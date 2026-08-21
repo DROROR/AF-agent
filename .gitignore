@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.env
+.env.local
+.DS_Store
+
+# Job workspaces and generated artifacts are never source-controlled
+jobs/
+outputs/
+previews/
+checkpoints/
+
+# Preflight reports contain machine-specific details; not committed
+DYO-Preflight-Report.txt
