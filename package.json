@@ -16,7 +16,11 @@
     "test": "vitest run",
     "build": "tsc -b tsconfig.solution.json && npm --workspace apps/web run build",
     "db:generate": "npm --workspace @dyo/database run db:generate",
-    "db:migrate": "npm --workspace @dyo/database run db:migrate"
+    "db:migrate": "npm --workspace @dyo/database run db:migrate",
+    "shotstack:typography-smoke-test": "tsx scripts/shotstack/typography-smoke-test.ts"
+  },
+  "dependencies": {
+    "@dyo/renderer": "*"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
@@ -27,6 +31,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.3.3",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   }

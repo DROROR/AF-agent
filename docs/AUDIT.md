@@ -124,3 +124,31 @@ installation exists here, so none was modified.
 
 ## READY_FOR_DEVELOPMENT (Phase 0 tooling): YES
 ## READY_FOR_DEVELOPMENT (real ae-mcp/POC audit): BLOCKED — pending client-run preflight report
+
+## Phase 4 status update (2026-08-22)
+
+Phase 4 ("Real Windows Worker + After Effects / ae-mcp integration") was
+started and immediately hit the same hard blocker documented above: it
+requires running `scripts/preflight/DYO-Preflight.bat` on the real client
+Windows/After Effects machine, and that machine is temporarily unavailable.
+
+Per explicit instruction, Phase 4 is **paused at the real-machine preflight
+gate** rather than continued with guessed/fabricated findings. Nothing in
+Phase 4A (Windows preflight), 4B (real worker deployment), 4C (MCP adapter
+implementation from verified behavior), 4D (recovery tests), or 4E (Windows
+security validation) has been performed or documented as complete — all of
+it genuinely requires the real machine. `apps/worker`'s `NotIntegratedMcpAdapter`
+(Phase 2) remains the honest current state: MCP status is always `UNKNOWN`,
+which is correct until real ae-mcp behavior can be observed.
+
+**To resume Phase 4:** run the preflight tool on the real Windows machine and
+share `DYO-Preflight-Report.txt` (plus an `ae-mcp-status.jsx` panel
+observation if the report's MCP section is inconclusive). Nothing here should
+be read as having audited real Windows/AE/ae-mcp behavior.
+
+While Phase 4 was paused, a separate bounded, isolated Shotstack renderer POC
+was carried out instead — see `docs/RENDERER-ARCHITECTURE.md` and
+`docs/SHOTSTACK-POC.md`. It does not touch `apps/worker`, does not replace or
+modify any Windows Worker/ae-mcp code, and does not affect this blocker.
+
+## READY_FOR_DEVELOPMENT (Phase 4 real-machine work): BLOCKED — paused, same reason as above

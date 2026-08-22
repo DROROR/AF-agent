@@ -28,6 +28,7 @@ export default [
           "./tsconfig.json",
           "./packages/schemas/tsconfig.json",
           "./packages/database/tsconfig.json",
+          "./packages/renderer/tsconfig.json",
           "./apps/api/tsconfig.json",
           "./apps/worker/tsconfig.json",
           "./apps/web/tsconfig.json"
