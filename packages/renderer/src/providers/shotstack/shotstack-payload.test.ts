@@ -181,4 +181,62 @@ describe("buildShotstackEditPayload", () => {
     expect(payload.timeline.tracks).toHaveLength(1);
     expect(payload.timeline.tracks[0]?.clips).toHaveLength(1);
   });
+
+  it("sets a video asset's trim from trimSeconds, and omits trim for images", () => {
+    const sceneMapWithTrim: SceneMap = {
+      projectId: "project-4",
+      brandColor: "#000000",
+      scenes: [
+        {
+          sceneId: "scene-1",
+          label: "Trimmed video",
+          startMs: 0,
+          durationMs: 4000,
+          assets: [
+            { placeholderId: "video", assetType: "VIDEO", sourceUrl: "https://example.com/a.mp4", trimSeconds: 36 },
+            { placeholderId: "image", assetType: "IMAGE", sourceUrl: "https://example.com/a.png", trimSeconds: 5 }
+          ],
+          texts: []
+        }
+      ]
+    };
+    const payload = buildShotstackEditPayload(sceneMapWithTrim, "LANDSCAPE");
+    const clips = payload.timeline.tracks[0]?.clips ?? [];
+    expect(clips[0]?.asset.trim).toBe(36);
+    expect(clips[1]?.asset.trim).toBeUndefined();
+  });
+
+  it("positions two simultaneous assets in one scene at distinct offsets (side-by-side phones)", () => {
+    const twoPhoneSceneMap: SceneMap = {
+      projectId: "project-5",
+      brandColor: "#000000",
+      scenes: [
+        {
+          sceneId: "scene-6",
+          label: "Two phones",
+          startMs: 0,
+          durationMs: 5000,
+          assets: [
+            {
+              placeholderId: "left-phone",
+              assetType: "VIDEO",
+              sourceUrl: "https://example.com/left.mp4",
+              offsetX: -0.25
+            },
+            {
+              placeholderId: "right-phone",
+              assetType: "VIDEO",
+              sourceUrl: "https://example.com/right.mp4",
+              offsetX: 0.25
+            }
+          ],
+          texts: []
+        }
+      ]
+    };
+    const payload = buildShotstackEditPayload(twoPhoneSceneMap, "LANDSCAPE");
+    const clips = payload.timeline.tracks[0]?.clips ?? [];
+    expect(clips[0]?.offset).toEqual({ x: -0.25, y: 0 });
+    expect(clips[1]?.offset).toEqual({ x: 0.25, y: 0 });
+  });
 });

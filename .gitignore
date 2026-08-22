@@ -17,3 +17,6 @@ checkpoints/
 
 # Preflight reports contain machine-specific details; not committed
 DYO-Preflight-Report.txt
+
+# Real client reference assets (video, project files, work maps) - never committed
+local-inputs/

@@ -23,6 +23,8 @@ export interface ShotstackTextAlign {
 export interface ShotstackAsset {
   type: "image" | "video" | "rich-text";
   src?: string;
+  /** Seconds into a video source to start playback from - confirmed real Shotstack video-asset field. */
+  trim?: number;
   text?: string;
   font?: ShotstackTextFont;
   align?: ShotstackTextAlign;
@@ -79,10 +81,16 @@ function toShotstackTransition(transition: Transition | undefined): string | und
   return "fade";
 }
 
+/**
+ * Live-verified against the real Shotstack sandbox API: the only valid
+ * `position` values are "top"|"topRight"|"right"|"bottomRight"|"bottom"|
+ * "bottomLeft"|"left"|"topLeft"|"center" - no "centerLeft"/"centerRight"
+ * variants exist, despite that being a reasonable-sounding guess.
+ */
 const PHONE_POSITION_TO_SHOTSTACK_POSITION: Record<PhonePosition, string> = {
-  LEFT: "centerLeft",
+  LEFT: "left",
   CENTER: "center",
-  RIGHT: "centerRight",
+  RIGHT: "right",
   FULL_SCREEN: "center"
 };
 
@@ -96,15 +104,20 @@ function assetClips(scene: Scene): ShotstackClip[] {
         : undefined;
     const transitionIn = toShotstackTransition(scene.transitionIn);
     const transitionOut = toShotstackTransition(scene.transitionOut);
+    const hasOffset = asset.offsetX !== undefined || asset.offsetY !== undefined;
 
     return {
       asset: {
         type: asset.assetType === "VIDEO" ? "video" : "image",
-        src: asset.sourceUrl
+        src: asset.sourceUrl,
+        ...(asset.assetType === "VIDEO" && asset.trimSeconds !== undefined
+          ? { trim: asset.trimSeconds }
+          : {})
       },
       start: scene.startMs / 1000,
       length: scene.durationMs / 1000,
       ...(position ? { position } : {}),
+      ...(hasOffset ? { offset: { x: asset.offsetX ?? 0, y: asset.offsetY ?? 0 } } : {}),
       ...(transitionIn || transitionOut
         ? { transition: { ...(transitionIn ? { in: transitionIn } : {}), ...(transitionOut ? { out: transitionOut } : {}) } }
         : {})

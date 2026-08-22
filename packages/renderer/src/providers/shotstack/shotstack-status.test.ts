@@ -6,7 +6,8 @@ describe("mapShotstackStatus", () => {
     expect(mapShotstackStatus("queued")).toBe("QUEUED");
   });
 
-  it("maps fetching, rendering and saving all onto PROCESSING", () => {
+  it("maps preprocessing, fetching, rendering and saving all onto PROCESSING", () => {
+    expect(mapShotstackStatus("preprocessing")).toBe("PROCESSING");
     expect(mapShotstackStatus("fetching")).toBe("PROCESSING");
     expect(mapShotstackStatus("rendering")).toBe("PROCESSING");
     expect(mapShotstackStatus("saving")).toBe("PROCESSING");

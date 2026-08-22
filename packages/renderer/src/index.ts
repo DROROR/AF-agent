@@ -8,4 +8,5 @@ export * from "./providers/shotstack/shotstack-env.js";
 export * from "./providers/shotstack/shotstack-status.js";
 export * from "./providers/shotstack/shotstack-payload.js";
 export * from "./providers/shotstack/shotstack-client.js";
+export * from "./providers/shotstack/shotstack-upload.js";
 export * from "./providers/shotstack/shotstack-renderer.js";

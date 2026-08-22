@@ -32,7 +32,12 @@ export type Transition = z.infer<typeof transitionSchema>;
 export const assetAssignmentSchema = z.object({
   placeholderId: z.string().min(1),
   assetType: assetTypeSchema,
-  sourceUrl: z.string().url()
+  sourceUrl: z.string().url(),
+  /** Seconds into a VIDEO source to start playback from - e.g. reusing one long screen recording for several scenes at different points. Ignored for IMAGE/LOGO. */
+  trimSeconds: z.number().nonnegative().optional(),
+  /** Normalized -1..1 positional nudge (Shotstack's own unit), for placing more than one simultaneous asset in a scene (e.g. two phones side by side) without them overlapping. */
+  offsetX: z.number().min(-1).max(1).optional(),
+  offsetY: z.number().min(-1).max(1).optional()
 });
 export type AssetAssignment = z.infer<typeof assetAssignmentSchema>;
 
