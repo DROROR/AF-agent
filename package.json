@@ -12,9 +12,9 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -b tsconfig.solution.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -b tsconfig.solution.json && npm --workspace apps/web run typecheck",
     "test": "vitest run",
-    "build": "tsc -b tsconfig.solution.json",
+    "build": "tsc -b tsconfig.solution.json && npm --workspace apps/web run build",
     "db:generate": "npm --workspace @dyo/database run db:generate",
     "db:migrate": "npm --workspace @dyo/database run db:migrate"
   },
@@ -25,6 +25,7 @@
     "@typescript-eslint/parser": "^8.13.0",
     "eslint": "^9.13.0",
     "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"

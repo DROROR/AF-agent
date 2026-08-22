@@ -34,6 +34,26 @@ module.exports = {
       out_file: path.join(repoRoot, "logs", "dyo-api.out.log"),
       error_file: path.join(repoRoot, "logs", "dyo-api.error.log"),
       time: true
+    },
+    {
+      // Read-only ops dashboard (Phase 3). Bound to 127.0.0.1 only - not
+      // exposed publicly yet (no Nginx config in front of it) - see
+      // docs/engineering/SECURITY.md and CLAUDE.md Phase 3 task 10/11.
+      name: "dyo-web",
+      script: path.join(repoRoot, "node_modules", ".bin", "next"),
+      args: ["start", "-H", "127.0.0.1", "-p", "4100"],
+      cwd: path.join(repoRoot, "apps", "web"),
+      env: {
+        NODE_ENV: "production",
+        // Loopback-only, server-side call from the dashboard to the API -
+        // the browser never talks to the Fastify API directly.
+        DYO_API_INTERNAL_URL: "http://127.0.0.1:4000"
+      },
+      max_restarts: 10,
+      restart_delay: 2000,
+      out_file: path.join(repoRoot, "logs", "dyo-web.out.log"),
+      error_file: path.join(repoRoot, "logs", "dyo-web.error.log"),
+      time: true
     }
   ]
 };
