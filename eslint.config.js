@@ -11,7 +11,9 @@ export default [
       "**/dist/**",
       "**/*.d.ts",
       // Build-tool config, deliberately outside every tsconfig's rootDir.
-      "packages/database/drizzle.config.ts"
+      "packages/database/drizzle.config.ts",
+      // PM2 process definition, plain CommonJS, outside every tsconfig's rootDir.
+      "deploy/pm2/ecosystem.config.cjs"
     ]
   },
   js.configs.recommended,
