@@ -9,6 +9,8 @@ export const ERROR_CODES = [
   "VALIDATION_ERROR",
   "UNAUTHORIZED",
   "WORKER_NOT_FOUND",
+  "JOB_NOT_FOUND",
+  "CONFLICT",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

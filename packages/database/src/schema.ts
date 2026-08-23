@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
-import { check, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import type { AeStatus, McpStatus, WorkerCapability, WorkerStatus } from "@dyo/schemas";
+import { check, integer, jsonb, pgTable, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import type { AeStatus, JobErrorCode, JobStatus, McpStatus, WorkerCapability, WorkerStatus } from "@dyo/schemas";
 
 const sqlEnumCheck = (column: string, values: readonly string[]): string =>
   `${column} in (${values.map((value) => `'${value}'`).join(", ")})`;
@@ -8,20 +8,42 @@ const sqlEnumCheck = (column: string, values: readonly string[]): string =>
 /**
  * DB status columns are constrained with a CHECK in addition to the
  * application-level Zod enum (docs/engineering/DATABASE.md: "Prefer DB
- * constraints plus application checks"). currentJobId has no foreign key
- * yet - the jobs table does not exist until Phase 2.
+ * constraints plus application checks").
  *
  * These value lists are intentionally re-declared here rather than imported
  * at runtime from @dyo/schemas: drizzle-kit's schema loader transpiles this
  * file in isolation and cannot follow @dyo/schemas' own relative NodeNext
  * (".js") imports across package boundaries. Only *types* are imported above
- * (erased at compile time, so this doesn't affect drizzle-kit); these two
- * literal arrays must stay in sync with packages/schemas/src/worker.ts's
- * WORKER_STATUSES/AE_STATUSES/MCP_STATUSES.
+ * (erased at compile time, so this doesn't affect drizzle-kit); these literal
+ * arrays must stay in sync with packages/schemas/src/worker.ts and job.ts.
  */
 export const DB_WORKER_STATUSES = ["ONLINE", "OFFLINE"] as const;
 export const DB_AE_STATUSES = ["ONLINE", "OFFLINE", "UNKNOWN"] as const;
 export const DB_MCP_STATUSES = ["ONLINE", "OFFLINE", "UNKNOWN"] as const;
+export const DB_WORKER_CAPABILITIES = [
+  "CHECK_HEALTH",
+  "INSPECT_TEMPLATE",
+  "VALIDATE_PLAN",
+  "PREPARE_PROJECT",
+  "EXECUTE_FRAME",
+  "APPLY_BRANDING",
+  "CREATE_PREVIEW",
+  "CREATE_HORIZONTAL",
+  "CREATE_REELS",
+  "PREPARE_RENDER",
+  "RENDER",
+  "RESUME_JOB"
+] as const;
+export const DB_JOB_STATUSES = [
+  "QUEUED",
+  "CLAIMED",
+  "RUNNING",
+  "WAITING_FOR_ACTION",
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED"
+] as const;
+
 export const workers = pgTable(
   "workers",
   {
@@ -37,7 +59,12 @@ export const workers = pgTable(
       .default(sql`'[]'::jsonb`)
       .$type<WorkerCapability[]>(),
     maxConcurrency: integer("max_concurrency").notNull().default(1),
-    currentJobId: uuid("current_job_id"),
+    // References jobs.id (defined below) - a genuine circular FK between
+    // these two tables. Drizzle's inline .references() accepts a callback
+    // specifically so this forward reference works: the callback is only
+    // ever invoked lazily (at introspection/migration time), by which point
+    // the `jobs` export below has already been assigned.
+    currentJobId: uuid("current_job_id").references((): AnyPgColumn => jobs.id, { onDelete: "set null" }),
     lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
@@ -52,3 +79,38 @@ export const workers = pgTable(
 
 export type WorkerRow = typeof workers.$inferSelect;
 export type NewWorkerRow = typeof workers.$inferInsert;
+
+/**
+ * A job always belongs to exactly one worker, assigned at creation - not a
+ * shared queue any worker can grab (CLAUDE.md's Windows worker connects
+ * outbound only; the dispatch model here is "the worker asks for its own
+ * next job", never the reverse). `operation` is constrained to
+ * DB_WORKER_CAPABILITIES - never an arbitrary command string.
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey(),
+    workerId: uuid("worker_id")
+      .notNull()
+      .references(() => workers.id, { onDelete: "cascade" }),
+    operation: text("operation").notNull().$type<WorkerCapability>(),
+    status: text("status").notNull().default("QUEUED").$type<JobStatus>(),
+    payload: jsonb("payload").notNull(),
+    result: jsonb("result"),
+    error: jsonb("error").$type<{ code: JobErrorCode; message: string } | null>(),
+    checkpoint: jsonb("checkpoint"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  () => [
+    check("jobs_operation_check", sql.raw(sqlEnumCheck("operation", DB_WORKER_CAPABILITIES))),
+    check("jobs_status_check", sql.raw(sqlEnumCheck("status", DB_JOB_STATUSES)))
+  ]
+);
+
+export type JobRow = typeof jobs.$inferSelect;
+export type NewJobRow = typeof jobs.$inferInsert;

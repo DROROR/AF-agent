@@ -7,7 +7,10 @@ function statusForCode(code: ErrorCode): number {
     case "UNAUTHORIZED":
       return 401;
     case "WORKER_NOT_FOUND":
+    case "JOB_NOT_FOUND":
       return 404;
+    case "CONFLICT":
+      return 409;
     case "INTERNAL_ERROR":
       return 500;
   }
@@ -42,5 +45,20 @@ export class WorkerNotFoundError extends AppError {
   constructor(workerId: string) {
     super("WORKER_NOT_FOUND", `Worker ${workerId} was not found`);
     this.name = "WorkerNotFoundError";
+  }
+}
+
+export class JobNotFoundError extends AppError {
+  constructor(jobId: string) {
+    super("JOB_NOT_FOUND", `Job ${jobId} was not found`);
+    this.name = "JobNotFoundError";
+  }
+}
+
+/** Duplicate claim, an invalid status transition, or a report against an already-terminal job - never a silent no-op, never a blind overwrite. */
+export class JobConflictError extends AppError {
+  constructor(message: string) {
+    super("CONFLICT", message);
+    this.name = "JobConflictError";
   }
 }

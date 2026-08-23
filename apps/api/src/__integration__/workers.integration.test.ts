@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { registerWorkerResponseSchema } from "@dyo/schemas";
 import { buildApp } from "../app.js";
+import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { createTestDatabase } from "./test-database.js";
 
@@ -23,6 +24,7 @@ async function setup(initialNow: Date) {
       LOG_LEVEL: "silent" as never
     },
     workerRepository: new DrizzleWorkerRepository(db),
+    jobRepository: new DrizzleJobRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;

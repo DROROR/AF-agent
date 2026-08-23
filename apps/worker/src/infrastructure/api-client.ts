@@ -1,9 +1,14 @@
 import {
+  claimJobResponseSchema,
+  jobDtoSchema,
   registerWorkerResponseSchema,
   workerDtoSchema,
+  type ClaimJobResponse,
   type HeartbeatRequest,
+  type JobDto,
   type RegisterWorkerRequest,
   type RegisterWorkerResponse,
+  type ReportJobStatusRequest,
   type WorkerDto
 } from "@dyo/schemas";
 import { ApiResponseError, NetworkError, UnauthorizedApiError } from "../errors/worker-error.js";
@@ -68,6 +73,35 @@ export class ApiClient {
     const json = await parseJson(response);
     if (response.status === 200) {
       return workerDtoSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  /** Asks for this worker's own next queued job. `job: null` means nothing to claim right now - not an error. */
+  async claimNextJob(workerId: string, workerToken: string): Promise<ClaimJobResponse> {
+    const response = await this.request("POST", `/api/workers/${workerId}/jobs/claim`, workerToken, {});
+    const json = await parseJson(response);
+    if (response.status === 200) {
+      return claimJobResponseSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  async reportJobStatus(
+    workerId: string,
+    workerToken: string,
+    jobId: string,
+    body: ReportJobStatusRequest
+  ): Promise<JobDto> {
+    const response = await this.request(
+      "POST",
+      `/api/workers/${workerId}/jobs/${jobId}/report`,
+      workerToken,
+      body
+    );
+    const json = await parseJson(response);
+    if (response.status === 200) {
+      return jobDtoSchema.parse(json);
     }
     throw this.errorForResponse(response, json);
   }

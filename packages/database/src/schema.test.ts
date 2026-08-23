@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { AE_STATUSES, MCP_STATUSES, WORKER_STATUSES } from "@dyo/schemas";
-import { DB_AE_STATUSES, DB_MCP_STATUSES, DB_WORKER_STATUSES } from "./schema.js";
+import { AE_STATUSES, JOB_STATUSES, MCP_STATUSES, WORKER_CAPABILITIES, WORKER_STATUSES } from "@dyo/schemas";
+import {
+  DB_AE_STATUSES,
+  DB_JOB_STATUSES,
+  DB_MCP_STATUSES,
+  DB_WORKER_CAPABILITIES,
+  DB_WORKER_STATUSES
+} from "./schema.js";
 
 // schema.ts cannot import these arrays at runtime from @dyo/schemas (see the
 // comment there for why) so it re-declares them for the CHECK constraints.
@@ -16,5 +22,13 @@ describe("schema CHECK-constraint value lists stay in sync with @dyo/schemas", (
 
   it("MCP statuses match", () => {
     expect(DB_MCP_STATUSES).toEqual(MCP_STATUSES);
+  });
+
+  it("worker capabilities (job operation allowlist) match", () => {
+    expect(DB_WORKER_CAPABILITIES).toEqual(WORKER_CAPABILITIES);
+  });
+
+  it("job statuses match", () => {
+    expect(DB_JOB_STATUSES).toEqual(JOB_STATUSES);
   });
 });

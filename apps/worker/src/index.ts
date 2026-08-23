@@ -1,21 +1,47 @@
 import pino from "pino";
 import { resolveWorkerCredentials } from "./bootstrap.js";
 import { CURRENT_WORKER_CAPABILITIES } from "./domain/operation-allowlist.js";
+import { executeJob } from "./domain/job-dispatcher.js";
 import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { NotIntegratedMcpAdapter } from "./health/mcp-adapter.js";
 import { McpInstanceFileAdapter } from "./health/mcp-instance-file-adapter.js";
+import { NotAvailableTemplateInspector } from "./inspection/template-inspector.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
 import { HeartbeatLoop, type HeartbeatLoopEvent } from "./runtime/heartbeat-loop.js";
+import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
 import { buildHeartbeatPayload } from "./application/build-heartbeat-payload.js";
 import { ensureWorkRoot, resolveWorkRoot } from "./workspace/work-root.js";
 
 /** Not exposed via env - Phase 2 fixes a conservative, bounded retry policy rather than making it operator-tunable before there's a reason to. */
 const HEARTBEAT_BACKOFF_POLICY = { baseMs: 2_000, maxMs: 60_000 };
+
+function logJobCycleEvent(logger: pino.Logger, event: JobCycleEvent): void {
+  switch (event.type) {
+    case "no_job_available":
+      return;
+    case "job_claimed":
+      logger.info({ jobId: event.jobId, operation: event.operation }, "job claimed");
+      return;
+    case "job_completed":
+      logger.info({ jobId: event.jobId, status: event.status }, "job completed");
+      return;
+    case "job_cycle_failed":
+      logger.warn(
+        { error: event.error instanceof Error ? event.error.message : String(event.error) },
+        "job cycle failed, will retry on next heartbeat"
+      );
+      return;
+    default: {
+      const _exhaustive: never = event;
+      throw new Error(`Unhandled job cycle event: ${JSON.stringify(_exhaustive)}`);
+    }
+  }
+}
 
 function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void {
   switch (event.type) {
@@ -73,6 +99,26 @@ async function main(): Promise<void> {
     ? new McpInstanceFileAdapter({ instanceFilePath: env.aeMcpInstanceFilePath })
     : new NotIntegratedMcpAdapter(env.aeMcpPath);
 
+  // No real ae-mcp bridge protocol is confirmed yet - see
+  // docs/TEMPLATE-INSPECTOR.md. Wiring this in now (rather than leaving
+  // INSPECT_TEMPLATE entirely unreachable) means a dispatched job fails
+  // safely with a typed NOT_AVAILABLE result instead of never being
+  // attempted at all.
+  const templateInspector = new NotAvailableTemplateInspector();
+
+  // One bounded claim/execute/report attempt per successful heartbeat -
+  // never a separate tight polling loop, so job attempts are naturally
+  // paced by HEARTBEAT_INTERVAL_MS with no blind retries.
+  const triggerJobCycle = (): void => {
+    void runJobCycle({
+      claimNextJob: () => apiClient.claimNextJob(credentials.workerId, credentials.workerToken),
+      reportJobStatus: (jobId, body) =>
+        apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
+      executeJob: (job) => executeJob({ templateInspector }, job),
+      onEvent: (event) => logJobCycleEvent(workerLogger, event)
+    });
+  };
+
   const loop = new HeartbeatLoop({
     buildPayload: async () => {
       const health = await buildHealthSnapshot(
@@ -85,7 +131,12 @@ async function main(): Promise<void> {
       apiClient.sendHeartbeat(credentials.workerId, credentials.workerToken, payload),
     intervalMs: env.heartbeatIntervalMs,
     backoff: HEARTBEAT_BACKOFF_POLICY,
-    onEvent: (event) => logHeartbeatEvent(workerLogger, event)
+    onEvent: (event) => {
+      logHeartbeatEvent(workerLogger, event);
+      if (event.type === "heartbeat_succeeded") {
+        triggerJobCycle();
+      }
+    }
   });
 
   let shuttingDown = false;

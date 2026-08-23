@@ -1,6 +1,7 @@
 import { createDatabase, runMigrations } from "@dyo/database";
 import { buildApp } from "./app.js";
 import { loadEnv } from "./env.js";
+import { DrizzleJobRepository } from "./infrastructure/db/drizzle-job-repository.js";
 import { DrizzleWorkerRepository } from "./infrastructure/db/drizzle-worker-repository.js";
 
 async function main(): Promise<void> {
@@ -12,6 +13,7 @@ async function main(): Promise<void> {
   const app = buildApp({
     env,
     workerRepository: new DrizzleWorkerRepository(db),
+    jobRepository: new DrizzleJobRepository(db),
     checkDatabaseHealth: async () => {
       try {
         await pool.query("SELECT 1");

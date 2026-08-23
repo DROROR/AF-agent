@@ -8,6 +8,13 @@
       "when": 1787327275394,
       "tag": "0000_nifty_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787481979539,
+      "tag": "0001_solid_tempest",
+      "breakpoints": true
     }
   ]
 }
