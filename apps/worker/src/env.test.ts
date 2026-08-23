@@ -74,4 +74,22 @@ describe("loadWorkerEnv", () => {
       loadWorkerEnv(baseEnv({ WORKER_REGISTRATION_SECRET: "too-short" }))
     ).toThrow(ConfigError);
   });
+
+  it("leaves AE_MCP_INSTANCE_FILE_PATH undefined when not set", () => {
+    const env = loadWorkerEnv(baseEnv());
+    expect(env.aeMcpInstanceFilePath).toBeUndefined();
+  });
+
+  it("passes through an explicit AE_MCP_INSTANCE_FILE_PATH independently of AE_MCP_PATH", () => {
+    const env = loadWorkerEnv(
+      baseEnv({
+        AE_MCP_PATH: "C:\\AI-Tools\\ae-mcp",
+        AE_MCP_INSTANCE_FILE_PATH: "C:\\Users\\PC\\ae-mcp\\instances\\default\\instance.json"
+      })
+    );
+    expect(env.aeMcpPath).toBe("C:\\AI-Tools\\ae-mcp");
+    expect(env.aeMcpInstanceFilePath).toBe(
+      "C:\\Users\\PC\\ae-mcp\\instances\\default\\instance.json"
+    );
+  });
 });

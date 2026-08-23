@@ -24,6 +24,16 @@ const rawEnvSchema = z.object({
   AE_PATH: z.string().trim().min(1).optional(),
   AERENDER_PATH: z.string().trim().min(1).optional(),
   AE_MCP_PATH: z.string().trim().min(1).optional(),
+  /**
+   * Path to ae-mcp's per-instance state file (e.g. instances\default\
+   * instance.json under the ae-mcp user-data directory - confirmed
+   * distinct from AE_MCP_PATH, the install directory). Optional and unset
+   * by default. When set, McpInstanceFileAdapter reads and interprets it
+   * against a schema confirmed from a real client sample (see
+   * mcp-instance-file-adapter.ts) - ONLINE/OFFLINE/UNKNOWN, never fabricated
+   * from an unrecognized shape or protocol version.
+   */
+  AE_MCP_INSTANCE_FILE_PATH: z.string().trim().min(1).optional(),
   HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000)
 });
 
@@ -37,6 +47,7 @@ export interface WorkerEnv {
   aePath: string | undefined;
   aerenderPath: string | undefined;
   aeMcpPath: string | undefined;
+  aeMcpInstanceFilePath: string | undefined;
   heartbeatIntervalMs: number;
 }
 
@@ -71,6 +82,7 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     aePath: data.AE_PATH,
     aerenderPath: data.AERENDER_PATH,
     aeMcpPath: data.AE_MCP_PATH,
+    aeMcpInstanceFilePath: data.AE_MCP_INSTANCE_FILE_PATH,
     heartbeatIntervalMs: data.HEARTBEAT_INTERVAL_MS
   };
 }

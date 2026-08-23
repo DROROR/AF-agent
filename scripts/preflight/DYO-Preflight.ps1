@@ -15,8 +15,10 @@
 
 .PARAMETER ApiUrl
   Contabo API URL to test outbound HTTPS reachability against (matches
-  DYO_API_URL in .env.example). Defaults to a placeholder; pass the real
-  value once known.
+  DYO_API_URL in .env.example). Leave unset until a real DYO API endpoint is
+  configured - the NETWORK section reports SKIPPED rather than failing when
+  no real endpoint is supplied, so an unset ApiUrl never blocks
+  READY_FOR_DEVELOPMENT.
 
 .PARAMETER AeMcpPath
   Expected ae-mcp installation path.
@@ -34,13 +36,17 @@
 
 [CmdletBinding()]
 param(
-  [string]$ApiUrl = "https://your-domain.example",
+  [string]$ApiUrl = "",
   [string]$AeMcpPath = "C:\AI-Tools\ae-mcp",
   [string]$TemplatesRoot = "",
   [string]$OutFile = ".\DYO-Preflight-Report.txt"
 )
 
 $ErrorActionPreference = "Continue"
+
+# Placeholder values that must never be treated as a real, testable API
+# endpoint - matches the placeholder still shipped in .env.example.
+$script:UnconfiguredApiUrls = @("", "https://your-domain.example")
 
 $KnownGoodPocNames = @(
   "Working-2026",
@@ -240,14 +246,18 @@ function Get-NetworkSection {
   $lines = New-Object System.Collections.Generic.List[string]
   $lines.Add("NETWORK")
 
-  $lines.Add((Invoke-Check "Outbound HTTPS to $TargetUrl" {
-    $uri = [Uri]$TargetUrl
-    $result = Test-NetConnection -ComputerName $uri.Host -Port 443 -WarningAction SilentlyContinue
-    if ($result.TcpTestSucceeded) {
-      "  outbound HTTPS to $($uri.Host):443 : SUCCEEDED"
+  $lines.Add((Invoke-Check "Outbound HTTPS" {
+    if ($script:UnconfiguredApiUrls -contains $TargetUrl) {
+      "  outbound HTTPS: SKIPPED - API endpoint not configured"
     } else {
-      $script:Blockers.Add("Outbound HTTPS to $($uri.Host):443 failed")
-      "  outbound HTTPS to $($uri.Host):443 : FAILED"
+      $uri = [Uri]$TargetUrl
+      $result = Test-NetConnection -ComputerName $uri.Host -Port 443 -WarningAction SilentlyContinue
+      if ($result.TcpTestSucceeded) {
+        "  outbound HTTPS to $($uri.Host):443 : SUCCEEDED"
+      } else {
+        $script:Blockers.Add("Outbound HTTPS to $($uri.Host):443 failed")
+        "  outbound HTTPS to $($uri.Host):443 : FAILED"
+      }
     }
   }))
 

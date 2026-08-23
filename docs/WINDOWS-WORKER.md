@@ -52,7 +52,8 @@ placeholders.
 | `WORK_ROOT` | no | Root directory for all worker-local state and future job workspaces. Defaults to `C:\DYO-Agent` on Windows. |
 | `AE_PATH` | no | Path to the After Effects installation (used for read-only health detection). |
 | `AERENDER_PATH` | no | Path to `aerender.exe` (used for read-only availability detection). |
-| `AE_MCP_PATH` | no | Path where ae-mcp is configured. Reported for visibility only - Phase 2 does not integrate ae-mcp (see "Health detection" below). |
+| `AE_MCP_PATH` | no | Path where ae-mcp is installed. Reported for visibility only - Phase 2 does not integrate ae-mcp (see "Health detection" below). |
+| `AE_MCP_INSTANCE_FILE_PATH` | no | Path to ae-mcp's per-instance state file, e.g. `C:\Users\PC\ae-mcp\instances\default\instance.json` - distinct from `AE_MCP_PATH` (the install directory), not derived from it. When set, the worker reads and parses this file but still always reports `mcpStatus: UNKNOWN` - real field interpretation is deliberately unimplemented until a sample of the file has been reviewed (see "Health detection" below). |
 | `HEARTBEAT_INTERVAL_MS` | no | Milliseconds between heartbeats when healthy. Defaults to `15000`. |
 
 `WORKER_REGISTRATION_SECRET` is never logged. Neither is `WORKER_TOKEN`, at
@@ -159,14 +160,25 @@ launches After Effects.
   recognizable is present.
 - **aerender availability**: whether `AERENDER_PATH` points at a file that
   exists on disk.
-- **MCP status**: **not integrated in Phase 2.** Real ae-mcp behavior on the
-  client's Windows machine is still pending the real Windows
-  preflight/audit (`docs/AUDIT.md`, `docs/CLIENT_WORKER_PREFLIGHT.md`). The
-  worker exposes a clean `McpAdapter` interface
-  (`apps/worker/src/health/mcp-adapter.ts`) so a real implementation can be
-  plugged in later without touching any call site. Until then, `mcpStatus`
-  is always `UNKNOWN` - the configured `AE_MCP_PATH` is reported for operator
-  visibility only, never used to fabricate a health status.
+- **MCP status**: real, schema-based integration as of Phase 4. The worker
+  exposes a clean `McpAdapter` interface (`apps/worker/src/health/mcp-adapter.ts`)
+  so implementations are swappable without touching any call site. When
+  `AE_MCP_INSTANCE_FILE_PATH` is unset, the worker uses
+  `NotIntegratedMcpAdapter` (always `UNKNOWN`, `AE_MCP_PATH` reported for
+  visibility only). When it is set, the worker uses `McpInstanceFileAdapter`
+  (`apps/worker/src/health/mcp-instance-file-adapter.ts`), validated against
+  a schema confirmed from a real client `instance.json` sample:
+  - `instanceId`, `aeVersion`, `projectName` (string), `projectPath`
+    (string or null), `lastSeen` (ISO timestamp), `pollMs` (positive
+    number), `protocolVersion` (integer, currently only `1` is
+    recognized), `listening` (boolean).
+  - **ONLINE**: `protocolVersion` is a recognized version, `listening` is
+    `true`, and `lastSeen` is fresh.
+  - **OFFLINE**: `listening` is `false`, or `lastSeen` is stale.
+    Freshness: `staleAfterMs = max(pollMs * 5, 10000)`.
+  - **UNKNOWN**: file missing/unreadable, malformed JSON, schema-invalid,
+    unparseable `lastSeen`, or an unrecognized `protocolVersion` - never
+    fabricated from a shape that hasn't been confirmed real.
 
 ## Operation allowlist
 

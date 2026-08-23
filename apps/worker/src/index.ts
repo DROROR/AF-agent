@@ -5,6 +5,7 @@ import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { NotIntegratedMcpAdapter } from "./health/mcp-adapter.js";
+import { McpInstanceFileAdapter } from "./health/mcp-instance-file-adapter.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
@@ -57,7 +58,12 @@ async function main(): Promise<void> {
   );
 
   const processLister = createProcessLister();
-  const mcpAdapter = new NotIntegratedMcpAdapter(env.aeMcpPath);
+  // McpInstanceFileAdapter is only selected once AE_MCP_INSTANCE_FILE_PATH
+  // is actually configured, so an unconfigured worker keeps the exact
+  // NotIntegratedMcpAdapter behavior it has always had.
+  const mcpAdapter = env.aeMcpInstanceFilePath
+    ? new McpInstanceFileAdapter({ instanceFilePath: env.aeMcpInstanceFilePath })
+    : new NotIntegratedMcpAdapter(env.aeMcpPath);
 
   const loop = new HeartbeatLoop({
     buildPayload: async () => {

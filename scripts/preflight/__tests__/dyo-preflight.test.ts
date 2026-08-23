@@ -81,4 +81,17 @@ describe("DYO-Preflight.ps1 (read-only contract)", () => {
     expect(bat).toMatch(/DYO-Preflight\.ps1/);
     expect(bat).toMatch(/%\*/);
   });
+
+  it("defaults ApiUrl to unconfigured rather than a placeholder domain", () => {
+    expect(script).toMatch(/\[string\]\$ApiUrl = ""/);
+  });
+
+  it("never lets an unconfigured API endpoint add a blocker", () => {
+    expect(script).toMatch(/UnconfiguredApiUrls -contains \$TargetUrl/);
+    expect(script).toMatch(/SKIPPED - API endpoint not configured/);
+  });
+
+  it("treats the .env.example placeholder domain as unconfigured, not a real endpoint", () => {
+    expect(script).toMatch(/UnconfiguredApiUrls = @\("", "https:\/\/your-domain\.example"\)/);
+  });
 });

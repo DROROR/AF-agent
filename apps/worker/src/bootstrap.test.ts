@@ -16,6 +16,7 @@ function baseEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     aePath: undefined,
     aerenderPath: undefined,
     aeMcpPath: undefined,
+    aeMcpInstanceFilePath: undefined,
     heartbeatIntervalMs: 15_000,
     ...overrides
   };
