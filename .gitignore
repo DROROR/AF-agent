@@ -20,3 +20,8 @@ DYO-Preflight-Report.txt
 
 # Real client reference assets (video, project files, work maps) - never committed
 local-inputs/
+
+# Windows worker deployment runtime - regenerated on demand via
+# `npm run package:windows-worker` (scripts/package-windows-worker.mjs),
+# same as every other dist/ in this repo. Never hand-edited or committed.
+deploy/windows-worker/worker-app/

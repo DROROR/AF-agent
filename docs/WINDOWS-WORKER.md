@@ -113,6 +113,28 @@ Both trigger the same graceful shutdown: the heartbeat loop stops accepting
 new ticks, any in-flight heartbeat is allowed to finish, and the process
 exits cleanly. No forced kill is required in normal operation.
 
+## Non-technical Windows deployment package
+
+For the actual client machine, `deploy/windows-worker/` is a self-contained,
+double-click setup package (`DYO-Worker-Setup.bat`, `DYO-Worker-Start.bat`,
+`DYO-Worker-Stop.bat`, `README-FIRST.txt`) - no terminal or npm knowledge
+required on the client side. It runs this same worker code, unmodified;
+see `deploy/windows-worker/README-FIRST.txt` for the client-facing
+instructions and that folder's own script comments for the full design
+(one-time registration-secret handling, NTFS ACL restriction, graceful vs.
+forced stop on Windows).
+
+The package's `worker-app/` runtime folder is a build artifact - like every
+other `dist/` in this repo, it is gitignored and regenerated on demand, never
+hand-edited or committed:
+
+```bash
+npm run package:windows-worker   # rebuilds worker-app/ from current source
+```
+
+Run this before handing the `deploy/windows-worker/` folder to a client, so
+it reflects the current worker code.
+
 ## Folder structure
 
 ```

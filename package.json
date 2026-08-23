@@ -19,7 +19,8 @@
     "build": "tsc -b tsconfig.solution.json && npm --workspace apps/web run build",
     "db:generate": "npm --workspace @dyo/database run db:generate",
     "db:migrate": "npm --workspace @dyo/database run db:migrate",
-    "shotstack:typography-smoke-test": "tsx scripts/shotstack/typography-smoke-test.ts"
+    "shotstack:typography-smoke-test": "tsx scripts/shotstack/typography-smoke-test.ts",
+    "package:windows-worker": "node scripts/package-windows-worker.mjs"
   },
   "dependencies": {
     "@dyo/renderer": "*"

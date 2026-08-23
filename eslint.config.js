@@ -15,7 +15,12 @@ export default [
       // Build-tool config, deliberately outside every tsconfig's rootDir.
       "packages/database/drizzle.config.ts",
       // PM2 process definition, plain CommonJS, outside every tsconfig's rootDir.
-      "deploy/pm2/ecosystem.config.cjs"
+      "deploy/pm2/ecosystem.config.cjs",
+      // Windows worker packaging/deployment tooling, plain JS, outside every tsconfig's rootDir.
+      "scripts/package-windows-worker.mjs",
+      "scripts/windows-worker-format-status.mjs",
+      // Regenerated build artifact - see deploy/windows-worker/worker-app/ in .gitignore.
+      "deploy/windows-worker/worker-app/**"
     ]
   },
   js.configs.recommended,
