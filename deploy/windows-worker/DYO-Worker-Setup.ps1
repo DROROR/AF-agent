@@ -193,20 +193,40 @@ $registrationSecret = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto(
   [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)
 )
 
+# Only strip accidental surrounding whitespace - very common after copying
+# the code from an email/chat message, and .Trim() catches tabs/other
+# whitespace that a naive space-only check would miss. Every other
+# character, including punctuation, is preserved exactly - never altered.
+$registrationSecret = $registrationSecret.Trim()
+
 if ([string]::IsNullOrWhiteSpace($registrationSecret)) {
   Write-Host "[NEEDS ATTENTION] No registration code was entered. Re-run DYO-Worker-Setup.bat to try again."
   exit 1
 }
 
+if ($registrationSecret.Contains('"')) {
+  Write-Host "[NEEDS ATTENTION] The registration code you entered contains a double-quote"
+  Write-Host "character, which this setup cannot safely store. Please re-check the code you"
+  Write-Host "were given (it should not include quote marks) and run DYO-Worker-Setup.bat again."
+  exit 1
+}
+
 $workerName = $env:COMPUTERNAME
 $envPath = Join-Path $InstallDir ".env"
+# WORKER_REGISTRATION_SECRET is wrapped in double quotes - Node's --env-file
+# parser (used by run-worker.bat and the verification run below) otherwise
+# truncates a value at the first unquoted "#" it finds, silently corrupting
+# any registration code that happens to contain one - confirmed empirically
+# against the real Node 24 --env-file parser, not assumed. Quoting also
+# protects any other character that could otherwise look like line syntax
+# to a simple parser.
 $envLines = @(
   "DYO_API_URL=$ApiUrl"
   "WORKER_NAME=$workerName"
   "AE_MCP_PATH=$AeMcpPath"
   "AE_MCP_INSTANCE_FILE_PATH=$InstanceFilePath"
   "WORK_ROOT=$WorkRoot"
-  "WORKER_REGISTRATION_SECRET=$registrationSecret"
+  ('WORKER_REGISTRATION_SECRET="' + $registrationSecret + '"')
 )
 Set-Content -Path $envPath -Value $envLines -Encoding utf8
 Set-OwnerOnlyAcl -Path $envPath -IsFile $true
@@ -254,7 +274,25 @@ if ($proc -and -not $proc.HasExited) {
 
 if (-not $registered) {
   Write-Host "[NEEDS ATTENTION] Registration did not complete."
-  Write-Host "Details (this file never contains your registration code): $regErrLog"
+  Write-Host ""
+  Write-Host "Details (the worker never logs your registration code, so this is safe to share):"
+  # Defense-in-depth on top of that guarantee: never show a line that looks
+  # like it could contain a secret/token/authorization value, even though
+  # the worker itself is not expected to produce one here.
+  $suspiciousLinePattern = 'WORKER_REGISTRATION_SECRET|Authorization|Bearer\s|workerToken'
+  foreach ($logFile in @($regErrLog, $regLog)) {
+    if (Test-Path $logFile) {
+      Get-Content -Path $logFile -Tail 15 | ForEach-Object {
+        if ($_ -match $suspiciousLinePattern) {
+          Write-Host "  [a line was hidden for safety]"
+        } else {
+          Write-Host "  $_"
+        }
+      }
+    }
+  }
+  Write-Host ""
+  Write-Host "Full details are also saved at: $regErrLog"
   Write-Host "Your registration code was not saved. You can safely run DYO-Worker-Setup.bat again."
   (Get-Content $envPath) | Where-Object { $_ -notmatch '^WORKER_REGISTRATION_SECRET=' } | Set-Content $envPath
   exit 1
