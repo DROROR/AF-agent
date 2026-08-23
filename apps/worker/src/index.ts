@@ -37,6 +37,14 @@ function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void
       return;
     case "loop_stopped":
       logger.info("heartbeat loop stopped");
+      return;
+    default: {
+      // Exhaustiveness guard: if HeartbeatLoopEvent gains a variant, this
+      // fails to compile until it's handled above, rather than silently
+      // logging nothing for it.
+      const _exhaustive: never = event;
+      throw new Error(`Unhandled heartbeat loop event: ${JSON.stringify(_exhaustive)}`);
+    }
   }
 }
 

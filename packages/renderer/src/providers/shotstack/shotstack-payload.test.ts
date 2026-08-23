@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SceneMap } from "../../scene-map/scene-map.js";
+import { DYO_REQUIRED_HEBREW_TEXT } from "../../scene-map/validate-scene-map.js";
 import { buildShotstackEditPayload } from "./shotstack-payload.js";
 
 const sceneMap: SceneMap = {
@@ -18,7 +19,7 @@ const sceneMap: SceneMap = {
         { placeholderId: "hero-image", assetType: "IMAGE", sourceUrl: "https://example.com/hero.png" },
         { placeholderId: "hero-video", assetType: "VIDEO", sourceUrl: "https://example.com/hero.mp4" }
       ],
-      texts: [{ placeholderId: "headline", content: "מבית DYO App", color: "#FFFFFF" }],
+      texts: [{ placeholderId: "headline", content: DYO_REQUIRED_HEBREW_TEXT, color: "#FFFFFF" }],
       transitionIn: { type: "FADE", durationMs: 300 },
       transitionOut: { type: "NONE" }
     }
@@ -68,7 +69,7 @@ describe("buildShotstackEditPayload", () => {
     expect(textClips).toHaveLength(1);
     expect(textClips[0]?.asset).toEqual({
       type: "rich-text",
-      text: "מבית DYO App",
+      text: DYO_REQUIRED_HEBREW_TEXT,
       font: { family: "Heebo", color: "#FFFFFF" },
       align: { horizontal: "center", vertical: "middle" }
     });
@@ -122,7 +123,7 @@ describe("buildShotstackEditPayload", () => {
         {
           ...sceneMap.scenes[0]!,
           texts: [
-            { placeholderId: "line-1", content: "מבית DYO App" },
+            { placeholderId: "line-1", content: DYO_REQUIRED_HEBREW_TEXT },
             { placeholderId: "line-2", content: "שורה שנייה" },
             { placeholderId: "line-3", content: "DYO App" }
           ]

@@ -3,7 +3,7 @@
  * docs/engineering/ERROR_HANDLING.md (validation, auth, infrastructure,
  * retryable). Nothing here is thrown as a raw string.
  */
-export abstract class WorkerError extends Error {
+abstract class WorkerError extends Error {
   abstract readonly category: string;
 
   constructor(message: string, options?: { cause?: unknown }) {

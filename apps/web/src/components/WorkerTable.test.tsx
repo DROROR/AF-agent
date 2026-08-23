@@ -29,35 +29,37 @@ function worker(overrides: Partial<WorkerDto> = {}): WorkerDto {
 describe("WorkerTable", () => {
   it("renders an error state when the worker list is unavailable (null)", () => {
     render(<WorkerTable workers={null} now={now} />);
-    expect(screen.getByRole("alert")).toBeTruthy();
-    expect(screen.getByText("Worker data unavailable")).toBeTruthy();
+    // getByRole/getByText already throw if nothing matches, so a bare call
+    // is the assertion - no need to additionally wrap it in expect().
+    screen.getByRole("alert");
+    screen.getByText("Worker data unavailable");
   });
 
   it("renders an empty state when there are no workers", () => {
     render(<WorkerTable workers={[]} now={now} />);
-    expect(screen.getByText("No workers registered")).toBeTruthy();
+    screen.getByText("No workers registered");
   });
 
   it("renders a row per worker with its identity and status fields", () => {
     render(<WorkerTable workers={[worker()]} now={now} />);
-    expect(screen.getByText("worker-a")).toBeTruthy();
-    expect(screen.getByText("11111111-1111-1111-1111-111111111111")).toBeTruthy();
+    screen.getByText("worker-a");
+    screen.getByText("11111111-1111-1111-1111-111111111111");
     // Both the overall worker status and the AE status render "Online" here.
     expect(screen.getAllByText("Online")).toHaveLength(2);
-    expect(screen.getByText("Unknown")).toBeTruthy();
-    expect(screen.getByText("2026")).toBeTruthy();
-    expect(screen.getByText("CHECK_HEALTH")).toBeTruthy();
+    screen.getByText("Unknown");
+    screen.getByText("2026");
+    screen.getByText("CHECK_HEALTH");
   });
 
   it("shows a human-readable relative heartbeat time", () => {
     render(<WorkerTable workers={[worker()]} now={now} />);
     // lastHeartbeatAt is 8s before `now`.
-    expect(screen.getByText("8 seconds ago")).toBeTruthy();
+    screen.getByText("8 seconds ago");
   });
 
   it('shows "never" when a worker has no lastHeartbeatAt yet', () => {
     render(<WorkerTable workers={[worker({ lastHeartbeatAt: null })]} now={now} />);
-    expect(screen.getByText("never")).toBeTruthy();
+    screen.getByText("never");
   });
 
   it("shows an em-dash placeholder for missing optional fields", () => {

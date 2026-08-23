@@ -1,7 +1,16 @@
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
-const scryptAsync = promisify(scrypt);
+/**
+ * Node's `scrypt` overloads make `promisify` infer a loosely-typed result;
+ * this is the one place that asserts the real return type, so call sites
+ * don't each need their own assertion.
+ */
+const scryptAsync = promisify(scrypt) as (
+  password: string,
+  salt: Buffer,
+  keylen: number
+) => Promise<Buffer>;
 const KEY_LENGTH = 64;
 
 /** Bearer token handed to a worker exactly once, at registration time. */
@@ -17,7 +26,7 @@ export function generateWorkerToken(): string {
  */
 export async function hashToken(token: string): Promise<string> {
   const salt = randomBytes(16);
-  const derivedKey = (await scryptAsync(token, salt, KEY_LENGTH)) as Buffer;
+  const derivedKey = await scryptAsync(token, salt, KEY_LENGTH);
   return `${salt.toString("hex")}:${derivedKey.toString("hex")}`;
 }
 
@@ -28,7 +37,7 @@ export async function verifyToken(token: string, storedHash: string): Promise<bo
   }
   const salt = Buffer.from(saltHex, "hex");
   const expectedKey = Buffer.from(keyHex, "hex");
-  const derivedKey = (await scryptAsync(token, salt, KEY_LENGTH)) as Buffer;
+  const derivedKey = await scryptAsync(token, salt, KEY_LENGTH);
   if (derivedKey.length !== expectedKey.length) {
     return false;
   }

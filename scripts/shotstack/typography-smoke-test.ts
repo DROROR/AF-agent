@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  DYO_REQUIRED_HEBREW_TEXT,
   loadShotstackConfig,
   ShotstackClient,
   ShotstackRenderer,
@@ -59,7 +60,7 @@ function buildTypographySmokeTestSceneMap(): SceneMap {
         texts: [
           {
             placeholderId: "line-1",
-            content: "מבית DYO App",
+            content: DYO_REQUIRED_HEBREW_TEXT,
             fontFamily: "Heebo",
             fontWeight: 700,
             color: "#FFFFFF"

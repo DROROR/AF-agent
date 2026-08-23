@@ -49,7 +49,8 @@ describe("Dashboard", () => {
 
     render(<Dashboard />);
 
-    expect(await screen.findByText("worker-a")).toBeTruthy();
+    // findByText/getAllByText already throw if nothing matches.
+    await screen.findByText("worker-a");
     expect(screen.getAllByText("Online").length).toBeGreaterThan(0);
   });
 
@@ -61,7 +62,7 @@ describe("Dashboard", () => {
 
     render(<Dashboard />);
 
-    expect(await screen.findByText("No workers registered")).toBeTruthy();
+    await screen.findByText("No workers registered");
   });
 
   it("shows a dashboard-unavailable error state when the status request itself fails", async () => {
@@ -69,6 +70,6 @@ describe("Dashboard", () => {
 
     render(<Dashboard />);
 
-    expect(await screen.findByText("Dashboard unavailable")).toBeTruthy();
+    await screen.findByText("Dashboard unavailable");
   });
 });

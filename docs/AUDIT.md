@@ -151,4 +151,95 @@ was carried out instead — see `docs/RENDERER-ARCHITECTURE.md` and
 `docs/SHOTSTACK-POC.md`. It does not touch `apps/worker`, does not replace or
 modify any Windows Worker/ae-mcp code, and does not affect this blocker.
 
-## READY_FOR_DEVELOPMENT (Phase 4 real-machine work): BLOCKED — paused, same reason as above
+## READY_FOR_DEVELOPMENT (Phase 4 real-machine work): READY_FOR_WINDOWS_WORKER — `https://worker-api.dyocourses.com` is live with a valid TLS certificate, path-allowlisted to only the two routes the worker calls, and the real ae-mcp `instance.json` schema is implemented (see "Overall project status" below and commit `feat(worker): prepare real Windows AE MCP integration`). Still blocked on actually connecting the client Windows worker and running AE/MCP automation against it — neither has been done yet.
+
+## Overall project status (2026-08-22)
+
+For anyone picking this up cold, the state of each phase:
+
+- **Phase 0** (repo/tooling foundation, read-only Windows preflight tool):
+  complete — see above. Commit `chore: establish engineering foundation and
+  Windows preflight`.
+- **Phase 1** (Contabo control-plane foundation — Fastify API, PostgreSQL,
+  Drizzle, worker registry/heartbeat): complete. Commit `feat(api): add
+  Contabo control-plane foundation (worker registry, heartbeat, health)`.
+- **Phase 1.5** (real production verification on the actual Contabo server —
+  native PostgreSQL, PM2, health/registration/heartbeat/persistence all
+  verified against the real running API): complete. Commit `chore(deploy):
+  verify native Contabo API and PostgreSQL runtime`.
+- **Phase 2** (real DYO Windows Worker — registration/pairing, authenticated
+  heartbeat, health detection, bounded backoff, path-traversal-safe
+  workspace): complete. See `docs/WINDOWS-WORKER.md`. Commit `feat(worker):
+  add secure outbound Windows worker foundation`.
+- **Phase 3** (read-only DYO operations dashboard — Next.js, real API
+  integration, PM2-deployed): complete. Commit `feat(web): add DYO
+  operations dashboard`.
+- **Phase 4** (real Windows Worker + After Effects/ae-mcp integration): **in
+  progress**, resumed 2026-08-23. Client machine confirmed: Windows 11 Pro,
+  After Effects 2026 v26.3, `aerender.exe` present, Node 24.15.0, npm
+  11.12.1, Git installed, ae-mcp installed at `C:\AI-Tools\ae-mcp` with its
+  status panel showing `[ON] LISTENING / CONNECTED`, Heebo fonts installed.
+  FFmpeg/FFprobe still missing on the client machine (not a blocker for
+  worker registration/heartbeat/health - see `docs/WINDOWS-WORKER.md`).
+  Element 3D confirmation still pending from the client.
+  - Fixed a real false-blocker bug in `scripts/preflight/DYO-Preflight.ps1`:
+    the unconfigured `-ApiUrl` placeholder (`https://your-domain.example`)
+    was being tested for real outbound HTTPS reachability and always
+    failing, incorrectly forcing `READY_FOR_DEVELOPMENT: NO`. It now
+    reports `SKIPPED - API endpoint not configured` and adds no blocker
+    until a real endpoint is supplied.
+  - Server-side read-only audit: `dyo-api` confirmed still bound to
+    `127.0.0.1:4000` (loopback-only); no existing Nginx site proxies to it;
+    7 existing `dyocourses.com` sites and their PM2/Nginx/certbot state left
+    untouched.
+  - Decision: `worker-api.dyocourses.com` is the dedicated hostname for the
+    DYO Windows Worker API. DNS confirmed live at the authoritative
+    nameservers (`ns59`/`ns60.domaincontrol.com`) and at Cloudflare's
+    `1.1.1.1`, resolving to this server's real public IP — Google's
+    `8.8.8.8` briefly showed a stale negative-cache entry (SOA negative TTL
+    600s), a caching artifact, not a misconfiguration.
+  - `worker-api.dyocourses.com` is **live**: deployed via a temporary
+    HTTP-only bootstrap block, `certbot --nginx -d worker-api.dyocourses.com`
+    (real cert, expires 2026-11-21), then the final config from
+    `deploy/nginx/worker-api.dyocourses.com.conf` installed over it and
+    reloaded. It path-allowlists only `POST /api/workers/register` and
+    `POST /api/workers/:workerId/heartbeat` - the only two endpoints the
+    Windows worker itself ever calls - and returns 404 for everything else,
+    including `GET /api/workers` and `GET /api/workers/:workerId`, which
+    have **no authentication at the application layer** and are
+    deliberately excluded from this hostname rather than made
+    internet-reachable (see the file's own header comment). Verified live:
+    TLS valid, both `GET` routes and `/health/*` return 404 externally,
+    registration/heartbeat reject invalid credentials with 401, port 4000
+    remains loopback-only, all other Nginx sites and PM2 apps untouched.
+  - The real client `instance.json` sample was supplied and its schema
+    implemented in `McpInstanceFileAdapter`
+    (`apps/worker/src/health/mcp-instance-file-adapter.ts`, commit
+    `feat(worker): prepare real Windows AE MCP integration`):
+    `instanceId`/`aeVersion`/`projectName` (string), `projectPath` (string
+    or null), `lastSeen` (ISO timestamp), `pollMs` (positive number),
+    `protocolVersion` (integer, currently only `1` recognized), `listening`
+    (boolean). ONLINE requires a recognized `protocolVersion`, `listening
+    === true`, and a fresh `lastSeen` (`staleAfterMs = max(pollMs * 5,
+    10000)`); OFFLINE covers `listening === false` or a stale `lastSeen`;
+    everything else (missing file, malformed JSON, schema-invalid,
+    unparseable timestamp, unrecognized protocol version) is UNKNOWN, never
+    fabricated. Configured via `AE_MCP_INSTANCE_FILE_PATH`; unset by
+    default, so existing worker behavior is unchanged until it's explicitly
+    set.
+  - Remaining before the client PC can actually connect: the real Windows
+    worker has not been started/paired against `worker-api.dyocourses.com`
+    yet, and no AE/MCP automation commands have been run against the client
+    machine.
+- **Shotstack renderer POC** (a separate, bounded, isolated track pursued
+  while Phase 4 was paused, not a phase in the original plan): **complete**.
+  Three stages: (1) an initial bounded provider-abstraction + Shotstack POC
+  (`docs/RENDERER-ARCHITECTURE.md`, `docs/SHOTSTACK-POC.md`), (2) a live
+  sandbox Hebrew+Heebo typography smoke test (PASS), (3) a full real-client
+  reference-video fidelity recreation (`docs/SHOTSTACK-REFERENCE-POC.md`),
+  using real Cognetica assets. **Final decision: After Effects remains the
+  primary, supported production renderer. Shotstack remains an optional
+  secondary renderer for simpler 2D videos only** — it has no 3D capability
+  at all, and this template's core visual identity (a true Element-3D phone
+  mockup) cannot be reproduced by it. This decision is final; the renderer
+  abstraction in `packages/renderer` is not being expanded further.

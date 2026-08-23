@@ -18,7 +18,7 @@ export interface ProcessLister {
  * Any failure to run tasklist itself is UNKNOWN, never fabricated as
  * ONLINE/OFFLINE.
  */
-export class WindowsTasklistProcessLister implements ProcessLister {
+class WindowsTasklistProcessLister implements ProcessLister {
   async isImageRunning(imageName: string): Promise<ProcessRunningStatus> {
     try {
       const { stdout } = await execFileAsync(
@@ -34,7 +34,7 @@ export class WindowsTasklistProcessLister implements ProcessLister {
 }
 
 /** Used on platforms where we have no reliable way to check (anything but Windows). */
-export class UnsupportedProcessLister implements ProcessLister {
+class UnsupportedProcessLister implements ProcessLister {
   async isImageRunning(): Promise<ProcessRunningStatus> {
     return "UNKNOWN";
   }

@@ -1,3 +1,4 @@
+import { registerWorkerResponseSchema } from "@dyo/schemas";
 import { describe, expect, it } from "vitest";
 import { generateWorkerToken, hashToken, verifyToken } from "../../../infrastructure/auth/token.js";
 import { InMemoryWorkerRepository } from "../test-support/in-memory-worker-repository.js";
@@ -14,8 +15,7 @@ describe("registerWorker", () => {
       { name: "Client PC 1", maxConcurrency: 1, capabilities: [] }
     );
 
-    expect(result.workerId).toBeTruthy();
-    expect(result.workerToken).toBeTruthy();
+    expect(registerWorkerResponseSchema.safeParse(result).success).toBe(true);
 
     const stored = await repository.findById(result.workerId);
     expect(stored).not.toBeNull();

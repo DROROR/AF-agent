@@ -12,6 +12,8 @@
   ],
   "scripts": {
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -b tsconfig.solution.json && npm --workspace apps/web run typecheck",
     "test": "vitest run",
     "build": "tsc -b tsconfig.solution.json && npm --workspace apps/web run build",

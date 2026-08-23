@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { registerWorkerResponseSchema } from "@dyo/schemas";
 import { buildApp } from "../app.js";
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { createTestDatabase } from "./test-database.js";
@@ -44,7 +45,7 @@ async function registerWorker(app: FastifyInstance, name = "Client PC 1") {
     headers: { authorization: `Bearer ${REGISTRATION_SECRET}` },
     payload: { name, maxConcurrency: 1, capabilities: [] }
   });
-  return { response, body: response.json() as { workerId: string; workerToken: string } };
+  return { response, body: registerWorkerResponseSchema.parse(response.json()) };
 }
 
 let harness: Awaited<ReturnType<typeof setup>>;
@@ -73,10 +74,10 @@ describe("health endpoints", () => {
 
 describe("POST /api/workers/register", () => {
   it("registers a worker given a valid pairing secret", async () => {
-    const { response, body } = await registerWorker(harness.app);
+    const { response } = await registerWorker(harness.app);
+    // registerWorker() already parses the body against registerWorkerResponseSchema -
+    // a malformed workerId/workerToken would have thrown before this line.
     expect(response.statusCode).toBe(201);
-    expect(body.workerId).toBeTruthy();
-    expect(body.workerToken).toBeTruthy();
   });
 
   it("rejects registration with an invalid pairing secret", async () => {

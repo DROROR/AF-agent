@@ -31,13 +31,6 @@ export class AppError extends Error {
   }
 }
 
-export class ValidationError extends AppError {
-  constructor(message: string) {
-    super("VALIDATION_ERROR", message);
-    this.name = "ValidationError";
-  }
-}
-
 export class UnauthorizedError extends AppError {
   constructor(message = "Missing or invalid credentials") {
     super("UNAUTHORIZED", message);
