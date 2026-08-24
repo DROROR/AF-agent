@@ -77,6 +77,23 @@ function Set-OwnerOnlyAcl {
   icacls $Path /grant:r "SYSTEM:$rights" *>$null
 }
 
+function Remove-RegistrationSecretFromEnv {
+  <#
+    Strips the WORKER_REGISTRATION_SECRET line from a .env file - the code
+    is only ever needed once. Deliberately reads the full file into a
+    variable FIRST, then writes, as two separate statements - never a
+    single `Get-Content $path | ... | Set-Content $path` pipeline against
+    the same file, which is a well-known PowerShell anti-pattern that can
+    truncate the file if Set-Content begins writing before Get-Content has
+    finished streaming from it. This function exists once so both call
+    sites (registration failure and registration success) get the same
+    safe behavior instead of duplicating the pattern.
+  #>
+  param([string]$Path)
+  $remainingLines = Get-Content -Path $Path | Where-Object { $_ -notmatch '^WORKER_REGISTRATION_SECRET=' }
+  Set-Content -Path $Path -Value $remainingLines -Encoding utf8
+}
+
 Write-Host "================================================"
 Write-Host "  DYO Windows Worker - Setup"
 Write-Host "================================================"
@@ -231,6 +248,38 @@ $envLines = @(
 Set-Content -Path $envPath -Value $envLines -Encoding utf8
 Set-OwnerOnlyAcl -Path $envPath -IsFile $true
 
+# ---- Fail-fast validation: never launch the worker against an incomplete
+# configuration file. Reads the file back from disk (not the in-memory
+# $envLines) specifically so this also catches a write that silently failed
+# or was altered on disk, not just a mistake in this script's own logic -
+# this is the exact class of failure ("Worker configuration error:
+# DYO_API_URL / Required / received: undefined") that reached a real
+# client: if it happens again, this now stops with a clear message before
+# Node ever runs, instead of a cryptic Zod error from inside the worker
+# process after the fact.
+$writtenEnvLines = Get-Content -Path $envPath
+$missingKeys = New-Object System.Collections.Generic.List[string]
+foreach ($key in @("DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH")) {
+  $line = $writtenEnvLines | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
+  $value = if ($line) { $line.Substring($key.Length + 1) } else { $null }
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    $missingKeys.Add($key)
+  }
+}
+if (-not ($writtenEnvLines | Where-Object { $_ -match '^WORKER_REGISTRATION_SECRET=' } | Select-Object -First 1)) {
+  $missingKeys.Add("WORKER_REGISTRATION_SECRET")
+}
+
+if ($missingKeys.Count -gt 0) {
+  Write-Host "[NEEDS ATTENTION] Setup could not write a complete configuration file."
+  Write-Host "Missing or empty: $($missingKeys -join ', ')"
+  Write-Host "This computer was not registered - no worker was started."
+  Write-Host "Please run DYO-Worker-Setup.bat again. If this keeps happening, contact DYO"
+  Write-Host "(do not share your registration code with anyone else)."
+  exit 1
+}
+Write-CheckResult $true "Configuration file is complete"
+
 Write-Host ""
 Write-Host "Registering this computer with DYO..."
 
@@ -294,7 +343,7 @@ if (-not $registered) {
   Write-Host ""
   Write-Host "Full details are also saved at: $regErrLog"
   Write-Host "Your registration code was not saved. You can safely run DYO-Worker-Setup.bat again."
-  (Get-Content $envPath) | Where-Object { $_ -notmatch '^WORKER_REGISTRATION_SECRET=' } | Set-Content $envPath
+  Remove-RegistrationSecretFromEnv -Path $envPath
   exit 1
 }
 
@@ -302,7 +351,7 @@ Write-CheckResult $true "Registered with DYO"
 
 # The one-time code is no longer needed: apps/worker/src/bootstrap.ts always
 # prefers the persisted credentials file over WORKER_REGISTRATION_SECRET.
-(Get-Content $envPath) | Where-Object { $_ -notmatch '^WORKER_REGISTRATION_SECRET=' } | Set-Content $envPath
+Remove-RegistrationSecretFromEnv -Path $envPath
 Remove-Item $regLog -ErrorAction SilentlyContinue
 Remove-Item $regErrLog -ErrorAction SilentlyContinue
 
