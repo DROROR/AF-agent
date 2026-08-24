@@ -29,8 +29,7 @@ export class InspectionTransportUnavailableError extends Error {
 }
 
 /**
- * Honest stub - mirrors AfterEffectsRenderer (packages/renderer) and
- * NotIntegratedMcpAdapter (apps/worker/src/health/mcp-adapter.ts): never
+ * Honest stub - mirrors AfterEffectsRenderer (packages/renderer): never
  * fabricates a result, always fails loudly with a clear reason.
  */
 export class NotAvailableTemplateInspector implements TemplateInspector {

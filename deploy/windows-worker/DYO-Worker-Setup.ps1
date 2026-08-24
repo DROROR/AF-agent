@@ -31,13 +31,11 @@
   override this for testing against a different environment.
 
 .PARAMETER AeMcpPath
-  Where ae-mcp is installed.
-
-.PARAMETER InstanceFilePath
-  Where ae-mcp's per-instance state file lives. Defaults to a path under the
-  CURRENT Windows user's own profile ($env:USERPROFILE) - never inferred
-  from the machine hostname, which has no reliable relationship to the
-  Windows username.
+  Where ae-mcp is installed. Distinct from ae-mcp's DATA root (where it
+  writes its live instance/heartbeat files) - the worker discovers that
+  itself at runtime (os.homedir() + ".ae-mcp", the real upstream
+  HeroicSwan/after-effects-mcp convention) and this script does not need to
+  know or configure it.
 
 .PARAMETER WorkRoot
   Local folder for worker state (registration, logs). Nothing outside this
@@ -51,15 +49,6 @@
 param(
   [string]$ApiUrl = "https://worker-api.dyocourses.com",
   [string]$AeMcpPath = "C:\AI-Tools\ae-mcp",
-  # Under the CURRENT Windows user's profile - a real client's username is
-  # not "PC" (that was a placeholder that shipped as a literal default and
-  # never matched any real machine). $env:USERPROFILE resolves to whichever
-  # account actually runs this script, which is exactly the account ae-mcp
-  # itself runs under and writes its instance file as. Deliberately not
-  # derived from $env:COMPUTERNAME/hostname - Windows has no rule tying a
-  # machine's hostname to any account's username, so that would be just as
-  # wrong as the old hardcoded default, only less obviously so.
-  [string]$InstanceFilePath = (Join-Path $env:USERPROFILE "ae-mcp\instances\default\instance.json"),
   [string]$WorkRoot = "C:\DYO-Agent",
   [string]$InstallDir = "C:\DYO-Agent\app"
 )
@@ -191,13 +180,18 @@ if (Test-Path $AeMcpPath) {
   $blockers.Add("ae-mcp was not found at: $AeMcpPath")
 }
 
-# The instance file is informational, not a hard blocker - the worker
-# already handles a missing file honestly (MCP status shows Unknown rather
-# than failing to start). See apps/worker/src/health/mcp-instance-file-adapter.ts.
-if (Test-Path $InstanceFilePath) {
-  Write-CheckResult $true "ae-mcp status file"
+# Informational only, not a hard blocker - the worker discovers ae-mcp's
+# live instance files itself at runtime (os.homedir() + ".ae-mcp", the real
+# upstream ae-mcp convention - see apps/worker/src/health/
+# mcp-instance-file-adapter.ts) and already handles a missing/empty data
+# directory honestly (MCP status shows Unknown rather than failing to
+# start). This check just previews that same default for the person
+# running setup, using the SAME account this script itself is running as.
+$aeMcpDataDirPreview = Join-Path $env:USERPROFILE ".ae-mcp"
+if (Test-Path (Join-Path $aeMcpDataDirPreview "instances")) {
+  Write-CheckResult $true "ae-mcp data directory"
 } else {
-  Write-CheckResult $false "ae-mcp status file" "not found yet - After Effects status will show as Unknown until this exists"
+  Write-CheckResult $false "ae-mcp data directory" "not found yet at $aeMcpDataDirPreview\instances - After Effects/ae-mcp status will show as Unknown until ae-mcp has run at least once"
 }
 
 try {
@@ -305,7 +299,13 @@ $envLines = @(
   # `if (!config.aePath) return UNKNOWN` branch fired unconditionally).
   "AE_PATH=$aeExePath"
   "AE_MCP_PATH=$AeMcpPath"
-  "AE_MCP_INSTANCE_FILE_PATH=$InstanceFilePath"
+  # No AE_MCP_DATA_DIR line - deliberately left unset so the worker
+  # resolves its own default (os.homedir() + ".ae-mcp", computed at actual
+  # runtime by whichever account runs the worker process) rather than this
+  # script baking in a path computed at install time, which could mismatch
+  # if a different account ever runs the Scheduled Task. Only set
+  # AE_MCP_DATA_DIR by hand in .env if ae-mcp's real data root is
+  # genuinely somewhere else.
   "WORK_ROOT=$WorkRoot"
   ('WORKER_REGISTRATION_SECRET="' + $registrationSecret + '"')
 )
@@ -325,7 +325,7 @@ Set-OwnerOnlyAcl -Path $envPath -IsFile $true
 # worker itself uses). Kept here only as a fast, cheap first check.
 $writtenEnvLines = Get-Content -Path $envPath
 $missingKeys = New-Object System.Collections.Generic.List[string]
-foreach ($key in @("DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH")) {
+foreach ($key in @("DYO_API_URL", "AE_PATH", "AE_MCP_PATH")) {
   $line = $writtenEnvLines | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
   $value = if ($line) { $line.Substring($key.Length + 1) } else { $null }
   if ([string]::IsNullOrWhiteSpace($value)) {
@@ -355,7 +355,7 @@ Write-CheckResult $true "Configuration file is complete"
 # DYO_API_URL, because the file carried a UTF-8 BOM that Get-Content
 # silently strips but Node's --env-file parser does not.
 $preRegistrationCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
-  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"
+  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "WORKER_REGISTRATION_SECRET"
 )
 if (-not $preRegistrationCheck.Ok) {
   Write-Host "[NEEDS ATTENTION] Node cannot read the configuration file this setup just wrote,"
@@ -447,7 +447,7 @@ Remove-Item $regErrLog -ErrorAction SilentlyContinue
 # WORKER_REGISTRATION_SECRET is intentionally excluded here - it was just
 # deliberately stripped and is expected to be absent from this point on.
 $postRegistrationCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
-  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"
+  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH"
 )
 if (-not $postRegistrationCheck.Ok) {
   Write-Host "[NEEDS ATTENTION] Registration succeeded, but the configuration file is no longer"

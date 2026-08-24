@@ -53,7 +53,7 @@ placeholders.
 | `AE_PATH` | no | Path to the After Effects installation (used for read-only health detection). |
 | `AERENDER_PATH` | no | Path to `aerender.exe` (used for read-only availability detection). |
 | `AE_MCP_PATH` | no | Path where ae-mcp is installed. Reported for visibility only - Phase 2 does not integrate ae-mcp (see "Health detection" below). |
-| `AE_MCP_INSTANCE_FILE_PATH` | no | Path to ae-mcp's per-instance state file, e.g. `C:\Users\PC\ae-mcp\instances\default\instance.json` - distinct from `AE_MCP_PATH` (the install directory), not derived from it. When set, the worker reads and parses this file but still always reports `mcpStatus: UNKNOWN` - real field interpretation is deliberately unimplemented until a sample of the file has been reviewed (see "Health detection" below). |
+| `AE_MCP_DATA_DIR` | no | ae-mcp's data root - defaults to `os.homedir() + ".ae-mcp"`, matching the real upstream HeroicSwan/after-effects-mcp implementation exactly (confirmed 2026-08-24, correcting an earlier default that was missing the leading dot). Distinct from `AE_MCP_PATH` (the install directory), not derived from it. The worker discovers and reads `<AE_MCP_DATA_DIR>/instances/*/instance.json` under this root (see "Health detection" below) - only set this explicitly to override the default. |
 | `HEARTBEAT_INTERVAL_MS` | no | Milliseconds between heartbeats when healthy. Defaults to `15000`. |
 
 `WORKER_REGISTRATION_SECRET` is never logged. Neither is `WORKER_TOKEN`, at
@@ -182,24 +182,37 @@ launches After Effects.
   recognizable is present.
 - **aerender availability**: whether `AERENDER_PATH` points at a file that
   exists on disk.
-- **MCP status**: real, schema-based integration as of Phase 4. The worker
-  exposes a clean `McpAdapter` interface (`apps/worker/src/health/mcp-adapter.ts`)
-  so implementations are swappable without touching any call site. When
-  `AE_MCP_INSTANCE_FILE_PATH` is unset, the worker uses
-  `NotIntegratedMcpAdapter` (always `UNKNOWN`, `AE_MCP_PATH` reported for
-  visibility only). When it is set, the worker uses `McpInstanceFileAdapter`
-  (`apps/worker/src/health/mcp-instance-file-adapter.ts`), validated against
-  a schema confirmed from a real client `instance.json` sample:
-  - `instanceId`, `aeVersion`, `projectName` (string), `projectPath`
-    (string or null), `lastSeen` (ISO timestamp), `pollMs` (positive
-    number), `protocolVersion` (integer, currently only `1` is
-    recognized), `listening` (boolean).
-  - **ONLINE**: `protocolVersion` is a recognized version, `listening` is
-    `true`, and `lastSeen` is fresh.
-  - **OFFLINE**: `listening` is `false`, or `lastSeen` is stale.
-    Freshness: `staleAfterMs = max(pollMs * 5, 10000)`.
-  - **UNKNOWN**: file missing/unreadable, malformed JSON, schema-invalid,
-    unparseable `lastSeen`, or an unrecognized `protocolVersion` - never
+- **MCP status**: real, discovery-based integration as of Phase 4 (corrected
+  2026-08-24 against the real upstream HeroicSwan/after-effects-mcp
+  implementation). The worker exposes a clean `McpAdapter` interface
+  (`apps/worker/src/health/mcp-adapter.ts`) so implementations are
+  swappable without touching any call site; `McpInstanceFileAdapter`
+  (`apps/worker/src/health/mcp-instance-file-adapter.ts`) is the only
+  implementation and is always used - `AE_MCP_DATA_DIR` always resolves to
+  something (see the env var table above), so there is no "unconfigured"
+  case anymore.
+  - **Discovery**: lists every subdirectory of `<AE_MCP_DATA_DIR>/instances/`
+    and reads `<that dir>/instance.json` for each - never assumes only a
+    `default` instance exists. A missing/unreadable `instances/` directory
+    (ae-mcp never run, or a wrong data dir) simply yields zero candidates.
+  - **Per-candidate validation**, against a schema confirmed from a real
+    client `instance.json` sample: `instanceId`, `aeVersion`, `projectName`
+    (string), `projectPath` (string or null), `lastSeen` (ISO timestamp),
+    `pollMs` (positive number), `protocolVersion` (integer, currently only
+    `1` is recognized), `listening` (boolean). A candidate that fails to
+    read, parse, or validate is skipped - it never blocks discovery of the
+    others, and is never treated as evidence of anything.
+  - **Selection**: among candidates that are live (`listening === true` and
+    `lastSeen` fresh - `staleAfterMs = max(pollMs * 5, 10000)`), a live
+    `default` instance is preferred; otherwise the freshest live instance,
+    whatever its ID.
+  - **ONLINE**: a live instance was selected per the above.
+  - **OFFLINE**: at least one structurally-valid instance file exists, but
+    none is currently live - real evidence of "not running", not absence
+    of information.
+  - **UNKNOWN**: no structurally-valid instance file was found anywhere
+    under `<AE_MCP_DATA_DIR>/instances/` - could mean ae-mcp has never run,
+    the data dir is wrong, or every candidate found was malformed. Never
     fabricated from a shape that hasn't been confirmed real.
 
 ## Operation allowlist

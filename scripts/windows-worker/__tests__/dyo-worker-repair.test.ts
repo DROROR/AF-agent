@@ -86,13 +86,31 @@ describe("DYO-Worker-Repair.ps1 preserves the existing install and configuration
     expect(repairScript).toContain('"AE_PATH=$aeExePath"');
   });
 
-  it("derives the ae-mcp instance path from $env:USERPROFILE (current user), never a hardcoded username or the hostname", () => {
-    expect(repairScript).toMatch(/\$instanceFilePath = Join-Path \$env:USERPROFILE "ae-mcp\\instances\\default\\instance\.json"/);
-    // The old bug (a literal "C:\Users\PC\..." default) is referenced by
-    // name in the doc comment explaining why this script exists - assert
-    // it only against the executable body, not that explanatory prose.
+  it("never writes AE_MCP_DATA_DIR (or the old AE_MCP_INSTANCE_FILE_PATH) to .env - the worker resolves its own data root at real runtime", () => {
+    // Regression, twice over: first a hardcoded "C:\Users\PC\..." literal,
+    // then (this same session) an install-time $env:USERPROFILE-relative
+    // single-file path - confirmed against the real upstream
+    // HeroicSwan/after-effects-mcp implementation to still be wrong
+    // (missing leading dot in ".ae-mcp", and assumed only one "default"
+    // instance ever exists). The correct fix is for the worker to resolve
+    // and discover this itself (env.ts's defaultAeMcpDataDir(),
+    // mcp-instance-file-adapter.ts's directory scan) - this script must
+    // never compute or write a data-dir-related value again.
+    expect(repairScript).not.toMatch(/AE_MCP_INSTANCE_FILE_PATH/);
+    expect(repairScript).not.toMatch(/AE_MCP_DATA_DIR=/);
+    // The old bug's literal path is referenced by name in the doc comment
+    // explaining why this script exists - assert it only against the
+    // executable body, not that explanatory prose.
     expect(repairCodeBody).not.toMatch(/C:\\Users\\PC\\/);
     expect(repairCodeBody).not.toMatch(/COMPUTERNAME.*instance/i);
+  });
+
+  it("previews the worker's real default data dir for the operator, matching env.ts's defaultAeMcpDataDir() exactly, and treats it as informational only", () => {
+    expect(repairScript).toMatch(/\$aeMcpDataDirPreview = Join-Path \$env:USERPROFILE "\.ae-mcp"/);
+    const checkIndex = repairScript.indexOf("$aeMcpDataDirPreview = Join-Path");
+    expect(checkIndex, "data dir preview check not found").toBeGreaterThan(-1);
+    const block = repairScript.slice(checkIndex, checkIndex + 500);
+    expect(block).not.toMatch(/exit 1/);
   });
 
   it("writes .env via the UTF-8-no-BOM writer, never Set-Content -Encoding utf8", () => {

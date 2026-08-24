@@ -12,14 +12,18 @@
   (WORKER_ID/WORKER_TOKEN in worker-credentials.json) and WITHOUT asking
   for a registration code.
 
-  This exists specifically to ship two configuration fixes to an already-
+  This exists specifically to ship configuration fixes to an already-
   registered machine without asking for a brand-new setup:
     - AE_PATH is now written (previously never written at all, so After
       Effects status always showed Unknown regardless of whether AE was
       running).
-    - The ae-mcp instance-file path now defaults under the current
-      Windows user's own profile ($env:USERPROFILE), not a hardcoded
-      "C:\Users\PC\..." placeholder that never matched a real machine.
+    - AE_MCP_DATA_DIR is deliberately left unset, so the worker resolves
+      ae-mcp's real data root itself at runtime (os.homedir() + ".ae-mcp" -
+      the real upstream HeroicSwan/after-effects-mcp convention, confirmed
+      2026-08-24) instead of this script ever baking in a path - two prior,
+      wrong hardcoded/computed guesses ("C:\Users\PC\..." and, before that,
+      an install-time $env:USERPROFILE-relative single-file path missing
+      ae-mcp's leading dot) are both gone.
 
   Safety, same as DYO-Worker-Setup.ps1:
     - never asks for or stores a Windows account password.
@@ -198,9 +202,9 @@ foreach ($dir in @($WorkRoot, $InstallDir)) {
 # DYO_API_URL is explicitly KEPT from the existing .env rather than
 # re-derived, per the repair requirement to never silently change where
 # this worker points. Everything else is recomputed the same way
-# DYO-Worker-Setup.ps1 would compute it today - including the two fixes
-# this script exists to deliver (AE_PATH, and the ae-mcp instance path
-# under the current user's own profile instead of a hardcoded username).
+# DYO-Worker-Setup.ps1 would compute it today - including AE_PATH, the fix
+# this script exists to deliver. AE_MCP_DATA_DIR is deliberately left
+# unset entirely - see the header comment above.
 Write-Host ""
 Write-Host "Updating configuration..."
 
@@ -221,17 +225,18 @@ if ([string]::IsNullOrWhiteSpace($existingApiUrl)) {
 }
 
 $workerName = $env:COMPUTERNAME
-# Under the CURRENT Windows user's profile - see DYO-Worker-Setup.ps1's
-# InstanceFilePath default for the full rationale. Never derived from the
-# machine hostname.
-$instanceFilePath = Join-Path $env:USERPROFILE "ae-mcp\instances\default\instance.json"
 
 $envLines = @(
   "DYO_API_URL=$existingApiUrl"
   "WORKER_NAME=$workerName"
   "AE_PATH=$aeExePath"
   "AE_MCP_PATH=$AeMcpPath"
-  "AE_MCP_INSTANCE_FILE_PATH=$instanceFilePath"
+  # No AE_MCP_DATA_DIR line - deliberately left unset so the worker
+  # resolves its own default (os.homedir() + ".ae-mcp", the real upstream
+  # HeroicSwan/after-effects-mcp convention, computed at actual runtime by
+  # whichever account runs the worker process) rather than this script
+  # baking in a path computed at repair time. Only set AE_MCP_DATA_DIR by
+  # hand in .env if ae-mcp's real data root is genuinely somewhere else.
   "WORK_ROOT=$WorkRoot"
 )
 # No WORKER_REGISTRATION_SECRET line, ever - this script never asks for or
@@ -242,15 +247,19 @@ $envLines = @(
 Write-Utf8NoBomFile -Path $envPath -Lines $envLines
 Set-OwnerOnlyAcl -Path $envPath -IsFile $true
 
-if (-not (Test-Path $instanceFilePath)) {
-  Write-Host "[NEEDS ATTENTION] ae-mcp status file not found yet at:"
-  Write-Host "  $instanceFilePath"
+# Informational only, not an error - previews the SAME default the worker
+# itself will resolve (see the comment above), using the same account this
+# script is running as.
+$aeMcpDataDirPreview = Join-Path $env:USERPROFILE ".ae-mcp"
+if (-not (Test-Path (Join-Path $aeMcpDataDirPreview "instances"))) {
+  Write-Host "[NEEDS ATTENTION] ae-mcp data directory not found yet at:"
+  Write-Host "  $aeMcpDataDirPreview\instances"
   Write-Host "This is informational, not an error - After Effects/ae-mcp status will show"
-  Write-Host "as Unknown until that file exists. The worker will still start normally."
+  Write-Host "as Unknown until ae-mcp has run at least once. The worker will still start normally."
 }
 
 $envCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
-  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"
+  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH"
 )
 if (-not $envCheck.Ok) {
   Write-Host "[NEEDS ATTENTION] Node cannot read the configuration file this repair just wrote."

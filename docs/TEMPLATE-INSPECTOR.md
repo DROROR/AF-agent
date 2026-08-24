@@ -29,8 +29,7 @@ can start immediately instead of being designed from scratch.
   - `template-inspector.ts` - the `TemplateInspector` service interface,
     plus `NotAvailableTemplateInspector`, an honest stub that always throws
     `InspectionTransportUnavailableError` rather than fabricating a result
-    (same pattern as `AfterEffectsRenderer` in `packages/renderer` and
-    `NotIntegratedMcpAdapter` in `apps/worker/src/health/mcp-adapter.ts`).
+    (same pattern as `AfterEffectsRenderer` in `packages/renderer`).
 
 None of this executes against real After Effects. All of it is testable,
 and tested, without one.

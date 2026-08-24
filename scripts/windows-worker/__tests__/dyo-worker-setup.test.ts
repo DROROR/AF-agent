@@ -33,13 +33,8 @@ describe("DYO-Worker-Setup.ps1 writes a complete .env before ever launching the 
     expect(envBlock).toMatch(/"DYO_API_URL=\$ApiUrl"/);
   });
 
-  it("writes all four required non-secret configuration values unconditionally", () => {
-    for (const line of [
-      '"DYO_API_URL=$ApiUrl"',
-      '"AE_PATH=$aeExePath"',
-      '"AE_MCP_PATH=$AeMcpPath"',
-      '"AE_MCP_INSTANCE_FILE_PATH=$InstanceFilePath"'
-    ]) {
+  it("writes all three required non-secret configuration values unconditionally", () => {
+    for (const line of ['"DYO_API_URL=$ApiUrl"', '"AE_PATH=$aeExePath"', '"AE_MCP_PATH=$AeMcpPath"']) {
       expect(setupScript).toContain(line);
     }
   });
@@ -53,7 +48,7 @@ describe("DYO-Worker-Setup.ps1 writes a complete .env before ever launching the 
     // Checks the file it actually wrote to disk, not just its in-memory
     // representation - catches a write that silently failed too.
     expect(setupScript).toMatch(/\$writtenEnvLines = Get-Content -Path \$envPath/);
-    expect(setupScript).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
+    expect(setupScript).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH"/);
     expect(setupScript).toMatch(/missingKeys\.Count -gt 0/);
     expect(setupScript).toMatch(/exit 1/);
   });
@@ -99,8 +94,8 @@ describe("the .env file is written and rewritten as UTF-8 without a BOM, and Nod
     expect(setupScript).not.toMatch(/^\s*Set-Content[^\n]*-Encoding utf8\b/m);
 
     const envWriteIndex = setupScript.indexOf("$envLines = @(");
-    const nextLines = setupScript.slice(envWriteIndex, envWriteIndex + 800);
-    expect(nextLines).toMatch(/Write-Utf8NoBomFile -Path \$envPath -Lines \$envLines/);
+    const writeCallIndex = setupScript.indexOf("Write-Utf8NoBomFile -Path $envPath -Lines $envLines", envWriteIndex);
+    expect(writeCallIndex, "Write-Utf8NoBomFile call for $envPath not found").toBeGreaterThan(envWriteIndex);
   });
 
   it("secret-removal rewrites the file through the same no-BOM writer, not Set-Content", () => {
@@ -122,7 +117,7 @@ describe("the .env file is written and rewritten as UTF-8 without a BOM, and Nod
     expect(preCheckIndex).toBeLessThan(registrationLaunchIndex);
 
     const block = setupScript.slice(preCheckIndex, registrationLaunchIndex);
-    expect(block).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"/);
+    expect(block).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "WORKER_REGISTRATION_SECRET"/);
     expect(block).toMatch(/if \(-not \$preRegistrationCheck\.Ok\)/);
     expect(block).toMatch(/exit 1/);
     // Never echoes Node's captured output, which could theoretically
@@ -139,7 +134,7 @@ describe("the .env file is written and rewritten as UTF-8 without a BOM, and Nod
     expect(postCheckIndex).toBeGreaterThan(secretRemovalIndex);
 
     const block = setupScript.slice(postCheckIndex, postCheckIndex + 600);
-    expect(block).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
+    expect(block).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH"/);
     // WORKER_REGISTRATION_SECRET is deliberately excluded post-cleanup - it
     // was just intentionally stripped, so checking for it here would fail.
     expect(block).not.toMatch(/"WORKER_REGISTRATION_SECRET"/);
@@ -177,33 +172,41 @@ describe("AE_PATH is written from the AE install path setup already discovered, 
   });
 });
 
-describe("the ae-mcp instance file path is derived from the current Windows user, never the hostname, and a missing file is non-fatal", () => {
-  it("defaults InstanceFilePath under $env:USERPROFILE, not a hardcoded username", () => {
-    // Regression: the old default was the literal path
-    // C:\Users\PC\ae-mcp\instances\default\instance.json - "PC" was a
-    // placeholder that shipped as a real default and does not match any
-    // real client's actual Windows username, so the file could never be
-    // found regardless of whether ae-mcp was actually running.
-    expect(setupScript).toMatch(
-      /\[string\]\$InstanceFilePath = \(Join-Path \$env:USERPROFILE "ae-mcp\\instances\\default\\instance\.json"\)/
-    );
+describe("ae-mcp's data directory is resolved by the worker itself at runtime - Setup.ps1 never bakes in a path", () => {
+  it("no longer has an InstanceFilePath parameter or writes AE_MCP_INSTANCE_FILE_PATH/AE_MCP_DATA_DIR to .env", () => {
+    // Regression, twice over: the original default was the literal path
+    // C:\Users\PC\ae-mcp\instances\default\instance.json ("PC" never
+    // matched a real client's username). The fix in this same session
+    // replaced it with an install-time $env:USERPROFILE-relative single
+    // file path - which turned out to ALSO be wrong, confirmed against
+    // the real upstream HeroicSwan/after-effects-mcp implementation: the
+    // data root is `os.homedir() + ".ae-mcp"` (missing leading dot in the
+    // prior fix), and ae-mcp supports multiple named instances, not only
+    // "default". The correct fix is for the WORKER to resolve and
+    // discover this itself at actual runtime (see env.ts's
+    // defaultAeMcpDataDir() and mcp-instance-file-adapter.ts's directory
+    // scan) - this script should never compute or write any of this again.
+    expect(setupScript).not.toMatch(/\$InstanceFilePath/);
+    expect(setupScript).not.toMatch(/AE_MCP_INSTANCE_FILE_PATH/);
+    expect(setupScript).not.toMatch(/AE_MCP_DATA_DIR=/);
     expect(setupScript).not.toMatch(/C:\\Users\\PC\\/);
   });
 
-  it("never derives the instance path from the machine hostname/COMPUTERNAME", () => {
+  it("never derives anything from the machine hostname/COMPUTERNAME in its parameter defaults", () => {
     const paramBlockEnd = setupScript.indexOf(")", setupScript.indexOf("[CmdletBinding()]"));
     const paramBlock = setupScript.slice(0, paramBlockEnd);
     expect(paramBlock).not.toMatch(/COMPUTERNAME/);
   });
 
-  it("keeps AE_MCP_PATH's own default unchanged at C:\\AI-Tools\\ae-mcp", () => {
+  it("keeps AE_MCP_PATH's own default unchanged at C:\\AI-Tools\\ae-mcp - distinct from the data root", () => {
     expect(setupScript).toMatch(/\[string\]\$AeMcpPath = "C:\\AI-Tools\\ae-mcp"/);
   });
 
-  it("a missing instance file is reported as informational, not added to $blockers (setup must still complete)", () => {
-    const checkIndex = setupScript.indexOf('Test-Path $InstanceFilePath');
+  it("previews the worker's real default data dir for the operator, matching env.ts's defaultAeMcpDataDir() exactly, and treats it as informational only", () => {
+    expect(setupScript).toMatch(/\$aeMcpDataDirPreview = Join-Path \$env:USERPROFILE "\.ae-mcp"/);
+    const checkIndex = setupScript.indexOf("$aeMcpDataDirPreview = Join-Path");
     const nextCheckIndex = setupScript.indexOf("Connection to DYO");
-    expect(checkIndex, "instance file preflight check not found").toBeGreaterThan(-1);
+    expect(checkIndex, "data dir preview check not found").toBeGreaterThan(-1);
     const block = setupScript.slice(checkIndex, nextCheckIndex);
     expect(block).not.toMatch(/\$blockers\.Add/);
   });

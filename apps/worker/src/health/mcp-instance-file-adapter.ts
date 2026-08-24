@@ -1,11 +1,11 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
-import type { McpStatus } from "@dyo/schemas";
 import type { McpAdapter, McpHealthResult } from "./mcp-adapter.js";
 
 /**
- * ae-mcp per-instance state file - schema confirmed against a real client
- * sample (Phase 4, 2026-08-23):
+ * ae-mcp per-instance heartbeat file schema - confirmed against a real
+ * client sample (Phase 4, 2026-08-23):
  *   {
  *     "instanceId": "default",
  *     "aeVersion": "26.3x87",
@@ -16,10 +16,15 @@ import type { McpAdapter, McpHealthResult } from "./mcp-adapter.js";
  *     "protocolVersion": 1,
  *     "listening": true
  *   }
- * Path is confirmed distinct from the ae-mcp *installation* path
- * (AE_MCP_PATH, C:\AI-Tools\ae-mcp) - the real instance file lives at
- * C:\Users\PC\ae-mcp\instances\default\instance.json, configured
- * independently via AE_MCP_INSTANCE_FILE_PATH.
+ *
+ * Location - confirmed against the real upstream HeroicSwan/after-effects-mcp
+ * implementation, not assumed: ae-mcp's data root is `os.homedir() +
+ * ".ae-mcp"` (see env.ts's defaultAeMcpDataDir()), and each live instance
+ * writes its heartbeat to `<dataRoot>/instances/<instanceId>/instance.json`.
+ * A prior version of this file hardcoded a single path
+ * (`instances\default\instance.json` under a literal `C:\Users\PC\...`) -
+ * wrong on two counts: it assumed only one instance ID ("default") ever
+ * exists, and it was missing the leading dot in ".ae-mcp" entirely.
  */
 const instanceFileSchema = z.object({
   instanceId: z.string(),
@@ -42,78 +47,147 @@ type InstanceFile = z.infer<typeof instanceFileSchema>;
  */
 const SUPPORTED_PROTOCOL_VERSIONS: readonly number[] = [1];
 
+const DEFAULT_INSTANCE_ID = "default";
+
 /** Five missed polls, with a 10s floor so a very fast pollMs doesn't make the check overly twitchy. */
 function computeStaleAfterMs(pollMs: number): number {
   return Math.max(pollMs * 5, 10_000);
 }
 
+interface ParsedCandidate {
+  instanceDirName: string;
+  filePath: string;
+  data: InstanceFile;
+  lastSeenAt: Date;
+}
+
+interface ValidCandidate extends ParsedCandidate {
+  isLive: boolean;
+}
+
 /**
- * Maps a schema-valid instance file to a status. An unsupported
- * protocolVersion or an unparseable lastSeen is treated the same as a
- * schema-validation failure (UNKNOWN) - the file exists and parses as
- * JSON, but its content can't be trusted to mean what we assume it means.
+ * Reads and validates one candidate instance.json. Returns null for ANY
+ * failure - missing/unreadable file, invalid JSON, schema mismatch,
+ * unrecognized protocolVersion, or an unparseable lastSeen - so one
+ * malformed instance directory can never block discovery of the others,
+ * and never gets treated as evidence of anything (per "never fabricate").
+ * Staleness (which needs `now`) is computed by the caller, not here.
  */
-function interpretInstanceFile(file: InstanceFile, now: Date): McpStatus {
-  if (!SUPPORTED_PROTOCOL_VERSIONS.includes(file.protocolVersion)) {
-    return "UNKNOWN";
+async function readValidCandidate(instanceDirName: string, filePath: string): Promise<ParsedCandidate | null> {
+  let raw: string;
+  try {
+    raw = await readFile(filePath, "utf8");
+  } catch {
+    return null;
   }
 
-  const lastSeenAt = new Date(file.lastSeen);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  const result = instanceFileSchema.safeParse(parsed);
+  if (!result.success) {
+    return null;
+  }
+  const data = result.data;
+
+  if (!SUPPORTED_PROTOCOL_VERSIONS.includes(data.protocolVersion)) {
+    return null;
+  }
+
+  const lastSeenAt = new Date(data.lastSeen);
   if (Number.isNaN(lastSeenAt.getTime())) {
-    return "UNKNOWN";
+    return null;
   }
 
-  if (!file.listening) {
-    return "OFFLINE";
-  }
+  return { instanceDirName, filePath, data, lastSeenAt };
+}
 
-  const isStale = now.getTime() - lastSeenAt.getTime() > computeStaleAfterMs(file.pollMs);
-  return isStale ? "OFFLINE" : "ONLINE";
+/**
+ * Lists every instance directory under `<dataDir>/instances/` and returns
+ * the instance.json path each one would use - never assumes only a
+ * "default" instance exists. A missing/unreadable instances root (ae-mcp
+ * never run, or a wrong dataDir) simply yields no candidates - same "not
+ * enough evidence, report UNKNOWN" rule as everything else here.
+ */
+async function discoverInstanceCandidates(dataDir: string): Promise<{ instanceDirName: string; filePath: string }[]> {
+  const instancesRoot = path.join(dataDir, "instances");
+  let entries;
+  try {
+    entries = await readdir(instancesRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      instanceDirName: entry.name,
+      filePath: path.join(instancesRoot, entry.name, "instance.json")
+    }));
 }
 
 export interface McpInstanceFileAdapterConfig {
-  instanceFilePath: string | undefined;
+  /** ae-mcp's data root (the directory containing `instances/`), always resolved by env.ts - see defaultAeMcpDataDir(). */
+  dataDir: string;
   /** Injectable clock for deterministic staleness tests. Defaults to the real clock. */
   now?: () => Date;
 }
 
 export class McpInstanceFileAdapter implements McpAdapter {
-  private readonly instanceFilePath: string | undefined;
+  private readonly dataDir: string;
   private readonly now: () => Date;
 
   constructor(config: McpInstanceFileAdapterConfig) {
-    this.instanceFilePath = config.instanceFilePath;
+    this.dataDir = config.dataDir;
     this.now = config.now ?? (() => new Date());
   }
 
   async checkHealth(): Promise<McpHealthResult> {
-    const path = this.instanceFilePath;
-    if (!path) {
-      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: null };
+    const now = this.now();
+    const candidates = await discoverInstanceCandidates(this.dataDir);
+
+    const valid: ValidCandidate[] = [];
+    for (const candidate of candidates) {
+      const result = await readValidCandidate(candidate.instanceDirName, candidate.filePath);
+      if (!result) {
+        continue;
+      }
+      const isStale = now.getTime() - result.lastSeenAt.getTime() > computeStaleAfterMs(result.data.pollMs);
+      valid.push({ ...result, isLive: result.data.listening && !isStale });
     }
 
-    let raw: string;
-    try {
-      raw = await readFile(path, "utf8");
-    } catch {
-      // Missing/unreadable file is not evidence of OFFLINE - it's simply
-      // not enough evidence either way, same rule as the AE process check
-      // in ae-health.ts.
-      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: path };
+    if (valid.length === 0) {
+      // Never fabricated: no structurally-valid instance file was found
+      // anywhere under <dataDir>/instances/ - could mean ae-mcp has never
+      // run, dataDir is wrong, or every candidate found was malformed.
+      // mcpConfiguredPath reports the root actually scanned, for operator
+      // visibility - not a specific file, since none was usable.
+      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: path.join(this.dataDir, "instances") };
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: path };
+    const liveCandidates = valid.filter((c) => c.isLive);
+
+    // Prefer a fresh, live "default" instance first - the common case,
+    // matches upstream's own default instance ID.
+    const liveDefault = liveCandidates.find((c) => c.instanceDirName === DEFAULT_INSTANCE_ID);
+    if (liveDefault) {
+      return { mcpStatus: "ONLINE", mcpConfiguredPath: liveDefault.filePath };
     }
 
-    const result = instanceFileSchema.safeParse(parsed);
-    if (!result.success) {
-      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: path };
+    // Otherwise the freshest live instance, whatever its ID.
+    if (liveCandidates.length > 0) {
+      const freshest = liveCandidates.reduce((a, b) => (a.lastSeenAt > b.lastSeenAt ? a : b));
+      return { mcpStatus: "ONLINE", mcpConfiguredPath: freshest.filePath };
     }
 
-    return { mcpStatus: interpretInstanceFile(result.data, this.now()), mcpConfiguredPath: path };
+    // At least one structurally-valid instance file exists, but none is
+    // currently live (listening === false, or stale) - honestly OFFLINE,
+    // not UNKNOWN: this IS real evidence, just evidence of "not running"
+    // rather than absence of information. Reports the freshest one found.
+    const freshestOffline = valid.reduce((a, b) => (a.lastSeenAt > b.lastSeenAt ? a : b));
+    return { mcpStatus: "OFFLINE", mcpConfiguredPath: freshestOffline.filePath };
   }
 }
