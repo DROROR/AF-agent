@@ -70,7 +70,84 @@ describe("DYO-Worker-Setup.ps1 writes a complete .env before ever launching the 
   it("strips WORKER_REGISTRATION_SECRET via a two-statement read-then-write, not a single same-file pipeline", () => {
     expect(setupScript).toMatch(/function Remove-RegistrationSecretFromEnv/);
     expect(setupScript).toMatch(/\$remainingLines = Get-Content -Path \$Path/);
-    expect(setupScript).toMatch(/Set-Content -Path \$Path -Value \$remainingLines/);
+    // Writes via Write-Utf8NoBomFile (not Set-Content) so this rewrite
+    // cannot reintroduce a UTF-8 BOM - see the UTF-8-no-BOM describe block
+    // below for full coverage of that requirement.
+    expect(setupScript).toMatch(/Write-Utf8NoBomFile -Path \$Path -Lines \$remainingLines/);
+  });
+});
+
+describe("the .env file is written and rewritten as UTF-8 without a BOM, and Node's real view of it is checked directly", () => {
+  it("writes the .env via Write-Utf8NoBomFile, never via Set-Content -Encoding utf8", () => {
+    // A real client hit this exact bug: Windows PowerShell 5.1's
+    // `Set-Content -Encoding utf8` writes a UTF-8 byte-order mark, which
+    // Get-Content silently strips on read (so this script's own PowerShell-
+    // side check reported the file complete) but Node's --env-file parser
+    // does not strip, corrupting only the first-declared variable
+    // (DYO_API_URL) while every later variable loaded fine.
+    expect(setupScript).toMatch(/function Write-Utf8NoBomFile/);
+    expect(setupScript).toMatch(/New-Object System\.Text\.UTF8Encoding\(\$false\)/);
+    expect(setupScript).toMatch(/\[System\.IO\.File\]::WriteAllLines\(\$Path, \$Lines, \$utf8NoBom\)/);
+    // The old buggy pattern is referenced by name inside doc comments
+    // explaining the root cause - assert no *live statement* uses it,
+    // rather than banning the substring outright.
+    expect(setupScript).not.toMatch(/^\s*Set-Content[^\n]*-Encoding utf8\b/m);
+
+    const envWriteIndex = setupScript.indexOf("$envLines = @(");
+    const nextLines = setupScript.slice(envWriteIndex, envWriteIndex + 800);
+    expect(nextLines).toMatch(/Write-Utf8NoBomFile -Path \$envPath -Lines \$envLines/);
+  });
+
+  it("secret-removal rewrites the file through the same no-BOM writer, not Set-Content", () => {
+    expect(setupScript).toMatch(/function Remove-RegistrationSecretFromEnv/);
+    const fnIndex = setupScript.indexOf("function Remove-RegistrationSecretFromEnv");
+    // Skip past the doc comment block (which references Set-Content/Get-Content
+    // by name to explain the anti-pattern being avoided) to isolate the
+    // function's actual executable body.
+    const docCommentEnd = setupScript.indexOf("#>", fnIndex);
+    const fnBody = setupScript.slice(docCommentEnd, docCommentEnd + 300);
+    expect(fnBody).toMatch(/Write-Utf8NoBomFile -Path \$Path -Lines \$remainingLines/);
+    expect(fnBody).not.toMatch(/Set-Content/);
+  });
+
+  it("validates the .env is readable by the real `node --env-file=.env` mechanism before registration launches, and STOPs if not", () => {
+    const preCheckIndex = setupScript.indexOf("$preRegistrationCheck = Test-WorkerEnvReadableByNode");
+    const registrationLaunchIndex = setupScript.indexOf('Start-Process -FilePath "node"');
+    expect(preCheckIndex, "pre-registration Node-level check not found").toBeGreaterThan(-1);
+    expect(preCheckIndex).toBeLessThan(registrationLaunchIndex);
+
+    const block = setupScript.slice(preCheckIndex, registrationLaunchIndex);
+    expect(block).toMatch(/"DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"/);
+    expect(block).toMatch(/if \(-not \$preRegistrationCheck\.Ok\)/);
+    expect(block).toMatch(/exit 1/);
+    // Never echoes Node's captured output, which could theoretically
+    // contain a value if a future required key's own value were bogus -
+    // only the pass/fail control-flow result is used.
+    expect(block).not.toMatch(/\$preRegistrationCheck\.Output/);
+  });
+
+  it("re-validates DYO_API_URL is still readable by Node after the post-registration secret-removal rewrite", () => {
+    const secretRemovalIndex = setupScript.indexOf("Remove-RegistrationSecretFromEnv -Path $envPath", setupScript.indexOf("Registered with DYO"));
+    const postCheckIndex = setupScript.indexOf("$postRegistrationCheck = Test-WorkerEnvReadableByNode");
+    expect(secretRemovalIndex, "post-success secret removal call not found").toBeGreaterThan(-1);
+    expect(postCheckIndex, "post-registration Node-level re-check not found").toBeGreaterThan(-1);
+    expect(postCheckIndex).toBeGreaterThan(secretRemovalIndex);
+
+    const block = setupScript.slice(postCheckIndex, postCheckIndex + 600);
+    expect(block).toMatch(/"DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
+    // WORKER_REGISTRATION_SECRET is deliberately excluded post-cleanup - it
+    // was just intentionally stripped, so checking for it here would fail.
+    expect(block).not.toMatch(/"WORKER_REGISTRATION_SECRET"/);
+    expect(block).toMatch(/if \(-not \$postRegistrationCheck\.Ok\)/);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("Test-WorkerEnvReadableByNode invokes the exact `node --env-file=.env` mechanism, and never prints values", () => {
+    const fnIndex = setupScript.indexOf("function Test-WorkerEnvReadableByNode");
+    expect(fnIndex).toBeGreaterThan(-1);
+    const fnBody = setupScript.slice(fnIndex, fnIndex + 700);
+    expect(fnBody).toMatch(/node --env-file=\.env dist\\validate-env\.js @RequiredKeys/);
+    expect(fnBody).not.toMatch(/Write-Host \$nodeOutput/);
   });
 });
 

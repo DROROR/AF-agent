@@ -77,6 +77,31 @@ function Set-OwnerOnlyAcl {
   icacls $Path /grant:r "SYSTEM:$rights" *>$null
 }
 
+function Write-Utf8NoBomFile {
+  <#
+    Writes lines as UTF-8 WITHOUT a byte-order mark, using .NET directly.
+
+    A real client hit "Worker configuration error: DYO_API_URL / Required /
+    received: undefined" from Node, immediately after this script itself
+    reported "[OK] Configuration file is complete". Root cause, confirmed
+    empirically: `Set-Content -Encoding utf8` writes UTF-8 WITH a BOM on
+    Windows PowerShell 5.1 (the default PowerShell on most Windows machines
+    unless PowerShell 7+ was explicitly installed - there is no
+    `-Encoding utf8NoBOM` option in 5.1, only in 7+). PowerShell's own
+    Get-Content is BOM-transparent and silently strips it when reading -
+    which is exactly why this script's own earlier file-completeness check
+    passed - but Node's `--env-file` parser is NOT BOM-aware: the BOM
+    becomes part of the first key it parses, corrupting only the first
+    variable declared in the file (DYO_API_URL, since it's listed first)
+    while every later variable loads fine. This uses
+    System.Text.UTF8Encoding($false) directly, which behaves identically on
+    PowerShell 5.1 and 7+, avoiding the version-dependent flag entirely.
+  #>
+  param([string]$Path, [string[]]$Lines)
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllLines($Path, $Lines, $utf8NoBom)
+}
+
 function Remove-RegistrationSecretFromEnv {
   <#
     Strips the WORKER_REGISTRATION_SECRET line from a .env file - the code
@@ -85,13 +110,33 @@ function Remove-RegistrationSecretFromEnv {
     single `Get-Content $path | ... | Set-Content $path` pipeline against
     the same file, which is a well-known PowerShell anti-pattern that can
     truncate the file if Set-Content begins writing before Get-Content has
-    finished streaming from it. This function exists once so both call
-    sites (registration failure and registration success) get the same
-    safe behavior instead of duplicating the pattern.
+    finished streaming from it. Writes back via Write-Utf8NoBomFile, not
+    Set-Content, so this rewrite cannot reintroduce a BOM either. This
+    function exists once so both call sites (registration failure and
+    registration success) get the same safe behavior instead of
+    duplicating the pattern.
   #>
   param([string]$Path)
   $remainingLines = Get-Content -Path $Path | Where-Object { $_ -notmatch '^WORKER_REGISTRATION_SECRET=' }
-  Set-Content -Path $Path -Value $remainingLines -Encoding utf8
+  Write-Utf8NoBomFile -Path $Path -Lines $remainingLines
+}
+
+function Test-WorkerEnvReadableByNode {
+  <#
+    The only trustworthy way to know whether the real worker will see its
+    configuration: ask Node, via the exact `node --env-file=.env` mechanism
+    the worker itself uses - not PowerShell's Get-Content, which silently
+    disagrees with Node about a leading BOM (see Write-Utf8NoBomFile).
+    Never prints values - dist\validate-env.js only ever prints key names.
+  #>
+  param([string]$InstallDir, [string[]]$RequiredKeys)
+  Push-Location $InstallDir
+  try {
+    $nodeOutput = & node --env-file=.env dist\validate-env.js @RequiredKeys 2>&1
+    return @{ Ok = ($LASTEXITCODE -eq 0); Output = $nodeOutput }
+  } finally {
+    Pop-Location
+  }
 }
 
 Write-Host "================================================"
@@ -245,18 +290,20 @@ $envLines = @(
   "WORK_ROOT=$WorkRoot"
   ('WORKER_REGISTRATION_SECRET="' + $registrationSecret + '"')
 )
-Set-Content -Path $envPath -Value $envLines -Encoding utf8
+Write-Utf8NoBomFile -Path $envPath -Lines $envLines
 Set-OwnerOnlyAcl -Path $envPath -IsFile $true
 
-# ---- Fail-fast validation: never launch the worker against an incomplete
-# configuration file. Reads the file back from disk (not the in-memory
-# $envLines) specifically so this also catches a write that silently failed
-# or was altered on disk, not just a mistake in this script's own logic -
-# this is the exact class of failure ("Worker configuration error:
-# DYO_API_URL / Required / received: undefined") that reached a real
-# client: if it happens again, this now stops with a clear message before
-# Node ever runs, instead of a cryptic Zod error from inside the worker
-# process after the fact.
+# ---- Fail-fast validation, part 1 (fast, PowerShell-side): never launch
+# the worker against an obviously incomplete configuration file. Reads the
+# file back from disk (not the in-memory $envLines) specifically so this
+# also catches a write that silently failed or was altered on disk, not
+# just a mistake in this script's own logic. Note this check alone is NOT
+# sufficient - Get-Content is BOM-transparent (silently strips a leading
+# UTF-8 byte-order mark), so it can report a file "complete" even when Node
+# cannot read its first variable at all (see Write-Utf8NoBomFile above and
+# Test-WorkerEnvReadableByNode below, which is the actual authoritative
+# check because it runs the real `node --env-file=.env` mechanism the
+# worker itself uses). Kept here only as a fast, cheap first check.
 $writtenEnvLines = Get-Content -Path $envPath
 $missingKeys = New-Object System.Collections.Generic.List[string]
 foreach ($key in @("DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH")) {
@@ -279,6 +326,26 @@ if ($missingKeys.Count -gt 0) {
   exit 1
 }
 Write-CheckResult $true "Configuration file is complete"
+
+# ---- Fail-fast validation, part 2 (authoritative, Node-side): proves what
+# the real worker process will see by actually running
+# `node --env-file=.env` against the file, exactly as the registration
+# launch below and every later worker start do. This is the check that
+# would have caught the real client failure - the PowerShell-side check
+# above passed on that machine even though Node could not read
+# DYO_API_URL, because the file carried a UTF-8 BOM that Get-Content
+# silently strips but Node's --env-file parser does not.
+$preRegistrationCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
+  "DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"
+)
+if (-not $preRegistrationCheck.Ok) {
+  Write-Host "[NEEDS ATTENTION] Node cannot read the configuration file this setup just wrote,"
+  Write-Host "even though it looks complete. This computer was not registered - no worker was"
+  Write-Host "started. Please run DYO-Worker-Setup.bat again. If this keeps happening, contact"
+  Write-Host "DYO (do not share your registration code with anyone else)."
+  exit 1
+}
+Write-CheckResult $true "Configuration file is readable by Node"
 
 Write-Host ""
 Write-Host "Registering this computer with DYO..."
@@ -354,6 +421,22 @@ Write-CheckResult $true "Registered with DYO"
 Remove-RegistrationSecretFromEnv -Path $envPath
 Remove-Item $regLog -ErrorAction SilentlyContinue
 Remove-Item $regErrLog -ErrorAction SilentlyContinue
+
+# Confirm the secret-removal rewrite above didn't reintroduce the BOM bug
+# and that DYO_API_URL (and the other still-required values) remain
+# readable by Node after this second write to the same file.
+# WORKER_REGISTRATION_SECRET is intentionally excluded here - it was just
+# deliberately stripped and is expected to be absent from this point on.
+$postRegistrationCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
+  "DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"
+)
+if (-not $postRegistrationCheck.Ok) {
+  Write-Host "[NEEDS ATTENTION] Registration succeeded, but the configuration file is no longer"
+  Write-Host "readable by Node after cleanup. Please run DYO-Worker-Setup.bat again. If this"
+  Write-Host "keeps happening, contact DYO."
+  exit 1
+}
+Write-CheckResult $true "Configuration file remains readable by Node after cleanup"
 
 if (Test-Path $credentialsPath) {
   Set-OwnerOnlyAcl -Path $credentialsPath -IsFile $true

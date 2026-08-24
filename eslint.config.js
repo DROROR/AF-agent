@@ -19,6 +19,7 @@ export default [
       // Windows worker packaging/deployment tooling, plain JS, outside every tsconfig's rootDir.
       "scripts/package-windows-worker.mjs",
       "scripts/windows-worker-format-status.mjs",
+      "scripts/windows-worker-validate-env.mjs",
       // Regenerated build artifact - see deploy/windows-worker/worker-app/ in .gitignore.
       "deploy/windows-worker/worker-app/**"
     ]

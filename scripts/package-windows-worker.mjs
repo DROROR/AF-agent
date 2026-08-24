@@ -107,4 +107,12 @@ cpSync(
   path.join(WORKER_APP_DIR, "run-worker.bat")
 );
 
+// Node-level env validator DYO-Worker-Setup.ps1 invokes via the real
+// `node --env-file=.env` mechanism, proving what Node itself sees rather
+// than trusting PowerShell's (BOM-transparent) view of the same file.
+cpSync(
+  path.join(REPO_ROOT, "scripts", "windows-worker-validate-env.mjs"),
+  path.join(WORKER_APP_DIR, "dist", "validate-env.js")
+);
+
 console.log("Done. worker-app/ contains no devDependencies and no TypeScript source - plain compiled JS + a minimal package.json, ready for `npm install --omit=dev` on the client machine.");
