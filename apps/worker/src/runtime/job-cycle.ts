@@ -47,7 +47,21 @@ export async function runJobCycle(deps: JobCycleDeps): Promise<void> {
     return;
   }
 
-  const executionResult = await deps.executeJob({ ...job, status: "RUNNING" });
+  let executionResult: JobExecutionResult;
+  try {
+    executionResult = await deps.executeJob({ ...job, status: "RUNNING" });
+  } catch (error) {
+    // This call was previously unguarded: an exception here escaped
+    // runJobCycle entirely and, since index.ts invokes it as
+    // `void runJobCycle(...)` with no .catch(), became an unhandled
+    // promise rejection - which crashes the whole worker process under
+    // Node's default unhandledRejection behavior. That directly
+    // contradicts this function's own "Never throws" contract above and
+    // masks a job-execution bug as a total worker outage instead of a
+    // single reported job failure.
+    deps.onEvent?.({ type: "job_cycle_failed", error });
+    return;
+  }
 
   try {
     await deps.reportJobStatus(job.jobId, {

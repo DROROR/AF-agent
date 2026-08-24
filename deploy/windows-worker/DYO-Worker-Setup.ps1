@@ -34,7 +34,10 @@
   Where ae-mcp is installed.
 
 .PARAMETER InstanceFilePath
-  Where ae-mcp's per-instance state file lives.
+  Where ae-mcp's per-instance state file lives. Defaults to a path under the
+  CURRENT Windows user's own profile ($env:USERPROFILE) - never inferred
+  from the machine hostname, which has no reliable relationship to the
+  Windows username.
 
 .PARAMETER WorkRoot
   Local folder for worker state (registration, logs). Nothing outside this
@@ -48,7 +51,15 @@
 param(
   [string]$ApiUrl = "https://worker-api.dyocourses.com",
   [string]$AeMcpPath = "C:\AI-Tools\ae-mcp",
-  [string]$InstanceFilePath = "C:\Users\PC\ae-mcp\instances\default\instance.json",
+  # Under the CURRENT Windows user's profile - a real client's username is
+  # not "PC" (that was a placeholder that shipped as a literal default and
+  # never matched any real machine). $env:USERPROFILE resolves to whichever
+  # account actually runs this script, which is exactly the account ae-mcp
+  # itself runs under and writes its instance file as. Deliberately not
+  # derived from $env:COMPUTERNAME/hostname - Windows has no rule tying a
+  # machine's hostname to any account's username, so that would be just as
+  # wrong as the old hardcoded default, only less obviously so.
+  [string]$InstanceFilePath = (Join-Path $env:USERPROFILE "ae-mcp\instances\default\instance.json"),
   [string]$WorkRoot = "C:\DYO-Agent",
   [string]$InstallDir = "C:\DYO-Agent\app"
 )
@@ -285,6 +296,14 @@ $envPath = Join-Path $InstallDir ".env"
 $envLines = @(
   "DYO_API_URL=$ApiUrl"
   "WORKER_NAME=$workerName"
+  # The exact path this script already confirmed AfterFX.exe exists at
+  # during Step 1's preflight above ($aeExePath) - never a separately
+  # hardcoded value. Previously this was never written to .env at all, so
+  # the worker's own AE_PATH env var was always undefined and aeStatus
+  # always reported UNKNOWN regardless of whether After Effects was
+  # actually running (apps/worker/src/health/ae-health.ts's
+  # `if (!config.aePath) return UNKNOWN` branch fired unconditionally).
+  "AE_PATH=$aeExePath"
   "AE_MCP_PATH=$AeMcpPath"
   "AE_MCP_INSTANCE_FILE_PATH=$InstanceFilePath"
   "WORK_ROOT=$WorkRoot"
@@ -306,7 +325,7 @@ Set-OwnerOnlyAcl -Path $envPath -IsFile $true
 # worker itself uses). Kept here only as a fast, cheap first check.
 $writtenEnvLines = Get-Content -Path $envPath
 $missingKeys = New-Object System.Collections.Generic.List[string]
-foreach ($key in @("DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH")) {
+foreach ($key in @("DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH")) {
   $line = $writtenEnvLines | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
   $value = if ($line) { $line.Substring($key.Length + 1) } else { $null }
   if ([string]::IsNullOrWhiteSpace($value)) {
@@ -336,7 +355,7 @@ Write-CheckResult $true "Configuration file is complete"
 # DYO_API_URL, because the file carried a UTF-8 BOM that Get-Content
 # silently strips but Node's --env-file parser does not.
 $preRegistrationCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
-  "DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"
+  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"
 )
 if (-not $preRegistrationCheck.Ok) {
   Write-Host "[NEEDS ATTENTION] Node cannot read the configuration file this setup just wrote,"
@@ -428,7 +447,7 @@ Remove-Item $regErrLog -ErrorAction SilentlyContinue
 # WORKER_REGISTRATION_SECRET is intentionally excluded here - it was just
 # deliberately stripped and is expected to be absent from this point on.
 $postRegistrationCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
-  "DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"
+  "DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"
 )
 if (-not $postRegistrationCheck.Ok) {
   Write-Host "[NEEDS ATTENTION] Registration succeeded, but the configuration file is no longer"

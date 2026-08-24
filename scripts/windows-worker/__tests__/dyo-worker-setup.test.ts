@@ -33,8 +33,13 @@ describe("DYO-Worker-Setup.ps1 writes a complete .env before ever launching the 
     expect(envBlock).toMatch(/"DYO_API_URL=\$ApiUrl"/);
   });
 
-  it("writes all three required non-secret configuration values unconditionally", () => {
-    for (const line of ['"DYO_API_URL=$ApiUrl"', '"AE_MCP_PATH=$AeMcpPath"', '"AE_MCP_INSTANCE_FILE_PATH=$InstanceFilePath"']) {
+  it("writes all four required non-secret configuration values unconditionally", () => {
+    for (const line of [
+      '"DYO_API_URL=$ApiUrl"',
+      '"AE_PATH=$aeExePath"',
+      '"AE_MCP_PATH=$AeMcpPath"',
+      '"AE_MCP_INSTANCE_FILE_PATH=$InstanceFilePath"'
+    ]) {
       expect(setupScript).toContain(line);
     }
   });
@@ -48,7 +53,7 @@ describe("DYO-Worker-Setup.ps1 writes a complete .env before ever launching the 
     // Checks the file it actually wrote to disk, not just its in-memory
     // representation - catches a write that silently failed too.
     expect(setupScript).toMatch(/\$writtenEnvLines = Get-Content -Path \$envPath/);
-    expect(setupScript).toMatch(/"DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
+    expect(setupScript).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
     expect(setupScript).toMatch(/missingKeys\.Count -gt 0/);
     expect(setupScript).toMatch(/exit 1/);
   });
@@ -117,7 +122,7 @@ describe("the .env file is written and rewritten as UTF-8 without a BOM, and Nod
     expect(preCheckIndex).toBeLessThan(registrationLaunchIndex);
 
     const block = setupScript.slice(preCheckIndex, registrationLaunchIndex);
-    expect(block).toMatch(/"DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"/);
+    expect(block).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH", "WORKER_REGISTRATION_SECRET"/);
     expect(block).toMatch(/if \(-not \$preRegistrationCheck\.Ok\)/);
     expect(block).toMatch(/exit 1/);
     // Never echoes Node's captured output, which could theoretically
@@ -134,7 +139,7 @@ describe("the .env file is written and rewritten as UTF-8 without a BOM, and Nod
     expect(postCheckIndex).toBeGreaterThan(secretRemovalIndex);
 
     const block = setupScript.slice(postCheckIndex, postCheckIndex + 600);
-    expect(block).toMatch(/"DYO_API_URL", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
+    expect(block).toMatch(/"DYO_API_URL", "AE_PATH", "AE_MCP_PATH", "AE_MCP_INSTANCE_FILE_PATH"/);
     // WORKER_REGISTRATION_SECRET is deliberately excluded post-cleanup - it
     // was just intentionally stripped, so checking for it here would fail.
     expect(block).not.toMatch(/"WORKER_REGISTRATION_SECRET"/);
@@ -148,6 +153,81 @@ describe("the .env file is written and rewritten as UTF-8 without a BOM, and Nod
     const fnBody = setupScript.slice(fnIndex, fnIndex + 700);
     expect(fnBody).toMatch(/node --env-file=\.env dist\\validate-env\.js @RequiredKeys/);
     expect(fnBody).not.toMatch(/Write-Host \$nodeOutput/);
+  });
+});
+
+describe("AE_PATH is written from the AE install path setup already discovered, so aeStatus is not always UNKNOWN", () => {
+  it("writes AE_PATH using $aeExePath - the exact variable the preflight check already confirmed AfterFX.exe exists at - never a separately hardcoded literal", () => {
+    // Regression: AE_PATH was never written to .env at all, even though
+    // Setup.ps1's own preflight already confirms AfterFX.exe's path and
+    // treats it as a hard blocker if missing. apps/worker/src/index.ts
+    // passes env.aePath (sourced from AE_PATH) into detectAeHealth(), whose
+    // `if (!config.aePath) return UNKNOWN` branch fired unconditionally as
+    // a result - not evidence AE was closed, just a missing config wire.
+    const aeExePathIndex = setupScript.indexOf('$aeExePath = "C:\\Program Files\\Adobe');
+    const envWriteIndex = setupScript.indexOf("$envLines = @(");
+    expect(aeExePathIndex, "AE install path discovery not found").toBeGreaterThan(-1);
+    expect(envWriteIndex, "could not find the .env write block").toBeGreaterThan(-1);
+    expect(aeExePathIndex).toBeLessThan(envWriteIndex);
+
+    expect(setupScript).toContain('"AE_PATH=$aeExePath"');
+    // Never a second, independently-hardcoded AE path literal used for the
+    // .env write itself - only the one preflight already validated.
+    expect(setupScript).not.toMatch(/"AE_PATH=C:\\/);
+  });
+});
+
+describe("the ae-mcp instance file path is derived from the current Windows user, never the hostname, and a missing file is non-fatal", () => {
+  it("defaults InstanceFilePath under $env:USERPROFILE, not a hardcoded username", () => {
+    // Regression: the old default was the literal path
+    // C:\Users\PC\ae-mcp\instances\default\instance.json - "PC" was a
+    // placeholder that shipped as a real default and does not match any
+    // real client's actual Windows username, so the file could never be
+    // found regardless of whether ae-mcp was actually running.
+    expect(setupScript).toMatch(
+      /\[string\]\$InstanceFilePath = \(Join-Path \$env:USERPROFILE "ae-mcp\\instances\\default\\instance\.json"\)/
+    );
+    expect(setupScript).not.toMatch(/C:\\Users\\PC\\/);
+  });
+
+  it("never derives the instance path from the machine hostname/COMPUTERNAME", () => {
+    const paramBlockEnd = setupScript.indexOf(")", setupScript.indexOf("[CmdletBinding()]"));
+    const paramBlock = setupScript.slice(0, paramBlockEnd);
+    expect(paramBlock).not.toMatch(/COMPUTERNAME/);
+  });
+
+  it("keeps AE_MCP_PATH's own default unchanged at C:\\AI-Tools\\ae-mcp", () => {
+    expect(setupScript).toMatch(/\[string\]\$AeMcpPath = "C:\\AI-Tools\\ae-mcp"/);
+  });
+
+  it("a missing instance file is reported as informational, not added to $blockers (setup must still complete)", () => {
+    const checkIndex = setupScript.indexOf('Test-Path $InstanceFilePath');
+    const nextCheckIndex = setupScript.indexOf("Connection to DYO");
+    expect(checkIndex, "instance file preflight check not found").toBeGreaterThan(-1);
+    const block = setupScript.slice(checkIndex, nextCheckIndex);
+    expect(block).not.toMatch(/\$blockers\.Add/);
+  });
+});
+
+describe("run-worker.bat (the Scheduled Task's background action) never masks the worker's real exit code", () => {
+  it("does not pipe the worker's output into format-status.js - a cmd.exe pipeline reports the LAST command's exit code, not the worker's", () => {
+    // Regression: run-worker.bat previously ran
+    // `node ... dist\index.js | node dist\format-status.js`. format-status.js
+    // only reads stdin to EOF and exits 0 normally regardless of whether the
+    // worker upstream crashed, so cmd.exe's %ERRORLEVEL% after the pipeline
+    // reflected format-status.js's own success, not the worker's failure -
+    // Task Scheduler's RestartCount/RestartInterval never fires because it
+    // believes the run succeeded.
+    expect(runWorkerBat).not.toMatch(/\|\s*node dist\\format-status\.js/);
+  });
+
+  it("writes the worker's own output directly to the log and forwards its real exit code", () => {
+    expect(runWorkerBat).toMatch(/node --env-file=\.env dist\\index\.js >> "logs\\worker\.log" 2>&1/);
+    expect(runWorkerBat).toMatch(/exit \/b %ERRORLEVEL%/);
+  });
+
+  it("DYO-Worker-Start.bat (manual/interactive troubleshooting only, not Scheduled-Task-driven) may still pipe through format-status.js for human-readable output", () => {
+    expect(startBat).toMatch(/node --env-file=\.env dist\\index\.js \| node dist\\format-status\.js/);
   });
 });
 

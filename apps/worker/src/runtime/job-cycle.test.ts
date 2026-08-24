@@ -94,6 +94,30 @@ describe("runJobCycle", () => {
     expect(events).toEqual([{ type: "job_cycle_failed", error: expect.any(Error) }]);
   });
 
+  it("never throws when job execution itself throws - reports job_cycle_failed instead of crashing the caller", async () => {
+    // Regression: this call was previously unguarded. Since index.ts
+    // invokes runJobCycle as `void runJobCycle(...)` with no .catch(), an
+    // exception escaping here became an unhandled promise rejection -
+    // which crashes the entire worker process under Node's default
+    // behavior, not just this one job.
+    const job = baseJob();
+    const events: unknown[] = [];
+    await expect(
+      runJobCycle({
+        claimNextJob: async () => ({ job }),
+        reportJobStatus: async () => ({ ...job, status: "RUNNING" }),
+        executeJob: async () => {
+          throw new Error("template inspector crashed");
+        },
+        onEvent: (e) => events.push(e)
+      })
+    ).resolves.toBeUndefined();
+    expect(events).toEqual([
+      { type: "job_claimed", jobId: job.jobId, operation: job.operation },
+      { type: "job_cycle_failed", error: expect.any(Error) }
+    ]);
+  });
+
   it("never throws and never executes the job when reporting RUNNING fails", async () => {
     const job = baseJob();
     const executeJob = vi.fn();
