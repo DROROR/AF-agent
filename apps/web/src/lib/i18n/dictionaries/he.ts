@@ -1,0 +1,312 @@
+import type { Dictionary } from "./dictionary-type";
+
+/**
+ * Hebrew dictionary - statically checked against `Dictionary` (see
+ * index.ts), so this can never silently drift out of shape with en.ts.
+ * Real, natural Hebrew phrasing (not machine-literal word-for-word) -
+ * technical terms that Hebrew UI conventionally keeps in Latin script
+ * (API, MCP, AE, Reels...) are kept as-is, matching normal Hebrew tech UX.
+ */
+export const he: Dictionary = {
+  common: {
+    language: "שפה",
+    back: "הקודם",
+    next: "הבא",
+    yes: "כן",
+    no: "לא",
+    never: "מעולם לא",
+    close: "סגירה",
+    unavailableFallback: "לא ניתן היה לטעון את נתוני לוח הבקרה.",
+    staleNotice: (error) => `העדכונים בזמן אמת הושהו - מוצגים הנתונים האחרונים הידועים, מתבצע ניסיון חוזר… (${error})`,
+    switchToTheme: (themeName) => `מעבר למצב ${themeName}`
+  },
+  nav: {
+    overview: "סקירה כללית",
+    projects: "פרויקטים",
+    jobs: "משימות / תור",
+    workers: "עובדים",
+    approvals: "אישורים",
+    renders: "רינדורים",
+    activity: "פעילות / יומנים",
+    settings: "הגדרות"
+  },
+  sidebar: {
+    brandName: "AE Dyo Agent",
+    primaryNavLabel: "ניווט ראשי",
+    brandLinkLabel: "לוח הבקרה של DYO - סקירה כללית",
+    expandSidebar: "הרחבת סרגל הצד",
+    collapseSidebar: "כיווץ סרגל הצד",
+    collapse: "כיווץ",
+    closeNavigation: "סגירת ניווט"
+  },
+  topbar: {
+    openNavigation: "פתיחת ניווט",
+    fallbackTitle: "לוח הבקרה של DYO",
+    logout: "התנתקות",
+    systemNormal: "כל המערכות תקינות",
+    systemIssue: "בעיה במערכת",
+    checking: "בודק…"
+  },
+  status: {
+    ONLINE: "מקוון",
+    OK: "תקין",
+    OFFLINE: "לא מקוון",
+    ERROR: "שגיאה",
+    UNKNOWN: "לא ידוע"
+  },
+  auth: {
+    login: {
+      title: "התחברות",
+      subtitle: "התחברו ללוח הבקרה התפעולי של DYO.",
+      noAccount: "אין לכם חשבון עדיין?",
+      createOne: "צרו חשבון",
+      emailLabel: "אימייל",
+      passwordLabel: "סיסמה",
+      rememberMe: "זכור אותי",
+      forgotPassword: "שכחתם סיסמה?",
+      forgotPasswordTitle: "איפוס סיסמה עדיין לא זמין",
+      submit: "התחברות",
+      submitting: "מתחבר…"
+    },
+    signup: {
+      title: "יצירת חשבון",
+      subtitle: "הגדירו גישה ללוח הבקרה התפעולי של DYO.",
+      haveAccount: "כבר יש לכם חשבון?",
+      signIn: "התחברות",
+      nameLabel: "שם",
+      emailLabel: "אימייל",
+      passwordLabel: "סיסמה",
+      passwordHint: "לפחות 8 תווים",
+      confirmPasswordLabel: "אימות סיסמה",
+      submit: "יצירת חשבון",
+      submitting: "יוצר חשבון…"
+    },
+    errors: {
+      nameRequired: "יש להזין שם",
+      invalidEmail: "יש להזין כתובת אימייל תקינה",
+      passwordRequired: "יש להזין סיסמה",
+      passwordTooShort: "הסיסמה חייבת להכיל לפחות 8 תווים",
+      passwordsDoNotMatch: "הסיסמאות אינן תואמות",
+      invalidValue: "שדה זה אינו תקין",
+      networkError: "לא ניתן היה להתחבר לשרת. נסו שוב.",
+      invalidCredentials: "אימייל או סיסמה שגויים",
+      emailAlreadyExists: "כבר קיים חשבון עם כתובת אימייל זו",
+      tooManyAttempts: "יותר מדי ניסיונות. יש להמתין רגע ולנסות שוב.",
+      somethingWentWrong: "משהו השתבש. נסו שוב."
+    }
+  },
+  overview: {
+    title: "סקירה כללית",
+    description: "סטטוס בזמן אמת של מערך הבקרה של DYO.",
+    loading: "טוען סקירה כללית…",
+    unavailableTitle: "הסקירה הכללית אינה זמינה",
+    api: "API",
+    database: "מסד נתונים",
+    workersOnline: "עובדים מקוונים",
+    aeOnline: "After Effects מקוון",
+    mcpOnline: "MCP מקוון",
+    activeJobs: "משימות פעילות",
+    lastHeartbeat: (relative) => `פעימת לב אחרונה ${relative}`,
+    noHeartbeat: "טרם התקבלה פעימת לב",
+    queueOverview: "סקירת תור",
+    queuePendingTitle: "היסטוריית תור המשימות אינה זמינה עדיין",
+    queuePendingDescription:
+      "כרגע ה-API תומך בתפיסת משימות בודדות ודיווח עליהן, אך עדיין אינו חושף נקודת קצה לרשימת התור. חלק זה יציג ספירת משימות בתור/בריצה/שהושלמו לאחר שנקודת קצה כזו תהיה קיימת (ראו docs/JOB-DISPATCH.md)."
+  },
+  projects: {
+    title: "פרויקטים",
+    description: "פרויקטי הפקת וידאו והשלב הנוכחי שלהם.",
+    newProject: "פרויקט חדש",
+    emptyTitle: "אין עדיין פרויקטים",
+    emptyDescription: "התחילו פרויקט חדש כדי להתחיל בתהליך הקליטה ובדיקת התבנית.",
+    pendingTitle: "מעקב הפרויקטים אינו מגובה ב-API עדיין",
+    pendingDescription:
+      "פרויקטים, תבניות ושלבי האישור/הרינדור שלהם עדיין אינם חשופים על ידי השרת. עמוד זה יציג פרויקטים אמיתיים (שם, תבנית, כיוון, סטטוס, שלב אישור, סטטוס רינדור) לאחר שה-API הזה יהיה קיים."
+  },
+  projectsNew: {
+    title: "פרויקט חדש",
+    description: "הגדירו פרויקט הפקת וידאו חדש. שום דבר כאן עדיין לא נשמר.",
+    stepperLabel: "שלבי הגדרת הפרויקט",
+    steps: {
+      details: "פרטי הפרויקט",
+      template: "תבנית",
+      "work-map": "מפת עבודה",
+      assets: "נכסים",
+      inspection: "בדיקת תבנית",
+      scenes: "טבלת סצנות",
+      review: "בדיקה / אישור",
+      render: "רינדור"
+    },
+    submitForApproval: "שליחה לאישור",
+    submitDisabledTitle: "קליטת הפרויקט אינה מחוברת עדיין לשרת",
+    fields: {
+      projectName: "שם הפרויקט",
+      projectNamePlaceholder: "לדוגמה: Cognetica - השקת אביב",
+      client: "לקוח",
+      clientPlaceholder: "לדוגמה: Cognetica",
+      orientation: "כיוון",
+      orientationHint: "פלט לרוחב ופלט Reels אנכי (1080x1920) מופקים שניהם מאותו פרויקט.",
+      orientationBoth: "לרוחב + Reels",
+      orientationLandscape: "לרוחב בלבד",
+      orientationReels: "Reels בלבד"
+    },
+    template: {
+      title: "ספריית התבניות אינה מחוברת עדיין",
+      description: "לאחר שקליטת תבניות תהיה זמינה בצד השרת, תבניות Envato מאושרות יהיו ניתנות לבחירה כאן."
+    },
+    workMap: {
+      title: "העלאת מפת העבודה אינה מחוברת עדיין",
+      description: "שלב זה יקבל את מפת הנכסים/הטקסט של הלקוח לאחר שקיים API לקליטה."
+    },
+    assets: {
+      title: "העלאת נכסים אינה מחוברת עדיין",
+      description: "תמונות, סרטונים ולוגואים שסופקו על ידי הלקוח יצורפו לפרויקט כאן."
+    },
+    inspection: {
+      title: "בדיקת התבנית טרם בוצעה עבור פרויקט זה",
+      description:
+        "INSPECT_TEMPLATE מחובר מקצה לקצה בעובד האמיתי (ראו עובדים), אך תהליך קליטת הפרויקט הזה עדיין אינו שולח משימה אוטומטית. התוצאות יאכלסו את template-manifest.json כאן לאחר שזה יקרה."
+    },
+    review: {
+      title: "שערי האישור אינם מחוברים עדיין",
+      description: "אישורי תוכנית הסצנות, הפריים הראשון, המיתוג והתצוגה המקדימה המלאה יופיעו כאן - ראו את עמוד האישורים לאותם שערים."
+    },
+    render: {
+      title: "שליחת הרינדור אינה מחוברת עדיין",
+      description: "משימות רינדור לרוחב ו-Reels יופעלו ויעקבו כאן לאחר שצינור הרינדור יחובר לפרויקט - ראו את עמוד הרינדורים."
+    },
+    stepNotAvailableTitle: "לא זמין",
+    stepNotAvailableDescription: "שלב זה עדיין לא מומש."
+  },
+  jobs: {
+    title: "משימות / תור",
+    description: "משימות שנתפסות כרגע על ידי עובד, וכן היסטוריית התור המלאה כאשר תהיה זמינה.",
+    unavailableTitle: "המשימות אינן זמינות",
+    currentlyActive: "פעיל כרגע",
+    workerDataUnavailableTitle: "נתוני העובד אינם זמינים",
+    workerDataUnavailableDescription: "לא ניתן היה לטעון את רשומות העובדים מה-API.",
+    emptyTitle: "אין כרגע משימות נתפסות",
+    emptyDescription: "משימות שעובד מריץ באופן פעיל יופיעו כאן.",
+    tableCaption: "משימות הנתפסות כעת",
+    jobIdColumn: "מזהה משימה",
+    workerColumn: "עובד",
+    pendingTitle: "היסטוריית התור המלאה אינה זמינה עדיין",
+    pendingDescription:
+      "ה-API תומך בעובד שתופס ומדווח על המשימה שלו, אך אין עדיין נקודת קצה מסוג GET לרשימת פעולת המשימה, הסטטוס, חותמות הזמן או השגיאות לאורך התור. חלק זה יציג זאת לאחר שנקודת קצה כזו תהיה קיימת (ראו docs/JOB-DISPATCH.md)."
+  },
+  workers: {
+    title: "עובדים",
+    description: "עובדי Windows רשומים והמצב שלהם בזמן אמת.",
+    unavailableTitle: "רשימת העובדים אינה זמינה",
+    tableCaption: "עובדים רשומים",
+    nameColumn: "שם",
+    statusColumn: "סטטוס",
+    aeStatusColumn: "סטטוס AE",
+    mcpStatusColumn: "סטטוס MCP",
+    aeVersionColumn: "גרסת AE",
+    maxConcurrencyColumn: "מקביליות מקסימלית",
+    currentJobColumn: "משימה נוכחית",
+    capabilitiesColumn: "יכולות",
+    lastHeartbeatColumn: "פעימת לב אחרונה",
+    viewDetailsAriaLabel: (name) => `הצגת פרטים עבור ${name}`,
+    dataUnavailableTitle: "נתוני העובד אינם זמינים",
+    dataUnavailableDescription: "לא ניתן היה לטעון את רשומות העובדים מה-API.",
+    emptyTitle: "לא רשומים עובדים",
+    emptyDescription: "לאחר שעובד Windows יתחבר ל-API, הוא יופיע כאן."
+  },
+  workerDetail: {
+    fallbackTitle: "עובד",
+    workerId: "מזהה עובד",
+    status: "סטטוס",
+    afterEffects: "After Effects",
+    mcp: "MCP",
+    aeVersion: "גרסת AE",
+    maxConcurrency: "מקביליות מקסימלית",
+    currentJob: "משימה נוכחית",
+    capabilities: "יכולות",
+    lastHeartbeat: "פעימת לב אחרונה",
+    registered: "נרשם",
+    lastUpdated: "עודכן לאחרונה"
+  },
+  approvals: {
+    title: "אישורים",
+    description: "שערי אישור אנושיים הנדרשים לפני ש-DYO ממשיכה לשלב ההפקה הבא.",
+    gates: {
+      scenePlan: { title: "אישור תוכנית סצנות", description: "מיפוי/סידור/בחירת סצנות ואישור תוכנית הביצוע - בידי אדם." },
+      firstFrame: { title: "הפריים המעוצב הראשון", description: "תצוגה מקדימה חזותית אמיתית ואישור סגנון על הסצנה המבוצעת הראשונה." },
+      branding: { title: "מיתוג, טיפוגרפיה וצבעים", description: "אישור כללי המיתוג של DYO/הלקוח, הטיפוגרפיה והצבעים." },
+      fullPreview: { title: "תצוגה מקדימה מלאה", description: "בקרת איכות חזותית באמצעות תצוגות מקדימות אמיתיות מהקומפוזיציה הסופית בפועל." },
+      finalRender: { title: "רינדור סופי", description: "אישור אנושי סופי לפני שמשימת ה-aerender הניתנת לשחזור נכנסת לתור." }
+    },
+    pendingTitle: "מעקב האישורים אינו מגובה ב-API עדיין",
+    pendingDescription: "לאחר שניתן יהיה לשלוח פרויקט לבדיקה וסקירה, כל שער למעלה יציג כאן את מצבו האמיתי (ממתין/מאושר/נדחה) ואת הבודק."
+  },
+  renders: {
+    title: "רינדורים",
+    description: "פלטי הרינדור הסופיים, לאחר שצינור ה-aerender הניתן לשחזור יחובר לפרויקט.",
+    outputs: {
+      landscape: { title: "לרוחב", description: "פלט סטנדרטי לרוחב ביחס 16:9." },
+      reels: { title: "Reels (1080x1920)", description: "קומפוזיציה אנכית טבעית עם מיקום מחדש של האלמנטים - לא חיתוך פשוט." }
+    },
+    noRenderTitle: "טרם הופק רינדור",
+    preview: "תצוגה מקדימה",
+    download: "הורדה",
+    pendingTitle: "שליחת הרינדור אינה מחוברת עדיין",
+    pendingDescription:
+      "סטטוס הרינדור, מיקום הפלט ופעולות התצוגה המקדימה/ההורדה יהפכו לאמיתיים לאחר שפרויקט יגיע לשלב הרינדור ומשימות aerender יישלחו ויעקבו."
+  },
+  activity: {
+    title: "פעילות / יומנים",
+    description: "יומן ביקורת של אירועי עובדים, משימות ואישורים.",
+    pendingTitle: "רישום הפעילות אינו מגובה ב-API עדיין",
+    pendingDescription:
+      "גם ה-API וגם העובד שומרים כיום יומנים מובנים, אך אין עדיין נקודת קצה שחושפת ללוח הבקרה פיד אירועים/ביקורת. עמוד זה יציג זרם פעילות חי לאחר שזה יהיה קיים."
+  },
+  settings: {
+    title: "הגדרות",
+    description: "העדפות לוח הבקרה והגדרות החשבון.",
+    appearance: "מראה",
+    themeLight: "בהיר",
+    themeDark: "כהה",
+    matchSystem: "התאמה למערכת",
+    savedOnThisDevice: "נשמר במכשיר זה בלבד.",
+    language: "שפה",
+    account: "חשבון",
+    accountNameLabel: "שם",
+    accountEmailLabel: "אימייל",
+    accountRoleLabel: "תפקיד",
+    logout: "התנתקות",
+    apiConnection: "חיבור ל-API",
+    controlPlaneApi: "API מישור הבקרה",
+    controlPlaneApiValue: "פנימי בלבד (פרוקסי בצד השרת)",
+    apiConnectionHint:
+      "הדפדפן לעולם אינו קורא ל-API של מישור הבקרה ישירות - כל הנתונים בלוח בקרה זה עוברים דרך פרוקסי בצד השרת. אין כאן שום דבר להגדיר כיום."
+  },
+  sceneTable: {
+    emptyTitle: "אין עדיין סצנות לבדיקה",
+    emptyDescription: "טבלה זו תתמלא לאחר שתבנית תיבדק והסצנות/מציין-המקום שהתגלו יהיו מוכנים לאישור.",
+    tableCaption: "טבלת אישור סצנות ומציין-מקום",
+    useColumn: "שימוש",
+    orderColumn: "סדר",
+    sceneColumn: "סצנה",
+    placeholderColumn: "מציין מקום",
+    typeColumn: "סוג",
+    assetColumn: "נכס",
+    textColumn: "טקסט",
+    sourceTimeColumn: "זמן מקור",
+    finalDurationColumn: "משך סופי",
+    notesColumn: "הערות",
+    approvalColumn: "אישור",
+    hasText: "טקסט",
+    noText: "ללא טקסט",
+    placeholderType: {
+      image: "תמונה",
+      video: "וידאו",
+      text: "טקסט",
+      logo: "לוגו",
+      phone_screen: "מסך טלפון",
+      color: "צבע",
+      unknown: "לא ידוע"
+    }
+  }
+};

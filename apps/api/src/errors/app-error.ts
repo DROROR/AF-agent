@@ -11,6 +11,8 @@ function statusForCode(code: ErrorCode): number {
       return 404;
     case "CONFLICT":
       return 409;
+    case "RATE_LIMITED":
+      return 429;
     case "INTERNAL_ERROR":
       return 500;
   }
@@ -60,5 +62,21 @@ export class JobConflictError extends AppError {
   constructor(message: string) {
     super("CONFLICT", message);
     this.name = "JobConflictError";
+  }
+}
+
+/** Signup with an email that's already registered. Safe to reveal on signup (unlike login) - see application/auth/log-in.ts for why login never does this. */
+export class EmailAlreadyRegisteredError extends AppError {
+  constructor() {
+    super("CONFLICT", "An account with this email already exists");
+    this.name = "EmailAlreadyRegisteredError";
+  }
+}
+
+/** Wrong email, wrong password, or an expired/invalid session - always the same generic message so a response never reveals which case occurred. */
+export class InvalidCredentialsError extends AppError {
+  constructor() {
+    super("UNAUTHORIZED", "Invalid email or password");
+    this.name = "InvalidCredentialsError";
   }
 }

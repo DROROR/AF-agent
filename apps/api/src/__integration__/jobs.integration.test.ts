@@ -4,6 +4,8 @@ import type { FastifyInstance } from "fastify";
 import { registerWorkerResponseSchema } from "@dyo/schemas";
 import { buildApp } from "../app.js";
 import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
+import { DrizzleSessionRepository } from "../infrastructure/db/drizzle-session-repository.js";
+import { DrizzleUserRepository } from "../infrastructure/db/drizzle-user-repository.js";
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { createTestDatabase } from "./test-database.js";
 
@@ -22,7 +24,7 @@ async function setup(initialNow: Date) {
   const { db, close } = await createTestDatabase();
   let current = initialNow;
   const jobRepository = new DrizzleJobRepository(db);
-  const app: FastifyInstance = buildApp({
+  const app: FastifyInstance = await buildApp({
     env: {
       WORKER_REGISTRATION_SECRET: REGISTRATION_SECRET,
       WORKER_HEARTBEAT_STALE_AFTER_MS: STALE_AFTER_MS,
@@ -30,6 +32,8 @@ async function setup(initialNow: Date) {
     },
     workerRepository: new DrizzleWorkerRepository(db),
     jobRepository,
+    userRepository: new DrizzleUserRepository(db),
+    sessionRepository: new DrizzleSessionRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;

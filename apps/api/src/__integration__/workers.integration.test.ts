@@ -1,8 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { registerWorkerResponseSchema } from "@dyo/schemas";
+import { authSessionResponseSchema, registerWorkerResponseSchema } from "@dyo/schemas";
 import { buildApp } from "../app.js";
 import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
+import { DrizzleSessionRepository } from "../infrastructure/db/drizzle-session-repository.js";
+import { DrizzleUserRepository } from "../infrastructure/db/drizzle-user-repository.js";
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { createTestDatabase } from "./test-database.js";
 
@@ -17,7 +19,7 @@ const STALE_AFTER_MS = 30_000;
 async function setup(initialNow: Date) {
   const { db, close } = await createTestDatabase();
   let current = initialNow;
-  const app: FastifyInstance = buildApp({
+  const app: FastifyInstance = await buildApp({
     env: {
       WORKER_REGISTRATION_SECRET: REGISTRATION_SECRET,
       WORKER_HEARTBEAT_STALE_AFTER_MS: STALE_AFTER_MS,
@@ -25,6 +27,8 @@ async function setup(initialNow: Date) {
     },
     workerRepository: new DrizzleWorkerRepository(db),
     jobRepository: new DrizzleJobRepository(db),
+    userRepository: new DrizzleUserRepository(db),
+    sessionRepository: new DrizzleSessionRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;
@@ -50,10 +54,27 @@ async function registerWorker(app: FastifyInstance, name = "Client PC 1") {
   return { response, body: registerWorkerResponseSchema.parse(response.json()) };
 }
 
+/** GET /api/workers and GET /api/workers/:workerId require a dashboard session - see routes/workers.ts. */
+async function signUpAndGetSessionToken(app: FastifyInstance): Promise<string> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/auth/signup",
+    payload: {
+      name: "Test Operator",
+      email: `operator-${Math.random().toString(36).slice(2)}@example.com`,
+      password: "correct-horse",
+      confirmPassword: "correct-horse"
+    }
+  });
+  return authSessionResponseSchema.parse(response.json()).sessionToken;
+}
+
 let harness: Awaited<ReturnType<typeof setup>>;
+let sessionToken: string;
 
 beforeEach(async () => {
   harness = await setup(new Date("2026-01-01T00:00:00.000Z"));
+  sessionToken = await signUpAndGetSessionToken(harness.app);
 });
 
 afterAll(async () => {
@@ -174,7 +195,11 @@ describe("GET /api/workers and /api/workers/:workerId", () => {
       payload: { aeStatus: "ONLINE", mcpStatus: "ONLINE" }
     });
 
-    const response = await harness.app.inject({ method: "GET", url: "/api/workers" });
+    const response = await harness.app.inject({
+      method: "GET",
+      url: "/api/workers",
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
     const listed = response.json().workers;
     expect(listed).toHaveLength(1);
     expect(listed[0].workerId).toBe(body.workerId);
@@ -184,7 +209,8 @@ describe("GET /api/workers and /api/workers/:workerId", () => {
   it("returns 404 for an unknown worker", async () => {
     const response = await harness.app.inject({
       method: "GET",
-      url: "/api/workers/00000000-0000-0000-0000-000000000000"
+      url: "/api/workers/00000000-0000-0000-0000-000000000000",
+      headers: { authorization: `Bearer ${sessionToken}` }
     });
     expect(response.statusCode).toBe(404);
     expect(response.json().error.code).toBe("WORKER_NOT_FOUND");
@@ -203,8 +229,32 @@ describe("GET /api/workers and /api/workers/:workerId", () => {
 
     const response = await harness.app.inject({
       method: "GET",
-      url: `/api/workers/${body.workerId}`
+      url: `/api/workers/${body.workerId}`,
+      headers: { authorization: `Bearer ${sessionToken}` }
     });
     expect(response.json().status).toBe("OFFLINE");
+  });
+
+  it("rejects GET /api/workers without a dashboard session", async () => {
+    const response = await harness.app.inject({ method: "GET", url: "/api/workers" });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects GET /api/workers/:workerId without a dashboard session", async () => {
+    const { body } = await registerWorker(harness.app);
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/workers/${body.workerId}`
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects GET /api/workers with an invalid session token", async () => {
+    const response = await harness.app.inject({
+      method: "GET",
+      url: "/api/workers",
+      headers: { authorization: "Bearer not-a-real-session" }
+    });
+    expect(response.statusCode).toBe(401);
   });
 });

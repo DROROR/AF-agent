@@ -15,6 +15,13 @@
       "when": 1787481979539,
       "tag": "0001_solid_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787662716587,
+      "tag": "0002_normal_spiral",
+      "breakpoints": true
     }
   ]
 }

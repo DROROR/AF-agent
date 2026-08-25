@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { AE_STATUSES, JOB_STATUSES, MCP_STATUSES, WORKER_CAPABILITIES, WORKER_STATUSES } from "@dyo/schemas";
+import {
+  AE_STATUSES,
+  JOB_STATUSES,
+  MCP_STATUSES,
+  USER_ROLES,
+  WORKER_CAPABILITIES,
+  WORKER_STATUSES
+} from "@dyo/schemas";
 import {
   DB_AE_STATUSES,
   DB_JOB_STATUSES,
   DB_MCP_STATUSES,
+  DB_USER_ROLES,
   DB_WORKER_CAPABILITIES,
   DB_WORKER_STATUSES
 } from "./schema.js";
@@ -30,5 +38,9 @@ describe("schema CHECK-constraint value lists stay in sync with @dyo/schemas", (
 
   it("job statuses match", () => {
     expect(DB_JOB_STATUSES).toEqual(JOB_STATUSES);
+  });
+
+  it("user roles match", () => {
+    expect(DB_USER_ROLES).toEqual(USER_ROLES);
   });
 });

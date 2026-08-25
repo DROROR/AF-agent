@@ -1,0 +1,82 @@
+name: Deploy production
+
+# AF-agent's own CI/CD, modeled on the proven pattern already in production
+# use for /opt/dashboard-dyo-app: a GitHub-hosted runner reaches the
+# server over SSH using a dedicated, restricted deploy key (see
+# scripts/ssh-deploy-entrypoint.sh) - no self-hosted runner, no webhook
+# listener. Deploys only main; a PR can never trigger this (pull_request
+# is deliberately not a trigger here), and the full quality gate below
+# must pass before the SSH step is even reached.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: af-agent-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy to production
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Configure restricted SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/af_agent_production_deploy"
+          chmod 600 "$HOME/.ssh/af_agent_production_deploy"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy exact production commit
+        env:
+          DEPLOY_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_PORT: ${{ secrets.PRODUCTION_PORT }}
+          DEPLOY_USER: ${{ secrets.PRODUCTION_USER }}
+        run: |
+          ssh \
+            -i "$HOME/.ssh/af_agent_production_deploy" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy $GITHUB_SHA"

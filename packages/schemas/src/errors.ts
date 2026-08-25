@@ -11,6 +11,7 @@ export const ERROR_CODES = [
   "WORKER_NOT_FOUND",
   "JOB_NOT_FOUND",
   "CONFLICT",
+  "RATE_LIMITED",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

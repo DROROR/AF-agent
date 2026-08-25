@@ -1,6 +1,14 @@
 import { sql } from "drizzle-orm";
 import { check, integer, jsonb, pgTable, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
-import type { AeStatus, JobErrorCode, JobStatus, McpStatus, WorkerCapability, WorkerStatus } from "@dyo/schemas";
+import type {
+  AeStatus,
+  JobErrorCode,
+  JobStatus,
+  McpStatus,
+  UserRole,
+  WorkerCapability,
+  WorkerStatus
+} from "@dyo/schemas";
 
 const sqlEnumCheck = (column: string, values: readonly string[]): string =>
   `${column} in (${values.map((value) => `'${value}'`).join(", ")})`;
@@ -114,3 +122,48 @@ export const jobs = pgTable(
 
 export type JobRow = typeof jobs.$inferSelect;
 export type NewJobRow = typeof jobs.$inferInsert;
+
+export const DB_USER_ROLES = ["ADMIN", "OPERATOR"] as const;
+
+/**
+ * Dashboard operator accounts - a separate system from `workers` (Windows
+ * worker token auth). Never stores a plaintext password, only a salted
+ * scrypt hash - see apps/api/src/infrastructure/auth/password.ts.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    role: text("role").notNull().default("OPERATOR").$type<UserRole>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true })
+  },
+  () => [check("users_role_check", sql.raw(sqlEnumCheck("role", DB_USER_ROLES)))]
+);
+
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;
+
+/**
+ * Server-side session record backing the dashboard's HttpOnly session
+ * cookie. The cookie carries `${sessionId}.${secret}`; only a hash of
+ * `secret` is ever stored (same scrypt pattern as worker token hashing,
+ * kept as an intentionally separate implementation - CLAUDE.md: "Dashboard
+ * user auth and Worker token auth are separate systems").
+ */
+export const sessions = pgTable("sessions", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export type SessionRow = typeof sessions.$inferSelect;
+export type NewSessionRow = typeof sessions.$inferInsert;

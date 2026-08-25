@@ -25,3 +25,17 @@ local-inputs/
 # `npm run package:windows-worker` (scripts/package-windows-worker.mjs),
 # same as every other dist/ in this repo. Never hand-edited or committed.
 deploy/windows-worker/worker-app/
+
+# Per-build stamp (commit hash + timestamp) written into each packaged zip -
+# regenerated on every build, never committed.
+deploy/windows-worker/BUILD-ID.txt
+
+# Packaged client zips - built on demand, never committed.
+deploy/*.zip
+
+# Production deployment key material and lock file - never committed, same
+# convention as /opt/dashboard-dyo-app's .deploy-tools/. The private key
+# lives only on the production server and in the GitHub Actions secret.
+.deploy-tools/
+.deploy.lock
+.deploy-build.*

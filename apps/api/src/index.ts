@@ -2,6 +2,8 @@ import { createDatabase, runMigrations } from "@dyo/database";
 import { buildApp } from "./app.js";
 import { loadEnv } from "./env.js";
 import { DrizzleJobRepository } from "./infrastructure/db/drizzle-job-repository.js";
+import { DrizzleSessionRepository } from "./infrastructure/db/drizzle-session-repository.js";
+import { DrizzleUserRepository } from "./infrastructure/db/drizzle-user-repository.js";
 import { DrizzleWorkerRepository } from "./infrastructure/db/drizzle-worker-repository.js";
 
 async function main(): Promise<void> {
@@ -10,10 +12,12 @@ async function main(): Promise<void> {
 
   await runMigrations(db);
 
-  const app = buildApp({
+  const app = await buildApp({
     env,
     workerRepository: new DrizzleWorkerRepository(db),
     jobRepository: new DrizzleJobRepository(db),
+    userRepository: new DrizzleUserRepository(db),
+    sessionRepository: new DrizzleSessionRepository(db),
     checkDatabaseHealth: async () => {
       try {
         await pool.query("SELECT 1");

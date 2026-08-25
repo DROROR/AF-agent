@@ -3,59 +3,64 @@ import type { ReactElement } from "react";
 import { formatRelativeTime } from "../lib/relative-time";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
+import { useLocale } from "./LocaleProvider";
 import { StatusBadge } from "./StatusBadge";
 
 export interface WorkerTableProps {
   /** null means the worker list could not be fetched/parsed - distinct from an empty (but valid) list. */
   workers: WorkerDto[] | null;
   now?: Date;
+  onSelectWorker?: (worker: WorkerDto) => void;
 }
 
-export function WorkerTable({ workers, now = new Date() }: WorkerTableProps): ReactElement {
+export function WorkerTable({ workers, now = new Date(), onSelectWorker }: WorkerTableProps): ReactElement {
+  const { t, locale } = useLocale();
+
   if (workers === null) {
-    return (
-      <ErrorState
-        title="Worker data unavailable"
-        description="Could not load worker records from the API."
-      />
-    );
+    return <ErrorState title={t.workers.dataUnavailableTitle} description={t.workers.dataUnavailableDescription} />;
   }
 
   if (workers.length === 0) {
-    return (
-      <EmptyState
-        title="No workers registered"
-        description="Once a Windows worker pairs with the API, it will appear here."
-      />
-    );
+    return <EmptyState title={t.workers.emptyTitle} description={t.workers.emptyDescription} />;
   }
 
   return (
     <div className="table-scroll">
       <table>
-        <caption className="visually-hidden">Registered workers</caption>
+        <caption className="visually-hidden">{t.workers.tableCaption}</caption>
         <thead>
           <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Worker ID</th>
-            <th scope="col">Status</th>
-            <th scope="col">AE status</th>
-            <th scope="col">MCP status</th>
-            <th scope="col">AE version</th>
-            <th scope="col">Capabilities</th>
-            <th scope="col">Max concurrency</th>
-            <th scope="col">Current job</th>
-            <th scope="col">Last heartbeat</th>
-            <th scope="col">Last updated</th>
+            <th scope="col">{t.workers.nameColumn}</th>
+            <th scope="col">{t.workers.statusColumn}</th>
+            <th scope="col">{t.workers.aeStatusColumn}</th>
+            <th scope="col">{t.workers.mcpStatusColumn}</th>
+            <th scope="col">{t.workers.aeVersionColumn}</th>
+            <th scope="col">{t.workers.maxConcurrencyColumn}</th>
+            <th scope="col">{t.workers.currentJobColumn}</th>
+            <th scope="col">{t.workers.capabilitiesColumn}</th>
+            <th scope="col">{t.workers.lastHeartbeatColumn}</th>
           </tr>
         </thead>
         <tbody>
           {workers.map((worker) => (
-            <tr key={worker.workerId}>
+            <tr
+              key={worker.workerId}
+              data-clickable={onSelectWorker ? "true" : undefined}
+              tabIndex={onSelectWorker ? 0 : undefined}
+              onClick={onSelectWorker ? () => onSelectWorker(worker) : undefined}
+              onKeyDown={
+                onSelectWorker
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelectWorker(worker);
+                      }
+                    }
+                  : undefined
+              }
+              aria-label={onSelectWorker ? t.workers.viewDetailsAriaLabel(worker.name) : undefined}
+            >
               <th scope="row">{worker.name}</th>
-              <td>
-                <code>{worker.workerId}</code>
-              </td>
               <td>
                 <StatusBadge status={worker.status} />
               </td>
@@ -66,20 +71,17 @@ export function WorkerTable({ workers, now = new Date() }: WorkerTableProps): Re
                 <StatusBadge status={worker.mcpStatus} />
               </td>
               <td>{worker.aeVersion ?? "—"}</td>
-              <td>{worker.capabilities.length > 0 ? worker.capabilities.join(", ") : "—"}</td>
               <td>{worker.maxConcurrency}</td>
-              <td>{worker.currentJobId ?? "—"}</td>
+              <td>{worker.currentJobId ? <code>{worker.currentJobId}</code> : "—"}</td>
+              <td>{worker.capabilities.length > 0 ? worker.capabilities.join(", ") : "—"}</td>
               <td>
                 {worker.lastHeartbeatAt ? (
                   <time dateTime={worker.lastHeartbeatAt}>
-                    {formatRelativeTime(new Date(worker.lastHeartbeatAt), now)}
+                    {formatRelativeTime(new Date(worker.lastHeartbeatAt), now, locale)}
                   </time>
                 ) : (
-                  "never"
+                  t.common.never
                 )}
-              </td>
-              <td>
-                <time dateTime={worker.updatedAt}>{formatRelativeTime(new Date(worker.updatedAt), now)}</time>
               </td>
             </tr>
           ))}

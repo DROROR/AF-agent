@@ -243,13 +243,26 @@ For anyone picking this up cold, the state of each phase:
     reloaded. It path-allowlists only `POST /api/workers/register` and
     `POST /api/workers/:workerId/heartbeat` - the only two endpoints the
     Windows worker itself ever calls - and returns 404 for everything else,
-    including `GET /api/workers` and `GET /api/workers/:workerId`, which
-    have **no authentication at the application layer** and are
+    including `GET /api/workers` and `GET /api/workers/:workerId`, which are
     deliberately excluded from this hostname rather than made
-    internet-reachable (see the file's own header comment). Verified live:
-    TLS valid, both `GET` routes and `/health/*` return 404 externally,
-    registration/heartbeat reject invalid credentials with 401, port 4000
-    remains loopback-only, all other Nginx sites and PM2 apps untouched.
+    internet-reachable (see the file's own header comment) - full fleet
+    inventory has no business being reachable from this hostname regardless
+    of its own auth state. Verified live: TLS valid, both `GET` routes and
+    `/health/*` return 404 externally, registration/heartbeat reject invalid
+    credentials with 401, port 4000 remains loopback-only, all other Nginx
+    sites and PM2 apps untouched.
+  - **Update (2026-08-25):** the gap noted above - `GET /api/workers` and
+    `GET /api/workers/:workerId` having no authentication at the
+    application layer - is now closed. Both routes require a valid
+    dashboard session (`apps/api/src/routes/workers.ts`, backed by the new
+    `users`/`sessions` tables from migration `0002_normal_spiral.sql`).
+    Verified live against the real production `dyo-api` process and
+    database after a `pm2 restart` picked up the new code: an unauthenticated
+    request now gets 401 `{"error":{"code":"UNAUTHORIZED",...}}`, and a
+    request carrying a real dashboard session token gets the real worker
+    list. This was defense in depth even before today - `worker-api.dyocourses.com`
+    never exposed these routes publicly in the first place - but the
+    application layer itself no longer has this gap either.
   - The real client `instance.json` sample was supplied and its schema
     implemented in `McpInstanceFileAdapter`
     (`apps/worker/src/health/mcp-instance-file-adapter.ts`, commit

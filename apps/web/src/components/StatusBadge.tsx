@@ -1,22 +1,27 @@
 import type { ReactElement } from "react";
+import { useLocale } from "./LocaleProvider";
 
 export type BadgeStatus = "ONLINE" | "OFFLINE" | "UNKNOWN" | "OK" | "ERROR";
 
-type Tone = "positive" | "negative" | "neutral";
+export type Tone = "positive" | "negative" | "neutral";
 
 /**
- * Single source of truth for status label/tone presentation - see
+ * Single source of truth for status tone presentation - see
  * docs/engineering/FRONTEND.md ("centralize status labels/presentation
  * instead of duplicating them"). UNKNOWN is deliberately "neutral", not
  * "negative" - CLAUDE.md Phase 3 task 6 ("UNKNOWN must not be shown as a
- * failure").
+ * failure"). Exported so other presentational components (e.g.
+ * StatusIndicator's compact dot) reuse the exact same tone mapping rather
+ * than redeclaring it. The label itself is NOT part of this map - "Online"/
+ * "Offline"/etc are user-facing text and come from the active locale's
+ * dictionary (t.status), not a hardcoded English string - see StatusIndicator.tsx.
  */
-const STATUS_PRESENTATION: Record<BadgeStatus, { label: string; tone: Tone }> = {
-  ONLINE: { label: "Online", tone: "positive" },
-  OK: { label: "OK", tone: "positive" },
-  OFFLINE: { label: "Offline", tone: "negative" },
-  ERROR: { label: "Error", tone: "negative" },
-  UNKNOWN: { label: "Unknown", tone: "neutral" }
+export const STATUS_TONE: Record<BadgeStatus, Tone> = {
+  ONLINE: "positive",
+  OK: "positive",
+  OFFLINE: "negative",
+  ERROR: "negative",
+  UNKNOWN: "neutral"
 };
 
 export interface StatusBadgeProps {
@@ -24,10 +29,11 @@ export interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status }: StatusBadgeProps): ReactElement {
-  const { label, tone } = STATUS_PRESENTATION[status];
+  const { t } = useLocale();
+  const tone = STATUS_TONE[status];
   return (
     <span className={`status-badge status-badge--${tone}`} data-status={status}>
-      {label}
+      {t.status[status]}
     </span>
   );
 }
