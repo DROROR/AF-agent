@@ -23,6 +23,15 @@ if [[ $# -ne 1 || ! $1 =~ ^[0-9a-f]{40}$ ]]; then
 fi
 readonly EXPECTED_SHA="$1"
 
+# Bounded retry/backoff readiness wait, not a blind fixed sleep - see
+# scripts/lib/deploy-health-check.sh (also gives scripts/__tests__ a
+# fake-curl/fake-pm2 seam to exercise the real retry loop and rollback
+# decision logic without ever touching a real PM2 process).
+readonly HEALTH_MAX_WAIT_SECONDS=60
+readonly HEALTH_RETRY_INTERVAL_SECONDS=2
+# shellcheck source=scripts/lib/deploy-health-check.sh
+source "$APP_DIR/scripts/lib/deploy-health-check.sh"
+
 # ---- Pre-flight identity/environment checks - fail closed, before anything else ----
 
 if [[ "$(whoami)" != "$EXPECTED_USER" ]]; then
@@ -141,15 +150,15 @@ npm run build
 pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api,dyo-web --update-env
 
 # ---- Health checks ----
+#
+# Bounded retry/backoff, not an immediate one-shot check: dyo-api needs a
+# short startup window for tsx boot + migrations + app.listen(), so an
+# instant curl right after `pm2 startOrReload` reliably hits connection-
+# refused even on a perfectly healthy deploy. Rollback/failure handling below
+# only runs once this has genuinely exhausted its full timeout - never on
+# the first failed attempt.
 
-health_check_passed() {
-  curl --fail --silent --show-error --max-time 10 http://127.0.0.1:4000/health/live >/dev/null &&
-    curl --fail --silent --show-error --max-time 10 http://127.0.0.1:4000/health/ready >/dev/null &&
-    curl --fail --silent --show-error --max-time 10 http://127.0.0.1:4100 >/dev/null &&
-    [[ "$(pm2 jlist | node -e 'const apps=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(apps.filter(a=>["dyo-api","dyo-web"].includes(a.name)&&a.pm2_env.status==="online").length)')" == "2" ]]
-}
-
-if health_check_passed; then
+if wait_for_healthy "$HEALTH_MAX_WAIT_SECONDS" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
   printf '%s\n' "$EXPECTED_SHA" >"$APP_DIR/.deployed-sha"
   echo "AF-agent production deployed successfully: $EXPECTED_SHA"
   exit 0
@@ -168,7 +177,9 @@ fi
 
 echo 'Health checks failed after deployment.' >&2
 
-if [[ "$SCHEMA_CHANGED" -eq 1 ]]; then
+readonly ROLLBACK_DECISION="$(describe_rollback_decision "$PREVIOUS_SHA" "$EXPECTED_SHA" "$SCHEMA_CHANGED")"
+
+if [[ "$ROLLBACK_DECISION" == 'SCHEMA_CHANGED_STOP' ]]; then
   cat >&2 <<EOF
 STOP: this deployment applied new database migrations before the health
 check failed. Automatic rollback is refused - reverting the application
@@ -183,6 +194,21 @@ EOF
   exit 70
 fi
 
+if [[ "$ROLLBACK_DECISION" == 'SAME_SHA_STOP' ]]; then
+  cat >&2 <<EOF
+STOP: no prior code revision is available to roll back to. The checkout at
+$APP_DIR was already at $EXPECTED_SHA before this deployment ran (this
+happens when the same working copy is used both to develop/push the commit
+and to deploy it), so PREVIOUS_SHA and EXPECTED_SHA are identical. Reloading
+this same commit again would not be a meaningful rollback, so none was
+attempted - no destructive git action was taken.
+
+Current state: dyo-api/dyo-web are running $EXPECTED_SHA and failed their
+health check. Manual review is required before taking any further action.
+EOF
+  exit 73
+fi
+
 echo "No schema change this deployment - attempting a safe code-only rollback to $PREVIOUS_SHA." >&2
 
 # Detached checkout, not `reset --hard`: the working tree was already
@@ -195,7 +221,7 @@ npm ci --no-audit --no-fund
 npm run build
 pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api,dyo-web --update-env
 
-if health_check_passed; then
+if wait_for_healthy "$HEALTH_MAX_WAIT_SECONDS" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
   echo "Rolled back successfully to $PREVIOUS_SHA. Investigate $EXPECTED_SHA before retrying." >&2
   exit 71
 fi
