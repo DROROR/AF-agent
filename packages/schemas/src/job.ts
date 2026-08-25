@@ -39,6 +39,14 @@ export const JOB_ERROR_CODES = [
   "INVALID_PAYLOAD",
   "TRANSPORT_ERROR",
   "WORKER_OFFLINE",
+  /**
+   * A required safety precondition (e.g. AE/MCP confirmed ONLINE as of the
+   * most recent heartbeat) was not met when the worker attempted to run
+   * the job - not a transport failure, not a bug, just "not safe to
+   * attempt right now". Distinct from NOT_AVAILABLE (no implementation
+   * exists at all) and TRANSPORT_ERROR (an attempt was made and failed).
+   */
+  "PRECONDITION_NOT_MET",
   "INTERNAL_ERROR"
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

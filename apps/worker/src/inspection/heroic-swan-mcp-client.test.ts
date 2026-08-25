@@ -4,6 +4,22 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeroicSwanMcpClient } from "./heroic-swan-mcp-client.js";
 
+/**
+ * Compile-time proof (not just a runtime check) that ae_run_jsx cannot be
+ * dispatched through this client: callTool's parameter type is a closed
+ * union of exactly the five allowlisted read-only tool names, so this
+ * line fails to typecheck (`npm run typecheck`/`tsc` errors) without the
+ * `@ts-expect-error` - and if AllowedInspectionTool were ever widened to
+ * include "ae_run_jsx", the now-valid call would make the suppressed
+ * error go missing, which itself fails typecheck (`@ts-expect-error`
+ * requires a real error to suppress). Never actually invoked.
+ */
+function assertAeRunJsxCannotBeDispatched(client: HeroicSwanMcpClient): void {
+  // @ts-expect-error - "ae_run_jsx" is not assignable to AllowedInspectionTool
+  void client.callTool("ae_run_jsx");
+}
+void assertAeRunJsxCannotBeDispatched;
+
 let dir: string;
 
 beforeEach(async () => {

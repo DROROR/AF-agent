@@ -1,9 +1,14 @@
-# Template Inspector (Phase 5 preparation)
+# Template Inspector (Phase 5)
 
-Status: **contracts and deterministic classification logic only.** No real
-AE inspection has run. This document exists so that once the real Windows
-Worker is online (Phase 4, still pending), the first read-only inspection
-can start immediately instead of being designed from scratch.
+Status (2026-08-25): **real read-only transport wired, no real inspection
+run yet.** Phase 4 (real Windows Worker + AE/ae-mcp integration) is
+complete - see `docs/AUDIT.md`. `HeroicSwanTemplateInspector`
+(`apps/worker/src/inspection/heroic-swan-template-inspector.ts`) has
+replaced `NotAvailableTemplateInspector` in the real worker execution path
+and is gated on AE/MCP confirmed `ONLINE` (see "The transport blocker"
+below, now resolved, and job-dispatcher.ts's safety gate). No job has been
+dispatched to the real client machine yet - the checklist below still
+applies before that first attempt.
 
 ## What exists today
 
@@ -27,9 +32,30 @@ can start immediately instead of being designed from scratch.
   - `allowed-inspection-queries.ts` - the closed allowlist of read-only AE
     ExtendScript object-model members inspection may ever query.
   - `template-inspector.ts` - the `TemplateInspector` service interface,
-    plus `NotAvailableTemplateInspector`, an honest stub that always throws
+    the `RawInspectionCapture`/`ManifestInspectionResult` result union, and
+    `NotAvailableTemplateInspector`, an honest stub that always throws
     `InspectionTransportUnavailableError` rather than fabricating a result
-    (same pattern as `AfterEffectsRenderer` in `packages/renderer`).
+    (same pattern as `AfterEffectsRenderer` in `packages/renderer`) - no
+    longer used in the real worker execution path (see below), kept as a
+    minimal reference implementation and for tests that need a
+    guaranteed-unavailable inspector without depending on ae-mcp at all.
+  - `heroic-swan-template-inspector.ts` - `HeroicSwanTemplateInspector`,
+    the real implementation now wired into the real worker execution path
+    (`index.ts`). Calls exactly the four zero-argument allowlisted
+    read-only MCP tools (`ae_health`, `ae_list_instances`,
+    `ae_get_project_info`, `ae_list_compositions`) via
+    `heroic-swan-mcp-client.ts` and returns a `RawInspectionCapture` - the
+    real response shapes for these tools are not confirmed yet, so this
+    captures what they actually return (bounded in size, never guessed at)
+    rather than forcing it into a `TemplateManifest` field mapping.
+    `ae_get_composition` remains allowlisted/reachable but is not called
+    this pass - it needs a real composition identifier from
+    `ae_list_compositions`' own response, which this capture exists to
+    discover safely. `ae_run_jsx` and every other upstream tool
+    (`src/mcp/tools/index.ts` in the real ae-mcp repository registers many
+    more - a Blender bridge, transcription, workflow audits, etc.) are
+    unreachable through this path by construction (a closed TypeScript
+    union, not a runtime check).
 
 None of this executes against real After Effects. All of it is testable,
 and tested, without one.
@@ -52,32 +78,36 @@ placeholders (present in the schema, matching `docs/SCHEMAS.md`'s
 illustrative "Left Phone"/"Scene 05" examples) - nothing in this codebase
 ever fills them in. They stay `null` until a human assigns them.
 
-## The transport blocker (why nothing executes yet)
+## The transport blocker (resolved 2026-08-25)
 
-`INSPECT_TEMPLATE` cannot actually run today, for two separate, both
-real, reasons:
+`INSPECT_TEMPLATE` could not run for two separate, both real, reasons -
+both now resolved:
 
-1. **No job-dispatch mechanism exists between the API and the worker.**
-   The worker's only communication with the API today is the heartbeat
-   loop (`apps/worker/src/runtime/heartbeat-loop.ts`) - there is no
-   endpoint for the API to hand a job to a worker, and no polling/command
-   loop on the worker side to receive one. `CURRENT_WORKER_CAPABILITIES`
-   (`apps/worker/src/domain/operation-allowlist.ts`) is still just
-   `["CHECK_HEALTH"]`. Building that dispatch mechanism is a separate,
-   larger piece of work, not started.
-2. **ae-mcp's real bridge/command protocol is still unknown.** Phase 4
-   confirmed the shape of `instance.json` (ae-mcp's state file) from a real
-   client sample, but never confirmed how to actually *send* it a command
-   and get a structured result back. `allowed-inspection-queries.ts` lists
-   real, standard, publicly-documented After Effects ExtendScript API
-   members - that's a legitimate, non-invented allowlist - but the actual
-   wire protocol for asking ae-mcp to run one is not known, and inventing
-   it would violate this project's "never fabricate" rule.
+1. **No job-dispatch mechanism existed between the API and the worker.**
+   Resolved: `POST /api/workers/:workerId/jobs/claim` and
+   `POST /api/workers/:workerId/jobs/:jobId/report`, plus
+   `apps/worker/src/runtime/job-cycle.ts` (one bounded claim/execute/report
+   attempt per successful heartbeat), are built, tested, and live at
+   `worker-api.dyocourses.com`. `CURRENT_WORKER_CAPABILITIES`
+   (`apps/worker/src/domain/operation-allowlist.ts`) now includes
+   `INSPECT_TEMPLATE`. No job has actually been dispatched to the real
+   client worker yet - the mechanism is proven, the real end-to-end
+   attempt has not happened.
+2. **ae-mcp's real bridge/command protocol was unknown.** Resolved: the
+   real, official, public protocol is the Model Context Protocol itself
+   (confirmed directly from the real upstream HeroicSwan/after-effects-mcp
+   repository's `package.json`/`src/index.ts`/`src/mcp/tools/index.ts`,
+   not invented) - `node <AE_MCP_PATH>/dist/index.js serve` speaks real MCP
+   over stdio, and `heroic-swan-mcp-client.ts` is a real client built on
+   the official `@modelcontextprotocol/sdk`. `allowed-inspection-queries.ts`
+   (the ExtendScript object-model allowlist for a *direct* JSX-based
+   executor) is superseded by this MCP-tool-based approach for now - ae-mcp
+   itself exposes the read-only tools, so this worker never needs to send
+   raw ExtendScript at all for INSPECT_TEMPLATE.
 
-`NotAvailableTemplateInspector` exists specifically so that once both of
-these are resolved, only the executor itself needs to be written - the
-contracts, classification logic, ID stability, and safety tests are already
-done and do not need to change.
+`NotAvailableTemplateInspector` is no longer used in the real worker
+execution path (`HeroicSwanTemplateInspector` replaced it in `index.ts`) -
+kept as a minimal reference implementation of the interface.
 
 ## Read-only guarantees
 
@@ -98,10 +128,16 @@ ahead:
 
 1. **Worker ONLINE** - the real Windows Worker (`deploy/windows-worker/`)
    is registered and heartbeating against `https://worker-api.dyocourses.com`.
+   **Confirmed 2026-08-25** - see `docs/AUDIT.md`.
 2. **AE ONLINE** - `aeStatus` reports `ONLINE` in a real heartbeat (After
-   Effects is actually running on the client machine).
+   Effects is actually running on the client machine). **Confirmed
+   2026-08-25.**
 3. **MCP ONLINE** - `mcpStatus` reports `ONLINE` via the real
-   `McpInstanceFileAdapter` freshness logic (not `UNKNOWN`, not assumed).
+   `HeroicSwanMcpAdapter` (ae-mcp's own official `health` CLI command, not
+   `UNKNOWN`, not assumed). **Confirmed 2026-08-25.** These three are also
+   re-checked automatically, live, immediately before every real
+   `INSPECT_TEMPLATE` attempt (job-dispatcher.ts's safety gate) - not just
+   a one-time precondition.
 4. **Open a COPY of one approved test project** - never the original. Use
    one of the known-good POC projects already documented
    (`docs/CLIENT_WORKER_PREFLIGHT.md`): `Working-2026`, `Production-v01`,

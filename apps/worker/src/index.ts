@@ -1,12 +1,12 @@
 import pino from "pino";
 import { resolveWorkerCredentials } from "./bootstrap.js";
 import { CURRENT_WORKER_CAPABILITIES } from "./domain/operation-allowlist.js";
-import { executeJob } from "./domain/job-dispatcher.js";
+import { executeJob, type LatestHealth } from "./domain/job-dispatcher.js";
 import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { HeroicSwanMcpAdapter } from "./health/heroic-swan-mcp-adapter.js";
-import { NotAvailableTemplateInspector } from "./inspection/template-inspector.js";
+import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-inspector.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
@@ -99,12 +99,18 @@ async function main(): Promise<void> {
   // UNKNOWN rather than crashing or fabricating a status.
   const mcpAdapter = new HeroicSwanMcpAdapter({ aeMcpPath: env.aeMcpPath });
 
-  // No real ae-mcp bridge protocol is confirmed yet - see
-  // docs/TEMPLATE-INSPECTOR.md. Wiring this in now (rather than leaving
-  // INSPECT_TEMPLATE entirely unreachable) means a dispatched job fails
-  // safely with a typed NOT_AVAILABLE result instead of never being
-  // attempted at all.
-  const templateInspector = new NotAvailableTemplateInspector();
+  // Real, production INSPECT_TEMPLATE implementation - see
+  // docs/TEMPLATE-INSPECTOR.md. Always safe to construct even with no
+  // AE_MCP_PATH configured: inspect() reports a typed unavailable capture
+  // rather than crashing or fabricating a result.
+  const templateInspector = new HeroicSwanTemplateInspector({ aeMcpPath: env.aeMcpPath });
+
+  // The last CONFIRMED (server round-tripped) aeStatus/mcpStatus, updated
+  // only on a successful heartbeat - the safety gate INSPECT_TEMPLATE
+  // checks before ever touching ae-mcp (see job-dispatcher.ts). null until
+  // the very first heartbeat succeeds, which is also the earliest point a
+  // job could ever be attempted (see onEvent below).
+  let latestHealth: LatestHealth | null = null;
 
   // One bounded claim/execute/report attempt per successful heartbeat -
   // never a separate tight polling loop, so job attempts are naturally
@@ -114,7 +120,7 @@ async function main(): Promise<void> {
       claimNextJob: () => apiClient.claimNextJob(credentials.workerId, credentials.workerToken),
       reportJobStatus: (jobId, body) =>
         apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
-      executeJob: (job) => executeJob({ templateInspector }, job),
+      executeJob: (job) => executeJob({ templateInspector, getLatestHealth: () => latestHealth }, job),
       onEvent: (event) => logJobCycleEvent(workerLogger, event)
     });
   };
@@ -134,6 +140,11 @@ async function main(): Promise<void> {
     onEvent: (event) => {
       logHeartbeatEvent(workerLogger, event);
       if (event.type === "heartbeat_succeeded") {
+        // Recorded from the SERVER's own echoed-back WorkerDto (confirmed
+        // persisted), not the locally-computed snapshot - the gate should
+        // reflect what the API actually has on record, the same source of
+        // truth server-side verification (docs/AUDIT.md) already uses.
+        latestHealth = { aeStatus: event.worker.aeStatus, mcpStatus: event.worker.mcpStatus };
         triggerJobCycle();
       }
     }

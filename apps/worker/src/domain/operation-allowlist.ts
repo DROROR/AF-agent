@@ -15,8 +15,13 @@ export function isAllowedOperation(operation: string): operation is WorkerCapabi
 }
 
 /**
- * Capabilities this worker build can actually perform today. Phase 2 only
- * implements read-only health detection, so it claims nothing else - adding a
+ * Capabilities this worker build can actually perform today - adding a
  * capability here must happen alongside the phase that implements it.
+ * INSPECT_TEMPLATE added once HeroicSwanTemplateInspector (a real,
+ * read-only implementation gated on AE/MCP confirmed ONLINE - see
+ * job-dispatcher.ts) replaced NotAvailableTemplateInspector in the real
+ * worker execution path. Purely informational today: this list is
+ * self-reported at registration/heartbeat time and is not currently used
+ * by the API to gate which jobs get created or claimed.
  */
-export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = ["CHECK_HEALTH"];
+export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = ["CHECK_HEALTH", "INSPECT_TEMPLATE"];

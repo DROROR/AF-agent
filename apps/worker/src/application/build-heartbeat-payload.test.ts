@@ -27,7 +27,7 @@ describe("buildHeartbeatPayload", () => {
   });
 
   it("only claims capabilities this build actually implements", () => {
-    expect(buildHeartbeatPayload(baseHealth).capabilities).toEqual(["CHECK_HEALTH"]);
+    expect(buildHeartbeatPayload(baseHealth).capabilities).toEqual(["CHECK_HEALTH", "INSPECT_TEMPLATE"]);
   });
 
   it("passes through a null aeVersion unchanged", () => {

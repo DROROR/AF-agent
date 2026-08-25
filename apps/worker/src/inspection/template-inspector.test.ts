@@ -10,8 +10,8 @@ describe("NotAvailableTemplateInspector", () => {
     await expect(inspector.inspect(request)).rejects.toThrow(InspectionTransportUnavailableError);
   });
 
-  it("explains the real reason (no dispatch transport), not a generic failure", async () => {
+  it("explains a real reason, not a generic failure", async () => {
     const inspector = new NotAvailableTemplateInspector();
-    await expect(inspector.inspect(request)).rejects.toThrow(/job-dispatch transport/);
+    await expect(inspector.inspect(request)).rejects.toThrow(/ae-mcp transport/);
   });
 });
