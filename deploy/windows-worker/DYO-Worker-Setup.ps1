@@ -31,11 +31,11 @@
   override this for testing against a different environment.
 
 .PARAMETER AeMcpPath
-  Where ae-mcp is installed. Distinct from ae-mcp's DATA root (where it
-  writes its live instance/heartbeat files) - the worker discovers that
-  itself at runtime (os.homedir() + ".ae-mcp", the real upstream
-  HeroicSwan/after-effects-mcp convention) and this script does not need to
-  know or configure it.
+  Where ae-mcp is installed. The worker's MCP health check and inspection
+  transport invoke exactly `node <AeMcpPath>\dist\index.js <fixed
+  subcommand>` (confirmed against the real upstream
+  HeroicSwan/after-effects-mcp package.json) - never a shell string, never
+  a user-influenced argument.
 
 .PARAMETER WorkRoot
   Local folder for worker state (registration, logs). Nothing outside this
@@ -173,25 +173,17 @@ if (Test-Path $aeExePath) {
   $blockers.Add("After Effects 2026 was not found at: $aeExePath")
 }
 
-if (Test-Path $AeMcpPath) {
+# The worker's MCP health check and inspection transport both invoke
+# exactly `node <AE_MCP_PATH>\dist\index.js <fixed subcommand>` (confirmed
+# against the real upstream HeroicSwan/after-effects-mcp package.json - see
+# apps/worker/src/health/heroic-swan-mcp-adapter.ts), so that exact file is
+# what actually needs to exist - not just the install directory.
+$aeMcpEntryPoint = Join-Path $AeMcpPath "dist\index.js"
+if (Test-Path $aeMcpEntryPoint) {
   Write-CheckResult $true "ae-mcp"
 } else {
-  Write-CheckResult $false "ae-mcp" "not found at $AeMcpPath"
-  $blockers.Add("ae-mcp was not found at: $AeMcpPath")
-}
-
-# Informational only, not a hard blocker - the worker discovers ae-mcp's
-# live instance files itself at runtime (os.homedir() + ".ae-mcp", the real
-# upstream ae-mcp convention - see apps/worker/src/health/
-# mcp-instance-file-adapter.ts) and already handles a missing/empty data
-# directory honestly (MCP status shows Unknown rather than failing to
-# start). This check just previews that same default for the person
-# running setup, using the SAME account this script itself is running as.
-$aeMcpDataDirPreview = Join-Path $env:USERPROFILE ".ae-mcp"
-if (Test-Path (Join-Path $aeMcpDataDirPreview "instances")) {
-  Write-CheckResult $true "ae-mcp data directory"
-} else {
-  Write-CheckResult $false "ae-mcp data directory" "not found yet at $aeMcpDataDirPreview\instances - After Effects/ae-mcp status will show as Unknown until ae-mcp has run at least once"
+  Write-CheckResult $false "ae-mcp" "dist\index.js not found under $AeMcpPath"
+  $blockers.Add("ae-mcp was not found (or is incomplete) at: $AeMcpPath")
 }
 
 try {
@@ -298,14 +290,11 @@ $envLines = @(
   # actually running (apps/worker/src/health/ae-health.ts's
   # `if (!config.aePath) return UNKNOWN` branch fired unconditionally).
   "AE_PATH=$aeExePath"
+  # The worker's MCP health check and inspection transport derive the real
+  # ae-mcp CLI/MCP-server entry point from this alone
+  # (<AE_MCP_PATH>\dist\index.js, invoked with a fixed subcommand) - no
+  # separate data-directory setting is needed or written.
   "AE_MCP_PATH=$AeMcpPath"
-  # No AE_MCP_DATA_DIR line - deliberately left unset so the worker
-  # resolves its own default (os.homedir() + ".ae-mcp", computed at actual
-  # runtime by whichever account runs the worker process) rather than this
-  # script baking in a path computed at install time, which could mismatch
-  # if a different account ever runs the Scheduled Task. Only set
-  # AE_MCP_DATA_DIR by hand in .env if ae-mcp's real data root is
-  # genuinely somewhere else.
   "WORK_ROOT=$WorkRoot"
   ('WORKER_REGISTRATION_SECRET="' + $registrationSecret + '"')
 )

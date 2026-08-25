@@ -16,7 +16,6 @@ function baseEnv(overrides: Partial<WorkerEnv> = {}): WorkerEnv {
     aePath: undefined,
     aerenderPath: undefined,
     aeMcpPath: undefined,
-    aeMcpDataDir: "/tmp/dyo-agent/.ae-mcp",
     heartbeatIntervalMs: 15_000,
     ...overrides
   };

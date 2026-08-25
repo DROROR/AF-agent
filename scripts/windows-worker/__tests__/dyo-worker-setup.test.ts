@@ -172,23 +172,21 @@ describe("AE_PATH is written from the AE install path setup already discovered, 
   });
 });
 
-describe("ae-mcp's data directory is resolved by the worker itself at runtime - Setup.ps1 never bakes in a path", () => {
-  it("no longer has an InstanceFilePath parameter or writes AE_MCP_INSTANCE_FILE_PATH/AE_MCP_DATA_DIR to .env", () => {
-    // Regression, twice over: the original default was the literal path
-    // C:\Users\PC\ae-mcp\instances\default\instance.json ("PC" never
-    // matched a real client's username). The fix in this same session
-    // replaced it with an install-time $env:USERPROFILE-relative single
-    // file path - which turned out to ALSO be wrong, confirmed against
-    // the real upstream HeroicSwan/after-effects-mcp implementation: the
-    // data root is `os.homedir() + ".ae-mcp"` (missing leading dot in the
-    // prior fix), and ae-mcp supports multiple named instances, not only
-    // "default". The correct fix is for the WORKER to resolve and
-    // discover this itself at actual runtime (see env.ts's
-    // defaultAeMcpDataDir() and mcp-instance-file-adapter.ts's directory
-    // scan) - this script should never compute or write any of this again.
+describe("MCP health is based on the real ae-mcp CLI entry point, not a scanned data directory - Setup.ps1 never bakes in a data-dir path", () => {
+  it("no longer has an InstanceFilePath parameter, and never writes AE_MCP_INSTANCE_FILE_PATH/AE_MCP_DATA_DIR to .env", () => {
+    // Regression, three times over: first a hardcoded "C:\Users\PC\..."
+    // literal, then an install-time $env:USERPROFILE-relative single-file
+    // path (missing ae-mcp's leading dot in ".ae-mcp", and assuming only
+    // one "default" instance ever exists) - both were guesses at
+    // undocumented internal file scanning. The correct fix, confirmed
+    // 2026-08-24 directly from the real upstream HeroicSwan/after-effects-mcp
+    // repository, is that MCP health is a documented CLI contract:
+    // `node <AE_MCP_PATH>\dist\index.js health`, read via its exit code
+    // (see apps/worker/src/health/heroic-swan-mcp-adapter.ts) - no data
+    // directory setting exists to compute or write at all anymore.
     expect(setupScript).not.toMatch(/\$InstanceFilePath/);
     expect(setupScript).not.toMatch(/AE_MCP_INSTANCE_FILE_PATH/);
-    expect(setupScript).not.toMatch(/AE_MCP_DATA_DIR=/);
+    expect(setupScript).not.toMatch(/AE_MCP_DATA_DIR/);
     expect(setupScript).not.toMatch(/C:\\Users\\PC\\/);
   });
 
@@ -198,17 +196,17 @@ describe("ae-mcp's data directory is resolved by the worker itself at runtime - 
     expect(paramBlock).not.toMatch(/COMPUTERNAME/);
   });
 
-  it("keeps AE_MCP_PATH's own default unchanged at C:\\AI-Tools\\ae-mcp - distinct from the data root", () => {
+  it("keeps AE_MCP_PATH's own default unchanged at C:\\AI-Tools\\ae-mcp", () => {
     expect(setupScript).toMatch(/\[string\]\$AeMcpPath = "C:\\AI-Tools\\ae-mcp"/);
   });
 
-  it("previews the worker's real default data dir for the operator, matching env.ts's defaultAeMcpDataDir() exactly, and treats it as informational only", () => {
-    expect(setupScript).toMatch(/\$aeMcpDataDirPreview = Join-Path \$env:USERPROFILE "\.ae-mcp"/);
-    const checkIndex = setupScript.indexOf("$aeMcpDataDirPreview = Join-Path");
+  it("hard-blocks setup if ae-mcp's real entry point (dist\\index.js) is missing under AE_MCP_PATH - the exact file the health check and inspection transport both depend on", () => {
+    expect(setupScript).toMatch(/\$aeMcpEntryPoint = Join-Path \$AeMcpPath "dist\\index\.js"/);
+    const checkIndex = setupScript.indexOf("$aeMcpEntryPoint = Join-Path");
     const nextCheckIndex = setupScript.indexOf("Connection to DYO");
-    expect(checkIndex, "data dir preview check not found").toBeGreaterThan(-1);
+    expect(checkIndex, "ae-mcp entry point check not found").toBeGreaterThan(-1);
     const block = setupScript.slice(checkIndex, nextCheckIndex);
-    expect(block).not.toMatch(/\$blockers\.Add/);
+    expect(block).toMatch(/\$blockers\.Add/);
   });
 });
 

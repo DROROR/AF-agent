@@ -86,18 +86,18 @@ describe("DYO-Worker-Repair.ps1 preserves the existing install and configuration
     expect(repairScript).toContain('"AE_PATH=$aeExePath"');
   });
 
-  it("never writes AE_MCP_DATA_DIR (or the old AE_MCP_INSTANCE_FILE_PATH) to .env - the worker resolves its own data root at real runtime", () => {
-    // Regression, twice over: first a hardcoded "C:\Users\PC\..." literal,
-    // then (this same session) an install-time $env:USERPROFILE-relative
-    // single-file path - confirmed against the real upstream
-    // HeroicSwan/after-effects-mcp implementation to still be wrong
-    // (missing leading dot in ".ae-mcp", and assumed only one "default"
-    // instance ever exists). The correct fix is for the worker to resolve
-    // and discover this itself (env.ts's defaultAeMcpDataDir(),
-    // mcp-instance-file-adapter.ts's directory scan) - this script must
-    // never compute or write a data-dir-related value again.
+  it("never writes AE_MCP_DATA_DIR (or the old AE_MCP_INSTANCE_FILE_PATH) to .env - MCP health is a documented CLI contract, not a scanned data directory", () => {
+    // Regression, three times over: first a hardcoded "C:\Users\PC\..."
+    // literal, then an install-time $env:USERPROFILE-relative single-file
+    // path - both guesses at undocumented internal file scanning. The
+    // correct fix, confirmed 2026-08-24 directly from the real upstream
+    // HeroicSwan/after-effects-mcp repository, is that MCP health is a
+    // documented CLI contract: `node <AE_MCP_PATH>\dist\index.js health`,
+    // read via its exit code (see
+    // apps/worker/src/health/heroic-swan-mcp-adapter.ts) - no data
+    // directory setting exists to compute or write at all anymore.
     expect(repairScript).not.toMatch(/AE_MCP_INSTANCE_FILE_PATH/);
-    expect(repairScript).not.toMatch(/AE_MCP_DATA_DIR=/);
+    expect(repairScript).not.toMatch(/AE_MCP_DATA_DIR/);
     // The old bug's literal path is referenced by name in the doc comment
     // explaining why this script exists - assert it only against the
     // executable body, not that explanatory prose.
@@ -105,12 +105,12 @@ describe("DYO-Worker-Repair.ps1 preserves the existing install and configuration
     expect(repairCodeBody).not.toMatch(/COMPUTERNAME.*instance/i);
   });
 
-  it("previews the worker's real default data dir for the operator, matching env.ts's defaultAeMcpDataDir() exactly, and treats it as informational only", () => {
-    expect(repairScript).toMatch(/\$aeMcpDataDirPreview = Join-Path \$env:USERPROFILE "\.ae-mcp"/);
-    const checkIndex = repairScript.indexOf("$aeMcpDataDirPreview = Join-Path");
-    expect(checkIndex, "data dir preview check not found").toBeGreaterThan(-1);
+  it("STOPs if ae-mcp's real entry point (dist\\index.js) is missing under AE_MCP_PATH - the exact file the health check and inspection transport both depend on", () => {
+    expect(repairScript).toMatch(/\$aeMcpEntryPoint = Join-Path \$AeMcpPath "dist\\index\.js"/);
+    const checkIndex = repairScript.indexOf("$aeMcpEntryPoint = Join-Path");
+    expect(checkIndex, "ae-mcp entry point check not found").toBeGreaterThan(-1);
     const block = repairScript.slice(checkIndex, checkIndex + 500);
-    expect(block).not.toMatch(/exit 1/);
+    expect(block).toMatch(/exit 1/);
   });
 
   it("writes .env via the UTF-8-no-BOM writer, never Set-Content -Encoding utf8", () => {

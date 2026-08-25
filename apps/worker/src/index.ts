@@ -5,7 +5,7 @@ import { executeJob } from "./domain/job-dispatcher.js";
 import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
-import { McpInstanceFileAdapter } from "./health/mcp-instance-file-adapter.js";
+import { HeroicSwanMcpAdapter } from "./health/heroic-swan-mcp-adapter.js";
 import { NotAvailableTemplateInspector } from "./inspection/template-inspector.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
@@ -91,13 +91,13 @@ async function main(): Promise<void> {
   );
 
   const processLister = createProcessLister();
-  // env.aeMcpDataDir is always resolved (defaults to the same
-  // os.homedir() + ".ae-mcp" the real upstream ae-mcp implementation uses
-  // itself - see env.ts), so this is always safe to construct: an
-  // ae-mcp-free machine (or a Linux dev/test environment) simply has no
-  // instances/ directory to discover, which McpInstanceFileAdapter treats
-  // as "not enough evidence" (UNKNOWN), never a crash or a fabricated status.
-  const mcpAdapter = new McpInstanceFileAdapter({ dataDir: env.aeMcpDataDir });
+  // Primary MCP health source: the real HeroicSwan/after-effects-mcp CLI's
+  // documented `health` subcommand and exit-code contract (confirmed
+  // 2026-08-24 directly from the upstream repository) - not undocumented
+  // instance.json file internals. Always safe to construct even with no
+  // AE_MCP_PATH configured (or on a Linux dev/test machine): it reports
+  // UNKNOWN rather than crashing or fabricating a status.
+  const mcpAdapter = new HeroicSwanMcpAdapter({ aeMcpPath: env.aeMcpPath });
 
   // No real ae-mcp bridge protocol is confirmed yet - see
   // docs/TEMPLATE-INSPECTOR.md. Wiring this in now (rather than leaving

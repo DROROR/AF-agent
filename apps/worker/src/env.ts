@@ -23,20 +23,17 @@ const rawEnvSchema = z.object({
   WORK_ROOT: z.string().trim().min(1).optional(),
   AE_PATH: z.string().trim().min(1).optional(),
   AERENDER_PATH: z.string().trim().min(1).optional(),
-  AE_MCP_PATH: z.string().trim().min(1).optional(),
   /**
-   * ae-mcp's data root - confirmed against the real upstream
-   * HeroicSwan/after-effects-mcp implementation, which always uses
-   * `os.homedir() + ".ae-mcp"` (never derived from AE_MCP_PATH, the
-   * separate install directory). Optional override; when unset, resolved
-   * the same way upstream ae-mcp itself resolves it - see
-   * defaultAeMcpDataDir() below. McpInstanceFileAdapter scans
-   * `<dataDir>/instances/*\/instance.json` under this root against a
-   * schema confirmed from a real client sample (see
-   * mcp-instance-file-adapter.ts) - ONLINE/OFFLINE/UNKNOWN, never
-   * fabricated from an unrecognized shape or protocol version.
+   * ae-mcp's install directory - confirmed against the real upstream
+   * HeroicSwan/after-effects-mcp implementation (package.json `bin` and
+   * `scripts`): the CLI/MCP-server entry point is always exactly
+   * `<AE_MCP_PATH>/dist/index.js`, invoked with a fixed, allowlisted
+   * subcommand (`health` for the primary health check - see
+   * heroic-swan-mcp-adapter.ts; `serve` for the read-only inspection
+   * transport - see inspection/heroic-swan-mcp-client.ts). Never parsed
+   * for undocumented internal file formats.
    */
-  AE_MCP_DATA_DIR: z.string().trim().min(1).optional(),
+  AE_MCP_PATH: z.string().trim().min(1).optional(),
   HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000)
 });
 
@@ -50,7 +47,6 @@ export interface WorkerEnv {
   aePath: string | undefined;
   aerenderPath: string | undefined;
   aeMcpPath: string | undefined;
-  aeMcpDataDir: string;
   heartbeatIntervalMs: number;
 }
 
@@ -58,11 +54,6 @@ function defaultWorkRoot(): string {
   return process.platform === "win32"
     ? DEFAULT_WORK_ROOT_WINDOWS
     : path.join(os.tmpdir(), "dyo-agent");
-}
-
-/** Matches the real upstream HeroicSwan/after-effects-mcp convention exactly: `os.homedir() + ".ae-mcp"`. */
-function defaultAeMcpDataDir(): string {
-  return path.join(os.homedir(), ".ae-mcp");
 }
 
 /** Environment variables are an external boundary - validated with Zod like any other input. */
@@ -90,7 +81,6 @@ export function loadWorkerEnv(source: NodeJS.ProcessEnv = process.env): WorkerEn
     aePath: data.AE_PATH,
     aerenderPath: data.AERENDER_PATH,
     aeMcpPath: data.AE_MCP_PATH,
-    aeMcpDataDir: data.AE_MCP_DATA_DIR ?? defaultAeMcpDataDir(),
     heartbeatIntervalMs: data.HEARTBEAT_INTERVAL_MS
   };
 }

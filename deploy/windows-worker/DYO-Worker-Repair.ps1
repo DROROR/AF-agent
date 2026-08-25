@@ -17,13 +17,13 @@
     - AE_PATH is now written (previously never written at all, so After
       Effects status always showed Unknown regardless of whether AE was
       running).
-    - AE_MCP_DATA_DIR is deliberately left unset, so the worker resolves
-      ae-mcp's real data root itself at runtime (os.homedir() + ".ae-mcp" -
-      the real upstream HeroicSwan/after-effects-mcp convention, confirmed
-      2026-08-24) instead of this script ever baking in a path - two prior,
-      wrong hardcoded/computed guesses ("C:\Users\PC\..." and, before that,
-      an install-time $env:USERPROFILE-relative single-file path missing
-      ae-mcp's leading dot) are both gone.
+    - MCP health is no longer based on scanning ae-mcp's internal data
+      files at all (that approach was replaced twice this session and both
+      guessed wrong). The worker now runs the real, upstream-documented
+      `node <AE_MCP_PATH>\dist\index.js health` CLI command (confirmed
+      2026-08-24 directly from the upstream HeroicSwan/after-effects-mcp
+      repository) and reads its exit code - no data-directory setting
+      exists to write or get wrong anymore.
 
   Safety, same as DYO-Worker-Setup.ps1:
     - never asks for or stores a Windows account password.
@@ -162,6 +162,19 @@ if (-not (Test-Path $aeExePath)) {
 }
 Write-CheckResult $true "After Effects 2026"
 
+# The worker's MCP health check and inspection transport both invoke
+# exactly `node <AE_MCP_PATH>\dist\index.js <fixed subcommand>` (confirmed
+# against the real upstream HeroicSwan/after-effects-mcp package.json).
+$aeMcpEntryPoint = Join-Path $AeMcpPath "dist\index.js"
+if (-not (Test-Path $aeMcpEntryPoint)) {
+  Write-Host "[NEEDS ATTENTION] ae-mcp's dist\index.js was not found under:"
+  Write-Host "  $AeMcpPath"
+  Write-Host "Repair cannot confirm ae-mcp is actually installed there. Re-check the ae-mcp"
+  Write-Host "installation and run DYO-Worker-Repair.bat again."
+  exit 1
+}
+Write-CheckResult $true "ae-mcp"
+
 # ---- Step 2: update program files ----
 
 Write-Host ""
@@ -203,8 +216,7 @@ foreach ($dir in @($WorkRoot, $InstallDir)) {
 # re-derived, per the repair requirement to never silently change where
 # this worker points. Everything else is recomputed the same way
 # DYO-Worker-Setup.ps1 would compute it today - including AE_PATH, the fix
-# this script exists to deliver. AE_MCP_DATA_DIR is deliberately left
-# unset entirely - see the header comment above.
+# this script exists to deliver.
 Write-Host ""
 Write-Host "Updating configuration..."
 
@@ -231,12 +243,6 @@ $envLines = @(
   "WORKER_NAME=$workerName"
   "AE_PATH=$aeExePath"
   "AE_MCP_PATH=$AeMcpPath"
-  # No AE_MCP_DATA_DIR line - deliberately left unset so the worker
-  # resolves its own default (os.homedir() + ".ae-mcp", the real upstream
-  # HeroicSwan/after-effects-mcp convention, computed at actual runtime by
-  # whichever account runs the worker process) rather than this script
-  # baking in a path computed at repair time. Only set AE_MCP_DATA_DIR by
-  # hand in .env if ae-mcp's real data root is genuinely somewhere else.
   "WORK_ROOT=$WorkRoot"
 )
 # No WORKER_REGISTRATION_SECRET line, ever - this script never asks for or
@@ -246,17 +252,6 @@ $envLines = @(
 # registered worker to keep running under its existing identity.
 Write-Utf8NoBomFile -Path $envPath -Lines $envLines
 Set-OwnerOnlyAcl -Path $envPath -IsFile $true
-
-# Informational only, not an error - previews the SAME default the worker
-# itself will resolve (see the comment above), using the same account this
-# script is running as.
-$aeMcpDataDirPreview = Join-Path $env:USERPROFILE ".ae-mcp"
-if (-not (Test-Path (Join-Path $aeMcpDataDirPreview "instances"))) {
-  Write-Host "[NEEDS ATTENTION] ae-mcp data directory not found yet at:"
-  Write-Host "  $aeMcpDataDirPreview\instances"
-  Write-Host "This is informational, not an error - After Effects/ae-mcp status will show"
-  Write-Host "as Unknown until ae-mcp has run at least once. The worker will still start normally."
-}
 
 $envCheck = Test-WorkerEnvReadableByNode -InstallDir $InstallDir -RequiredKeys @(
   "DYO_API_URL", "AE_PATH", "AE_MCP_PATH"

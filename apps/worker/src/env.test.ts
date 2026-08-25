@@ -75,21 +75,13 @@ describe("loadWorkerEnv", () => {
     ).toThrow(ConfigError);
   });
 
-  it("defaults AE_MCP_DATA_DIR to os.homedir() + '.ae-mcp' when not set - matching the real upstream ae-mcp convention exactly", () => {
+  it("leaves AE_MCP_PATH undefined when not set", () => {
     const env = loadWorkerEnv(baseEnv());
-    expect(env.aeMcpDataDir.endsWith(".ae-mcp")).toBe(true);
-    // Never the old, wrong default that was missing the leading dot.
-    expect(env.aeMcpDataDir).not.toMatch(/[/\\]ae-mcp$/);
+    expect(env.aeMcpPath).toBeUndefined();
   });
 
-  it("respects an explicit AE_MCP_DATA_DIR override independently of AE_MCP_PATH", () => {
-    const env = loadWorkerEnv(
-      baseEnv({
-        AE_MCP_PATH: "C:\\AI-Tools\\ae-mcp",
-        AE_MCP_DATA_DIR: "C:\\Users\\real-user\\.ae-mcp"
-      })
-    );
+  it("passes through an explicit AE_MCP_PATH - the fixed base for the real ae-mcp CLI/MCP-server entry point", () => {
+    const env = loadWorkerEnv(baseEnv({ AE_MCP_PATH: "C:\\AI-Tools\\ae-mcp" }));
     expect(env.aeMcpPath).toBe("C:\\AI-Tools\\ae-mcp");
-    expect(env.aeMcpDataDir).toBe("C:\\Users\\real-user\\.ae-mcp");
   });
 });

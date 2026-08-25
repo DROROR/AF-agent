@@ -52,8 +52,7 @@ placeholders.
 | `WORK_ROOT` | no | Root directory for all worker-local state and future job workspaces. Defaults to `C:\DYO-Agent` on Windows. |
 | `AE_PATH` | no | Path to the After Effects installation (used for read-only health detection). |
 | `AERENDER_PATH` | no | Path to `aerender.exe` (used for read-only availability detection). |
-| `AE_MCP_PATH` | no | Path where ae-mcp is installed. Reported for visibility only - Phase 2 does not integrate ae-mcp (see "Health detection" below). |
-| `AE_MCP_DATA_DIR` | no | ae-mcp's data root - defaults to `os.homedir() + ".ae-mcp"`, matching the real upstream HeroicSwan/after-effects-mcp implementation exactly (confirmed 2026-08-24, correcting an earlier default that was missing the leading dot). Distinct from `AE_MCP_PATH` (the install directory), not derived from it. The worker discovers and reads `<AE_MCP_DATA_DIR>/instances/*/instance.json` under this root (see "Health detection" below) - only set this explicitly to override the default. |
+| `AE_MCP_PATH` | no | ae-mcp's install directory. The worker's MCP health check and inspection transport both invoke exactly `node <AE_MCP_PATH>/dist/index.js <fixed subcommand>` - confirmed directly against the real upstream HeroicSwan/after-effects-mcp repository's `package.json`/`src/index.ts` (2026-08-24), not assumed (see "Health detection" below). |
 | `HEARTBEAT_INTERVAL_MS` | no | Milliseconds between heartbeats when healthy. Defaults to `15000`. |
 
 `WORKER_REGISTRATION_SECRET` is never logged. Neither is `WORKER_TOKEN`, at
@@ -182,38 +181,63 @@ launches After Effects.
   recognizable is present.
 - **aerender availability**: whether `AERENDER_PATH` points at a file that
   exists on disk.
-- **MCP status**: real, discovery-based integration as of Phase 4 (corrected
-  2026-08-24 against the real upstream HeroicSwan/after-effects-mcp
-  implementation). The worker exposes a clean `McpAdapter` interface
-  (`apps/worker/src/health/mcp-adapter.ts`) so implementations are
-  swappable without touching any call site; `McpInstanceFileAdapter`
-  (`apps/worker/src/health/mcp-instance-file-adapter.ts`) is the only
-  implementation and is always used - `AE_MCP_DATA_DIR` always resolves to
-  something (see the env var table above), so there is no "unconfigured"
-  case anymore.
-  - **Discovery**: lists every subdirectory of `<AE_MCP_DATA_DIR>/instances/`
-    and reads `<that dir>/instance.json` for each - never assumes only a
-    `default` instance exists. A missing/unreadable `instances/` directory
-    (ae-mcp never run, or a wrong data dir) simply yields zero candidates.
-  - **Per-candidate validation**, against a schema confirmed from a real
-    client `instance.json` sample: `instanceId`, `aeVersion`, `projectName`
-    (string), `projectPath` (string or null), `lastSeen` (ISO timestamp),
-    `pollMs` (positive number), `protocolVersion` (integer, currently only
-    `1` is recognized), `listening` (boolean). A candidate that fails to
-    read, parse, or validate is skipped - it never blocks discovery of the
-    others, and is never treated as evidence of anything.
-  - **Selection**: among candidates that are live (`listening === true` and
-    `lastSeen` fresh - `staleAfterMs = max(pollMs * 5, 10000)`), a live
-    `default` instance is preferred; otherwise the freshest live instance,
-    whatever its ID.
-  - **ONLINE**: a live instance was selected per the above.
-  - **OFFLINE**: at least one structurally-valid instance file exists, but
-    none is currently live - real evidence of "not running", not absence
-    of information.
-  - **UNKNOWN**: no structurally-valid instance file was found anywhere
-    under `<AE_MCP_DATA_DIR>/instances/` - could mean ae-mcp has never run,
-    the data dir is wrong, or every candidate found was malformed. Never
-    fabricated from a shape that hasn't been confirmed real.
+- **MCP status**: real integration against ae-mcp's own official public CLI
+  contract (corrected 2026-08-24, replacing an earlier approach that parsed
+  ae-mcp's undocumented internal `instance.json` files - see git history
+  for that prior design if needed). The worker exposes a clean `McpAdapter`
+  interface (`apps/worker/src/health/mcp-adapter.ts`) so implementations
+  are swappable without touching any call site; `HeroicSwanMcpAdapter`
+  (`apps/worker/src/health/heroic-swan-mcp-adapter.ts`) is the only
+  implementation and is always used.
+  - **Command** (confirmed directly against the real upstream
+    HeroicSwan/after-effects-mcp repository's `package.json` `scripts` and
+    `bin` fields, and `src/index.ts` - not assumed): the worker spawns the
+    exact fixed, allowlisted command `node <AE_MCP_PATH>/dist/index.js
+    health` - never a shell string, never a caller-influenced argument.
+  - **Mapping is based ONLY on the documented exit code**, never on
+    parsing the command's stdout: upstream's `health` subcommand prints
+    several separate human-labeled lines mixed with JSON fragments (`"Data
+    dir: ..."`, `"AE running: ..."`, trailing JSON blobs) - not one
+    coherent, stable, documented JSON object. Depending on that text would
+    repeat the same undocumented-internals mistake in a different place.
+    - **exit 0** (bridge connected, health invoked successfully) -> `ONLINE`.
+    - **exit 1** (bridge not connected) -> `OFFLINE` - real evidence of
+      "not running", not absence of information.
+    - **exit 2** (health invocation itself failed), a missing/unreadable
+      script, a timeout, or any other/unrecognized outcome -> `UNKNOWN` -
+      never fabricated. A missing `dist/index.js` is checked explicitly
+      before ever spawning `node`, specifically because Node's own
+      "cannot find module" failure also exits 1 - indistinguishable, by
+      exit code alone, from ae-mcp's own "bridge not connected" signal
+      (found via real spawn-based testing, not assumed).
+  - Bounded by a fixed timeout (default 8s, well under the 15s heartbeat
+    interval) so an unresponsive bridge can never hang the heartbeat loop.
+
+### Read-only AE inspection transport (INSPECT_TEMPLATE)
+
+`HeroicSwanMcpClient` (`apps/worker/src/inspection/heroic-swan-mcp-client.ts`)
+is the transport for calling ae-mcp's real MCP tools, built on the official
+`@modelcontextprotocol/sdk` (the same SDK upstream itself depends on) - not
+a hand-rolled protocol parser.
+
+- **Command**: spawns the one fixed allowlisted command
+  `node <AE_MCP_PATH>/dist/index.js serve` via `StdioClientTransport`, then
+  performs the real MCP `initialize` handshake.
+- **Allowlist**: the client's public surface only permits calling exactly
+  five read-only tools - `ae_health`, `ae_list_instances`,
+  `ae_get_project_info`, `ae_list_compositions`, `ae_get_composition` -
+  enforced by a TypeScript union type, not just a runtime check. Upstream
+  registers many more tools (Blender bridge, transcription, editorial
+  planning, workflow audits, and `ae_run_jsx`, which can mutate a live AE
+  project) - there is no method on this client to call any of those.
+- **Results are returned raw** (`{ ok: true, content: unknown }` or a
+  typed `{ ok: false, error }`), deliberately not parsed into a rigid
+  schema yet: upstream's exact field-level response shape for these tools
+  has not been confirmed against a real sample the way the old
+  `instance.json` schema was. Building a `TemplateManifest` from these
+  tools' actual output remains a separate follow-up once a real sample
+  exists - fabricating that mapping now would repeat the same mistake in
+  a new place.
 
 ## Operation allowlist
 
@@ -250,5 +274,7 @@ Windows/ae-mcp audit.
   keeps retrying with bounded backoff. This is expected during a temporary
   API outage; no manual intervention is needed unless the outage is
   prolonged.
-- **AE/MCP status always `UNKNOWN`**: expected until `AE_PATH` is configured
-  and (for MCP) the real ae-mcp integration lands in a later phase.
+- **AE/MCP status always `UNKNOWN`**: expected until `AE_PATH`/`AE_MCP_PATH`
+  are configured and point at real, complete installs (see "Health
+  detection" above for the specific conditions that produce `UNKNOWN` for
+  each).
