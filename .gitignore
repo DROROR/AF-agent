@@ -39,3 +39,4 @@ deploy/*.zip
 .deploy-tools/
 .deploy.lock
 .deploy-build.*
+/.deployed-sha
