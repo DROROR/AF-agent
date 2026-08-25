@@ -151,7 +151,44 @@ was carried out instead — see `docs/RENDERER-ARCHITECTURE.md` and
 `docs/SHOTSTACK-POC.md`. It does not touch `apps/worker`, does not replace or
 modify any Windows Worker/ae-mcp code, and does not affect this blocker.
 
-## READY_FOR_DEVELOPMENT (Phase 4 real-machine work): READY_FOR_WINDOWS_WORKER — `https://worker-api.dyocourses.com` is live with a valid TLS certificate, path-allowlisted to only the two routes the worker calls, and the real ae-mcp `instance.json` schema is implemented (see "Overall project status" below and commit `feat(worker): prepare real Windows AE MCP integration`). Still blocked on actually connecting the client Windows worker and running AE/MCP automation against it — neither has been done yet.
+## Phase 4 status update (2026-08-25) — COMPLETE
+
+Phase 4 ("Real Windows Worker + After Effects / ae-mcp integration") is
+**complete**, verified live against the real client machine and the real
+production Contabo API/database (not simulated), via direct `psql` queries
+against `workers` and a live `curl` against `dyo-api`'s own `/health/ready`:
+
+- Worker `345ee0a4-ef4d-4b87-a923-726f97144aa4` (`DESKTOP-A629N4N`):
+  `status: ONLINE`, `aeStatus: ONLINE`, `mcpStatus: ONLINE`,
+  `maxConcurrency: 1`.
+- 5 consecutive heartbeats observed live over ~70s (10:16:48–10:17:53 UTC),
+  each ~15–16s apart matching `HEARTBEAT_INTERVAL_MS`, `lastHeartbeatAt`
+  strictly advancing each time, all three status fields stable throughout.
+- `createdAt` unchanged since original registration (2026-08-24 15:32:12
+  UTC) — confirmed no re-registration, no duplicate worker row (3 total
+  rows in `workers`: this one plus the two pre-existing `worker-a`/
+  `worker-b` test workers, both `OFFLINE`, untouched).
+- `dyo-api` healthy (`GET /health/ready` → `{"status":"ok","database":"ok"}`,
+  PM2 uptime 41h, no new restarts) and PostgreSQL reachable.
+
+This closes 4A (Windows preflight - done 2026-08-23), 4B (real worker
+deployment - registered and heartbeating live), and 4C (MCP adapter
+implementation from verified behavior) - superseding the plan's original
+"paused" note below and the `McpInstanceFileAdapter`/`instance.json`
+approach it once described: `mcpStatus` is now sourced from
+`HeroicSwanMcpAdapter`
+(`apps/worker/src/health/heroic-swan-mcp-adapter.ts`), which runs
+ae-mcp's own official, upstream-documented `health` CLI command and reads
+its real exit code - confirmed directly against the real client's ae-mcp
+bridge, not fabricated. 4D (an interrupted-job recovery test) and 4E (a
+dedicated Windows security validation pass) were **not** part of this
+verification and remain open if still required - no job has been
+dispatched to this worker yet (the `jobs` table for it is empty), and no
+separate formal security-validation pass has been recorded beyond the
+NTFS-ACL/no-stored-password/redacted-logging measures already built into
+`DYO-Worker-Setup.ps1`/`DYO-Worker-Repair.ps1` and `apps/worker` itself.
+
+## READY_FOR_DEVELOPMENT (Phase 4 real-machine work): READY — the client Windows worker is connected, registered, and reporting real (non-fabricated) `aeStatus`/`mcpStatus`. `https://worker-api.dyocourses.com` is live with a valid TLS certificate, path-allowlisted to only the routes the worker calls.
 
 ## Overall project status (2026-08-22)
 
@@ -174,8 +211,9 @@ For anyone picking this up cold, the state of each phase:
 - **Phase 3** (read-only DYO operations dashboard — Next.js, real API
   integration, PM2-deployed): complete. Commit `feat(web): add DYO
   operations dashboard`.
-- **Phase 4** (real Windows Worker + After Effects/ae-mcp integration): **in
-  progress**, resumed 2026-08-23. Client machine confirmed: Windows 11 Pro,
+- **Phase 4** (real Windows Worker + After Effects/ae-mcp integration):
+  **complete** (verified 2026-08-25 - see "Phase 4 status update
+  (2026-08-25) — COMPLETE" above). Resumed 2026-08-23. Client machine confirmed: Windows 11 Pro,
   After Effects 2026 v26.3, `aerender.exe` present, Node 24.15.0, npm
   11.12.1, Git installed, ae-mcp installed at `C:\AI-Tools\ae-mcp` with its
   status panel showing `[ON] LISTENING / CONNECTED`, Heebo fonts installed.
@@ -227,10 +265,15 @@ For anyone picking this up cold, the state of each phase:
     fabricated. Configured via `AE_MCP_INSTANCE_FILE_PATH`; unset by
     default, so existing worker behavior is unchanged until it's explicitly
     set.
-  - Remaining before the client PC can actually connect: the real Windows
-    worker has not been started/paired against `worker-api.dyocourses.com`
-    yet, and no AE/MCP automation commands have been run against the client
-    machine.
+  - **Update (2026-08-25):** the real Windows worker is now registered and
+    connected against `worker-api.dyocourses.com`, reporting live, real
+    `aeStatus`/`mcpStatus` - see "Phase 4 status update (2026-08-25) —
+    COMPLETE" above. The `McpInstanceFileAdapter`/`instance.json`-based MCP
+    detection described just above was superseded by `HeroicSwanMcpAdapter`
+    (ae-mcp's own official `health` CLI command) before this connection was
+    verified - `AE_MCP_INSTANCE_FILE_PATH` no longer exists. No
+    AE/MCP-inspection automation (INSPECT_TEMPLATE or any other tool call)
+    has been run against the client machine yet - only health/heartbeat.
 - **Shotstack renderer POC** (a separate, bounded, isolated track pursued
   while Phase 4 was paused, not a phase in the original plan): **complete**.
   Three stages: (1) an initial bounded provider-abstraction + Shotstack POC
