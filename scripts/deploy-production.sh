@@ -73,6 +73,19 @@ if ! flock -n 9; then
   exit 75
 fi
 
+# ---- Refuse to deploy if port 4000 is already owned by something PM2
+#      isn't managing (2026-08-26 incident: a stray manual process
+#      answered health checks while the real PM2-managed dyo-api
+#      crash-looped on EADDRINUSE, invisibly, in the background). Never
+#      kills the unexpected process - just fails loudly with its pid so a
+#      human investigates. A free port, or one already owned by dyo-api's
+#      own current PM2 pid (the normal about-to-be-reloaded case), both
+#      pass. ----
+
+if ! verify_no_unexpected_port_owner 4000 dyo-api; then
+  exit 79
+fi
+
 # ---- Never deploy over uncommitted local changes, never discard anything ----
 # (No `git reset --hard` and no `git clean -fd` anywhere in this script -
 # a dirty tree is a hard stop, not something to be silently discarded.)

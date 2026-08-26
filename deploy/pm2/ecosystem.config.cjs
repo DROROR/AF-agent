@@ -28,7 +28,11 @@ module.exports = {
       script: "apps/api/src/index.ts",
       interpreter: path.join(repoRoot, "node_modules", ".bin", "tsx"),
       cwd: repoRoot,
-      env: loadEnvFile(envPath),
+      // NODE_ENV: "production" here (not just implied by running under
+      // PM2) is what makes production-runtime-guard.ts's startup check
+      // meaningful - see that file's own doc comment for the incident
+      // that prompted it.
+      env: { ...loadEnvFile(envPath), NODE_ENV: "production" },
       max_restarts: 10,
       restart_delay: 2000,
       out_file: path.join(repoRoot, "logs", "dyo-api.out.log"),

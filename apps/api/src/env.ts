@@ -8,7 +8,19 @@ const envSchema = z.object({
     .string()
     .min(16, "WORKER_REGISTRATION_SECRET must be at least 16 characters"),
   WORKER_HEARTBEAT_STALE_AFTER_MS: z.coerce.number().int().positive().default(30_000),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info")
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  /**
+   * Explicit, deliberate escape hatch for a genuine one-off manual
+   * production diagnostic run outside PM2 - see production-runtime-guard.ts.
+   * Deliberately NOT z.coerce.boolean() (which coerces any non-empty
+   * string, including "false", to true) - only the literal string "1" or
+   * "true" opts in; anything else (including unset) stays false.
+   */
+  ALLOW_UNMANAGED_PRODUCTION_START: z
+    .string()
+    .optional()
+    .transform((value) => value === "1" || value === "true")
 });
 
 export type Env = z.infer<typeof envSchema>;

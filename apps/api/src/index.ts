@@ -1,6 +1,7 @@
 import { createDatabase, runMigrations } from "@dyo/database";
 import { buildApp } from "./app.js";
 import { loadEnv } from "./env.js";
+import { assertManagedRuntime } from "./production-runtime-guard.js";
 import { DrizzleJobRepository } from "./infrastructure/db/drizzle-job-repository.js";
 import { DrizzleSessionRepository } from "./infrastructure/db/drizzle-session-repository.js";
 import { DrizzleUserRepository } from "./infrastructure/db/drizzle-user-repository.js";
@@ -10,6 +11,7 @@ import { DrizzleExecutionPlanRepository } from "./infrastructure/db/drizzle-exec
 
 async function main(): Promise<void> {
   const env = loadEnv();
+  assertManagedRuntime(env, process.env["pm_id"]);
   const { db, pool } = createDatabase(env.DATABASE_URL);
 
   await runMigrations(db);

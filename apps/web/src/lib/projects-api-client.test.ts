@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchProjectList, updateExecutionPlan } from "./projects-api-client";
+import { createProject, fetchProjectList, updateExecutionPlan } from "./projects-api-client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -44,5 +44,57 @@ describe("updateExecutionPlan", () => {
     stubFetch(409, { error: { code: "CONFLICT", message: "stale revision", requestId: "r1" } });
     const result = await updateExecutionPlan("project-1", 1, [{ type: "INCLUDE_SCENE", scenePlanId: "scene-1" }]);
     expect(result).toEqual({ ok: false, status: 409, code: "CONFLICT", message: "stale revision" });
+  });
+});
+
+describe("createProject", () => {
+  it("returns the real created project on a well-formed 201 response - exists so a disposable project can be created for smoke-testing through the same authenticated path a real operator uses", async () => {
+    stubFetch(201, {
+      projectId: "11111111-1111-1111-1111-111111111111",
+      name: "Diagnostic Disposable Project",
+      templateId: "diag-tmpl",
+      sourceProjectSha256: "b".repeat(64),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    const result = await createProject({
+      name: "Diagnostic Disposable Project",
+      manifest: {
+        schemaVersion: "1.0",
+        templateId: "diag-tmpl",
+        templateName: "diag-tmpl",
+        sourceProject: { path: "/tmp/diag.aep", name: "diag.aep", sha256: "b".repeat(64) },
+        afterEffects: { version: "26.3x87" },
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        compositions: [],
+        scenes: [],
+        preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+        unknownItems: []
+      }
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.name).toBe("Diagnostic Disposable Project");
+    }
+  });
+
+  it("never renders a malformed response as if it were a real created project", async () => {
+    stubFetch(201, { nonsense: true });
+    const result = await createProject({
+      name: "x",
+      manifest: {
+        schemaVersion: "1.0",
+        templateId: "t",
+        templateName: "t",
+        sourceProject: { path: "/tmp/x.aep", name: "x.aep", sha256: "c".repeat(64) },
+        afterEffects: { version: "26.3x87" },
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        compositions: [],
+        scenes: [],
+        preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+        unknownItems: []
+      }
+    });
+    expect(result.ok).toBe(false);
   });
 });

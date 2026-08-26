@@ -3,7 +3,9 @@ import {
   executionPlanResponseSchema,
   listExecutionPlanRevisionsResponseSchema,
   listProjectsResponseSchema,
+  projectDtoSchema,
   projectResponseSchema,
+  type CreateProjectRequest,
   type ExecutionPlanEditOperation,
   type ExecutionPlanResponse,
   type ListExecutionPlanRevisionsResponse,
@@ -58,6 +60,22 @@ function toErrorResult(status: number, json: unknown): ApiResult<never> {
  * real @dyo/schemas contract; a response that doesn't match it is treated
  * as a failure rather than rendered as if it were valid data.
  */
+export async function createProject(body: CreateProjectRequest): Promise<ApiResult<ProjectDto>> {
+  const { status, json } = await request("/api/projects", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (status !== 201) {
+    return toErrorResult(status, json);
+  }
+  const parsed = projectDtoSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected project contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 export async function fetchProjectList(): Promise<ApiResult<ProjectDto[]>> {
   const { status, json } = await request("/api/projects");
   if (status !== 200) {
