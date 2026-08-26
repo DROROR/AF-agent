@@ -1,4 +1,11 @@
-import { SCHEMA_VERSION, type Composition, type Placeholder, type Scene, type TemplateManifest } from "@dyo/schemas";
+import {
+  SCHEMA_VERSION,
+  type Composition,
+  type InspectionSummary,
+  type Placeholder,
+  type Scene,
+  type TemplateManifest
+} from "@dyo/schemas";
 import { classifyPlaceholder } from "./classify-placeholder.js";
 import { deterministicId } from "./deterministic-id.js";
 import type { ProjectFacts } from "./project-facts.js";
@@ -92,5 +99,23 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
       pluginReferences: [...facts.pluginReferences]
     },
     unknownItems
+  };
+}
+
+/** Pure derived counts for InspectTemplateResponse.summary - every field is a direct count over the manifest, never recomputed differently elsewhere. */
+export function computeInspectionSummary(manifest: TemplateManifest): InspectionSummary {
+  return {
+    compositionCount: manifest.compositions.length,
+    candidateSceneCount: manifest.scenes.length,
+    editablePlaceholderCount: manifest.scenes.reduce(
+      (count, scene) => count + scene.placeholders.filter((p) => p.editable).length,
+      0
+    ),
+    nestedCompositionCount: manifest.compositions.filter((c) => c.isNestedOnlyReferenced).length,
+    requiredFontCount: manifest.preflight.requiredFonts.length,
+    footageReferencedCount: manifest.preflight.footageReferenced.length,
+    missingFootageCount: manifest.preflight.missingFootage.length,
+    pluginReferenceCount: manifest.preflight.pluginReferences.length,
+    unknownItemCount: manifest.unknownItems.length
   };
 }

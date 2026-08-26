@@ -33,15 +33,13 @@ export interface RawToolCallCapture {
 }
 
 /**
- * First-pass INSPECT_TEMPLATE result: the real upstream ae-mcp tool
- * response shapes are not confirmed yet (see docs/TEMPLATE-INSPECTOR.md),
- * so this captures what the read-only tools actually returned instead of
- * forcing it into a guessed TemplateManifest field mapping - exactly the
- * mistake already made twice this session with ae-mcp's other undocumented
- * internals. Once a real captured sample confirms the tools' actual
- * response shapes, a later pass can build the real TemplateManifest
- * mapping from it, the same way the ae-mcp instance.json schema was only
- * trusted once a real sample existed.
+ * Fallback INSPECT_TEMPLATE result for when a real TemplateManifest
+ * cannot honestly be built: any of the four discovery tool calls failed
+ * or returned something that doesn't match the confirmed shape
+ * (parse-mcp-shapes.ts), or the real source .aep at sourceProjectPath
+ * could not be hashed (CLAUDE.md Safety Rule 8). Captures exactly what
+ * the read-only tools actually returned instead of forcing it into a
+ * guessed mapping - never a crash, never a fabricated manifest.
  */
 export interface RawInspectionCapture {
   kind: "raw_capture";
@@ -53,10 +51,18 @@ export interface RawInspectionCapture {
   note: string;
 }
 
-/** A finalized TemplateManifest, once real response schemas are confirmed and a real mapping exists. Not produced by any inspector yet. */
+/**
+ * A finalized, schema-validated TemplateManifest, built from real,
+ * confirmed MCP response shapes (see parse-mcp-shapes.ts,
+ * build-project-facts.ts). `diagnostics` retains the bounded raw capture
+ * of the four top-level tool calls this was built from - never required
+ * by any consumer of `response`, kept only so a human/operator can see
+ * exactly what ae-mcp returned if the built manifest ever looks wrong.
+ */
 export interface ManifestInspectionResult {
   kind: "manifest";
   response: InspectTemplateResponse;
+  diagnostics: RawToolCallCapture[];
 }
 
 export type InspectTemplateResult = RawInspectionCapture | ManifestInspectionResult;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTemplateManifest } from "./build-manifest.js";
+import { buildTemplateManifest, computeInspectionSummary } from "./build-manifest.js";
 import type { CompositionFact, LayerFact, ProjectFacts } from "./project-facts.js";
 
 function layer(overrides: Partial<LayerFact>): LayerFact {
@@ -154,5 +154,32 @@ describe("buildTemplateManifest", () => {
     expect(manifest.preflight.footageReferenced).toEqual(["logo.png"]);
     expect(manifest.preflight.missingFootage).toEqual([{ name: "hero.mp4", expectedPath: "(footage)/hero.mp4" }]);
     expect(manifest.preflight.pluginReferences).toEqual(["Element 3D"]);
+  });
+});
+
+describe("computeInspectionSummary", () => {
+  it("derives every count directly from the manifest, including the extra unknownItems count", () => {
+    const facts = baseFacts({
+      compositions: [
+        composition({
+          compositionId: "top",
+          isNestedOnlyReferenced: false,
+          layers: [
+            layer({ name: "Editable", index: 1, layerKind: "TextLayer" }),
+            layer({ name: "Mystery", index: 2, layerKind: "CameraLayer" })
+          ]
+        }),
+        composition({ compositionId: "nested", isNestedOnlyReferenced: true })
+      ]
+    });
+    const manifest = buildTemplateManifest(facts, fixedNow);
+    manifest.unknownItems.push({ context: "(project)", reason: "extra note appended after building" });
+
+    const summary = computeInspectionSummary(manifest);
+    expect(summary.compositionCount).toBe(2);
+    expect(summary.candidateSceneCount).toBe(1);
+    expect(summary.editablePlaceholderCount).toBe(1);
+    expect(summary.nestedCompositionCount).toBe(1);
+    expect(summary.unknownItemCount).toBe(2);
   });
 });
