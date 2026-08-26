@@ -115,4 +115,11 @@ cpSync(
   path.join(WORKER_APP_DIR, "dist", "validate-env.js")
 );
 
+// Harmless build/version marker (commit + build time, never a secret) -
+// version.ts reads this at worker startup and logs it, so worker.log can
+// prove exactly which build produced a given heartbeat/job after an
+// update package is installed.
+const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT }).toString().trim();
+writeJson(path.join(WORKER_APP_DIR, "BUILD_INFO.json"), { commit, builtAt: new Date().toISOString() });
+
 console.log("Done. worker-app/ contains no devDependencies and no TypeScript source - plain compiled JS + a minimal package.json, ready for `npm install --omit=dev` on the client machine.");

@@ -7,6 +7,7 @@ import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { HeroicSwanMcpAdapter } from "./health/heroic-swan-mcp-adapter.js";
 import { runCheckHealthDiagnostics } from "./health/run-check-health-diagnostics.js";
+import { readWorkerBuildInfo } from "./version.js";
 import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-inspector.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
@@ -86,8 +87,13 @@ async function main(): Promise<void> {
   const credentials = await resolveWorkerCredentials(env, credentialStore, apiClient, logger);
 
   const workerLogger = logger.child({ workerId: credentials.workerId, workerName: env.workerName });
+  // Harmless build/version marker (commit + build timestamp, never a
+  // secret) - null in local dev where no packaged BUILD_INFO.json exists.
+  // Logged once at startup so worker.log can prove exactly which build is
+  // actually running, e.g. after a Windows Worker update.
+  const buildInfo = readWorkerBuildInfo();
   workerLogger.info(
-    { workRoot, capabilities: CURRENT_WORKER_CAPABILITIES },
+    { workRoot, capabilities: CURRENT_WORKER_CAPABILITIES, buildInfo },
     "worker starting"
   );
 
