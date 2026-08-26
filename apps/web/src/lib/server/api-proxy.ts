@@ -23,7 +23,12 @@ export interface ProxyOptions {
 export async function proxyToApi(path: string, options: ProxyOptions): Promise<NextResponse> {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  // content-type: application/json is only ever sent alongside a real
+  // body - a bodyless request (DELETE, or any future no-payload call)
+  // must never carry it, since Fastify's JSON content-type parser reads
+  // the header as a promise of a JSON body and throws
+  // FST_ERR_CTP_EMPTY_JSON_BODY the moment it finds zero bytes instead.
+  const headers: Record<string, string> = options.body !== undefined ? { "content-type": "application/json" } : {};
   if (sessionToken) {
     headers["authorization"] = `Bearer ${sessionToken}`;
   }
