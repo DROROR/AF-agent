@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import type { WorkerCapability } from "./worker.js";
 
@@ -12,7 +13,8 @@ import type { WorkerCapability } from "./worker.js";
  * claims it (defense in depth across the API/worker boundary).
  */
 export const JOB_PAYLOAD_SCHEMAS: Partial<Record<WorkerCapability, z.ZodTypeAny>> = {
-  INSPECT_TEMPLATE: inspectTemplateRequestSchema
+  INSPECT_TEMPLATE: inspectTemplateRequestSchema,
+  CHECK_HEALTH: checkHealthRequestSchema
 };
 
 export function hasJobPayloadSchema(operation: WorkerCapability): boolean {

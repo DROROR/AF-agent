@@ -6,3 +6,4 @@ export * from "./inspect-template.js";
 export * from "./job.js";
 export * from "./job-payload.js";
 export * from "./job-dispatch.js";
+export * from "./check-health.js";

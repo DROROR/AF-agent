@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import { jobStatusSchema } from "./job.js";
 
@@ -11,22 +12,31 @@ import { jobStatusSchema } from "./job.js";
  * Rule 2 ("never execute arbitrary AI-generated JSX... only tested,
  * versioned, allowlisted scripts/operations").
  */
-export const DISPATCHABLE_OPERATIONS = ["INSPECT_TEMPLATE"] as const;
+export const DISPATCHABLE_OPERATIONS = ["INSPECT_TEMPLATE", "CHECK_HEALTH"] as const;
 export type DispatchableOperation = (typeof DISPATCHABLE_OPERATIONS)[number];
 export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
 
 /**
- * POST /api/jobs request body. `payload` is validated against
- * INSPECT_TEMPLATE's own real contract right here at the boundary - never
- * `z.unknown()`/`z.any()` - so a malformed or unrelated payload is
- * rejected before a job is ever created (defense in depth alongside
- * create-job.ts's own validateJobPayload() call).
+ * POST /api/jobs request body - a discriminated union keyed by
+ * `operation`, so each operation's payload is validated against its own
+ * real, reviewed contract right here at the boundary, never
+ * `z.unknown()`/`z.any()`. CHECK_HEALTH's payload is a strict empty
+ * object - no command string, no path, no arbitrary field is ever
+ * accepted for it. Defense in depth alongside create-job.ts's own
+ * validateJobPayload() call, which validates again independently.
  */
-export const dispatchJobRequestSchema = z.object({
-  operation: dispatchableOperationSchema,
-  workerId: z.string().uuid(),
-  payload: inspectTemplateRequestSchema
-});
+export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("INSPECT_TEMPLATE"),
+    workerId: z.string().uuid(),
+    payload: inspectTemplateRequestSchema
+  }),
+  z.object({
+    operation: z.literal("CHECK_HEALTH"),
+    workerId: z.string().uuid(),
+    payload: checkHealthRequestSchema
+  })
+]);
 export type DispatchJobRequest = z.infer<typeof dispatchJobRequestSchema>;
 
 /** Safe DTO only - never the worker's token/tokenHash, never any other job's internal fields. */

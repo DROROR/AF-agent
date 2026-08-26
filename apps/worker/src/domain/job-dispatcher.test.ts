@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { JobDto } from "@dyo/schemas";
+import type { CheckHealthResponse, JobDto } from "@dyo/schemas";
 import { executeJob, type JobDispatcherDeps, type LatestHealth } from "./job-dispatcher.js";
 import { NotAvailableTemplateInspector } from "../inspection/template-inspector.js";
 
@@ -10,11 +10,29 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 
 const ONLINE_HEALTH: LatestHealth = { aeStatus: "ONLINE", mcpStatus: "ONLINE" };
 
+const FAKE_CHECK_HEALTH_RESPONSE: CheckHealthResponse = {
+  aeStatus: "ONLINE",
+  aeVersion: "26.3x87",
+  mcpStatus: "OFFLINE",
+  mcpProcess: {
+    aeMcpPathConfigured: true,
+    scriptExists: true,
+    exitCode: 1,
+    timedOut: false,
+    stdout: "",
+    stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false
+  },
+  checkedAt: "2026-08-26T00:00:00.000Z"
+};
+
 /** Every existing test here is about payload/dispatch behavior, not the health gate itself - defaults to a healthy heartbeat so those tests reach the inspector as before. The gate has its own dedicated describe block below. */
 function healthyDeps(overrides: Partial<JobDispatcherDeps> = {}): JobDispatcherDeps {
   return {
     templateInspector: new NotAvailableTemplateInspector(),
     getLatestHealth: () => ONLINE_HEALTH,
+    runCheckHealthDiagnostics: () => Promise.resolve(FAKE_CHECK_HEALTH_RESPONSE),
     ...overrides
   };
 }
@@ -89,7 +107,7 @@ describe("executeJob - INSPECT_TEMPLATE safety gate: AE and MCP must both be con
   it("fails with PRECONDITION_NOT_MET and never calls the inspector when no heartbeat has succeeded yet (getLatestHealth returns null)", async () => {
     const inspect = vi.fn();
     const result = await executeJob(
-      { templateInspector: { inspect }, getLatestHealth: () => null },
+      healthyDeps({ templateInspector: { inspect }, getLatestHealth: () => null }),
       baseJob()
     );
     expect(result.status).toBe("FAILED");
@@ -100,7 +118,7 @@ describe("executeJob - INSPECT_TEMPLATE safety gate: AE and MCP must both be con
   it("fails with PRECONDITION_NOT_MET and never calls the inspector when aeStatus is not ONLINE", async () => {
     const inspect = vi.fn();
     const result = await executeJob(
-      { templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "OFFLINE", mcpStatus: "ONLINE" }) },
+      healthyDeps({ templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "OFFLINE", mcpStatus: "ONLINE" }) }),
       baseJob()
     );
     expect(result.status).toBe("FAILED");
@@ -111,7 +129,7 @@ describe("executeJob - INSPECT_TEMPLATE safety gate: AE and MCP must both be con
   it("fails with PRECONDITION_NOT_MET and never calls the inspector when mcpStatus is not ONLINE", async () => {
     const inspect = vi.fn();
     const result = await executeJob(
-      { templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "ONLINE", mcpStatus: "UNKNOWN" }) },
+      healthyDeps({ templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "ONLINE", mcpStatus: "UNKNOWN" }) }),
       baseJob()
     );
     expect(result.status).toBe("FAILED");
@@ -122,11 +140,53 @@ describe("executeJob - INSPECT_TEMPLATE safety gate: AE and MCP must both be con
   it("reaches the inspector when both aeStatus and mcpStatus are ONLINE", async () => {
     const inspect = vi.fn().mockResolvedValue({ kind: "raw_capture", capturedAt: "x", toolCalls: [], note: "n" });
     const result = await executeJob(
-      { templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "ONLINE", mcpStatus: "ONLINE" }) },
+      healthyDeps({ templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "ONLINE", mcpStatus: "ONLINE" }) }),
       baseJob()
     );
     expect(inspect).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("SUCCEEDED");
+  });
+});
+
+describe("executeJob - CHECK_HEALTH", () => {
+  function checkHealthJob(overrides: Partial<JobDto> = {}): JobDto {
+    return baseJob({ operation: "CHECK_HEALTH", payload: {}, ...overrides });
+  }
+
+  it("succeeds and returns the diagnostics response for a well-formed payload", async () => {
+    const runCheckHealthDiagnostics = vi.fn().mockResolvedValue(FAKE_CHECK_HEALTH_RESPONSE);
+    const result = await executeJob(healthyDeps({ runCheckHealthDiagnostics }), checkHealthJob());
+    expect(result.status).toBe("SUCCEEDED");
+    expect(result.result).toBe(FAKE_CHECK_HEALTH_RESPONSE);
+    expect(runCheckHealthDiagnostics).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an unexpected payload field - never a generic command/argument passthrough", async () => {
+    const runCheckHealthDiagnostics = vi.fn();
+    const result = await executeJob(
+      healthyDeps({ runCheckHealthDiagnostics }),
+      checkHealthJob({ payload: { cmd: "rm -rf /" } })
+    );
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("INVALID_PAYLOAD");
+    expect(runCheckHealthDiagnostics).not.toHaveBeenCalled();
+  });
+
+  it("still runs CHECK_HEALTH when mcpStatus is OFFLINE and even when no heartbeat has succeeded yet - diagnosing that is its whole purpose", async () => {
+    const runCheckHealthDiagnostics = vi.fn().mockResolvedValue(FAKE_CHECK_HEALTH_RESPONSE);
+    const result = await executeJob(
+      healthyDeps({ getLatestHealth: () => null, runCheckHealthDiagnostics }),
+      checkHealthJob()
+    );
+    expect(result.status).toBe("SUCCEEDED");
+    expect(runCheckHealthDiagnostics).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports INTERNAL_ERROR (never crashes) if the diagnostics function itself throws", async () => {
+    const runCheckHealthDiagnostics = vi.fn().mockRejectedValue(new Error("spawn failed unexpectedly"));
+    const result = await executeJob(healthyDeps({ runCheckHealthDiagnostics }), checkHealthJob());
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("INTERNAL_ERROR");
   });
 });
 

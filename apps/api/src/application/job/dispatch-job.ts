@@ -38,13 +38,20 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
   if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, deps.staleAfterMs)) {
     throw new WorkerOfflineError(worker.id);
   }
-  if (worker.aeStatus !== "ONLINE") {
-    throw new PreconditionNotMetError(
-      `Worker ${worker.id} reports After Effects status "${worker.aeStatus}", not ONLINE`
-    );
-  }
-  if (worker.mcpStatus !== "ONLINE") {
-    throw new PreconditionNotMetError(`Worker ${worker.id} reports MCP status "${worker.mcpStatus}", not ONLINE`);
+  // AE/MCP-ONLINE preconditions apply only to operations that actually
+  // touch ae-mcp/AE (INSPECT_TEMPLATE). CHECK_HEALTH is deliberately
+  // exempt: its whole purpose is to remotely diagnose why AE/MCP status
+  // disagrees with reality, so requiring either to already be ONLINE
+  // would make it useless exactly when it's needed most.
+  if (request.operation === "INSPECT_TEMPLATE") {
+    if (worker.aeStatus !== "ONLINE") {
+      throw new PreconditionNotMetError(
+        `Worker ${worker.id} reports After Effects status "${worker.aeStatus}", not ONLINE`
+      );
+    }
+    if (worker.mcpStatus !== "ONLINE") {
+      throw new PreconditionNotMetError(`Worker ${worker.id} reports MCP status "${worker.mcpStatus}", not ONLINE`);
+    }
   }
   if (!worker.capabilities.includes(request.operation)) {
     throw new PreconditionNotMetError(`Worker ${worker.id} does not report the ${request.operation} capability`);

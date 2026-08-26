@@ -6,6 +6,7 @@ import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { HeroicSwanMcpAdapter } from "./health/heroic-swan-mcp-adapter.js";
+import { runCheckHealthDiagnostics } from "./health/run-check-health-diagnostics.js";
 import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-inspector.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
@@ -120,7 +121,19 @@ async function main(): Promise<void> {
       claimNextJob: () => apiClient.claimNextJob(credentials.workerId, credentials.workerToken),
       reportJobStatus: (jobId, body) =>
         apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
-      executeJob: (job) => executeJob({ templateInspector, getLatestHealth: () => latestHealth }, job),
+      executeJob: (job) =>
+        executeJob(
+          {
+            templateInspector,
+            getLatestHealth: () => latestHealth,
+            runCheckHealthDiagnostics: () =>
+              runCheckHealthDiagnostics(
+                { aePath: env.aePath, aerenderPath: env.aerenderPath, aeMcpPath: env.aeMcpPath },
+                { processLister }
+              )
+          },
+          job
+        ),
       onEvent: (event) => logJobCycleEvent(workerLogger, event)
     });
   };

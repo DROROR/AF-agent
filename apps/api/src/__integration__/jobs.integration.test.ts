@@ -470,3 +470,83 @@ describe("POST /api/jobs (dispatch)", () => {
     expect(second.json().error.code).toBe("WORKER_BUSY");
   });
 });
+
+describe("POST /api/jobs (dispatch) - CHECK_HEALTH", () => {
+  function dispatch(body: Record<string, unknown>, token = sessionToken) {
+    return harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+      payload: body
+    });
+  }
+
+  it("rejects an unauthenticated CHECK_HEALTH request", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["CHECK_HEALTH"] });
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} }, "");
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("accepts a well-formed CHECK_HEALTH dispatch and creates exactly one QUEUED job", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["CHECK_HEALTH"] });
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.status).toBe("QUEUED");
+    expect(body.operation).toBe("CHECK_HEALTH");
+
+    const persisted = await harness.jobRepository.findById(body.jobId);
+    expect(persisted?.status).toBe("QUEUED");
+    expect(persisted?.operation).toBe("CHECK_HEALTH");
+  });
+
+  it("rejects an arbitrary/unsupported operation", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["CHECK_HEALTH"] });
+    const response = await dispatch({ operation: "RUN_ANYTHING", workerId, payload: {} });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a CHECK_HEALTH payload with an extra/arbitrary field (e.g. a command string) - never a generic command endpoint", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["CHECK_HEALTH"] });
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: { cmd: "rm -rf /" } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("dispatches CHECK_HEALTH even when the worker reports mcpStatus OFFLINE - diagnosing that is the whole point", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, {
+      capabilities: ["CHECK_HEALTH"],
+      mcpStatus: "OFFLINE"
+    });
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().status).toBe("QUEUED");
+  });
+
+  it("dispatches CHECK_HEALTH even when the worker reports aeStatus OFFLINE too", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, {
+      capabilities: ["CHECK_HEALTH"],
+      aeStatus: "OFFLINE",
+      mcpStatus: "OFFLINE"
+    });
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} });
+    expect(response.statusCode).toBe(201);
+  });
+
+  it("still rejects a stale/offline worker for CHECK_HEALTH (worker ONLINE is still required)", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["CHECK_HEALTH"] });
+    harness.advanceTime(STALE_AFTER_MS + 1_000);
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("WORKER_OFFLINE");
+  });
+
+  it("still rejects a worker that does not report the CHECK_HEALTH capability", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["INSPECT_TEMPLATE"] });
+    const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("PRECONDITION_NOT_MET");
+  });
+});

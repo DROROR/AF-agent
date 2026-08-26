@@ -1,4 +1,12 @@
-import { validateJobPayload, type AeStatus, type InspectTemplateRequest, type JobDto, type JobError, type McpStatus } from "@dyo/schemas";
+import {
+  validateJobPayload,
+  type AeStatus,
+  type CheckHealthResponse,
+  type InspectTemplateRequest,
+  type JobDto,
+  type JobError,
+  type McpStatus
+} from "@dyo/schemas";
 import { isAllowedOperation } from "./operation-allowlist.js";
 import type { TemplateInspector } from "../inspection/template-inspector.js";
 
@@ -18,6 +26,8 @@ export interface JobDispatcherDeps {
   templateInspector: TemplateInspector;
   /** Checked before INSPECT_TEMPLATE ever touches ae-mcp - see runInspectTemplate's precondition gate below. */
   getLatestHealth: () => LatestHealth | null;
+  /** The one real CHECK_HEALTH implementation - see health/run-check-health-diagnostics.ts. Never gated on getLatestHealth(): diagnosing a bad AE/MCP status is this operation's whole purpose. */
+  runCheckHealthDiagnostics: () => Promise<CheckHealthResponse>;
 }
 
 /**
@@ -40,6 +50,8 @@ export async function executeJob(deps: JobDispatcherDeps, job: JobDto): Promise<
   switch (job.operation) {
     case "INSPECT_TEMPLATE":
       return runInspectTemplate(deps, job);
+    case "CHECK_HEALTH":
+      return runCheckHealth(deps, job);
     default:
       // Every other WORKER_CAPABILITIES entry is a recognized operation
       // name with no execution handler yet - fail safely, never attempt it.
@@ -123,6 +135,46 @@ async function runInspectTemplate(deps: JobDispatcherDeps, job: JobDto): Promise
       error: {
         code: "NOT_AVAILABLE",
         message: cause instanceof Error ? cause.message : "INSPECT_TEMPLATE could not run"
+      }
+    };
+  }
+}
+
+async function runCheckHealth(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  // Structurally guaranteed by the switch above - asserted anyway, matching
+  // runInspectTemplate's own defense-in-depth style.
+  if (job.operation !== "CHECK_HEALTH") {
+    return {
+      status: "FAILED",
+      error: { code: "INTERNAL_ERROR", message: "runCheckHealth called for a non-CHECK_HEALTH job" }
+    };
+  }
+
+  try {
+    validateJobPayload("CHECK_HEALTH", job.payload);
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: cause instanceof Error ? cause.message : "CHECK_HEALTH payload failed validation"
+      }
+    };
+  }
+
+  // Deliberately NOT gated on getLatestHealth() (unlike runInspectTemplate
+  // above) - CHECK_HEALTH exists specifically to diagnose a bad/disagreeing
+  // AE or MCP status, so requiring either to already be ONLINE would make
+  // it useless exactly when it is needed most.
+  try {
+    const response = await deps.runCheckHealthDiagnostics();
+    return { status: "SUCCEEDED", result: response };
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INTERNAL_ERROR",
+        message: cause instanceof Error ? cause.message : "CHECK_HEALTH could not run"
       }
     };
   }
