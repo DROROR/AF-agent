@@ -18,6 +18,7 @@ import { getProject } from "../application/project/get-project.js";
 import { listProjects } from "../application/project/list-projects.js";
 import { createExecutionPlan } from "../application/execution-plan/create-execution-plan.js";
 import { getExecutionPlan } from "../application/execution-plan/get-execution-plan.js";
+import { listExecutionPlanRevisions } from "../application/execution-plan/list-execution-plan-revisions.js";
 import { updateExecutionPlan } from "../application/execution-plan/update-execution-plan.js";
 import { approveExecutionPlan } from "../application/execution-plan/approve-execution-plan.js";
 import { rejectExecutionPlan } from "../application/execution-plan/reject-execution-plan.js";
@@ -85,6 +86,14 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const result = await getExecutionPlan({ executionPlanRepository: deps.executionPlanRepository }, projectId);
+    reply.send(result);
+  });
+
+  /** Read-only revision history for the dashboard's Revisions tab - see list-execution-plan-revisions.ts. */
+  app.get("/api/projects/:projectId/execution-plan/revisions", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId } = projectIdParamsSchema.parse(request.params);
+    const result = await listExecutionPlanRevisions({ executionPlanRepository: deps.executionPlanRepository }, projectId);
     reply.send(result);
   });
 

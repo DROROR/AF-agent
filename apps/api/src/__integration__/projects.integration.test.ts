@@ -25,7 +25,36 @@ function manifest(sha256 = "a".repeat(64)): TemplateManifest {
       { compositionId: "comp-1", name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
     ],
     scenes: [
-      { sceneId: "scene-a", displayName: null, compositionId: "comp-1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 5, placeholders: [] }
+      {
+        sceneId: "scene-a",
+        displayName: null,
+        compositionId: "comp-1",
+        originalOrderIndex: 0,
+        startTimeSeconds: 0,
+        durationSeconds: 5,
+        // A real, resolved (non-"unknown") placeholder - so this scene has
+        // no unresolvedReasons by default and approve succeeds in the
+        // tests below that expect it to. See the dedicated
+        // "unresolved plan" approval-rejection tests further down for the
+        // opposite case.
+        placeholders: [
+          {
+            placeholderId: "ph-1",
+            displayLabel: null,
+            compositionId: "comp-1",
+            layerName: "Headline",
+            layerIndex: 1,
+            layerPath: [],
+            placeholderType: "text",
+            editable: true,
+            sourceType: "TextLayer",
+            dimensions: null,
+            startTimeSeconds: 0,
+            durationSeconds: 5,
+            evidence: { source: "read_directly", reason: "TextLayer confirmed via ae_get_composition" }
+          }
+        ]
+      }
     ],
     preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
     unknownItems: []
@@ -82,14 +111,20 @@ function authed(token = sessionToken) {
   return token ? { headers: { authorization: `Bearer ${token}` } } : {};
 }
 
-async function createProjectViaApi(): Promise<string> {
+async function createProjectViaApi(manifestOverride: TemplateManifest = manifest()): Promise<string> {
   const response = await harness.app.inject({
     method: "POST",
     url: "/api/projects",
     ...authed(),
-    payload: { name: "Test Project", manifest: manifest() }
+    payload: { name: "Test Project", manifest: manifestOverride }
   });
   return response.json().projectId;
+}
+
+/** No placeholders at all - build-execution-plan.ts's real logic leaves this scene's unresolvedReasons non-empty, matching the real White App Promo plan's current state. */
+function unresolvedManifest(): TemplateManifest {
+  const base = manifest();
+  return { ...base, scenes: base.scenes.map((scene) => ({ ...scene, placeholders: [] })) };
 }
 
 describe("POST /api/projects", () => {
@@ -285,5 +320,83 @@ describe("execution plan API", () => {
     });
     expect(response.json().plan.status).toBe("DRAFT");
     expect(response.json().plan.revision).toBe(2);
+  });
+
+  it("rejects an unauthenticated revision-history request", async () => {
+    const projectId = await createProjectViaApi();
+    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const response = await harness.app.inject({ method: "GET", url: `/api/projects/${projectId}/execution-plan/revisions` });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("returns 404 for revision history when no plan exists yet", async () => {
+    const projectId = await createProjectViaApi();
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/execution-plan/revisions`,
+      ...authed()
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("lists every real persisted revision, newest first, with exactly one marked current", async () => {
+    const projectId = await createProjectViaApi();
+    const created = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const sceneId = created.json().plan.scenePlans[0].id;
+    await harness.app.inject({
+      method: "PATCH",
+      url: `/api/projects/${projectId}/execution-plan`,
+      ...authed(),
+      payload: { baseRevision: 1, operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }] }
+    });
+
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/execution-plan/revisions`,
+      ...authed()
+    });
+    expect(response.statusCode).toBe(200);
+    const revisions = response.json().revisions;
+    expect(revisions).toHaveLength(2);
+    expect(revisions.map((r: { revision: number }) => r.revision)).toEqual([2, 1]);
+    expect(revisions[0]).toMatchObject({ revision: 2, status: "DRAFT", isCurrent: true, sceneCount: 1 });
+    expect(revisions[1]).toMatchObject({ revision: 1, isCurrent: false });
+    // Never the full scenePlans payload for every past revision.
+    expect(revisions[0]).not.toHaveProperty("scenePlans");
+  });
+
+  it("rejects a direct API approval of a real unresolved plan with 409 PRECONDITION_NOT_MET - a UI restriction alone cannot be bypassed by calling the API directly", async () => {
+    const projectId = await createProjectViaApi(unresolvedManifest());
+    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+
+    const response = await harness.app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/execution-plan/approve`,
+      ...authed(),
+      payload: { baseRevision: 1 }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("PRECONDITION_NOT_MET");
+
+    // The plan must remain exactly DRAFT/revision 1 - never partially approved.
+    const stillDraft = await harness.app.inject({ method: "GET", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    expect(stillDraft.json().plan.status).toBe("DRAFT");
+    expect(stillDraft.json().plan.revision).toBe(1);
+    expect(stillDraft.json().plan.approvedAt).toBeNull();
+  });
+
+  it("allows approval once the plan is genuinely resolved (real success path, not just the rejection path)", async () => {
+    const projectId = await createProjectViaApi();
+    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+
+    const response = await harness.app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/execution-plan/approve`,
+      ...authed(),
+      payload: { baseRevision: 1 }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().plan.status).toBe("APPROVED");
   });
 });

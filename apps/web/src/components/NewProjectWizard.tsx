@@ -118,7 +118,7 @@ function StepContent({ stepId }: { stepId: StepId }): ReactElement {
     case "inspection":
       return <PendingPanel title={t.projectsNew.inspection.title} description={t.projectsNew.inspection.description} />;
     case "scenes":
-      return <SceneTable rows={[]} />;
+      return <SceneTable rows={[]} onToggleUse={() => {}} onMove={() => {}} onEditScene={() => {}} />;
     case "review":
       return <PendingPanel title={t.projectsNew.review.title} description={t.projectsNew.review.description} />;
     case "render":

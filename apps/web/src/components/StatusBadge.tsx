@@ -3,7 +3,7 @@ import { useLocale } from "./LocaleProvider";
 
 export type BadgeStatus = "ONLINE" | "OFFLINE" | "UNKNOWN" | "OK" | "ERROR";
 
-export type Tone = "positive" | "negative" | "neutral";
+export type Tone = "positive" | "negative" | "neutral" | "info";
 
 /**
  * Single source of truth for status tone presentation - see

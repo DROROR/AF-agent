@@ -119,9 +119,18 @@ export const he: Dictionary = {
     newProject: "פרויקט חדש",
     emptyTitle: "אין עדיין פרויקטים",
     emptyDescription: "התחילו פרויקט חדש כדי להתחיל בתהליך הקליטה ובדיקת התבנית.",
-    pendingTitle: "מעקב הפרויקטים אינו מגובה ב-API עדיין",
-    pendingDescription:
-      "פרויקטים, תבניות ושלבי האישור/הרינדור שלהם עדיין אינם חשופים על ידי השרת. עמוד זה יציג פרויקטים אמיתיים (שם, תבנית, כיוון, סטטוס, שלב אישור, סטטוס רינדור) לאחר שה-API הזה יהיה קיים."
+    unavailableTitle: "לא ניתן לטעון פרויקטים",
+    card: {
+      sourceFile: "קובץ מקור",
+      planStatus: "סטטוס תוכנית",
+      revision: "גרסה",
+      sourceSha: "SHA של המקור",
+      scenes: "סצנות",
+      unresolved: "לא פתורות",
+      updated: "עודכן",
+      noPlanYet: "אין עדיין תוכנית",
+      open: "פתיחה"
+    }
   },
   projectsNew: {
     title: "פרויקט חדש",
@@ -284,21 +293,28 @@ export const he: Dictionary = {
   },
   sceneTable: {
     emptyTitle: "אין עדיין סצנות לבדיקה",
-    emptyDescription: "טבלה זו תתמלא לאחר שתבנית תיבדק והסצנות/מציין-המקום שהתגלו יהיו מוכנים לאישור.",
-    tableCaption: "טבלת אישור סצנות ומציין-מקום",
+    emptyDescription: "טבלה זו תתמלא לאחר שתבנית תיבדק והסצנות/מציין-המקום שהתגלו יהיו מוכנים למיפוי.",
+    tableCaption: "טבלת מיפוי סצנות ומציין-מקום",
     useColumn: "שימוש",
-    orderColumn: "סדר",
-    sceneColumn: "סצנה",
-    placeholderColumn: "מציין מקום",
-    typeColumn: "סוג",
+    finalOrderColumn: "סדר סופי",
+    sourcePositionColumn: "מיקום מקור",
+    sceneColumn: "סצנה / קומפוזיציה",
+    mappingColumn: "מציין מקום / מיפוי",
     assetColumn: "נכס",
     textColumn: "טקסט",
-    sourceTimeColumn: "זמן מקור",
+    assetTimestampColumn: "חותמת זמן בנכס",
     finalDurationColumn: "משך סופי",
-    notesColumn: "הערות",
-    approvalColumn: "אישור",
-    hasText: "טקסט",
+    statusColumn: "סטטוס",
+    notesColumn: "הערות / הנחיות",
+    actionsColumn: "פעולות",
+    hasText: "טקסט הוגדר",
     noText: "ללא טקסט",
+    noAssetsUploaded: "לא הועלו נכסים",
+    noMappingDetected: "טרם זוהה מציין מקום עבור סצנה זו",
+    moveUp: "העברה למעלה",
+    moveDown: "העברה למטה",
+    editRow: "עריכה",
+    includeSceneAriaLabel: (scene) => `הכללת ${scene} בפלט הסופי`,
     placeholderType: {
       image: "תמונה",
       video: "וידאו",
@@ -307,6 +323,83 @@ export const he: Dictionary = {
       phone_screen: "מסך טלפון",
       color: "צבע",
       unknown: "לא ידוע"
+    }
+  },
+  planStatus: {
+    DRAFT: "טיוטה",
+    APPROVED: "מאושר",
+    REJECTED: "נדחה"
+  },
+  rowApprovalState: {
+    UNREVIEWED: "טרם נבדק",
+    NEEDS_MAPPING: "דורש מיפוי",
+    READY_FOR_APPROVAL: "מוכן לאישור",
+    APPROVED: "מאושר",
+    REJECTED: "נדחה"
+  },
+  projectWorkspace: {
+    backToProjects: "חזרה לפרויקטים",
+    tabs: {
+      overview: "סקירה כללית",
+      scenes: "מיפוי סצנות",
+      revisions: "גרסאות"
+    },
+    header: {
+      sourceProject: "פרויקט מקור",
+      sourceSha: "SHA של המקור",
+      revision: "גרסה",
+      status: "סטטוס",
+      scenes: "סצנות",
+      unresolved: "לא פתורות"
+    },
+    loadErrorTitle: "לא ניתן היה לטעון את הפרויקט הזה",
+    notFoundTitle: "הפרויקט לא נמצא",
+    notFoundDescription: "פרויקט זה אינו קיים, או שאין לכם עוד גישה אליו.",
+    noPlanTitle: "אין עדיין תוכנית ביצוע",
+    noPlanDescription: "עבור פרויקט זה טרם נוצרה תוכנית ביצוע.",
+    staleRevisionTitle: "התוכנית השתנתה במקום אחר",
+    staleRevisionDescription: "עריכה אחרת נשמרה לגרסה חדשה יותר. יש לרענן כדי לראות את התוכנית העדכנית לפני עריכה נוספת.",
+    reload: "רענון",
+    savingLabel: "שומר…",
+    saveFailedTitle: "לא ניתן היה לשמור את השינוי הזה",
+    overview: {
+      projectSection: "פרויקט",
+      planSection: "תוכנית ביצוע",
+      safetySection: "בטיחות / מצב ביצוע",
+      mappingCount: "מיפויים",
+      approvedLabel: "מאושר",
+      notApprovedLabel: "לא מאושר",
+      approvedByAt: (by, at) => `אושר על ידי ${by} בתאריך ${at}`,
+      readyTitle: "מוכן לאישור",
+      notReadyTitle: "לא מוכן לאישור",
+      blockedReasonsIntro: "לא מוכן מהסיבות הבאות:",
+      unresolvedScenesReason: (count) => `${count} סצנות לא פתורות`,
+      approveAction: "אישור התוכנית",
+      rejectAction: "דחיית התוכנית",
+      reopenAction: "פתיחה מחדש לעריכה"
+    },
+    revisions: {
+      title: "היסטוריית גרסאות",
+      description: "כל גרסה שנשמרה של תוכנית הביצוע הזו.",
+      tableCaption: "היסטוריית גרסאות של תוכנית הביצוע",
+      revisionColumn: "גרסה",
+      statusColumn: "סטטוס",
+      scenesColumn: "סצנות",
+      approvedColumn: "אושר",
+      updatedColumn: "עודכן",
+      currentBadge: "נוכחי",
+      emptyTitle: "אין עדיין גרסאות",
+      emptyDescription: "היסטוריית הגרסאות תופיע לאחר שלפרויקט זה תהיה תוכנית ביצוע."
+    },
+    editDrawer: {
+      title: "עריכת מיפוי סצנה",
+      textLabel: "טקסט",
+      textHint: "השאירו ריק כדי לנקות את הטקסט הנוכחי.",
+      assetTimestampLabel: "חותמת זמן בנכס (שניות)",
+      finalDurationLabel: "משך סופי (שניות)",
+      instructionsLabel: "הנחיות / הערות",
+      save: "שמירת שינויים",
+      cancel: "ביטול"
     }
   }
 };

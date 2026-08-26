@@ -3,6 +3,7 @@ import { SCHEMA_VERSION, type TemplateManifest } from "@dyo/schemas";
 import {
   ExecutionPlanAlreadyExistsError,
   ExecutionPlanEditError,
+  PreconditionNotMetError,
   ProjectNotFoundError,
   SourceShaMismatchError,
   StaleExecutionPlanRevisionError
@@ -33,17 +34,52 @@ function manifest(sha256 = "a".repeat(64)): TemplateManifest {
       { compositionId: "comp-1", name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
     ],
     scenes: [
-      { sceneId: "scene-a", displayName: null, compositionId: "comp-1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 5, placeholders: [] }
+      {
+        sceneId: "scene-a",
+        displayName: null,
+        compositionId: "comp-1",
+        originalOrderIndex: 0,
+        startTimeSeconds: 0,
+        durationSeconds: 5,
+        // A real, resolved (non-"unknown") placeholder - so this scene has
+        // no unresolvedReasons by default and approveExecutionPlan can
+        // succeed in the tests below that expect it to. See
+        // getExecutionPlanReadiness's own dedicated tests for the
+        // unresolved-rejection case.
+        placeholders: [
+          {
+            placeholderId: "ph-1",
+            displayLabel: null,
+            compositionId: "comp-1",
+            layerName: "Headline",
+            layerIndex: 1,
+            layerPath: [],
+            placeholderType: "text",
+            editable: true,
+            sourceType: "TextLayer",
+            dimensions: null,
+            startTimeSeconds: 0,
+            durationSeconds: 5,
+            evidence: { source: "read_directly", reason: "TextLayer confirmed via ae_get_composition" }
+          }
+        ]
+      }
     ],
     preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
     unknownItems: []
   };
 }
 
-async function setup() {
+/** No placeholders at all - build-execution-plan.ts's real logic leaves this scene's unresolvedReasons non-empty, matching the real White App Promo plan's current state (every scene still unresolved). */
+function unresolvedManifest(sha256 = "a".repeat(64)): TemplateManifest {
+  const base = manifest(sha256);
+  return { ...base, scenes: base.scenes.map((scene) => ({ ...scene, placeholders: [] })) };
+}
+
+async function setup(manifestForProject: TemplateManifest = manifest()) {
   const projectRepository = new InMemoryProjectRepository();
   const executionPlanRepository = new InMemoryExecutionPlanRepository();
-  const project = await createProject({ projectRepository, now: fixedNow }, { name: "Test Project", manifest: manifest() });
+  const project = await createProject({ projectRepository, now: fixedNow }, { name: "Test Project", manifest: manifestForProject });
   return { projectRepository, executionPlanRepository, project };
 }
 
@@ -190,5 +226,83 @@ describe("execution plan lifecycle", () => {
     await expect(
       reopenExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 2 })
     ).rejects.toThrow(StaleExecutionPlanRevisionError);
+  });
+
+  it("refuses to approve a plan with an unresolved scene marked for use - real backend enforcement, not just a UI restriction", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup(unresolvedManifest());
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    const attempt = approveExecutionPlan(
+      { executionPlanRepository, projectRepository, now: fixedNow },
+      project.projectId,
+      USER_ID,
+      { baseRevision: 1 }
+    );
+    await expect(attempt).rejects.toThrow(PreconditionNotMetError);
+    await expect(attempt).rejects.toThrow(/1 scene\(s\)/);
+
+    // The plan must remain exactly as it was - never partially approved.
+    const stillDraft = await getExecutionPlan({ executionPlanRepository }, project.projectId);
+    expect(stillDraft.plan.status).toBe("DRAFT");
+    expect(stillDraft.plan.revision).toBe(1);
+  });
+
+  it("does not count an excluded scene's unresolved reason against approval readiness", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup(unresolvedManifest());
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = created.plan.scenePlans[0]?.id as string;
+
+    // Excluding the one unresolved scene means nothing marked for use is unresolved anymore.
+    const updated = await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
+    });
+    expect(updated.plan.revision).toBe(2);
+
+    const approved = await approveExecutionPlan(
+      { executionPlanRepository, projectRepository, now: fixedNow },
+      project.projectId,
+      USER_ID,
+      { baseRevision: 2 }
+    );
+    expect(approved.plan.status).toBe("APPROVED");
+  });
+
+  it("refuses to re-approve a plan that is already APPROVED (plan not in an eligible state)", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 });
+
+    await expect(
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
+
+  it("refuses to approve a REJECTED plan - must be reopened to DRAFT first", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    await rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 1 });
+
+    await expect(
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
+
+  it("never mutates a prior revision's own row when approving the current one", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = created.plan.scenePlans[0]?.id as string;
+    await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_INSTRUCTIONS", scenePlanId: sceneId, instructions: "revision 1 note" }]
+    });
+
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 2 });
+
+    const revisions = await executionPlanRepository.findAllByProjectId(project.projectId);
+    const revisionOne = revisions.find((r) => r.revision === 1);
+    expect(revisionOne?.status).toBe("DRAFT");
+    expect(revisionOne?.approvedAt).toBeNull();
+    expect(revisionOne?.scenePlans[0]?.instructions).toBeNull();
   });
 });

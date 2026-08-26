@@ -49,4 +49,6 @@ export interface ExecutionPlanRepository {
    * if the row doesn't exist or the revision has already moved on.
    */
   updateStatus(id: string, expectedRevision: number, update: ExecutionPlanStatusUpdate, now: Date): Promise<ExecutionPlanRecord | null>;
+  /** Every persisted revision for this project (append-only history), ordered newest-first. Read-only - dashboard revision history view. */
+  findAllByProjectId(projectId: string): Promise<ExecutionPlanRecord[]>;
 }

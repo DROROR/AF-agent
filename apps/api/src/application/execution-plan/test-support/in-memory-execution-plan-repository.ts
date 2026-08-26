@@ -33,6 +33,12 @@ export class InMemoryExecutionPlanRepository implements ExecutionPlanRepository 
     return candidates.reduce((max, r) => (r.revision > max.revision ? r : max));
   }
 
+  async findAllByProjectId(projectId: string): Promise<ExecutionPlanRecord[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.projectId === projectId)
+      .sort((a, b) => b.revision - a.revision);
+  }
+
   async updateStatus(
     id: string,
     expectedRevision: number,

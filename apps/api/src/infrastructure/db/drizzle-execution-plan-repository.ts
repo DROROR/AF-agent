@@ -59,6 +59,15 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
     return row ? toDomain(row) : null;
   }
 
+  async findAllByProjectId(projectId: string): Promise<ExecutionPlanRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(executionPlans)
+      .where(eq(executionPlans.projectId, projectId))
+      .orderBy(desc(executionPlans.revision));
+    return rows.map(toDomain);
+  }
+
   async updateStatus(
     id: string,
     expectedRevision: number,

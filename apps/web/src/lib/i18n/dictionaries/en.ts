@@ -125,9 +125,18 @@ export const en = {
     newProject: "New project",
     emptyTitle: "No projects yet",
     emptyDescription: "Start a new project to begin the intake and template-inspection workflow.",
-    pendingTitle: "Project tracking is not backed by an API yet",
-    pendingDescription:
-      "Projects, templates, and their approval/render stages are not yet exposed by the backend. This page will list real projects (name, template, orientation, status, approval stage, render status) once that API exists."
+    unavailableTitle: "Projects unavailable",
+    card: {
+      sourceFile: "Source file",
+      planStatus: "Plan status",
+      revision: "Revision",
+      sourceSha: "Source SHA",
+      scenes: "Scenes",
+      unresolved: "Unresolved",
+      updated: "Updated",
+      noPlanYet: "No plan yet",
+      open: "Open"
+    }
   },
   projectsNew: {
     title: "New project",
@@ -293,20 +302,27 @@ export const en = {
   sceneTable: {
     emptyTitle: "No scenes to review yet",
     emptyDescription: "This table populates once a template has been inspected and its discovered scenes/placeholders are ready for approval.",
-    tableCaption: "Scene and placeholder approval table",
+    tableCaption: "Scene and placeholder mapping table",
     useColumn: "Use",
-    orderColumn: "Order",
-    sceneColumn: "Scene",
-    placeholderColumn: "Placeholder",
-    typeColumn: "Type",
+    finalOrderColumn: "Final order",
+    sourcePositionColumn: "Source position",
+    sceneColumn: "Scene / Composition",
+    mappingColumn: "Placeholder / Mapping",
     assetColumn: "Asset",
     textColumn: "Text",
-    sourceTimeColumn: "Source time",
+    assetTimestampColumn: "Asset timestamp",
     finalDurationColumn: "Final duration",
-    notesColumn: "Notes",
-    approvalColumn: "Approval",
-    hasText: "Text",
+    statusColumn: "Status",
+    notesColumn: "Notes / Instructions",
+    actionsColumn: "Actions",
+    hasText: "Text set",
     noText: "No text",
+    noAssetsUploaded: "No assets uploaded",
+    noMappingDetected: "No placeholder detected for this scene yet",
+    moveUp: "Move up",
+    moveDown: "Move down",
+    editRow: "Edit",
+    includeSceneAriaLabel: (scene: string): string => `Include ${scene} in the final output`,
     placeholderType: {
       image: "Image",
       video: "Video",
@@ -315,6 +331,83 @@ export const en = {
       phone_screen: "Phone screen",
       color: "Color",
       unknown: "Unknown"
+    }
+  },
+  planStatus: {
+    DRAFT: "Draft",
+    APPROVED: "Approved",
+    REJECTED: "Rejected"
+  },
+  rowApprovalState: {
+    UNREVIEWED: "Unreviewed",
+    NEEDS_MAPPING: "Needs mapping",
+    READY_FOR_APPROVAL: "Ready for approval",
+    APPROVED: "Approved",
+    REJECTED: "Rejected"
+  },
+  projectWorkspace: {
+    backToProjects: "Back to Projects",
+    tabs: {
+      overview: "Overview",
+      scenes: "Scene Mapping",
+      revisions: "Revisions"
+    },
+    header: {
+      sourceProject: "Source project",
+      sourceSha: "Source SHA",
+      revision: "Revision",
+      status: "Status",
+      scenes: "Scenes",
+      unresolved: "Unresolved"
+    },
+    loadErrorTitle: "Could not load this project",
+    notFoundTitle: "Project not found",
+    notFoundDescription: "This project does not exist, or you no longer have access to it.",
+    noPlanTitle: "No execution plan yet",
+    noPlanDescription: "This project has not had an execution plan created for it yet.",
+    staleRevisionTitle: "This plan changed elsewhere",
+    staleRevisionDescription: "Another edit was saved to a newer revision. Reload to see the latest plan before editing again.",
+    reload: "Reload",
+    savingLabel: "Saving…",
+    saveFailedTitle: "Could not save this change",
+    overview: {
+      projectSection: "Project",
+      planSection: "Execution plan",
+      safetySection: "Safety / execution state",
+      mappingCount: "Mappings",
+      approvedLabel: "Approved",
+      notApprovedLabel: "Not approved",
+      approvedByAt: (by: string, at: string): string => `Approved by ${by} at ${at}`,
+      readyTitle: "Ready for approval",
+      notReadyTitle: "Not ready for approval",
+      blockedReasonsIntro: "Not ready because:",
+      unresolvedScenesReason: (count: number): string => `${count} unresolved scene(s)`,
+      approveAction: "Approve plan",
+      rejectAction: "Reject plan",
+      reopenAction: "Reopen for editing"
+    },
+    revisions: {
+      title: "Revision history",
+      description: "Every persisted revision of this execution plan.",
+      tableCaption: "Execution plan revision history",
+      revisionColumn: "Revision",
+      statusColumn: "Status",
+      scenesColumn: "Scenes",
+      approvedColumn: "Approved",
+      updatedColumn: "Updated",
+      currentBadge: "Current",
+      emptyTitle: "No revisions yet",
+      emptyDescription: "Revision history will appear once this project has an execution plan."
+    },
+    editDrawer: {
+      title: "Edit scene mapping",
+      textLabel: "Text",
+      textHint: "Leave empty to clear the current text.",
+      assetTimestampLabel: "Asset timestamp (seconds)",
+      finalDurationLabel: "Final duration (seconds)",
+      instructionsLabel: "Instructions / notes",
+      save: "Save changes",
+      cancel: "Cancel"
     }
   }
 } as const;
