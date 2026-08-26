@@ -7,3 +7,8 @@ export * from "./job.js";
 export * from "./job-payload.js";
 export * from "./job-dispatch.js";
 export * from "./check-health.js";
+export * from "./project.js";
+export * from "./execution-plan.js";
+export * from "./execution-plan-edit.js";
+export * from "./execution-plan-api.js";
+export * from "./ai-suggestion.js";

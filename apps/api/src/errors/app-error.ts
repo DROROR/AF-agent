@@ -8,6 +8,8 @@ function statusForCode(code: ErrorCode): number {
       return 401;
     case "WORKER_NOT_FOUND":
     case "JOB_NOT_FOUND":
+    case "PROJECT_NOT_FOUND":
+    case "EXECUTION_PLAN_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
@@ -105,5 +107,51 @@ export class WorkerBusyError extends AppError {
   constructor(message: string) {
     super("WORKER_BUSY", message);
     this.name = "WorkerBusyError";
+  }
+}
+
+export class ProjectNotFoundError extends AppError {
+  constructor(projectId: string) {
+    super("PROJECT_NOT_FOUND", `Project ${projectId} was not found`);
+    this.name = "ProjectNotFoundError";
+  }
+}
+
+export class ExecutionPlanNotFoundError extends AppError {
+  constructor(projectId: string) {
+    super("EXECUTION_PLAN_NOT_FOUND", `No execution plan exists yet for project ${projectId}`);
+    this.name = "ExecutionPlanNotFoundError";
+  }
+}
+
+/** A project already has a current execution plan - create is a one-time action; use GET/update instead of creating a second one. */
+export class ExecutionPlanAlreadyExistsError extends AppError {
+  constructor(projectId: string) {
+    super("CONFLICT", `Project ${projectId} already has an execution plan`);
+    this.name = "ExecutionPlanAlreadyExistsError";
+  }
+}
+
+/** The caller's baseRevision no longer matches the plan's current revision - optimistic-concurrency protection against a stale edit silently overwriting a newer one. */
+export class StaleExecutionPlanRevisionError extends AppError {
+  constructor(expected: number, actual: number) {
+    super("CONFLICT", `Expected revision ${expected}, but the current revision is ${actual} - reload the plan and retry`);
+    this.name = "StaleExecutionPlanRevisionError";
+  }
+}
+
+/** An edit operation referenced a scenePlanId/mappingId that doesn't exist in this plan, or would create a conflicting state (e.g. a duplicate finalOrder among included scenes). */
+export class ExecutionPlanEditError extends AppError {
+  constructor(message: string) {
+    super("CONFLICT", message);
+    this.name = "ExecutionPlanEditError";
+  }
+}
+
+/** Approval refused: the plan's own sourceProjectSha256 no longer matches its project's current manifest sha256 - CLAUDE.md Safety Rule 8 / Phase 4: never silently approve/execute a plan against a template revision it wasn't built for. */
+export class SourceShaMismatchError extends AppError {
+  constructor() {
+    super("CONFLICT", "This plan's source project SHA256 no longer matches the project's current manifest - it cannot be approved");
+    this.name = "SourceShaMismatchError";
   }
 }

@@ -6,6 +6,8 @@ import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repositor
 import { DrizzleSessionRepository } from "../infrastructure/db/drizzle-session-repository.js";
 import { DrizzleUserRepository } from "../infrastructure/db/drizzle-user-repository.js";
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
+import { DrizzleProjectRepository } from "../infrastructure/db/drizzle-project-repository.js";
+import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
 import { createTestDatabase } from "./test-database.js";
 
 const REGISTRATION_SECRET = "test-registration-secret-1234567890";
@@ -29,6 +31,8 @@ async function setup(initialNow: Date) {
     jobRepository: new DrizzleJobRepository(db),
     userRepository: new DrizzleUserRepository(db),
     sessionRepository: new DrizzleSessionRepository(db),
+    projectRepository: new DrizzleProjectRepository(db),
+    executionPlanRepository: new DrizzleExecutionPlanRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;

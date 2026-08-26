@@ -10,6 +10,8 @@ export const ERROR_CODES = [
   "UNAUTHORIZED",
   "WORKER_NOT_FOUND",
   "JOB_NOT_FOUND",
+  "PROJECT_NOT_FOUND",
+  "EXECUTION_PLAN_NOT_FOUND",
   "CONFLICT",
   "RATE_LIMITED",
   /** Worker is not currently ONLINE (never reported in, or heartbeat has gone stale) - job dispatch refuses rather than queuing against a worker that may not be there. */

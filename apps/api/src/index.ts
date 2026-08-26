@@ -5,6 +5,8 @@ import { DrizzleJobRepository } from "./infrastructure/db/drizzle-job-repository
 import { DrizzleSessionRepository } from "./infrastructure/db/drizzle-session-repository.js";
 import { DrizzleUserRepository } from "./infrastructure/db/drizzle-user-repository.js";
 import { DrizzleWorkerRepository } from "./infrastructure/db/drizzle-worker-repository.js";
+import { DrizzleProjectRepository } from "./infrastructure/db/drizzle-project-repository.js";
+import { DrizzleExecutionPlanRepository } from "./infrastructure/db/drizzle-execution-plan-repository.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -18,6 +20,8 @@ async function main(): Promise<void> {
     jobRepository: new DrizzleJobRepository(db),
     userRepository: new DrizzleUserRepository(db),
     sessionRepository: new DrizzleSessionRepository(db),
+    projectRepository: new DrizzleProjectRepository(db),
+    executionPlanRepository: new DrizzleExecutionPlanRepository(db),
     checkDatabaseHealth: async () => {
       try {
         await pool.query("SELECT 1");

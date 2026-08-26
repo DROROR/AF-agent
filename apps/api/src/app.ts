@@ -4,11 +4,14 @@ import type { Env } from "./env.js";
 import type { JobRepository } from "./domain/job/types.js";
 import type { WorkerRepository } from "./domain/worker/types.js";
 import type { SessionRepository, UserRepository } from "./domain/auth/types.js";
+import type { ExecutionPlanRepository } from "./domain/execution-plan/types.js";
+import type { ProjectRepository } from "./domain/project/types.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { registerWorkerRoutes } from "./routes/workers.js";
+import { registerProjectRoutes } from "./routes/projects.js";
 
 export interface AppDependencies {
   env: Pick<Env, "WORKER_REGISTRATION_SECRET" | "WORKER_HEARTBEAT_STALE_AFTER_MS" | "LOG_LEVEL">;
@@ -16,6 +19,8 @@ export interface AppDependencies {
   jobRepository: JobRepository;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
+  projectRepository: ProjectRepository;
+  executionPlanRepository: ExecutionPlanRepository;
   checkDatabaseHealth: () => Promise<boolean>;
   now?: () => Date;
 }
@@ -57,6 +62,13 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     jobRepository: deps.jobRepository,
     workerRepository: deps.workerRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
+    userRepository: deps.userRepository,
+    sessionRepository: deps.sessionRepository,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerProjectRoutes(app, {
+    projectRepository: deps.projectRepository,
+    executionPlanRepository: deps.executionPlanRepository,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     ...(deps.now ? { now: deps.now } : {})

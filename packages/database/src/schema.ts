@@ -1,10 +1,13 @@
 import { sql } from "drizzle-orm";
-import { check, integer, jsonb, pgTable, text, timestamp, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { check, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type {
   AeStatus,
   JobErrorCode,
   JobStatus,
   McpStatus,
+  PlanStatus,
+  ScenePlanEntry,
+  TemplateManifest,
   UserRole,
   WorkerCapability,
   WorkerStatus
@@ -167,3 +170,63 @@ export const sessions = pgTable("sessions", {
 
 export type SessionRow = typeof sessions.$inferSelect;
 export type NewSessionRow = typeof sessions.$inferInsert;
+
+export const DB_PLAN_STATUSES = ["DRAFT", "APPROVED", "REJECTED"] as const;
+
+/**
+ * The durable anchor for "one project" (Phase 4 / docs/PHASES.md section
+ * 9) - a validated TemplateManifest a dashboard operator has chosen to
+ * plan against. Before this table, a manifest only ever lived transiently
+ * in a job's own result column.
+ */
+export const projects = pgTable("projects", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  templateId: text("template_id").notNull(),
+  sourceProjectSha256: text("source_project_sha256").notNull(),
+  manifest: jsonb("manifest").notNull().$type<TemplateManifest>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export type ProjectRow = typeof projects.$inferSelect;
+export type NewProjectRow = typeof projects.$inferInsert;
+
+/**
+ * Append-only: a content edit always INSERTs a new row (revision + 1),
+ * never UPDATEs one - this is the plan's full revision history for free,
+ * with no separate history table (Phase 4 section 9: "historical
+ * revisions if feasible with current schema"). approve/reject/reopen are
+ * the only in-place UPDATEs, since they change status without changing
+ * content, so incrementing revision for them would be misleading. The
+ * unique (project_id, revision) constraint is the hard backstop against a
+ * concurrent-edit race double-inserting the same next revision (defense
+ * in depth alongside the application-layer baseRevision check).
+ */
+export const executionPlans = pgTable(
+  "execution_plans",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    status: text("status").notNull().default("DRAFT").$type<PlanStatus>(),
+    templateId: text("template_id").notNull(),
+    /** Copied from the owning project at plan-creation time, not re-joined live - CLAUDE.md Safety Rule 8 / Phase 4: a plan is bound to the EXACT source revision it was built for, even if the project's own manifest is later replaced. */
+    sourceProjectSha256: text("source_project_sha256").notNull(),
+    scenePlans: jsonb("scene_plans").notNull().$type<ScenePlanEntry[]>(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("execution_plans_status_check", sql.raw(sqlEnumCheck("status", DB_PLAN_STATUSES))),
+    check("execution_plans_revision_check", sql`${table.revision} > 0`),
+    unique("execution_plans_project_revision_unique").on(table.projectId, table.revision)
+  ]
+);
+
+export type ExecutionPlanRow = typeof executionPlans.$inferSelect;
+export type NewExecutionPlanRow = typeof executionPlans.$inferInsert;

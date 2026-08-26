@@ -1,0 +1,194 @@
+import { describe, expect, it } from "vitest";
+import { SCHEMA_VERSION, type TemplateManifest } from "@dyo/schemas";
+import {
+  ExecutionPlanAlreadyExistsError,
+  ExecutionPlanEditError,
+  ProjectNotFoundError,
+  SourceShaMismatchError,
+  StaleExecutionPlanRevisionError
+} from "../../../errors/app-error.js";
+import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
+import { InMemoryExecutionPlanRepository } from "../test-support/in-memory-execution-plan-repository.js";
+import { createProject } from "../../project/create-project.js";
+import { createExecutionPlan } from "../create-execution-plan.js";
+import { getExecutionPlan } from "../get-execution-plan.js";
+import { updateExecutionPlan } from "../update-execution-plan.js";
+import { approveExecutionPlan } from "../approve-execution-plan.js";
+import { rejectExecutionPlan } from "../reject-execution-plan.js";
+import { reopenExecutionPlan } from "../reopen-execution-plan.js";
+
+const NOW = new Date("2026-08-26T00:00:00.000Z");
+const fixedNow = () => NOW;
+const USER_ID = "11111111-1111-1111-1111-111111111111";
+
+function manifest(sha256 = "a".repeat(64)): TemplateManifest {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    templateId: "tmpl-1",
+    templateName: "tmpl-1",
+    sourceProject: { path: "/copies/test.aep", name: "test.aep", sha256 },
+    afterEffects: { version: "26.3x87" },
+    generatedAt: NOW.toISOString(),
+    compositions: [
+      { compositionId: "comp-1", name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+    ],
+    scenes: [
+      { sceneId: "scene-a", displayName: null, compositionId: "comp-1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 5, placeholders: [] }
+    ],
+    preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+    unknownItems: []
+  };
+}
+
+async function setup() {
+  const projectRepository = new InMemoryProjectRepository();
+  const executionPlanRepository = new InMemoryExecutionPlanRepository();
+  const project = await createProject({ projectRepository, now: fixedNow }, { name: "Test Project", manifest: manifest() });
+  return { projectRepository, executionPlanRepository, project };
+}
+
+describe("execution plan lifecycle", () => {
+  it("creates revision 1 in DRAFT status, bound to the project's source sha256", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    const result = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    expect(result.plan.revision).toBe(1);
+    expect(result.plan.status).toBe("DRAFT");
+    expect(result.plan.sourceProjectSha256).toBe("a".repeat(64));
+    expect(result.plan.scenePlans).toHaveLength(1);
+  });
+
+  it("refuses to create a second plan for the same project - use GET/update instead", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    await expect(createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId)).rejects.toThrow(
+      ExecutionPlanAlreadyExistsError
+    );
+  });
+
+  it("throws ProjectNotFoundError for a nonexistent project", async () => {
+    const { projectRepository, executionPlanRepository } = await setup();
+    await expect(createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, "does-not-exist")).rejects.toThrow(
+      ProjectNotFoundError
+    );
+  });
+
+  it("GET returns the current (highest-revision) plan", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const result = await getExecutionPlan({ executionPlanRepository }, project.projectId);
+    expect(result.plan.revision).toBe(1);
+    expect(result.sceneTable).toHaveLength(1);
+  });
+
+  it("update creates a new revision and rejects a stale baseRevision", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 999,
+        operations: [{ type: "EXCLUDE_SCENE", scenePlanId: "irrelevant" }]
+      })
+    ).rejects.toThrow(StaleExecutionPlanRevisionError);
+
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, "unused").catch(() => null);
+    expect(created).toBeNull(); // sanity: unrelated call still fails normally, not a side effect of the above
+  });
+
+  it("a valid update bumps the revision and applies the edit", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = initial.plan.scenePlans[0]?.id as string;
+
+    const updated = await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
+    });
+    expect(updated.plan.revision).toBe(2);
+    expect(updated.plan.scenePlans[0]?.use).toBe(false);
+  });
+
+  it("rejects an update whose edit operation references an unknown scenePlanId", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 1,
+        operations: [{ type: "EXCLUDE_SCENE", scenePlanId: "does-not-exist" }]
+      })
+    ).rejects.toThrow(ExecutionPlanEditError);
+  });
+
+  it("approve is an in-place status change - revision does not change", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    const approved = await approveExecutionPlan(
+      { executionPlanRepository, projectRepository, now: fixedNow },
+      project.projectId,
+      USER_ID,
+      { baseRevision: 1 }
+    );
+    expect(approved.plan.status).toBe("APPROVED");
+    expect(approved.plan.revision).toBe(1);
+    expect(approved.plan.approvedBy).toBe(USER_ID);
+    expect(approved.plan.approvedAt).toBe(NOW.toISOString());
+  });
+
+  it("refuses to approve when the plan's sourceProjectSha256 no longer matches the project's current manifest", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    // The client re-ran INSPECT_TEMPLATE and the project's manifest was replaced with a different source revision.
+    await projectRepository.updateManifest(project.projectId, manifest("b".repeat(64)), NOW);
+
+    await expect(
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+    ).rejects.toThrow(SourceShaMismatchError);
+  });
+
+  it("an edit after APPROVED resets status to DRAFT on the new revision - never silently stays approved", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = initial.plan.scenePlans[0]?.id as string;
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 });
+
+    const updated = await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
+    });
+    expect(updated.plan.revision).toBe(2);
+    expect(updated.plan.status).toBe("DRAFT");
+    expect(updated.plan.approvedAt).toBeNull();
+    expect(updated.plan.approvedBy).toBeNull();
+  });
+
+  it("reject sets status to REJECTED in place; reopen returns it to DRAFT in place", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    const rejected = await rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 1 });
+    expect(rejected.plan.status).toBe("REJECTED");
+    expect(rejected.plan.revision).toBe(1);
+
+    const reopened = await reopenExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 1 });
+    expect(reopened.plan.status).toBe("DRAFT");
+    expect(reopened.plan.revision).toBe(1);
+  });
+
+  it("stale revision is rejected for approve/reject/reopen too, not just update", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+
+    await expect(
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 2 })
+    ).rejects.toThrow(StaleExecutionPlanRevisionError);
+    await expect(
+      rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 2 })
+    ).rejects.toThrow(StaleExecutionPlanRevisionError);
+    await expect(
+      reopenExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 2 })
+    ).rejects.toThrow(StaleExecutionPlanRevisionError);
+  });
+});
