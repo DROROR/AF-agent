@@ -1,4 +1,4 @@
-import type { JobStatus } from "@dyo/schemas";
+import type { JobStatus, WorkerCapability } from "@dyo/schemas";
 import { canClaimAnotherJob, isJobTerminal } from "../../../domain/job/rules.js";
 import type { Job, JobRepository, JobStatusUpdate, NewJob } from "../../../domain/job/types.js";
 
@@ -115,5 +115,17 @@ export class InMemoryJobRepository implements JobRepository {
       }
     }
     return affected;
+  }
+
+  async countActiveForWorker(workerId: string): Promise<number> {
+    return [...this.rows.values()].filter(
+      (job) => job.workerId === workerId && ACTIVE_STATUSES.includes(job.status)
+    ).length;
+  }
+
+  async hasNonTerminalJobForOperation(workerId: string, operation: WorkerCapability): Promise<boolean> {
+    return [...this.rows.values()].some(
+      (job) => job.workerId === workerId && job.operation === operation && !isJobTerminal(job.status)
+    );
   }
 }

@@ -68,4 +68,8 @@ export interface JobRepository {
   updateStatus(jobId: string, workerId: string, update: JobStatusUpdate, now: Date): Promise<Job | null>;
   /** Fails every non-terminal job belonging to a worker whose heartbeat is stale - recovery for "worker goes offline while running/before claim". Returns affected job IDs. */
   failJobsForStaleWorkers(now: Date, staleAfterMs: number): Promise<string[]>;
+  /** Count of this worker's non-QUEUED, non-terminal jobs (CLAIMED/RUNNING/WAITING_FOR_ACTION) - the same "in flight" definition claimNextForWorker's concurrency gate uses. Used by job dispatch to refuse creating a job past maxConcurrency. */
+  countActiveForWorker(workerId: string): Promise<number>;
+  /** True if this worker already has a non-terminal job (QUEUED or later, up to but excluding SUCCEEDED/FAILED/CANCELLED) for this exact operation - used by job dispatch to refuse a duplicate/double-submit dispatch of the same operation. */
+  hasNonTerminalJobForOperation(workerId: string, operation: WorkerCapability): Promise<boolean>;
 }

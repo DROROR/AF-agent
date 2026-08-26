@@ -57,6 +57,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     jobRepository: deps.jobRepository,
     workerRepository: deps.workerRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
+    userRepository: deps.userRepository,
+    sessionRepository: deps.sessionRepository,
     ...(deps.now ? { now: deps.now } : {})
   });
 

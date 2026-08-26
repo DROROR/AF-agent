@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { jobs, workers, type Database, type JobRow } from "@dyo/database";
-import type { JobErrorCode, JobStatus } from "@dyo/schemas";
+import { TERMINAL_JOB_STATUSES, type JobErrorCode, type JobStatus, type WorkerCapability } from "@dyo/schemas";
 import { isJobTerminal } from "../../domain/job/rules.js";
 import type { Job, JobRepository, JobStatusUpdate, NewJob } from "../../domain/job/types.js";
 
@@ -133,5 +133,24 @@ export class DrizzleJobRepository implements JobRepository {
       )
       .returning({ id: jobs.id });
     return rows.map((row: { id: string }) => row.id);
+  }
+
+  async countActiveForWorker(workerId: string): Promise<number> {
+    const result = await this.db.execute<{ count: number }>(
+      sql`select count(*)::int as count from ${jobs}
+          where ${jobs.workerId} = ${workerId} and ${jobs.status} in ${ACTIVE_JOB_STATUSES}`
+    );
+    return result.rows[0]?.count ?? 0;
+  }
+
+  async hasNonTerminalJobForOperation(workerId: string, operation: WorkerCapability): Promise<boolean> {
+    const result = await this.db.execute<{ id: string }>(
+      sql`select id from ${jobs}
+          where ${jobs.workerId} = ${workerId}
+            and ${jobs.operation} = ${operation}
+            and ${jobs.status} not in ${TERMINAL_JOB_STATUSES}
+          limit 1`
+    );
+    return result.rows.length > 0;
   }
 }

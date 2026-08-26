@@ -10,6 +10,9 @@ function statusForCode(code: ErrorCode): number {
     case "JOB_NOT_FOUND":
       return 404;
     case "CONFLICT":
+    case "WORKER_OFFLINE":
+    case "PRECONDITION_NOT_MET":
+    case "WORKER_BUSY":
       return 409;
     case "RATE_LIMITED":
       return 429;
@@ -78,5 +81,29 @@ export class InvalidCredentialsError extends AppError {
   constructor() {
     super("UNAUTHORIZED", "Invalid email or password");
     this.name = "InvalidCredentialsError";
+  }
+}
+
+/** Job dispatch refused: the target worker has never reported in, or its heartbeat has gone stale - never trust a cached "ONLINE" DB value alone. */
+export class WorkerOfflineError extends AppError {
+  constructor(workerId: string) {
+    super("WORKER_OFFLINE", `Worker ${workerId} is not currently ONLINE (no fresh heartbeat)`);
+    this.name = "WorkerOfflineError";
+  }
+}
+
+/** Job dispatch refused: the worker is ONLINE, but a required live precondition (AE status, MCP status, required capability) is not currently met. */
+export class PreconditionNotMetError extends AppError {
+  constructor(message: string) {
+    super("PRECONDITION_NOT_MET", message);
+    this.name = "PreconditionNotMetError";
+  }
+}
+
+/** Job dispatch refused: the worker is already at its concurrency limit, or already has a live job for the requested operation. */
+export class WorkerBusyError extends AppError {
+  constructor(message: string) {
+    super("WORKER_BUSY", message);
+    this.name = "WorkerBusyError";
   }
 }

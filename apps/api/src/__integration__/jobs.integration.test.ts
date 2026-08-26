@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { registerWorkerResponseSchema } from "@dyo/schemas";
+import { authSessionResponseSchema, registerWorkerResponseSchema } from "@dyo/schemas";
 import { buildApp } from "../app.js";
 import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
 import { DrizzleSessionRepository } from "../infrastructure/db/drizzle-session-repository.js";
@@ -74,10 +74,58 @@ async function registerAndHeartbeatWorker(app: FastifyInstance, maxConcurrency =
   return { workerId, workerToken };
 }
 
+/** POST /api/jobs requires a dashboard session - see routes/jobs.ts. */
+async function signUpAndGetSessionToken(app: FastifyInstance): Promise<string> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/auth/signup",
+    payload: {
+      name: "Test Operator",
+      email: `operator-${Math.random().toString(36).slice(2)}@example.com`,
+      password: "correct-horse",
+      confirmPassword: "correct-horse"
+    }
+  });
+  return authSessionResponseSchema.parse(response.json()).sessionToken;
+}
+
+interface HeartbeatOverrides {
+  aeStatus?: "ONLINE" | "OFFLINE" | "UNKNOWN";
+  mcpStatus?: "ONLINE" | "OFFLINE" | "UNKNOWN";
+  capabilities?: string[];
+}
+
+/** Registers a worker and sends one heartbeat with the given (or fully healthy default) status. */
+async function registerHealthyWorker(app: FastifyInstance, overrides: HeartbeatOverrides = {}) {
+  const registerResponse = await app.inject({
+    method: "POST",
+    url: "/api/workers/register",
+    headers: { authorization: `Bearer ${REGISTRATION_SECRET}` },
+    payload: { name: "Client PC 1", maxConcurrency: 1, capabilities: overrides.capabilities ?? ["INSPECT_TEMPLATE"] }
+  });
+  const { workerId, workerToken } = registerWorkerResponseSchema.parse(registerResponse.json());
+
+  await app.inject({
+    method: "POST",
+    url: `/api/workers/${workerId}/heartbeat`,
+    headers: { authorization: `Bearer ${workerToken}` },
+    payload: {
+      aeStatus: overrides.aeStatus ?? "ONLINE",
+      mcpStatus: overrides.mcpStatus ?? "ONLINE",
+      aeVersion: "26.0",
+      capabilities: overrides.capabilities ?? ["INSPECT_TEMPLATE"]
+    }
+  });
+
+  return { workerId, workerToken };
+}
+
 let harness: Awaited<ReturnType<typeof setup>>;
+let sessionToken: string;
 
 beforeEach(async () => {
   harness = await setup(new Date("2026-01-01T00:00:00.000Z"));
+  sessionToken = await signUpAndGetSessionToken(harness.app);
 });
 
 afterAll(async () => {
@@ -283,5 +331,142 @@ describe("POST /api/workers/:workerId/jobs/:jobId/report", () => {
       payload: { status: "RUNNING" }
     });
     expect(reportResponse.statusCode).toBe(409);
+  });
+});
+
+describe("POST /api/jobs (dispatch)", () => {
+  const validPayload = { templateId: "t1", sourceProjectPath: "/copies/t1.aep" };
+
+  function dispatch(body: Record<string, unknown>, token = sessionToken) {
+    return harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+      payload: body
+    });
+  }
+
+  it("rejects an unauthenticated request", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    // "" (not undefined) - dispatch()'s default parameter only kicks in for
+    // an omitted/undefined argument, so this deliberately sends no
+    // Authorization header rather than falling back to sessionToken.
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload }, "");
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects a malformed request body", async () => {
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE" });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects an unsupported operation", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    const response = await dispatch({ operation: "RENDER", workerId, payload: validPayload });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a nonexistent worker", async () => {
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId: randomUUID(), payload: validPayload });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("WORKER_NOT_FOUND");
+  });
+
+  it("rejects a worker whose heartbeat has gone stale, even though its last known status was ONLINE", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    harness.advanceTime(STALE_AFTER_MS + 1_000);
+
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("WORKER_OFFLINE");
+  });
+
+  it("rejects when AE is not ONLINE", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { aeStatus: "OFFLINE" });
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("PRECONDITION_NOT_MET");
+  });
+
+  it("rejects when MCP is not ONLINE", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { mcpStatus: "OFFLINE" });
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("PRECONDITION_NOT_MET");
+  });
+
+  it("rejects a worker that does not report the INSPECT_TEMPLATE capability", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app, { capabilities: ["CHECK_HEALTH"] });
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("PRECONDITION_NOT_MET");
+  });
+
+  it("rejects a busy worker (already has a live job of the same operation claimed)", async () => {
+    const { workerId, workerToken } = await registerHealthyWorker(harness.app);
+    await harness.jobRepository.create(
+      { id: randomUUID(), workerId, operation: "INSPECT_TEMPLATE", payload: validPayload },
+      new Date("2026-01-01T00:00:00.000Z")
+    );
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    const response = await dispatch({
+      operation: "INSPECT_TEMPLATE",
+      workerId,
+      payload: { templateId: "t2", sourceProjectPath: "/copies/t2.aep" }
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("WORKER_BUSY");
+  });
+
+  it("rejects via the currentJobId/concurrency gate even when the in-flight job is a different operation", async () => {
+    const { workerId, workerToken } = await registerHealthyWorker(harness.app);
+    const otherJob = await harness.jobRepository.create(
+      { id: randomUUID(), workerId, operation: "CHECK_HEALTH", payload: {} },
+      new Date("2026-01-01T00:00:00.000Z")
+    );
+    // Worker self-reports its current job via heartbeat, same as a real worker would.
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/heartbeat`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { aeStatus: "ONLINE", mcpStatus: "ONLINE", currentJobId: otherJob.id }
+    });
+
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("WORKER_BUSY");
+  });
+
+  it("creates exactly one QUEUED job for a fresh, fully healthy worker, and never returns a secret", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    const response = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.status).toBe("QUEUED");
+    expect(body.workerId).toBe(workerId);
+    expect(body.operation).toBe("INSPECT_TEMPLATE");
+    expect(JSON.stringify(body)).not.toMatch(/token/i);
+
+    const persisted = await harness.jobRepository.findById(body.jobId);
+    expect(persisted?.status).toBe("QUEUED");
+  });
+
+  it("rejects a duplicate live INSPECT_TEMPLATE dispatch for the same worker (double-submit protection)", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+
+    const first = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(first.statusCode).toBe(201);
+
+    const second = await dispatch({ operation: "INSPECT_TEMPLATE", workerId, payload: validPayload });
+    expect(second.statusCode).toBe(409);
+    expect(second.json().error.code).toBe("WORKER_BUSY");
   });
 });

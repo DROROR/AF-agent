@@ -12,6 +12,12 @@ export const ERROR_CODES = [
   "JOB_NOT_FOUND",
   "CONFLICT",
   "RATE_LIMITED",
+  /** Worker is not currently ONLINE (never reported in, or heartbeat has gone stale) - job dispatch refuses rather than queuing against a worker that may not be there. */
+  "WORKER_OFFLINE",
+  /** Worker is ONLINE but a required safety precondition (AE/MCP status, required capability) isn't met right now. */
+  "PRECONDITION_NOT_MET",
+  /** Worker is already at its concurrency limit, or already has a live job for the requested operation - dispatch refuses rather than double-queuing. */
+  "WORKER_BUSY",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
