@@ -11,6 +11,7 @@ export class InMemoryProjectRepository implements ProjectRepository {
       templateId: project.manifest.templateId,
       sourceProjectSha256: project.manifest.sourceProject.sha256,
       manifest: project.manifest,
+      brandInputs: null,
       createdAt: now,
       updatedAt: now
     };
@@ -36,6 +37,14 @@ export class InMemoryProjectRepository implements ProjectRepository {
       manifest,
       updatedAt: now
     };
+    this.rows.set(id, updated);
+    return updated;
+  }
+
+  async updateBrandInputs(id: string, brandInputs: Project["brandInputs"], now: Date): Promise<Project | null> {
+    const existing = this.rows.get(id);
+    if (!existing) return null;
+    const updated: Project = { ...existing, brandInputs, updatedAt: now };
     this.rows.set(id, updated);
     return updated;
   }

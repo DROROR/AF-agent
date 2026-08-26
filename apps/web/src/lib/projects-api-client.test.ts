@@ -12,7 +12,7 @@ function stubFetch(status: number, body: unknown): void {
 
 describe("fetchProjectList", () => {
   it("returns the real project list on a well-formed 200 response", async () => {
-    stubFetch(200, { projects: [{ projectId: "11111111-1111-1111-1111-111111111111", name: "x", templateId: "t", sourceProjectSha256: "a".repeat(64), createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }] });
+    stubFetch(200, { projects: [{ projectId: "11111111-1111-1111-1111-111111111111", name: "x", templateId: "t", sourceProjectSha256: "a".repeat(64), brandInputs: { logoAssetId: null, brandColors: [], textInstructions: null }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }] });
     const result = await fetchProjectList();
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -54,6 +54,7 @@ describe("createProject", () => {
       name: "Diagnostic Disposable Project",
       templateId: "diag-tmpl",
       sourceProjectSha256: "b".repeat(64),
+      brandInputs: { logoAssetId: null, brandColors: [], textInstructions: null },
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
     });

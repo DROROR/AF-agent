@@ -6,16 +6,19 @@ import {
   createProjectRequestSchema,
   rejectExecutionPlanRequestSchema,
   reopenExecutionPlanRequestSchema,
-  updateExecutionPlanRequestSchema
+  updateExecutionPlanRequestSchema,
+  updateProjectBrandInputsRequestSchema
 } from "@dyo/schemas";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../domain/project/types.js";
+import type { AssetRepository } from "../domain/asset/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
 import { createProject } from "../application/project/create-project.js";
 import { getProject } from "../application/project/get-project.js";
 import { listProjects } from "../application/project/list-projects.js";
+import { updateBrandInputs } from "../application/project/update-brand-inputs.js";
 import { createExecutionPlan } from "../application/execution-plan/create-execution-plan.js";
 import { getExecutionPlan } from "../application/execution-plan/get-execution-plan.js";
 import { listExecutionPlanRevisions } from "../application/execution-plan/list-execution-plan-revisions.js";
@@ -27,6 +30,7 @@ import { reopenExecutionPlan } from "../application/execution-plan/reopen-execut
 export interface ProjectsRouteDeps {
   projectRepository: ProjectRepository;
   executionPlanRepository: ExecutionPlanRepository;
+  assetRepository: AssetRepository;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   now?: () => Date;
@@ -71,6 +75,15 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     reply.send(result);
   });
 
+  /** Replaces the client's whole brand-inputs object - input only, never DYO's own permanent brand rules (see project.ts's doc comment) and never executed in After Effects by this phase. */
+  app.patch("/api/projects/:projectId/brand-inputs", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId } = projectIdParamsSchema.parse(request.params);
+    const body = updateProjectBrandInputsRequestSchema.parse(request.body);
+    const result = await updateBrandInputs({ projectRepository: deps.projectRepository, now }, projectId, body);
+    reply.send(result);
+  });
+
   app.post("/api/projects/:projectId/execution-plan", async (request, reply) => {
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId } = projectIdParamsSchema.parse(request.params);
@@ -101,7 +114,11 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const body = updateExecutionPlanRequestSchema.parse(request.body);
-    const result = await updateExecutionPlan({ executionPlanRepository: deps.executionPlanRepository, now }, projectId, body);
+    const result = await updateExecutionPlan(
+      { executionPlanRepository: deps.executionPlanRepository, assetRepository: deps.assetRepository, now },
+      projectId,
+      body
+    );
     reply.send(result);
   });
 

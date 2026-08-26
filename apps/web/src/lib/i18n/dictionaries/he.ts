@@ -342,6 +342,8 @@ export const he: Dictionary = {
     tabs: {
       overview: "סקירה כללית",
       scenes: "מיפוי סצנות",
+      assets: "נכסים",
+      workMap: "מפת עבודה",
       revisions: "גרסאות"
     },
     header: {
@@ -395,11 +397,77 @@ export const he: Dictionary = {
       title: "עריכת מיפוי סצנה",
       textLabel: "טקסט",
       textHint: "השאירו ריק כדי לנקות את הטקסט הנוכחי.",
+      assetLabel: "נכס",
+      assetUnmappedOption: "לא ממופה",
+      assetHint: "ניתן לבחור רק נכסים שכבר הועלו לקטלוג הנכסים של הפרויקט הזה.",
       assetTimestampLabel: "חותמת זמן בנכס (שניות)",
       finalDurationLabel: "משך סופי (שניות)",
       instructionsLabel: "הנחיות / הערות",
       save: "שמירת שינויים",
       cancel: "ביטול"
+    }
+  },
+  assetsTab: {
+    title: "קטלוג נכסים",
+    description: "תמונות, סרטונים, לוגואים, קבצי אודיו ומסמכים שסופקו על ידי הלקוח עבור פרויקט זה.",
+    uploadTitle: "העלאת נכס",
+    fileLabel: "קובץ",
+    mediaKindLabel: "דריסת סוג",
+    mediaKindAuto: "זיהוי אוטומטי",
+    mediaKindLogoHint: "תקף רק עבור קובץ תמונה - מסמן אותו כלוגו הלקוח/החברה.",
+    uploadAction: "העלאה",
+    uploading: "מעלה…",
+    uploadFailedTitle: "לא ניתן היה להעלות את הקובץ הזה",
+    emptyTitle: "לא הועלו נכסים",
+    emptyDescription: "העלו כאן את התמונות, הסרטונים, הלוגואים, קבצי האודיו או המסמכים של הלקוח.",
+    labelLabel: "תווית",
+    notesLabel: "הערות",
+    labelPlaceholder: "לדוגמה: לוגו הלקוח",
+    notesPlaceholder: "הערות אופציונליות לנכס זה",
+    saveDetails: "שמירה",
+    savingDetails: "שומר…",
+    deleteAction: "מחיקה",
+    deleteConfirmTitle: "למחוק את הנכס הזה?",
+    deleteConfirmDescription: (filename) => `הקובץ "${filename}" יימחק לצמיתות. לא ניתן לבטל פעולה זו.`,
+    deleteConfirmAction: "מחיקה לצמיתות",
+    deleteCancelAction: "ביטול",
+    deleteFailedTitle: "לא ניתן היה למחוק את הנכס הזה",
+    mediaKind: {
+      IMAGE: "תמונה",
+      VIDEO: "סרטון",
+      LOGO: "לוגו",
+      AUDIO: "אודיו",
+      DOCUMENT: "מסמך",
+      OTHER: "אחר"
+    },
+    sizeLabel: "גודל",
+    uploadedLabel: "הועלה",
+    shaLabel: "SHA-256"
+  },
+  workMapTab: {
+    title: "מפת עבודה",
+    description: "כוונת הלקוח לגבי כל סצנה - מה שהם רוצים שישמש, לא עדיין מה שהתוכנית תבצע בפועל.",
+    intro:
+      "זה מתאר את מה שהלקוח רוצה (נכס רצוי, טקסט, תזמון, הנחיות) - הדבר לעולם אינו מוחל אוטומטית על תוכנית הביצוע. השתמשו במיפוי סצנות כדי להפוך רשומה למיפוי אמיתי ומאושר.",
+    addRow: "הוספת שורה",
+    removeRow: "הסרה",
+    save: "שמירת מפת העבודה",
+    saving: "שומר…",
+    saveFailedTitle: "לא ניתן היה לשמור את מפת העבודה",
+    emptyTitle: "אין עדיין רשומות במפת העבודה",
+    emptyDescription: "הוסיפו שורה עבור כל סצנה שהלקוח תיאר, גם לפני שהתבנית נבדקה.",
+    fields: {
+      sourceReference: "סימוכין הסצנה של הלקוח",
+      sourceCompositionId: "מזהה הקומפוזיציה המותאם",
+      desiredAssetId: "מזהה הנכס הרצוי",
+      desiredText: "הטקסט הרצוי",
+      assetTimestampSeconds: "חותמת זמן בנכס (שניות)",
+      desiredDurationSeconds: "משך רצוי (שניות)",
+      instructions: "הנחיות"
+    },
+    fieldHints: {
+      desiredAssetId: "מזהה נכס אמיתי מקטלוג הנכסים של הפרויקט - לא מאומת כאן, רק כאשר הוא ממופה בפועל במיפוי סצנות.",
+      sourceCompositionId: "השאירו ריק אם התבנית טרם נבדקה."
     }
   }
 };

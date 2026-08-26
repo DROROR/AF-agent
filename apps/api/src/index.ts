@@ -8,6 +8,9 @@ import { DrizzleUserRepository } from "./infrastructure/db/drizzle-user-reposito
 import { DrizzleWorkerRepository } from "./infrastructure/db/drizzle-worker-repository.js";
 import { DrizzleProjectRepository } from "./infrastructure/db/drizzle-project-repository.js";
 import { DrizzleExecutionPlanRepository } from "./infrastructure/db/drizzle-execution-plan-repository.js";
+import { DrizzleAssetRepository } from "./infrastructure/db/drizzle-asset-repository.js";
+import { DrizzleWorkMapRepository } from "./infrastructure/db/drizzle-work-map-repository.js";
+import { LocalFilesystemAssetStorage } from "./infrastructure/storage/local-filesystem-asset-storage.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -24,6 +27,9 @@ async function main(): Promise<void> {
     sessionRepository: new DrizzleSessionRepository(db),
     projectRepository: new DrizzleProjectRepository(db),
     executionPlanRepository: new DrizzleExecutionPlanRepository(db),
+    assetRepository: new DrizzleAssetRepository(db),
+    assetStorage: new LocalFilesystemAssetStorage(env.ASSET_STORAGE_ROOT),
+    workMapRepository: new DrizzleWorkMapRepository(db),
     checkDatabaseHealth: async () => {
       try {
         await pool.query("SELECT 1");

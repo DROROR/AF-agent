@@ -12,6 +12,12 @@ export const ERROR_CODES = [
   "JOB_NOT_FOUND",
   "PROJECT_NOT_FOUND",
   "EXECUTION_PLAN_NOT_FOUND",
+  "ASSET_NOT_FOUND",
+  "WORK_MAP_NOT_FOUND",
+  /** Upload's real MIME type is not on the allowlist, or an explicit requested mediaKind doesn't match the real file. */
+  "UNSUPPORTED_MEDIA_TYPE",
+  /** Upload exceeds the configured maximum byte size. */
+  "PAYLOAD_TOO_LARGE",
   "CONFLICT",
   "RATE_LIMITED",
   /** Worker is not currently ONLINE (never reported in, or heartbeat has gone stale) - job dispatch refuses rather than queuing against a worker that may not be there. */

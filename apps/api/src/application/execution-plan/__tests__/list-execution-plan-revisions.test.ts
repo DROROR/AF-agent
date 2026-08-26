@@ -3,6 +3,7 @@ import { SCHEMA_VERSION, type TemplateManifest } from "@dyo/schemas";
 import { ExecutionPlanNotFoundError } from "../../../errors/app-error.js";
 import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
 import { InMemoryExecutionPlanRepository } from "../test-support/in-memory-execution-plan-repository.js";
+import { InMemoryAssetRepository } from "../../asset/test-support/in-memory-asset-repository.js";
 import { createProject } from "../../project/create-project.js";
 import { createExecutionPlan } from "../create-execution-plan.js";
 import { updateExecutionPlan } from "../update-execution-plan.js";
@@ -61,8 +62,9 @@ function manifest(): TemplateManifest {
 async function setup() {
   const projectRepository = new InMemoryProjectRepository();
   const executionPlanRepository = new InMemoryExecutionPlanRepository();
+  const assetRepository = new InMemoryAssetRepository();
   const project = await createProject({ projectRepository, now: fixedNow }, { name: "Test Project", manifest: manifest() });
-  return { projectRepository, executionPlanRepository, project };
+  return { projectRepository, executionPlanRepository, assetRepository, project };
 }
 
 describe("listExecutionPlanRevisions", () => {
@@ -83,10 +85,10 @@ describe("listExecutionPlanRevisions", () => {
   });
 
   it("returns every prior revision (never just the latest), newest first, with only the latest marked current", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const scenePlanId = created.plan.scenePlans[0]!.id;
-    await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+    await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
       operations: [{ type: "SET_INSTRUCTIONS", scenePlanId, instructions: "x" }]
     });

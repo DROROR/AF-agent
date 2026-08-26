@@ -1840,3 +1840,120 @@ thead th {
   gap: var(--space-3);
   margin-top: var(--space-2);
 }
+
+/* ==========================================================================
+   Asset Catalog
+   ========================================================================== */
+
+.asset-upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 28rem;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.asset-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 0.5rem);
+  padding: var(--space-3);
+}
+
+.asset-card__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 8rem;
+  background: var(--color-surface-sunken, var(--color-surface));
+  border-radius: var(--radius-sm, 0.375rem);
+  overflow: hidden;
+}
+
+.asset-card__thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.asset-card__kind-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.asset-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.asset-card__filename {
+  font-weight: 600;
+  font-size: 0.88rem;
+  margin: 0;
+  word-break: break-word;
+}
+
+.asset-card__facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 0.25rem);
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.asset-card__facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.asset-card__facts dt {
+  color: var(--color-text-muted);
+}
+
+.asset-card__facts dd {
+  margin: 0;
+}
+
+.asset-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ==========================================================================
+   Work Map
+   ========================================================================== */
+
+.work-map-intro {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.work-map-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.work-map-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 0.5rem);
+  padding: var(--space-4);
+}

@@ -3,7 +3,8 @@ import { loadEnv } from "./env.js";
 
 const BASE = {
   DATABASE_URL: "postgresql://user:pass@localhost:5432/db",
-  WORKER_REGISTRATION_SECRET: "a".repeat(16)
+  WORKER_REGISTRATION_SECRET: "a".repeat(16),
+  ASSET_STORAGE_ROOT: "/tmp/dyo-test-assets"
 };
 
 describe("loadEnv - NODE_ENV / ALLOW_UNMANAGED_PRODUCTION_START", () => {

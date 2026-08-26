@@ -15,3 +15,5 @@ export * from "./ai-suggestion.js";
 export * from "./execute-scene-edit.js";
 export * from "./scene-evidence.js";
 export * from "./execution-plan-readiness.js";
+export * from "./asset.js";
+export * from "./work-map.js";

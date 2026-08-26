@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION, type TemplateManifest } from "@dyo/schemas";
 import {
+  AssetCrossProjectAccessError,
+  AssetNotFoundError,
   ExecutionPlanAlreadyExistsError,
   ExecutionPlanEditError,
   PreconditionNotMetError,
@@ -10,6 +12,7 @@ import {
 } from "../../../errors/app-error.js";
 import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
 import { InMemoryExecutionPlanRepository } from "../test-support/in-memory-execution-plan-repository.js";
+import { InMemoryAssetRepository } from "../../asset/test-support/in-memory-asset-repository.js";
 import { createProject } from "../../project/create-project.js";
 import { createExecutionPlan } from "../create-execution-plan.js";
 import { getExecutionPlan } from "../get-execution-plan.js";
@@ -79,8 +82,9 @@ function unresolvedManifest(sha256 = "a".repeat(64)): TemplateManifest {
 async function setup(manifestForProject: TemplateManifest = manifest()) {
   const projectRepository = new InMemoryProjectRepository();
   const executionPlanRepository = new InMemoryExecutionPlanRepository();
+  const assetRepository = new InMemoryAssetRepository();
   const project = await createProject({ projectRepository, now: fixedNow }, { name: "Test Project", manifest: manifestForProject });
-  return { projectRepository, executionPlanRepository, project };
+  return { projectRepository, executionPlanRepository, assetRepository, project };
 }
 
 describe("execution plan lifecycle", () => {
@@ -117,11 +121,11 @@ describe("execution plan lifecycle", () => {
   });
 
   it("update creates a new revision and rejects a stale baseRevision", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     await expect(
-      updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+      updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
         baseRevision: 999,
         operations: [{ type: "EXCLUDE_SCENE", scenePlanId: "irrelevant" }]
       })
@@ -132,11 +136,11 @@ describe("execution plan lifecycle", () => {
   });
 
   it("a valid update bumps the revision and applies the edit", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = initial.plan.scenePlans[0]?.id as string;
 
-    const updated = await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
       operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
     });
@@ -145,11 +149,11 @@ describe("execution plan lifecycle", () => {
   });
 
   it("rejects an update whose edit operation references an unknown scenePlanId", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     await expect(
-      updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+      updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
         baseRevision: 1,
         operations: [{ type: "EXCLUDE_SCENE", scenePlanId: "does-not-exist" }]
       })
@@ -185,12 +189,12 @@ describe("execution plan lifecycle", () => {
   });
 
   it("an edit after APPROVED resets status to DRAFT on the new revision - never silently stays approved", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = initial.plan.scenePlans[0]?.id as string;
     await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 });
 
-    const updated = await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
       operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
     });
@@ -248,12 +252,12 @@ describe("execution plan lifecycle", () => {
   });
 
   it("does not count an excluded scene's unresolved reason against approval readiness", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup(unresolvedManifest());
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup(unresolvedManifest());
     const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = created.plan.scenePlans[0]?.id as string;
 
     // Excluding the one unresolved scene means nothing marked for use is unresolved anymore.
-    const updated = await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
       operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
     });
@@ -289,10 +293,10 @@ describe("execution plan lifecycle", () => {
   });
 
   it("never mutates a prior revision's own row when approving the current one", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = created.plan.scenePlans[0]?.id as string;
-    await updateExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, {
+    await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
       operations: [{ type: "SET_INSTRUCTIONS", scenePlanId: sceneId, instructions: "revision 1 note" }]
     });
@@ -304,5 +308,87 @@ describe("execution plan lifecycle", () => {
     expect(revisionOne?.status).toBe("DRAFT");
     expect(revisionOne?.approvedAt).toBeNull();
     expect(revisionOne?.scenePlans[0]?.instructions).toBeNull();
+  });
+
+  it("MAP_ASSET succeeds for a real asset that belongs to this exact project", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const scenePlanId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
+    const asset = await assetRepository.create(
+      {
+        id: "11111111-1111-1111-1111-111111111112",
+        projectId: project.projectId,
+        originalFilename: "logo.png",
+        storageKey: `${project.projectId}/asset.png`,
+        mediaKind: "IMAGE",
+        mimeType: "image/png",
+        byteSize: 10,
+        sha256: "a".repeat(64),
+        width: null,
+        height: null,
+        durationSeconds: null,
+        label: null,
+        notes: null
+      },
+      NOW
+    );
+
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "MAP_ASSET", scenePlanId, mappingId, selectedAssetId: asset.id, selectedAssetType: "image" }]
+    });
+    expect(updated.plan.scenePlans[0]?.mappings[0]?.selectedAssetId).toBe(asset.id);
+  });
+
+  it("MAP_ASSET rejects an asset that belongs to a DIFFERENT project - never confirms it exists elsewhere", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const scenePlanId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
+    const asset = await assetRepository.create(
+      {
+        id: "11111111-1111-1111-1111-111111111113",
+        projectId: "22222222-2222-2222-2222-222222222222",
+        originalFilename: "logo.png",
+        storageKey: "22222222-2222-2222-2222-222222222222/asset.png",
+        mediaKind: "IMAGE",
+        mimeType: "image/png",
+        byteSize: 10,
+        sha256: "a".repeat(64),
+        width: null,
+        height: null,
+        durationSeconds: null,
+        label: null,
+        notes: null
+      },
+      NOW
+    );
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 1,
+        operations: [{ type: "MAP_ASSET", scenePlanId, mappingId, selectedAssetId: asset.id, selectedAssetType: "image" }]
+      })
+    ).rejects.toThrow(AssetCrossProjectAccessError);
+
+    // Refused before anything is applied - the plan is untouched.
+    const stillDraft = await getExecutionPlan({ executionPlanRepository }, project.projectId);
+    expect(stillDraft.plan.revision).toBe(1);
+    expect(stillDraft.plan.scenePlans[0]?.mappings[0]?.selectedAssetId).toBeNull();
+  });
+
+  it("MAP_ASSET rejects an asset id that does not exist at all", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const scenePlanId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 1,
+        operations: [{ type: "MAP_ASSET", scenePlanId, mappingId, selectedAssetId: "does-not-exist", selectedAssetType: "image" }]
+      })
+    ).rejects.toThrow(AssetNotFoundError);
   });
 });

@@ -1,4 +1,4 @@
-import type { TemplateManifest } from "@dyo/schemas";
+import type { ProjectBrandInputs, TemplateManifest } from "@dyo/schemas";
 
 export interface Project {
   id: string;
@@ -6,6 +6,8 @@ export interface Project {
   templateId: string;
   sourceProjectSha256: string;
   manifest: TemplateManifest;
+  /** Null until a human sets it - the application layer maps this to DEFAULT_BRAND_INPUTS at the DTO boundary rather than every repository having to know that default. */
+  brandInputs: ProjectBrandInputs | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -34,4 +36,6 @@ export interface ProjectRepository {
    * whatever the project's CURRENT manifest says at approval time.
    */
   updateManifest(id: string, manifest: Project["manifest"], now: Date): Promise<Project | null>;
+  /** Replaces the whole brand-inputs object in place - never revisioned (this is small, single-value project configuration, not a plan/work-map history). */
+  updateBrandInputs(id: string, brandInputs: ProjectBrandInputs, now: Date): Promise<Project | null>;
 }

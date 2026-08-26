@@ -10,12 +10,18 @@ function statusForCode(code: ErrorCode): number {
     case "JOB_NOT_FOUND":
     case "PROJECT_NOT_FOUND":
     case "EXECUTION_PLAN_NOT_FOUND":
+    case "ASSET_NOT_FOUND":
+    case "WORK_MAP_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
     case "PRECONDITION_NOT_MET":
     case "WORKER_BUSY":
       return 409;
+    case "PAYLOAD_TOO_LARGE":
+      return 413;
+    case "UNSUPPORTED_MEDIA_TYPE":
+      return 415;
     case "RATE_LIMITED":
       return 429;
     case "INTERNAL_ERROR":
@@ -153,5 +159,67 @@ export class SourceShaMismatchError extends AppError {
   constructor() {
     super("CONFLICT", "This plan's source project SHA256 no longer matches the project's current manifest - it cannot be approved");
     this.name = "SourceShaMismatchError";
+  }
+}
+
+export class AssetNotFoundError extends AppError {
+  constructor(assetId: string) {
+    super("ASSET_NOT_FOUND", `Asset ${assetId} was not found`);
+    this.name = "AssetNotFoundError";
+  }
+}
+
+/** An asset exists, but not in the project the request named - never treated the same as "not found at all" in logs/tests, even though both return 404 to the client (never confirm to a caller which project an asset they don't own belongs to). */
+export class AssetCrossProjectAccessError extends AppError {
+  constructor(assetId: string, projectId: string) {
+    super("ASSET_NOT_FOUND", `Asset ${assetId} was not found in project ${projectId}`);
+    this.name = "AssetCrossProjectAccessError";
+  }
+}
+
+/**
+ * Delete refused: this asset is still referenced by `selectedAssetId` on
+ * a mapping in the project's CURRENT execution plan revision. Rather
+ * than silently deleting the file (leaving a dangling reference an
+ * operator would only discover later, in the scene table) or silently
+ * reaching into the execution plan to clear the mapping on the asset's
+ * own behalf (a surprising cross-domain side effect), this refuses the
+ * delete and tells the operator to unmap it first (CLEAR_ASSET) - see
+ * delete-asset.ts's own doc comment for why this specific tradeoff was
+ * chosen.
+ */
+export class AssetInUseError extends AppError {
+  constructor(assetId: string) {
+    super("CONFLICT", `Asset ${assetId} is still mapped to a scene in the current execution plan - unmap it (CLEAR_ASSET) before deleting`);
+    this.name = "AssetInUseError";
+  }
+}
+
+export class UnsupportedMediaTypeError extends AppError {
+  constructor(reason: string) {
+    super("UNSUPPORTED_MEDIA_TYPE", reason);
+    this.name = "UnsupportedMediaTypeError";
+  }
+}
+
+export class PayloadTooLargeError extends AppError {
+  constructor(maxBytes: number) {
+    super("PAYLOAD_TOO_LARGE", `Upload exceeds the maximum allowed size of ${maxBytes} bytes`);
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+export class WorkMapNotFoundError extends AppError {
+  constructor(projectId: string) {
+    super("WORK_MAP_NOT_FOUND", `No work map exists yet for project ${projectId}`);
+    this.name = "WorkMapNotFoundError";
+  }
+}
+
+/** The caller's baseRevision no longer matches the work map's current revision - same optimistic-concurrency protection as StaleExecutionPlanRevisionError. */
+export class StaleWorkMapRevisionError extends AppError {
+  constructor(expected: number, actual: number) {
+    super("CONFLICT", `Expected revision ${expected}, but the current work map revision is ${actual} - reload and retry`);
+    this.name = "StaleWorkMapRevisionError";
   }
 }

@@ -9,6 +9,7 @@ function toDomain(row: ProjectRow): Project {
     templateId: row.templateId,
     sourceProjectSha256: row.sourceProjectSha256,
     manifest: row.manifest,
+    brandInputs: row.brandInputs ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -29,6 +30,7 @@ export class DrizzleProjectRepository implements ProjectRepository {
         templateId: project.manifest.templateId,
         sourceProjectSha256: project.manifest.sourceProject.sha256,
         manifest: project.manifest,
+        brandInputs: null,
         createdAt: now,
         updatedAt: now
       })
@@ -60,6 +62,11 @@ export class DrizzleProjectRepository implements ProjectRepository {
       })
       .where(eq(projects.id, id))
       .returning();
+    return row ? toDomain(row) : null;
+  }
+
+  async updateBrandInputs(id: string, brandInputs: Project["brandInputs"], now: Date): Promise<Project | null> {
+    const [row] = await this.db.update(projects).set({ brandInputs, updatedAt: now }).where(eq(projects.id, id)).returning();
     return row ? toDomain(row) : null;
   }
 }

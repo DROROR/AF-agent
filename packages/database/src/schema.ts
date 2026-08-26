@@ -1,16 +1,19 @@
 import { sql } from "drizzle-orm";
-import { check, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { check, doublePrecision, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type {
   AeStatus,
   JobErrorCode,
   JobStatus,
   McpStatus,
+  MediaKind,
   PlanStatus,
+  ProjectBrandInputs,
   ScenePlanEntry,
   TemplateManifest,
   UserRole,
   WorkerCapability,
-  WorkerStatus
+  WorkerStatus,
+  WorkMapEntry
 } from "@dyo/schemas";
 
 const sqlEnumCheck = (column: string, values: readonly string[]): string =>
@@ -173,6 +176,7 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type NewSessionRow = typeof sessions.$inferInsert;
 
 export const DB_PLAN_STATUSES = ["DRAFT", "APPROVED", "REJECTED"] as const;
+export const DB_MEDIA_KINDS = ["IMAGE", "VIDEO", "LOGO", "AUDIO", "DOCUMENT", "OTHER"] as const;
 
 /**
  * The durable anchor for "one project" (Phase 4 / docs/PHASES.md section
@@ -186,6 +190,8 @@ export const projects = pgTable("projects", {
   templateId: text("template_id").notNull(),
   sourceProjectSha256: text("source_project_sha256").notNull(),
   manifest: jsonb("manifest").notNull().$type<TemplateManifest>(),
+  /** Client's own brand inputs (logo asset reference, colors, text instructions) - null for a project that hasn't set any yet; the application layer maps null to DEFAULT_BRAND_INPUTS rather than requiring a DB-level jsonb default. Never DYO's own permanent brand rules (see project.ts's own doc comment). */
+  brandInputs: jsonb("brand_inputs").$type<ProjectBrandInputs>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
@@ -231,3 +237,71 @@ export const executionPlans = pgTable(
 
 export type ExecutionPlanRow = typeof executionPlans.$inferSelect;
 export type NewExecutionPlanRow = typeof executionPlans.$inferInsert;
+
+/**
+ * Real Asset Catalog (asset-workmap-intake phase). `storageKey` is an
+ * opaque, server-generated identifier into AssetStorage - never the
+ * original filename, never a filesystem path exposed to the browser.
+ * `sha256`/`byteSize` are always computed server-side from the actual
+ * written bytes, never trusted from the client. Deleting a project
+ * cascades to its assets (their storage files must be cleaned up by the
+ * application layer BEFORE the DB delete, since a DB cascade cannot also
+ * delete a file on disk - see delete-asset.ts).
+ */
+export const assets = pgTable(
+  "assets",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    originalFilename: text("original_filename").notNull(),
+    storageKey: text("storage_key").notNull(),
+    mediaKind: text("media_kind").notNull().$type<MediaKind>(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sha256: text("sha256").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    durationSeconds: doublePrecision("duration_seconds"),
+    label: text("label"),
+    notes: text("notes"),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("assets_media_kind_check", sql.raw(sqlEnumCheck("media_kind", DB_MEDIA_KINDS))),
+    check("assets_byte_size_check", sql`${table.byteSize} >= 0`),
+    unique("assets_storage_key_unique").on(table.storageKey)
+  ]
+);
+export type AssetRow = typeof assets.$inferSelect;
+export type NewAssetRow = typeof assets.$inferInsert;
+
+/**
+ * Work Map - real, structured client/user INTENT for a project (never a
+ * machine-observed source fact - see work-map.ts's own doc comment).
+ * Append-only per content edit, same pattern as execution_plans: a PUT
+ * always inserts a new revision, optimistic-concurrency-checked via
+ * baseRevision at the application layer, backstopped here by the unique
+ * (project_id, revision) constraint.
+ */
+export const projectWorkMaps = pgTable(
+  "project_work_maps",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    entries: jsonb("entries").notNull().$type<WorkMapEntry[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("project_work_maps_revision_check", sql`${table.revision} > 0`),
+    unique("project_work_maps_project_revision_unique").on(table.projectId, table.revision)
+  ]
+);
+export type ProjectWorkMapRow = typeof projectWorkMaps.$inferSelect;
+export type NewProjectWorkMapRow = typeof projectWorkMaps.$inferInsert;

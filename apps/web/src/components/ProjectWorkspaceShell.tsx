@@ -12,13 +12,15 @@ import { useLocale } from "./LocaleProvider";
 
 interface TabDef {
   href: string;
-  labelKey: "overview" | "scenes" | "revisions";
+  labelKey: "overview" | "scenes" | "assets" | "workMap" | "revisions";
 }
 
 function tabsFor(projectId: string): TabDef[] {
   return [
     { href: `/projects/${projectId}`, labelKey: "overview" },
     { href: `/projects/${projectId}/scenes`, labelKey: "scenes" },
+    { href: `/projects/${projectId}/assets`, labelKey: "assets" },
+    { href: `/projects/${projectId}/work-map`, labelKey: "workMap" },
     { href: `/projects/${projectId}/revisions`, labelKey: "revisions" }
   ];
 }

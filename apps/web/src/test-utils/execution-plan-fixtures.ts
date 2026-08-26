@@ -30,6 +30,7 @@ export function projectDtoFixture() {
     name: "White App Promo",
     templateId: "tmpl-1",
     sourceProjectSha256: SOURCE_SHA,
+    brandInputs: { logoAssetId: null, brandColors: [], textInstructions: null },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -93,6 +94,53 @@ export function sceneTableRowFixture(overrides: Record<string, unknown> = {}) {
     notes: null,
     instructions: null,
     unresolvedReasons: ["no confident structural classification"],
+    ...overrides
+  };
+}
+
+export function assetFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "asset-1",
+    projectId: PROJECT_ID,
+    originalFilename: "logo.png",
+    storageKey: `${PROJECT_ID}/asset-1.png`,
+    mediaKind: "IMAGE",
+    mimeType: "image/png",
+    byteSize: 2048,
+    sha256: "b".repeat(64),
+    width: null,
+    height: null,
+    durationSeconds: null,
+    label: null,
+    notes: null,
+    uploadedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+export function workMapEntryFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "wm-entry-1",
+    sourceCompositionId: null,
+    sourceReference: "Scene 1",
+    desiredAssetId: null,
+    desiredText: "Hello world",
+    assetTimestampSeconds: null,
+    desiredDurationSeconds: null,
+    instructions: null,
+    ...overrides
+  };
+}
+
+export function workMapFixture(overrides: Record<string, unknown> = {}, entries = [workMapEntryFixture()]) {
+  return {
+    id: "wm-1",
+    projectId: PROJECT_ID,
+    revision: 1,
+    entries,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     ...overrides
   };
 }

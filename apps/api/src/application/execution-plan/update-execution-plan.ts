@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { ExecutionPlanResponse, UpdateExecutionPlanRequest } from "@dyo/schemas";
 import { ExecutionPlanEditError, ExecutionPlanNotFoundError, StaleExecutionPlanRevisionError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
+import type { AssetRepository } from "../../domain/asset/types.js";
+import { findOwnedAsset } from "../asset/find-owned-asset.js";
 import { applyExecutionPlanEdit } from "./apply-execution-plan-edit.js";
 import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
 
 export interface UpdateExecutionPlanDeps {
   executionPlanRepository: ExecutionPlanRepository;
+  assetRepository: AssetRepository;
   now: () => Date;
 }
 
@@ -17,6 +20,12 @@ export interface UpdateExecutionPlanDeps {
  * the new revision, even if the plan was APPROVED/REJECTED before this
  * edit - Phase 4's own hard rule: "Do not allow an edited plan to remain
  * silently APPROVED."
+ *
+ * Every MAP_ASSET operation's selectedAssetId is verified against the
+ * real Asset Catalog BEFORE any operation is applied - it must exist AND
+ * belong to this exact project (asset-workmap-intake phase requirement:
+ * "no arbitrary asset IDs, no cross-project assets"). A bad reference
+ * fails the whole update; nothing is partially applied.
  */
 export async function updateExecutionPlan(
   deps: UpdateExecutionPlanDeps,
@@ -29,6 +38,12 @@ export async function updateExecutionPlan(
   }
   if (current.revision !== request.baseRevision) {
     throw new StaleExecutionPlanRevisionError(request.baseRevision, current.revision);
+  }
+
+  for (const operation of request.operations) {
+    if (operation.type === "MAP_ASSET") {
+      await findOwnedAsset(deps.assetRepository, projectId, operation.selectedAssetId);
+    }
   }
 
   let scenePlans = current.scenePlans;

@@ -350,6 +350,8 @@ export const en = {
     tabs: {
       overview: "Overview",
       scenes: "Scene Mapping",
+      assets: "Assets",
+      workMap: "Work Map",
       revisions: "Revisions"
     },
     header: {
@@ -403,11 +405,77 @@ export const en = {
       title: "Edit scene mapping",
       textLabel: "Text",
       textHint: "Leave empty to clear the current text.",
+      assetLabel: "Asset",
+      assetUnmappedOption: "Unmapped",
+      assetHint: "Only assets already uploaded to this project's Asset Catalog can be selected.",
       assetTimestampLabel: "Asset timestamp (seconds)",
       finalDurationLabel: "Final duration (seconds)",
       instructionsLabel: "Instructions / notes",
       save: "Save changes",
       cancel: "Cancel"
+    }
+  },
+  assetsTab: {
+    title: "Asset Catalog",
+    description: "Client-supplied images, videos, logos, audio, and documents for this project.",
+    uploadTitle: "Upload asset",
+    fileLabel: "File",
+    mediaKindLabel: "Type override",
+    mediaKindAuto: "Detect automatically",
+    mediaKindLogoHint: "Only valid for an image file - marks it as the client/company logo.",
+    uploadAction: "Upload",
+    uploading: "Uploading…",
+    uploadFailedTitle: "Could not upload this file",
+    emptyTitle: "No assets uploaded",
+    emptyDescription: "Upload the client's images, videos, logos, audio, or documents here.",
+    labelLabel: "Label",
+    notesLabel: "Notes",
+    labelPlaceholder: "e.g. Client logo",
+    notesPlaceholder: "Optional notes for this asset",
+    saveDetails: "Save",
+    savingDetails: "Saving…",
+    deleteAction: "Delete",
+    deleteConfirmTitle: "Delete this asset?",
+    deleteConfirmDescription: (filename: string): string => `"${filename}" will be permanently deleted. This cannot be undone.`,
+    deleteConfirmAction: "Delete permanently",
+    deleteCancelAction: "Cancel",
+    deleteFailedTitle: "Could not delete this asset",
+    mediaKind: {
+      IMAGE: "Image",
+      VIDEO: "Video",
+      LOGO: "Logo",
+      AUDIO: "Audio",
+      DOCUMENT: "Document",
+      OTHER: "Other"
+    },
+    sizeLabel: "Size",
+    uploadedLabel: "Uploaded",
+    shaLabel: "SHA-256"
+  },
+  workMapTab: {
+    title: "Work Map",
+    description: "The client's own intent for each scene - what they want used, not yet what the plan will execute.",
+    intro:
+      "This describes what the client wants (desired asset, text, timing, instructions) - it is never automatically applied to the execution plan. Use Scene Mapping to turn an entry into a real, approved mapping.",
+    addRow: "Add row",
+    removeRow: "Remove",
+    save: "Save work map",
+    saving: "Saving…",
+    saveFailedTitle: "Could not save the work map",
+    emptyTitle: "No work map entries yet",
+    emptyDescription: "Add a row for each scene the client described, even before a template has been inspected.",
+    fields: {
+      sourceReference: "Client's scene reference",
+      sourceCompositionId: "Matched composition ID",
+      desiredAssetId: "Desired asset ID",
+      desiredText: "Desired text",
+      assetTimestampSeconds: "Asset timestamp (seconds)",
+      desiredDurationSeconds: "Desired duration (seconds)",
+      instructions: "Instructions"
+    },
+    fieldHints: {
+      desiredAssetId: "A real asset ID from this project's Asset Catalog - not yet validated here, only when actually mapped in Scene Mapping.",
+      sourceCompositionId: "Leave empty if no template has been inspected yet."
     }
   }
 } as const;

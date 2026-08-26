@@ -8,6 +8,12 @@ import { DrizzleUserRepository } from "../infrastructure/db/drizzle-user-reposit
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { DrizzleProjectRepository } from "../infrastructure/db/drizzle-project-repository.js";
 import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
+import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repository.js";
+import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
+import { LocalFilesystemAssetStorage } from "../infrastructure/storage/local-filesystem-asset-storage.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createTestDatabase } from "./test-database.js";
 
 const REGISTRATION_SECRET = "test-registration-secret-1234567890";
@@ -25,7 +31,8 @@ async function setup(initialNow: Date) {
     env: {
       WORKER_REGISTRATION_SECRET: REGISTRATION_SECRET,
       WORKER_HEARTBEAT_STALE_AFTER_MS: STALE_AFTER_MS,
-      LOG_LEVEL: "silent" as never
+      LOG_LEVEL: "silent" as never,
+      ASSET_MAX_UPLOAD_BYTES: 10_000_000
     },
     workerRepository: new DrizzleWorkerRepository(db),
     jobRepository: new DrizzleJobRepository(db),
@@ -33,6 +40,9 @@ async function setup(initialNow: Date) {
     sessionRepository: new DrizzleSessionRepository(db),
     projectRepository: new DrizzleProjectRepository(db),
     executionPlanRepository: new DrizzleExecutionPlanRepository(db),
+    assetRepository: new DrizzleAssetRepository(db),
+    assetStorage: new LocalFilesystemAssetStorage(mkdtempSync(join(tmpdir(), "dyo-test-assets-"))),
+    workMapRepository: new DrizzleWorkMapRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;

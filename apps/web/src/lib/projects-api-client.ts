@@ -1,16 +1,24 @@
 import {
+  assetResponseSchema,
   errorResponseSchema,
   executionPlanResponseSchema,
+  listAssetsResponseSchema,
   listExecutionPlanRevisionsResponseSchema,
   listProjectsResponseSchema,
   projectDtoSchema,
   projectResponseSchema,
+  workMapResponseSchema,
+  type AssetDto,
   type CreateProjectRequest,
   type ExecutionPlanEditOperation,
   type ExecutionPlanResponse,
   type ListExecutionPlanRevisionsResponse,
+  type MediaKind,
   type ProjectDto,
-  type ProjectResponse
+  type ProjectResponse,
+  type UpdateAssetRequest,
+  type WorkMap,
+  type WorkMapEntry
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -170,3 +178,106 @@ export const rejectExecutionPlan = (projectId: string, baseRevision: number): Pr
   postPlanTransition(projectId, "reject", baseRevision);
 export const reopenExecutionPlan = (projectId: string, baseRevision: number): Promise<ApiResult<ExecutionPlanResponse>> =>
   postPlanTransition(projectId, "reopen", baseRevision);
+
+/** GET the real Asset Catalog for a project - never another project's assets (enforced server-side, see find-owned-asset.ts). */
+export async function fetchAssets(projectId: string): Promise<ApiResult<AssetDto[]>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/assets`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = listAssetsResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected asset-list contract" };
+  }
+  return { ok: true, data: parsed.data.assets };
+}
+
+/**
+ * Uploads a real file via multipart/form-data - never JSON-encoded, since
+ * this is the client's actual bytes. `mediaKind` is only ever sent as the
+ * optional LOGO override (see mime-allowlist.ts); every other kind is
+ * derived server-side from the real sniffed MIME type.
+ */
+export async function uploadAsset(projectId: string, file: File, mediaKind?: MediaKind): Promise<ApiResult<AssetDto>> {
+  const form = new FormData();
+  form.append("file", file);
+  if (mediaKind) {
+    form.append("mediaKind", mediaKind);
+  }
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/assets`, { method: "POST", body: form });
+  if (status !== 201) {
+    return toErrorResult(status, json);
+  }
+  const parsed = assetResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected asset contract" };
+  }
+  return { ok: true, data: parsed.data.asset };
+}
+
+/** Only ever label/notes - every other asset fact is fixed at upload time. */
+export async function updateAsset(projectId: string, assetId: string, body: UpdateAssetRequest): Promise<ApiResult<AssetDto>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = assetResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected asset contract" };
+  }
+  return { ok: true, data: parsed.data.asset };
+}
+
+/** The real API refuses this with 409 CONFLICT if the asset is still mapped to a scene in the current execution plan - surfaced to the caller as an ApiResult failure, never silently retried. */
+export async function deleteAsset(projectId: string, assetId: string): Promise<ApiResult<true>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`, {
+    method: "DELETE"
+  });
+  if (status !== 204) {
+    return toErrorResult(status, json);
+  }
+  return { ok: true, data: true };
+}
+
+/** Same-origin URL for an asset's real stored bytes - safe to use directly as an <img>/<video> src; never a filesystem path or storage key. */
+export function assetFileUrl(projectId: string, assetId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/file`;
+}
+
+/** null (never a 404) is a real, valid state - no work map has been saved for this project yet. */
+export async function fetchWorkMap(projectId: string): Promise<ApiResult<WorkMap | null>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/work-map`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = workMapResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected work-map contract" };
+  }
+  return { ok: true, data: parsed.data.workMap };
+}
+
+/** Replaces the whole entry list as one new revision - baseRevision 0 means "no work map exists yet, create the first one" (mirrors updateExecutionPlan's own optimistic-concurrency shape). */
+export async function updateWorkMap(
+  projectId: string,
+  baseRevision: number,
+  entries: Array<Omit<WorkMapEntry, "id"> & { id?: string }>
+): Promise<ApiResult<WorkMap>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/work-map`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ baseRevision, entries })
+  });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = workMapResponseSchema.safeParse(json);
+  if (!parsed.success || !parsed.data.workMap) {
+    return { ok: false, status, code: null, message: "Response did not match the expected work-map contract" };
+  }
+  return { ok: true, data: parsed.data.workMap };
+}
