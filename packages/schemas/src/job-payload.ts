@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
+import { sceneEvidenceRequestSchema } from "./scene-evidence.js";
 import type { WorkerCapability } from "./worker.js";
 
 /**
@@ -14,7 +15,8 @@ import type { WorkerCapability } from "./worker.js";
  */
 export const JOB_PAYLOAD_SCHEMAS: Partial<Record<WorkerCapability, z.ZodTypeAny>> = {
   INSPECT_TEMPLATE: inspectTemplateRequestSchema,
-  CHECK_HEALTH: checkHealthRequestSchema
+  CHECK_HEALTH: checkHealthRequestSchema,
+  INSPECT_SCENE_EVIDENCE: sceneEvidenceRequestSchema
 };
 
 export function hasJobPayloadSchema(operation: WorkerCapability): boolean {

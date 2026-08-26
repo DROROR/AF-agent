@@ -39,11 +39,12 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     throw new WorkerOfflineError(worker.id);
   }
   // AE/MCP-ONLINE preconditions apply only to operations that actually
-  // touch ae-mcp/AE (INSPECT_TEMPLATE). CHECK_HEALTH is deliberately
-  // exempt: its whole purpose is to remotely diagnose why AE/MCP status
-  // disagrees with reality, so requiring either to already be ONLINE
-  // would make it useless exactly when it's needed most.
-  if (request.operation === "INSPECT_TEMPLATE") {
+  // touch ae-mcp/AE (INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE).
+  // CHECK_HEALTH is deliberately exempt: its whole purpose is to remotely
+  // diagnose why AE/MCP status disagrees with reality, so requiring
+  // either to already be ONLINE would make it useless exactly when it's
+  // needed most.
+  if (request.operation === "INSPECT_TEMPLATE" || request.operation === "INSPECT_SCENE_EVIDENCE") {
     if (worker.aeStatus !== "ONLINE") {
       throw new PreconditionNotMetError(
         `Worker ${worker.id} reports After Effects status "${worker.aeStatus}", not ONLINE`

@@ -26,6 +26,6 @@ describe("isAllowedOperation", () => {
     for (const capability of CURRENT_WORKER_CAPABILITIES) {
       expect(WORKER_CAPABILITIES).toContain(capability);
     }
-    expect(CURRENT_WORKER_CAPABILITIES).toEqual(["CHECK_HEALTH", "INSPECT_TEMPLATE"]);
+    expect(CURRENT_WORKER_CAPABILITIES).toEqual(["CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE"]);
   });
 });

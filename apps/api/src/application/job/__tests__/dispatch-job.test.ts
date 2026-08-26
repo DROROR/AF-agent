@@ -179,4 +179,38 @@ describe("dispatchJob", () => {
     // The duplicate was refused before creation - only ever one job row exists for this worker.
     expect(jobs).toBe(0); // still QUEUED, not yet CLAIMED/RUNNING/WAITING_FOR_ACTION
   });
+
+  it("applies the same AE/MCP-ONLINE precondition to INSPECT_SCENE_EVIDENCE as to INSPECT_TEMPLATE", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = randomUUID();
+    await workerRepository.create(
+      { id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] },
+      FIXED_NOW
+    );
+    // AE deliberately not ONLINE - mirrors the "rejects when the worker does
+    // not report AE as ONLINE" scenario already covered for INSPECT_TEMPLATE.
+    await workerRepository.updateHeartbeat(
+      workerId,
+      { aeStatus: "OFFLINE", mcpStatus: "ONLINE", aeVersion: null, currentJobId: null },
+      FIXED_NOW
+    );
+
+    const sceneEvidencePayload = {
+      sourceProjectPath: "/copies/t.aep",
+      sourceProjectSha256: "a".repeat(64),
+      manifestCompositionId: "comp-275",
+      compositionIndex: 14,
+      layerIndices: [1],
+      previewTimestampSeconds: null
+    };
+
+    await expect(
+      dispatchJob(deps(jobRepository, workerRepository), {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId,
+        payload: sceneEvidencePayload
+      })
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
 });

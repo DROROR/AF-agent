@@ -13,3 +13,4 @@ export * from "./execution-plan-edit.js";
 export * from "./execution-plan-api.js";
 export * from "./ai-suggestion.js";
 export * from "./execute-scene-edit.js";
+export * from "./scene-evidence.js";

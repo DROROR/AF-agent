@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CheckHealthResponse, JobDto } from "@dyo/schemas";
 import { executeJob, type JobDispatcherDeps, type LatestHealth } from "./job-dispatcher.js";
 import { NotAvailableTemplateInspector } from "../inspection/template-inspector.js";
+import { NotAvailableSceneEvidenceInspector } from "../inspection/scene-evidence-inspector.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +32,7 @@ const FAKE_CHECK_HEALTH_RESPONSE: CheckHealthResponse = {
 function healthyDeps(overrides: Partial<JobDispatcherDeps> = {}): JobDispatcherDeps {
   return {
     templateInspector: new NotAvailableTemplateInspector(),
+    sceneEvidenceInspector: new NotAvailableSceneEvidenceInspector(),
     getLatestHealth: () => ONLINE_HEALTH,
     runCheckHealthDiagnostics: () => Promise.resolve(FAKE_CHECK_HEALTH_RESPONSE),
     ...overrides
@@ -187,6 +189,78 @@ describe("executeJob - CHECK_HEALTH", () => {
     const result = await executeJob(healthyDeps({ runCheckHealthDiagnostics }), checkHealthJob());
     expect(result.status).toBe("FAILED");
     expect(result.error?.code).toBe("INTERNAL_ERROR");
+  });
+});
+
+describe("executeJob - INSPECT_SCENE_EVIDENCE", () => {
+  function sceneEvidenceJob(overrides: Partial<JobDto> = {}): JobDto {
+    return baseJob({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      payload: {
+        sourceProjectPath: "/copies/test.aep",
+        sourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        compositionIndex: 14,
+        layerIndices: [1]
+      },
+      ...overrides
+    });
+  }
+
+  it("fails safely with NOT_AVAILABLE when the inspector has no real transport yet - never fabricates evidence", async () => {
+    const result = await executeJob(healthyDeps(), sceneEvidenceJob());
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("NOT_AVAILABLE");
+  });
+
+  it("rejects an unexpected payload field - never a generic passthrough, e.g. no arbitrary layer property path", async () => {
+    const inspect = vi.fn();
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect } }),
+      sceneEvidenceJob({ payload: { sourceProjectPath: "/copies/test.aep", propertyPath: "ADBE Text Properties" } })
+    );
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("INVALID_PAYLOAD");
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it("returns the evidence result on success", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        compositionIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: null,
+        previewFailureReason: null,
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const result = await executeJob(healthyDeps({ sceneEvidenceInspector: { inspect } }), sceneEvidenceJob());
+    expect(result.status).toBe("SUCCEEDED");
+    expect(result.result).toBe(evidenceResult.response);
+  });
+
+  it("reports a typed failure (not a crash) when the inspector reports kind: failure", async () => {
+    const inspect = vi.fn().mockResolvedValue({ kind: "failure", reason: "source project changed" });
+    const result = await executeJob(healthyDeps({ sceneEvidenceInspector: { inspect } }), sceneEvidenceJob());
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("NOT_AVAILABLE");
+    expect(result.error?.message).toBe("source project changed");
+  });
+
+  it("fails with PRECONDITION_NOT_MET and never calls the inspector when AE/MCP are not both ONLINE - same gate as INSPECT_TEMPLATE", async () => {
+    const inspect = vi.fn();
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect }, getLatestHealth: () => null }),
+      sceneEvidenceJob()
+    );
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("PRECONDITION_NOT_MET");
+    expect(inspect).not.toHaveBeenCalled();
   });
 });
 

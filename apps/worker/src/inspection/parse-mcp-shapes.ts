@@ -241,3 +241,130 @@ export function parseCompositionDetail(content: unknown): ParseResult<Compositio
     }
   };
 }
+
+/**
+ * Real confirmed shape of ae_get_layer's response (`layer.get` ->
+ * `layerSummary(layer, true)` in the upstream host script, confirmed by
+ * reading host-scripts/ae-mcp-methods.jsx directly, 2026-08-26). Called
+ * with `detailed=true` (unlike compSummary's own nested layer listing,
+ * which always passes `detailed=false` and only ever yields
+ * LayerSummary above), this additionally exposes position/scale/
+ * rotation/opacity/effects - but, per a full grep of the same file for
+ * `sourceText`/`footageSource`/`mainSource`/`instanceof`, NEVER layer
+ * type, source item identity, or a text layer's value. Those stay
+ * outside this type entirely; scene-evidence.ts's LayerEvidence records
+ * them as explicit nulls rather than this parser inventing a guess.
+ */
+export interface LayerDetail {
+  index: number;
+  name: string;
+  enabled: boolean;
+  inPointSeconds: number;
+  outPointSeconds: number;
+  startTimeSeconds: number;
+  nullLayer: boolean;
+  threeDLayer: boolean;
+  /** The parent layer's NAME (upstream's `layerSummary` reads `layer.parent.name`, not an index), or null if unparented. */
+  parentLayerName: string | null;
+  /** Present only when called with response_format: "detailed" (always true for this worker's one call site). */
+  opacityPercent: number | null;
+}
+
+export function parseLayerDetail(content: unknown): ParseResult<LayerDetail> {
+  const parsed = parseJsonTextContent(content);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  const raw = parsed.value;
+  if (!isRecord(raw)) {
+    return { ok: false, reason: "expected an object" };
+  }
+  const { index, name, enabled, inPoint, outPoint, startTime, nullLayer, threeDLayer, parent, opacity } = raw;
+  if (
+    typeof index !== "number" ||
+    typeof name !== "string" ||
+    typeof enabled !== "boolean" ||
+    typeof inPoint !== "number" ||
+    typeof outPoint !== "number" ||
+    typeof startTime !== "number" ||
+    typeof nullLayer !== "boolean" ||
+    typeof threeDLayer !== "boolean"
+  ) {
+    return { ok: false, reason: "response did not match the confirmed layer.get shape" };
+  }
+  return {
+    ok: true,
+    value: {
+      index,
+      name,
+      enabled,
+      inPointSeconds: inPoint,
+      outPointSeconds: outPoint,
+      startTimeSeconds: startTime,
+      nullLayer,
+      threeDLayer,
+      parentLayerName: typeof parent === "string" ? parent : null,
+      opacityPercent: typeof opacity === "number" ? opacity : null
+    }
+  };
+}
+
+/**
+ * Real confirmed shape of the `ae_capture_frame` TOOL's response
+ * (confirmed 2026-08-26 by reading upstream-tools-index.ts's own
+ * `ae_capture_frame` registration, not just the underlying
+ * `view.captureFrame` host method it calls - the tool wrapper re-shapes
+ * the host method's result). Two distinct shapes are possible depending
+ * on timing:
+ *   - the common path (file finishes writing before `waitForFileReady`'s
+ *     timeout): content = [{type:"text", text: JSON of {path, comp,
+ *     time, note, previews_dir}}, {type:"image", data: <base64 PNG>,
+ *     mimeType:"image/png"}] - width/height/bytes are NOT included here;
+ *   - the fallback path (file not ready in time): content = [{type:"text",
+ *     text: JSON of the bare host-method result {path, comp, time,
+ *     width, height, bytes}}], no image block.
+ * Rather than depend on either shape's optional fields, this parser only
+ * extracts `path`/`comp`/`time` (present in both) - the caller
+ * independently verifies the file's real existence/size via its own
+ * filesystem stat call on `path` (worker and ae-mcp are co-located on the
+ * same Windows machine), which is strictly more trustworthy than any
+ * self-reported byte count anyway.
+ */
+export interface CaptureFrameResult {
+  path: string;
+  compName: string;
+  timeSeconds: number | null;
+}
+
+export function parseCaptureFrame(content: unknown): ParseResult<CaptureFrameResult> {
+  if (!Array.isArray(content) || content.length === 0) {
+    return { ok: false, reason: "content is not a non-empty array" };
+  }
+  const textBlock = content.find(
+    (block): block is { type: "text"; text: string } =>
+      isRecord(block) && block["type"] === "text" && typeof block["text"] === "string"
+  );
+  if (!textBlock) {
+    return { ok: false, reason: 'no {type: "text", text} block found in content' };
+  }
+  if (textBlock.text.length > MAX_SAFE_PARSE_CHARS) {
+    return { ok: false, reason: "text block exceeds the safe parse size limit" };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(textBlock.text);
+  } catch (error) {
+    return { ok: false, reason: `text block is not valid JSON: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!isRecord(raw)) {
+    return { ok: false, reason: "expected an object" };
+  }
+  const { path: capturedPath, comp, time } = raw;
+  if (typeof capturedPath !== "string" || typeof comp !== "string") {
+    return { ok: false, reason: "response did not match either confirmed ae_capture_frame shape" };
+  }
+  return {
+    ok: true,
+    value: { path: capturedPath, compName: comp, timeSeconds: typeof time === "number" ? time : null }
+  };
+}

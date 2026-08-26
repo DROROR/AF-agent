@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
+import { sceneEvidenceRequestSchema } from "./scene-evidence.js";
 import { jobStatusSchema } from "./job.js";
 
 /**
@@ -12,7 +13,7 @@ import { jobStatusSchema } from "./job.js";
  * Rule 2 ("never execute arbitrary AI-generated JSX... only tested,
  * versioned, allowlisted scripts/operations").
  */
-export const DISPATCHABLE_OPERATIONS = ["INSPECT_TEMPLATE", "CHECK_HEALTH"] as const;
+export const DISPATCHABLE_OPERATIONS = ["INSPECT_TEMPLATE", "CHECK_HEALTH", "INSPECT_SCENE_EVIDENCE"] as const;
 export type DispatchableOperation = (typeof DISPATCHABLE_OPERATIONS)[number];
 export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
 
@@ -35,6 +36,11 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
     operation: z.literal("CHECK_HEALTH"),
     workerId: z.string().uuid(),
     payload: checkHealthRequestSchema
+  }),
+  z.object({
+    operation: z.literal("INSPECT_SCENE_EVIDENCE"),
+    workerId: z.string().uuid(),
+    payload: sceneEvidenceRequestSchema
   })
 ]);
 export type DispatchJobRequest = z.infer<typeof dispatchJobRequestSchema>;

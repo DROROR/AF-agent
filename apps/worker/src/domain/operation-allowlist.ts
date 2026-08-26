@@ -24,4 +24,8 @@ export function isAllowedOperation(operation: string): operation is WorkerCapabi
  * self-reported at registration/heartbeat time and is not currently used
  * by the API to gate which jobs get created or claimed.
  */
-export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = ["CHECK_HEALTH", "INSPECT_TEMPLATE"];
+export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = [
+  "CHECK_HEALTH",
+  "INSPECT_TEMPLATE",
+  "INSPECT_SCENE_EVIDENCE"
+];

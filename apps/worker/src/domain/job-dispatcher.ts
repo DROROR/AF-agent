@@ -5,10 +5,12 @@ import {
   type InspectTemplateRequest,
   type JobDto,
   type JobError,
-  type McpStatus
+  type McpStatus,
+  type SceneEvidenceRequest
 } from "@dyo/schemas";
 import { isAllowedOperation } from "./operation-allowlist.js";
 import type { TemplateInspector } from "../inspection/template-inspector.js";
+import type { SceneEvidenceInspector } from "../inspection/scene-evidence-inspector.js";
 
 export interface JobExecutionResult {
   status: "SUCCEEDED" | "FAILED";
@@ -24,7 +26,8 @@ export interface LatestHealth {
 
 export interface JobDispatcherDeps {
   templateInspector: TemplateInspector;
-  /** Checked before INSPECT_TEMPLATE ever touches ae-mcp - see runInspectTemplate's precondition gate below. */
+  sceneEvidenceInspector: SceneEvidenceInspector;
+  /** Checked before INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE ever touch ae-mcp - see their precondition gates below. */
   getLatestHealth: () => LatestHealth | null;
   /** The one real CHECK_HEALTH implementation - see health/run-check-health-diagnostics.ts. Never gated on getLatestHealth(): diagnosing a bad AE/MCP status is this operation's whole purpose. */
   runCheckHealthDiagnostics: () => Promise<CheckHealthResponse>;
@@ -52,6 +55,8 @@ export async function executeJob(deps: JobDispatcherDeps, job: JobDto): Promise<
       return runInspectTemplate(deps, job);
     case "CHECK_HEALTH":
       return runCheckHealth(deps, job);
+    case "INSPECT_SCENE_EVIDENCE":
+      return runInspectSceneEvidence(deps, job);
     default:
       // Every other WORKER_CAPABILITIES entry is a recognized operation
       // name with no execution handler yet - fail safely, never attempt it.
@@ -135,6 +140,60 @@ async function runInspectTemplate(deps: JobDispatcherDeps, job: JobDto): Promise
       error: {
         code: "NOT_AVAILABLE",
         message: cause instanceof Error ? cause.message : "INSPECT_TEMPLATE could not run"
+      }
+    };
+  }
+}
+
+async function runInspectSceneEvidence(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (job.operation !== "INSPECT_SCENE_EVIDENCE") {
+    return {
+      status: "FAILED",
+      error: { code: "INTERNAL_ERROR", message: "runInspectSceneEvidence called for a non-INSPECT_SCENE_EVIDENCE job" }
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = validateJobPayload("INSPECT_SCENE_EVIDENCE", job.payload);
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: cause instanceof Error ? cause.message : "INSPECT_SCENE_EVIDENCE payload failed validation"
+      }
+    };
+  }
+
+  // Same safety gate as runInspectTemplate above: this touches ae-mcp, so
+  // it never runs unless AE and MCP were BOTH confirmed ONLINE as of the
+  // most recent server-round-tripped heartbeat.
+  const health = deps.getLatestHealth();
+  if (!health || health.aeStatus !== "ONLINE" || health.mcpStatus !== "ONLINE") {
+    return {
+      status: "FAILED",
+      error: {
+        code: "PRECONDITION_NOT_MET",
+        message: health
+          ? `AE and MCP must both be ONLINE (aeStatus=${health.aeStatus}, mcpStatus=${health.mcpStatus})`
+          : "No heartbeat has succeeded yet - AE/MCP status is not yet confirmed"
+      }
+    };
+  }
+
+  try {
+    const result = await deps.sceneEvidenceInspector.inspect(payload as SceneEvidenceRequest);
+    if (result.kind === "failure") {
+      return { status: "FAILED", error: { code: "NOT_AVAILABLE", message: result.reason } };
+    }
+    return { status: "SUCCEEDED", result: result.response };
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "NOT_AVAILABLE",
+        message: cause instanceof Error ? cause.message : "INSPECT_SCENE_EVIDENCE could not run"
       }
     };
   }

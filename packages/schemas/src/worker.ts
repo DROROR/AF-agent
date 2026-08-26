@@ -26,6 +26,7 @@ export const mcpStatusSchema = z.enum(MCP_STATUSES);
 export const WORKER_CAPABILITIES = [
   "CHECK_HEALTH",
   "INSPECT_TEMPLATE",
+  "INSPECT_SCENE_EVIDENCE",
   "VALIDATE_PLAN",
   "PREPARE_PROJECT",
   "EXECUTE_FRAME",

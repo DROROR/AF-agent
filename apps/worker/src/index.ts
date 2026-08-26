@@ -9,6 +9,7 @@ import { HeroicSwanMcpAdapter } from "./health/heroic-swan-mcp-adapter.js";
 import { runCheckHealthDiagnostics } from "./health/run-check-health-diagnostics.js";
 import { readWorkerBuildInfo } from "./version.js";
 import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-inspector.js";
+import { HeroicSwanSceneEvidenceInspector } from "./inspection/heroic-swan-scene-evidence-inspector.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
@@ -112,6 +113,10 @@ async function main(): Promise<void> {
   // rather than crashing or fabricating a result.
   const templateInspector = new HeroicSwanTemplateInspector({ aeMcpPath: env.aeMcpPath });
 
+  // Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B) -
+  // same "safe to construct with no AE_MCP_PATH" contract as above.
+  const sceneEvidenceInspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: env.aeMcpPath });
+
   // The last CONFIRMED (server round-tripped) aeStatus/mcpStatus, updated
   // only on a successful heartbeat - the safety gate INSPECT_TEMPLATE
   // checks before ever touching ae-mcp (see job-dispatcher.ts). null until
@@ -131,6 +136,7 @@ async function main(): Promise<void> {
         executeJob(
           {
             templateInspector,
+            sceneEvidenceInspector,
             getLatestHealth: () => latestHealth,
             runCheckHealthDiagnostics: () =>
               runCheckHealthDiagnostics(

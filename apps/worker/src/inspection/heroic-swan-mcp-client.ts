@@ -15,10 +15,20 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
  * `dist/mcp/tools/index.ts` upstream registers many tools (Blender bridge,
  * transcription, editorial planning, workflow audits, etc.) well beyond AE
  * inspection - ae_run_jsx in particular can mutate a live AE project. This
- * client's public surface is a closed allowlist of exactly the five
+ * client's public surface is a closed allowlist of exactly the seven
  * read-only inspection tools named below; there is no method to call any
  * other tool name, by construction (TypeScript union, not just a runtime
  * check).
+ *
+ * ae_get_layer and ae_capture_frame were added 2026-08-26 (Phase 7B) after
+ * reading the real upstream host-script implementations in full
+ * (host-scripts/ae-mcp-methods.jsx's `layer.get`/`view.captureFrame`/
+ * `view.captureFrames` case blocks): ae_get_layer only ever reads
+ * layer.get -> layerSummary(), never writes any property; ae_capture_frame/
+ * ae_capture_frames call comp.saveFrameToPng() (a render-a-still-to-a-new-
+ * PNG-file operation, never app.project.save()) and always restore the
+ * composition's prior current-time before returning, including on the
+ * catch path. Neither tool can mutate persisted project state.
  */
 const SERVE_SUBCOMMAND = "serve";
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -28,7 +38,9 @@ export const ALLOWED_INSPECTION_TOOLS = [
   "ae_list_instances",
   "ae_get_project_info",
   "ae_list_compositions",
-  "ae_get_composition"
+  "ae_get_composition",
+  "ae_get_layer",
+  "ae_capture_frame"
 ] as const;
 
 export type AllowedInspectionTool = (typeof ALLOWED_INSPECTION_TOOLS)[number];
@@ -116,7 +128,7 @@ export class HeroicSwanMcpClient {
   }
 
   /**
-   * Calls exactly one of the five allowlisted read-only inspection tools.
+   * Calls exactly one of the seven allowlisted read-only inspection tools.
    * Never throws - every failure (not connected, the tool itself reporting
    * an error, or a transport/protocol failure) is reported as a typed
    * ToolCallFailure, matching the "never fabricate, always report failure
