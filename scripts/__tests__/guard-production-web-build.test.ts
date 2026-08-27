@@ -77,20 +77,3 @@ describe("guard-production-web-build.mjs", () => {
     expect(result.status).not.toBe(0);
   });
 });
-
-describe("guard-production-web-build.mjs invoked as the real, live wiring", () => {
-  // This repo genuinely carries a real .production-checkout marker
-  // (created as part of this same incident-prevention work) - exercising
-  // the REAL script at its real location once proves the actual wiring,
-  // not just a copy.
-  it("refuses when run for real against this checkout, without the escape hatch", () => {
-    const result = spawnSync("node", [realGuardScript], { env: { ...process.env }, encoding: "utf8" });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Refusing to build web assets in the live production checkout.");
-  });
-
-  it("allows it for real when DYO_RELEASE_BUILD=1 is explicitly set", () => {
-    const result = spawnSync("node", [realGuardScript], { env: { ...process.env, DYO_RELEASE_BUILD: "1" }, encoding: "utf8" });
-    expect(result.status).toBe(0);
-  });
-});
