@@ -217,14 +217,16 @@ describe("switch-web-release.sh", () => {
     expect(readlinkSync(currentLink)).toBe(join(releasesRoot, SHA_A));
 
     const pm2Calls = readFileSync(pm2Log, "utf8").trim().split("\n");
-    expect(pm2Calls).toHaveLength(1);
-    // startOrReload (not a bare `reload`) with the ecosystem FILE, scoped
-    // to --only dyo-web - see switch-web-release.sh's own doc comment for
-    // why: PM2 only re-reads cwd/script from the file when the file
-    // itself is the reload target, which is what makes the very first
-    // cutover (before PM2 has ever registered the release-based cwd)
-    // actually pick up the new path.
-    expect(pm2Calls[0]).toMatch(/^startOrReload .*ecosystem\.config\.cjs --only dyo-web --update-env$/);
+    expect(pm2Calls).toHaveLength(2);
+    // delete then start with the ecosystem FILE, scoped to --only dyo-web -
+    // NEVER reload/startOrReload - see switch-web-release.sh's own doc
+    // comment for why: verified empirically that PM2 never re-reads a
+    // changed cwd/script for reload/restart on an already-registered app,
+    // only a genuine delete+start does, which is what makes the very
+    // first cutover (before PM2 has ever registered the release-based
+    // cwd) actually pick up the new path.
+    expect(pm2Calls[0]).toBe("delete dyo-web");
+    expect(pm2Calls[1]).toMatch(/^start .*ecosystem\.config\.cjs --only dyo-web$/);
   });
 
   it("rolling back to a previous release switches back without rebuilding, and both releases remain on disk", () => {

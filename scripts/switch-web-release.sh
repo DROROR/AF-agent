@@ -8,15 +8,22 @@ set -Eeuo pipefail
 # operation serves both a forward deploy and a rollback: rolling back is
 # just switching to the previous SHA's still-on-disk release.
 #
-# Reloads via `pm2 startOrReload <ecosystem-file> --only dyo-web`, NEVER a
-# bare `pm2 reload dyo-web` - deliberately, for the first-ever cutover: PM2
-# only re-reads `cwd`/`script` from the ecosystem file when the file itself
-# is the reload target. Before the very first switch, PM2 has dyo-web
-# registered with its OLD literal cwd (the canonical checkout's own
-# apps/web) from whatever last started it - a bare `pm2 reload dyo-web`
-# would reload that STALE definition and never pick up the new
-# release-symlink-based cwd/script at all. Passing the ecosystem file every
-# time re-syncs PM2's registration on every switch, not just the first.
+# Reloads via `pm2 delete dyo-web` (tolerating "not found" the very first
+# time) followed by `pm2 start <ecosystem-file> --only dyo-web` - NEVER
+# `pm2 reload`/`startOrReload`. Verified empirically (2026-08-27, against
+# a real PM2 instance) that neither `reload` nor `restart` - even when
+# passed the ecosystem FILE - ever re-reads a CHANGED `cwd`/`script` for an
+# app that already exists in PM2's process list; only env vars refresh.
+# Since `current` is a symlink whose TARGET changes every switch while its
+# own path string never does, a plain `pm2 reload dyo-web` (which this
+# script used at first) silently keeps respawning against whatever cwd/
+# script PM2 registered the very first time dyo-web was ever started -
+# never picking up the release mechanism at all, while still reporting
+# healthy because the OLD path happened to still hold a valid build. A
+# genuine delete+start is required to make PM2 re-resolve cwd/script from
+# the file. dyo-web runs in fork mode with a single instance, so this
+# carries no additional downtime beyond what a fork-mode reload already
+# has - there is no second instance to keep serving traffic either way.
 #
 # Usage: switch-web-release.sh <40-character-commit-sha>
 
@@ -52,5 +59,8 @@ mv -T "$TMP_LINK" "$CURRENT_LINK"
 
 echo "Switched current web release to $SHA ($RELEASE_DIR)"
 
-pm2 startOrReload "$ECOSYSTEM_FILE" --only dyo-web --update-env
-echo "dyo-web reloaded against release $SHA"
+# `|| true`: pm2 delete exits non-zero if dyo-web isn't registered yet
+# (the very first cutover) - that's expected, not a failure.
+pm2 delete dyo-web 2>/dev/null || true
+pm2 start "$ECOSYSTEM_FILE" --only dyo-web
+echo "dyo-web (re)started against release $SHA"
