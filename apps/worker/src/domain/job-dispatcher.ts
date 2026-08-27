@@ -281,7 +281,6 @@ async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<Jo
           resolveSceneEditOperation({ workRoot: deps.workRoot, jobId: job.jobId, assetDownloadClient: deps.assetDownloadClient }, intent),
         now: deps.now
       },
-      job.jobId,
       payload as ExecuteSceneEditRequest
     );
     // job-dispatcher owns job identity - the executor itself is not

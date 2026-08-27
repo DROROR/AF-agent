@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION, type PlaceholderMapping, type ScenePlanEntry, type TemplateManifest } from "@dyo/schemas";
-import { resolveExecuteFrameDispatch, type ExecuteFrameDispatchPlanSnapshot } from "../resolve-execute-frame-dispatch.js";
+import { resolveExecuteFrameDispatch, type ExecuteFrameDispatchPlanSnapshot, type ExecuteFrameDispatchSessionSnapshot } from "../resolve-execute-frame-dispatch.js";
 import type { SceneEditWorkerSnapshot } from "../../execute-scene-edit/validate-scene-edit-preconditions.js";
 import type { AssetRecord } from "../../asset/types.js";
 
@@ -9,6 +9,8 @@ const NOW = new Date("2026-01-01T00:00:00.000Z");
 const STALE_AFTER_MS = 30_000;
 const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
 const ASSET_ID = "33333333-3333-3333-3333-333333333333";
+const WORKER_ID = "44444444-4444-4444-4444-444444444444";
+const SESSION_ID = "55555555-5555-5555-5555-555555555555";
 
 function validManifest(overrides: Partial<TemplateManifest> = {}): TemplateManifest {
   return {
@@ -160,6 +162,7 @@ function validAsset(overrides: Partial<AssetRecord> = {}): AssetRecord {
 
 function validWorker(overrides: Partial<SceneEditWorkerSnapshot> = {}): SceneEditWorkerSnapshot {
   return {
+    id: WORKER_ID,
     status: "ONLINE",
     aeStatus: "ONLINE",
     mcpStatus: "ONLINE",
@@ -170,10 +173,25 @@ function validWorker(overrides: Partial<SceneEditWorkerSnapshot> = {}): SceneEdi
   };
 }
 
+function validSession(overrides: Partial<ExecuteFrameDispatchSessionSnapshot> = {}): ExecuteFrameDispatchSessionSnapshot {
+  return {
+    id: SESSION_ID,
+    projectId: PROJECT_ID,
+    planRevision: 2,
+    sourceProjectSha256: SHA,
+    assignedWorkerId: WORKER_ID,
+    status: "PREPARING",
+    latestWorkingProjectSha256: null,
+    completedScenePlanIds: [],
+    ...overrides
+  };
+}
+
 function baseInput(overrides: Partial<Parameters<typeof resolveExecuteFrameDispatch>[0]> = {}) {
   return {
     projectId: PROJECT_ID,
     scenePlanId: "scene-1",
+    session: validSession(),
     currentPlan: validPlan(),
     currentProjectManifest: validManifest(),
     projectAssets: [validAsset()],
@@ -195,6 +213,17 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.payload.sourceProjectPath).toBe("C:\\vidio agent\\White App Promo (converted).aep");
     expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
     expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
+    expect(result.payload.executionSessionId).toBe(SESSION_ID);
+    expect(result.payload.expectedWorkingProjectSha256).toBeNull();
+  });
+
+  it("carries the session's own latestWorkingProjectSha256 as expectedWorkingProjectSha256 for a session's SECOND scene job", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: validSession({ latestWorkingProjectSha256: "d".repeat(64), completedScenePlanIds: ["scene-0"] }) })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.expectedWorkingProjectSha256).toBe("d".repeat(64));
   });
 
   it("resolves a MAP_FOOTAGE intent from an asset-classified mapping - assetId/expectedSha256/mimeType come from the real Asset Catalog, never a caller-supplied path", () => {
@@ -355,6 +384,57 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("already has a job in progress");
+  });
+
+  it("fails when no execution session exists for the requested executionSessionId", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: null }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("No execution session was found");
+  });
+
+  it("fails when the session belongs to a different project", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ projectId: "99999999-9999-9999-9999-999999999999" }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("does not belong to this project");
+  });
+
+  it("fails when the session is already terminal (COMPLETED/FAILED) - a new session is required", () => {
+    for (const status of ["COMPLETED", "FAILED"] as const) {
+      const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ status }) }));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain("start a new execution session");
+    }
+  });
+
+  it("fails when this exact scene has already been edited in this session - never a double-edit", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ completedScenePlanIds: ["scene-1"] }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("already been edited in this execution session");
+  });
+
+  it("fails when the session's own bound planRevision no longer matches the current plan - never silently applies a changed plan to an existing session", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ planRevision: 1 }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("start a new execution session");
+  });
+
+  it("fails when the session's own bound sourceProjectSha256 no longer matches the current plan", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ sourceProjectSha256: "c".repeat(64) }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("start a new execution session");
+  });
+
+  it("fails when the dispatched worker is not the session's own assignedWorkerId - worker affinity", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ worker: validWorker({ id: "66666666-6666-6666-6666-666666666666" }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("pinned to a different worker");
   });
 
   it("never accepts a raw assetPath/aeProjectItemIndex/compositionName from the caller - the function's own input type has no such field", () => {

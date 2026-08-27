@@ -9,6 +9,7 @@ import type { AerenderRunner, AerenderRunParams, AerenderRunResult } from "../ae
 import type { CompositionVerifier, VerifyRenderCompositionResult } from "../verify-render-composition.js";
 import type { RenderArtifactUploader, UploadRenderArtifactParams, UploadRenderArtifactResult } from "../upload-render-artifact.js";
 import { renderOutputPath } from "../render-output-path.js";
+import { sessionWorkingCopyPath } from "../../../workspace/working-copy.js";
 
 const cleanupDirs: string[] = [];
 afterEach(() => {
@@ -21,6 +22,8 @@ function sha256(content: Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+const EXECUTION_SESSION_ID = "prior-session";
+
 function makeFixture() {
   const workRoot = mkdtempSync(join(tmpdir(), "render-executor-test-"));
   cleanupDirs.push(workRoot);
@@ -28,9 +31,11 @@ function makeFixture() {
   const sourceContent = Buffer.from("original source aep bytes");
   writeFileSync(sourcePath, sourceContent);
 
-  const workingDir = join(workRoot, "jobs", "prior-job", "");
-  mkdirSync(workingDir, { recursive: true });
-  const workingPath = join(workingDir, "working-copy.aep");
+  // The worker derives this path itself from (workRoot, executionSessionId) -
+  // never from a request field - so the fixture writes the "prior scene
+  // edit's" working copy at exactly that derived location.
+  const workingPath = sessionWorkingCopyPath(workRoot, EXECUTION_SESSION_ID);
+  mkdirSync(join(workingPath, ".."), { recursive: true });
   const workingContent = Buffer.from("edited working copy aep bytes");
   writeFileSync(workingPath, workingContent);
 
@@ -51,8 +56,8 @@ function makeRequest(fixture: ReturnType<typeof makeFixture>, overrides: Partial
     variant: "LANDSCAPE",
     sourceProjectPath: fixture.sourcePath,
     sourceProjectSha256: fixture.sourceSha,
-    workingProjectPath: fixture.workingPath,
-    workingProjectSha256: fixture.workingSha,
+    executionSessionId: EXECUTION_SESSION_ID,
+    expectedWorkingProjectSha256: fixture.workingSha,
     aeProjectItemIndex: 5,
     compositionName: "Landscape Master",
     renderSettingsTemplateName: "Best Settings",
@@ -186,7 +191,7 @@ describe("executeRenderProject", () => {
 
   it("fails at VERIFY_WORKING_COPY when the working copy sha256 does not match - never touches the verifier or aerender", async () => {
     const fixture = makeFixture();
-    const request = makeRequest(fixture, { workingProjectSha256: "f".repeat(64) });
+    const request = makeRequest(fixture, { expectedWorkingProjectSha256: "f".repeat(64) });
     const runner = alwaysSucceedingRunner();
     const verifier = new FakeCompositionVerifier();
 
@@ -201,14 +206,9 @@ describe("executeRenderProject", () => {
     expect(runner.calls).toHaveLength(0);
   });
 
-  it("refuses a workingProjectPath outside the configured work root", async () => {
+  it("fails closed with a clear message when no working copy exists yet for this execution session - never derives one from the original source", async () => {
     const fixture = makeFixture();
-    const outsideDir = mkdtempSync(join(tmpdir(), "render-executor-outside-"));
-    cleanupDirs.push(outsideDir);
-    const outsidePath = join(outsideDir, "working-copy.aep");
-    const content = Buffer.from("outside content");
-    writeFileSync(outsidePath, content);
-    const request = makeRequest(fixture, { workingProjectPath: outsidePath, workingProjectSha256: sha256(content) });
+    const request = makeRequest(fixture, { executionSessionId: "a-session-with-no-scene-edits-yet" });
 
     const result = await executeRenderProject(
       {
@@ -224,7 +224,7 @@ describe("executeRenderProject", () => {
       request
     );
 
-    expect(result.failureReason).toContain("unsafe");
+    expect(result.failureReason).toContain("no working copy found for this execution session");
   });
 
   it("fails when the original source .aep no longer matches its expected sha256, even before rendering", async () => {

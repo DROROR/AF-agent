@@ -7,6 +7,7 @@ import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
+  SOURCE_SHA,
   manifestFixture,
   planFixture,
   projectDtoFixture,
@@ -129,20 +130,23 @@ describe("ProjectOverviewTab", () => {
     expect(approvedLabels.length).toBeGreaterThan(0);
   });
 
-  it("disables Execute first approved scene with an honest reason when no worker reports EXECUTE_FRAME", async () => {
+  it("disables Start execution with an honest reason when no worker reports EXECUTE_FRAME", async () => {
     const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
     stubFetchByUrl({
       "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
-      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } }
     });
     renderOverview();
     await screen.findByText("No worker available");
-    expect((screen.getByRole("button", { name: "Execute first approved scene" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Start execution" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("dispatches EXECUTE_FRAME for the first approved+resolved scene when a real worker is available, and shows the real queued job id", async () => {
+  it("starts an execution session and dispatches EXECUTE_FRAME for the first approved+resolved scene when a real worker is available, and shows the real queued job id", async () => {
     const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    const WORKER_ID = "44444444-4444-4444-4444-444444444444";
+    const SESSION_ID = "66666666-6666-6666-6666-666666666666";
     stubFetchByUrl({
       "/api/dashboard/status": {
         status: 200,
@@ -151,7 +155,7 @@ describe("ProjectOverviewTab", () => {
           database: "ok",
           workers: [
             {
-              workerId: "44444444-4444-4444-4444-444444444444",
+              workerId: WORKER_ID,
               name: "worker-a",
               status: "ONLINE",
               lastHeartbeatAt: new Date().toISOString(),
@@ -169,13 +173,33 @@ describe("ProjectOverviewTab", () => {
       },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions`]: {
+        status: 201,
+        body: {
+          session: {
+            id: SESSION_ID,
+            projectId: PROJECT_ID,
+            executionPlanId: "plan-1",
+            planRevision: 3,
+            sourceProjectSha256: SOURCE_SHA,
+            assignedWorkerId: WORKER_ID,
+            status: "PREPARING",
+            latestWorkingProjectSha256: null,
+            completedScenePlanIds: [],
+            firstPreviewApproved: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      },
       "/api/jobs": {
         status: 201,
-        body: { jobId: "55555555-5555-5555-5555-555555555555", workerId: "44444444-4444-4444-4444-444444444444", operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() }
+        body: { jobId: "55555555-5555-5555-5555-555555555555", workerId: WORKER_ID, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() }
       }
     });
     renderOverview();
-    const button = await screen.findByRole("button", { name: "Execute first approved scene" });
+    const button = await screen.findByRole("button", { name: "Start execution" });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
     await screen.findByText(/55555555-5555-5555-5555-555555555555/);

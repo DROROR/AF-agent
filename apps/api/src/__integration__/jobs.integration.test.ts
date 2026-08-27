@@ -9,6 +9,7 @@ import { DrizzleUserRepository } from "../infrastructure/db/drizzle-user-reposit
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { DrizzleProjectRepository } from "../infrastructure/db/drizzle-project-repository.js";
 import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
+import { DrizzleExecutionSessionRepository } from "../infrastructure/db/drizzle-execution-session-repository.js";
 import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repository.js";
 import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
 import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle-mapping-suggestion-repository.js";
@@ -54,6 +55,7 @@ async function setup(initialNow: Date) {
     sessionRepository: new DrizzleSessionRepository(db),
     projectRepository: new DrizzleProjectRepository(db),
     executionPlanRepository: new DrizzleExecutionPlanRepository(db),
+    executionSessionRepository: new DrizzleExecutionSessionRepository(db),
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(mkdtempSync(join(tmpdir(), "dyo-test-assets-"))),
     workMapRepository: new DrizzleWorkMapRepository(db),
@@ -957,7 +959,9 @@ describe("RENDER report -> render_artifacts persistence (full real HTTP cycle)",
     });
   }
 
-  /** RENDER is not (yet) on DISPATCHABLE_OPERATIONS - see job-dispatch.ts's own doc comment - so this creates the job directly, matching the /report describe block's own convention above for the same reason. */
+  const EXECUTION_SESSION_ID = randomUUID();
+
+  /** Creates the job directly (never through dispatchJob/resolveRenderDispatch) so this test can control the exact payload/result shape independently of dispatch-time preconditions - matching the /report describe block's own convention above for the same reason. */
   async function createRenderJob(workerId: string, projectId: string) {
     return harness.jobRepository.create(
       {
@@ -972,8 +976,8 @@ describe("RENDER report -> render_artifacts persistence (full real HTTP cycle)",
           variant: "LANDSCAPE",
           sourceProjectPath: "/copies/test.aep",
           sourceProjectSha256: SOURCE_SHA,
-          workingProjectPath: "/work/jobs/prior/working-copy.aep",
-          workingProjectSha256: WORKING_SHA,
+          executionSessionId: EXECUTION_SESSION_ID,
+          expectedWorkingProjectSha256: WORKING_SHA,
           aeProjectItemIndex: 5,
           compositionName: "Landscape Master",
           renderSettingsTemplateName: "Best Settings",
@@ -1013,6 +1017,7 @@ describe("RENDER report -> render_artifacts persistence (full real HTTP cycle)",
     expect(uploadResponse.statusCode).toBe(201);
 
     const result = {
+      executionSessionId: EXECUTION_SESSION_ID,
       variant: "LANDSCAPE",
       workingProjectSha256: WORKING_SHA,
       artifact: {

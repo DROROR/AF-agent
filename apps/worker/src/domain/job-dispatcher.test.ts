@@ -15,6 +15,7 @@ import { NotAvailableCompositionVerifier } from "../execution/render/verify-rend
 import { NotAvailableRenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
 import type { RenderArtifactUploader, UploadRenderArtifactResult } from "../execution/render/upload-render-artifact.js";
 import type { AssetDownloadClient } from "../workspace/asset-cache.js";
+import { sessionWorkingCopyPath } from "../workspace/working-copy.js";
 
 class FakeArtifactUploader implements RenderArtifactUploader {
   async upload(): Promise<UploadRenderArtifactResult> {
@@ -328,6 +329,8 @@ describe("executeJob - EXECUTE_FRAME", () => {
       planRevision: 1,
       sourceProjectSha256: sha256,
       sourceProjectPath: sourcePath,
+      executionSessionId: "44444444-4444-4444-4444-444444444444",
+      expectedWorkingProjectSha256: null,
       scenePlanId: "scene-1",
       manifestCompositionId: "comp-1",
       aeProjectItemIndex: 1,
@@ -417,9 +420,9 @@ describe("executeJob - RENDER", () => {
     writeFileSync(sourcePath, sourceContent);
     const sourceSha256 = createHash("sha256").update(sourceContent).digest("hex");
 
-    const workingDir = join(workRoot, "jobs", "prior-job");
-    mkdirSync(workingDir, { recursive: true });
-    const workingProjectPath = join(workingDir, "working-copy.aep");
+    const executionSessionId = "55555555-5555-5555-5555-555555555555";
+    const workingProjectPath = sessionWorkingCopyPath(workRoot, executionSessionId);
+    mkdirSync(join(workingProjectPath, ".."), { recursive: true });
     const workingContent = Buffer.from("working copy aep bytes");
     writeFileSync(workingProjectPath, workingContent);
     const workingProjectSha256 = createHash("sha256").update(workingContent).digest("hex");
@@ -431,8 +434,8 @@ describe("executeJob - RENDER", () => {
       variant: "LANDSCAPE",
       sourceProjectPath: sourcePath,
       sourceProjectSha256: sourceSha256,
-      workingProjectPath,
-      workingProjectSha256,
+      executionSessionId,
+      expectedWorkingProjectSha256: workingProjectSha256,
       aeProjectItemIndex: 1,
       compositionName: "Landscape Master",
       renderSettingsTemplateName: "Best Settings",

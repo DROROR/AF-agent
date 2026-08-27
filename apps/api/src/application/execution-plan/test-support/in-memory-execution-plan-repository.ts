@@ -20,8 +20,6 @@ export class InMemoryExecutionPlanRepository implements ExecutionPlanRepository 
       sourceProjectSha256: revisionRow.sourceProjectSha256,
       scenePlans: revisionRow.scenePlans,
       renderOutputs: EMPTY_RENDER_OUTPUTS,
-      workingProjectPath: null,
-      workingProjectSha256: null,
       approvedAt: revisionRow.approvedAt,
       approvedBy: revisionRow.approvedBy,
       createdAt: now,
@@ -79,16 +77,6 @@ export class InMemoryExecutionPlanRepository implements ExecutionPlanRepository 
       renderOutputs: { ...existing.renderOutputs, [variant]: config },
       updatedAt: now
     };
-    this.rows.set(id, updated);
-    return updated;
-  }
-
-  async updateWorkingCopy(id: string, workingProjectPath: string, workingProjectSha256: string, now: Date): Promise<ExecutionPlanRecord | null> {
-    const existing = this.rows.get(id);
-    if (!existing) {
-      return null;
-    }
-    const updated: ExecutionPlanRecord = { ...existing, workingProjectPath, workingProjectSha256, updatedAt: now };
     this.rows.set(id, updated);
     return updated;
   }

@@ -14,6 +14,8 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
     planRevision: 1,
     sourceProjectSha256: "a".repeat(64),
     sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
+    executionSessionId: "33333333-3333-3333-3333-333333333333",
+    expectedWorkingProjectSha256: null,
     scenePlanId: "scene-1",
     manifestCompositionId: "comp-275",
     aeProjectItemIndex: 14,
@@ -164,19 +166,32 @@ describe("executeSceneEditRequestSchema", () => {
   it("rejects aeProjectItemIndex of 0 - AE's own project item addressing is 1-based, never 0-based", () => {
     expect(() => executeSceneEditRequestSchema.parse(validRequest({ aeProjectItemIndex: 0 }))).toThrow();
   });
+
+  it("requires executionSessionId - the working copy is derived from it worker-side", () => {
+    const raw = { ...validRequest() } as Partial<ExecuteSceneEditRequest>;
+    delete raw.executionSessionId;
+    expect(() => executeSceneEditRequestSchema.parse(raw)).toThrow();
+  });
+
+  it("accepts a null expectedWorkingProjectSha256 (a session's first scene job) and a real one (a later scene job)", () => {
+    expect(() => executeSceneEditRequestSchema.parse(validRequest({ expectedWorkingProjectSha256: null }))).not.toThrow();
+    expect(() => executeSceneEditRequestSchema.parse(validRequest({ expectedWorkingProjectSha256: "d".repeat(64) }))).not.toThrow();
+  });
 });
 
 describe("sceneEditResultSchema", () => {
   function validResult() {
     return {
+      executionSessionId: "33333333-3333-3333-3333-333333333333",
       scenePlanId: "scene-1",
       sourceProjectSha256: "a".repeat(64),
-      workingProjectPath: "/work/jobs/job-1/working-copy.aep",
+      workingProjectPath: "/work/execution-sessions/session-1/working-copy.aep",
       workingProjectSha256: "b".repeat(64),
+      workingCopyFailureCode: null,
       operationsRequested: 1,
       operationsCompleted: [0],
       checkpoint: { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: "2026-01-01T00:00:00.000Z", failureReason: null },
-      previewFramePath: "/work/jobs/job-1/preview.png",
+      previewFramePath: "/work/execution-sessions/session-1/preview.png",
       previewTimestampSeconds: 0,
       failureReason: null,
       startedAt: "2026-01-01T00:00:00.000Z",
@@ -205,5 +220,17 @@ describe("sceneEditResultSchema", () => {
   it("accepts jobId/workerId only once stamped (optional)", () => {
     expect(() => sceneEditResultSchema.parse(validResult())).not.toThrow();
     expect(() => sceneEditResultSchema.parse({ ...validResult(), jobId: "job-1", workerId: "worker-1" })).not.toThrow();
+  });
+
+  it("accepts each chain-of-custody failure code, and rejects an unrecognized one", () => {
+    expect(() => sceneEditResultSchema.parse({ ...validResult(), workingCopyFailureCode: "WORKING_COPY_MISSING" })).not.toThrow();
+    expect(() => sceneEditResultSchema.parse({ ...validResult(), workingCopyFailureCode: "WORKING_COPY_SHA_MISMATCH" })).not.toThrow();
+    expect(() => sceneEditResultSchema.parse({ ...validResult(), workingCopyFailureCode: "SOMETHING_ELSE" })).toThrow();
+  });
+
+  it("requires executionSessionId on the result too - echoed back so the API can update the right session", () => {
+    const raw = validResult() as Partial<ReturnType<typeof validResult>>;
+    delete raw.executionSessionId;
+    expect(() => sceneEditResultSchema.parse(raw)).toThrow();
   });
 });

@@ -46,6 +46,7 @@ function scene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
 
 function goodWorker(overrides: Partial<SceneEditWorkerSnapshot> = {}): SceneEditWorkerSnapshot {
   return {
+    id: "44444444-4444-4444-4444-444444444444",
     status: "ONLINE",
     aeStatus: "ONLINE",
     mcpStatus: "ONLINE",
@@ -63,6 +64,8 @@ function request(overrides: Partial<ExecuteSceneEditRequest> = {}): ExecuteScene
     planRevision: 1,
     sourceProjectSha256: SHA,
     sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
+    executionSessionId: "55555555-5555-5555-5555-555555555555",
+    expectedWorkingProjectSha256: null,
     scenePlanId: "scene-1",
     manifestCompositionId: "comp-275",
     aeProjectItemIndex: 14,

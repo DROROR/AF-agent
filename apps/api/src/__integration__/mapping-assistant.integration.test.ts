@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp } from "../app.js";
 import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
+import { DrizzleExecutionSessionRepository } from "../infrastructure/db/drizzle-execution-session-repository.js";
 import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repository.js";
 import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
 import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle-mapping-suggestion-repository.js";
@@ -83,6 +84,7 @@ async function setup() {
     sessionRepository: new DrizzleSessionRepository(db),
     projectRepository: new DrizzleProjectRepository(db),
     executionPlanRepository: new DrizzleExecutionPlanRepository(db),
+    executionSessionRepository: new DrizzleExecutionSessionRepository(db),
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(mkdtempSync(join(tmpdir(), "dyo-test-assets-"))),
     workMapRepository: new DrizzleWorkMapRepository(db),

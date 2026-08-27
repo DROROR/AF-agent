@@ -38,18 +38,25 @@ export const renderCheckpointSchema = sceneEditCheckpointSchema;
 export type RenderCheckpoint = SceneEditCheckpoint;
 
 /**
- * The full RENDER request - derived from an approved execution plan +
- * an already-produced, already-verified working copy (the output of one
- * or more prior EXECUTE_FRAME jobs). `workingProjectPath` is NOT derived
- * from this job's own jobId (unlike EXECUTE_FRAME) - a render job
- * continues from a working copy an EARLIER job already created/edited, so
- * this field is asserted directly and re-verified (existence, hash, and
- * that it stays strictly inside the worker's configured work root) by the
- * worker itself before ever touching it - see
- * render-project-executor.ts/assert-path-within-root.ts. `aeProjectItemIndex`/
- * `compositionName` use the exact same canonical-composition-addressing
- * pairing established for EXECUTE_FRAME/INSPECT_SCENE_EVIDENCE (never an
- * ambiguous bare index - see execute-scene-edit.ts's own doc comment).
+ * The full RENDER request - derived from an approved execution plan + an
+ * already-produced, already-verified CUMULATIVE working copy (the output
+ * of one or more prior EXECUTE_FRAME jobs, all sharing the same
+ * `executionSessionId` - multi-scene-accumulation phase, section 12).
+ *
+ * Deliberately carries NO raw `workingProjectPath` (removed 2026-08-27,
+ * replacing a pre-existing gap: RENDER used to accept a server-resolved
+ * but still-raw Windows path, echoed verbatim from whichever EXECUTE_FRAME
+ * job most recently succeeded - see execution_plans.workingProjectPath's
+ * own now-superseded doc comment in packages/database/src/schema.ts). The
+ * worker now derives its own local path from (its own configured workRoot,
+ * `executionSessionId`) - the exact same derivation EXECUTE_FRAME already
+ * used for the working copy that produced it - and re-verifies its real
+ * sha256 against `expectedWorkingProjectSha256` before ever rendering it
+ * (render-project-executor.ts's VERIFY_WORKING_COPY stage), never trusting
+ * a path value from this request. `aeProjectItemIndex`/`compositionName`
+ * use the exact same canonical-composition-addressing pairing established
+ * for EXECUTE_FRAME/INSPECT_SCENE_EVIDENCE (never an ambiguous bare index -
+ * see execute-scene-edit.ts's own doc comment).
  *
  * `renderSettingsTemplateName`/`outputModuleTemplateName` are explicit,
  * human-reviewed AE Render Queue template NAMES (aerender's own
@@ -69,20 +76,16 @@ export const renderProjectRequestSchema = z
     variant: renderOutputVariantSchema,
     sourceProjectPath: z.string().min(1),
     sourceProjectSha256: z.string().min(1),
-    workingProjectPath: z.string().min(1),
-    /** Re-verified from the real file on disk before rendering - never merely trusted from the request (section 5: "working-copy SHA matches expected"). */
-    workingProjectSha256: z.string().min(1),
+    executionSessionId: z.string().uuid(),
+    /** Re-verified from the real file on disk before rendering - never merely trusted from the request (section 5/6: "working-copy SHA matches expected"). Always non-null for RENDER (a session with no completed scene edit yet cannot be dispatched - see resolve-render-dispatch.ts's READY_TO_RENDER gate). */
+    expectedWorkingProjectSha256: z.string().min(1),
     aeProjectItemIndex: z.number().int().positive(),
     compositionName: z.string().min(1),
     renderSettingsTemplateName: z.string().min(1),
     outputModuleTemplateName: z.string().min(1),
     checkpoint: renderCheckpointSchema.nullable()
   })
-  .strict()
-  .refine((data) => data.workingProjectPath !== data.sourceProjectPath, {
-    message: "workingProjectPath must differ from sourceProjectPath - the original .aep is never a render target",
-    path: ["workingProjectPath"]
-  });
+  .strict();
 export type RenderProjectRequest = z.infer<typeof renderProjectRequestSchema>;
 
 export const RENDER_ARTIFACT_VALIDATION_STATUSES = ["VALID", "INVALID"] as const;
@@ -131,6 +134,8 @@ export const renderProjectResultSchema = z
   .object({
     jobId: z.string().min(1).optional(),
     workerId: z.string().min(1).optional(),
+    /** Echoed back from the request (never invented worker-side) so the API can mark the correct execution session COMPLETED without needing to parse job.payload - see record-render-artifact.ts's own session side effect. */
+    executionSessionId: z.string().uuid(),
     variant: renderOutputVariantSchema,
     workingProjectSha256: z.string().min(1),
     artifact: renderArtifactSchema.nullable(),

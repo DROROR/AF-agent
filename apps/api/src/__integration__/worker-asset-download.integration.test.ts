@@ -12,6 +12,7 @@ import { DrizzleUserRepository } from "../infrastructure/db/drizzle-user-reposit
 import { DrizzleWorkerRepository } from "../infrastructure/db/drizzle-worker-repository.js";
 import { DrizzleProjectRepository } from "../infrastructure/db/drizzle-project-repository.js";
 import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
+import { DrizzleExecutionSessionRepository } from "../infrastructure/db/drizzle-execution-session-repository.js";
 import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repository.js";
 import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
 import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle-mapping-suggestion-repository.js";
@@ -43,6 +44,7 @@ async function setup() {
     sessionRepository: new DrizzleSessionRepository(db),
     projectRepository: new DrizzleProjectRepository(db),
     executionPlanRepository: new DrizzleExecutionPlanRepository(db),
+    executionSessionRepository: new DrizzleExecutionSessionRepository(db),
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(storageRoot),
     workMapRepository: new DrizzleWorkMapRepository(db),
@@ -240,8 +242,8 @@ describe("GET /api/workers/:workerId/jobs/:jobId/assets/:assetId/file", () => {
           variant: "LANDSCAPE",
           sourceProjectPath: "/copies/test.aep",
           sourceProjectSha256: "a".repeat(64),
-          workingProjectPath: "/work/jobs/prior/working-copy.aep",
-          workingProjectSha256: "b".repeat(64),
+          executionSessionId: randomUUID(),
+          expectedWorkingProjectSha256: "b".repeat(64),
           aeProjectItemIndex: 1,
           compositionName: "Master",
           renderSettingsTemplateName: "Best Settings",

@@ -9,6 +9,8 @@ import { isHeartbeatStale } from "../worker/rules.js";
 const REQUIRED_WORKER_CAPABILITY: WorkerCapability = "EXECUTE_FRAME";
 
 export interface SceneEditWorkerSnapshot {
+  /** Added for the multi-scene-accumulation phase (section 8: worker affinity) - lets resolveExecuteFrameDispatch/resolveRenderDispatch verify a session's own assignedWorkerId matches the worker actually being dispatched to, without every existing caller needing to change. */
+  id: string;
   status: WorkerStatus;
   aeStatus: AeStatus;
   mcpStatus: McpStatus;

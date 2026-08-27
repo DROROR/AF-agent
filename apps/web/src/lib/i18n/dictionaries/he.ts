@@ -395,7 +395,22 @@ export const he: Dictionary = {
       executionSection: "ביצוע סצנות",
       executeFirstSceneAction: "ביצוע הסצנה המאושרת הראשונה",
       noApprovedSceneTitle: "אין סצנה מאושרת לביצוע",
-      noApprovedSceneDescription: "יש לאשר לפחות סצנה אחת עם מיפויים פתורים במלואם לפני הביצוע."
+      noApprovedSceneDescription: "יש לאשר לפחות סצנה אחת עם מיפויים פתורים במלואם לפני הביצוע.",
+      startExecutionAction: "התחלת ביצוע",
+      continueExecutionAction: "המשך ביצוע",
+      approvePreviewAction: "אישור תצוגה מקדימה",
+      allScenesCompleteLabel: "כל הסצנות המאושרות בוצעו - מוכן לרינדור.",
+      sessionStatusLabel: "סטטוס",
+      sessionWorkerLabel: "עובד",
+      sessionProgressLabel: (done: number, total: number): string => `${done} / ${total} סצנות הושלמו`,
+      sessionStatusPreparing: "בהכנה",
+      sessionStatusEditing: "בעריכה",
+      sessionStatusAwaitingPreviewApproval: "ממתין לאישור תצוגה מקדימה",
+      sessionStatusReadyToRender: "מוכן לרינדור",
+      sessionStatusRendering: "ברינדור",
+      sessionStatusCompleted: "הושלם",
+      sessionStatusPaused: "מושהה (העובד לא מחובר)",
+      sessionStatusFailed: "נכשל - יש להתחיל הפעלת ביצוע חדשה"
     },
     revisions: {
       title: "היסטוריית גרסאות",
@@ -433,7 +448,9 @@ export const he: Dictionary = {
       inspectCapabilitiesSection: "יכולות רינדור",
       inspectCapabilitiesAction: "בדיקת יכולות רינדור",
       inspectCapabilitiesDescription: "קריאה בלבד. מבקש מהוורקר לדווח על שמות תבניות Render Queue האמיתיים של AE וגרסת AE - לעולם לא משנה או שומר דבר.",
-      renderAction: "רינדור"
+      renderAction: "רינדור",
+      sessionNotReadyTitle: "עדיין לא מוכן לרינדור",
+      sessionNotReadyDescription: "יש לבצע כל סצנה מאושרת ולאשר את התצוגה המקדימה הראשונה לפני הרינדור - ראו ביצוע סצנות בלשונית סקירה כללית."
     },
     editDrawer: {
       title: "עריכת מיפוי סצנה",

@@ -168,11 +168,24 @@ export type SceneEditCheckpoint = z.infer<typeof sceneEditCheckpointSchema>;
  * apps/worker/src/execution/execute-scene-edit-executor.ts's own doc
  * comment on why): the working copy's real location is entirely the
  * worker's own concern, derived internally from (its own configured
- * workRoot, this job's real jobId) - the API/browser never knows or needs
- * to know that value, and the worker never accepts it as an assertion to
- * verify against. The original-vs-working-copy distinctness safety check
- * (CLAUDE.md Safety Rule 1) is enforced entirely worker-side too (see
- * workspace/working-copy.ts's own SAME_PATH check).
+ * workRoot, `executionSessionId` below) - the API/browser never knows or
+ * needs to know that value, and the worker never accepts it as an
+ * assertion to verify against. The original-vs-working-copy distinctness
+ * safety check (CLAUDE.md Safety Rule 1) is enforced entirely worker-side
+ * too (see workspace/working-copy.ts's own SAME_PATH check).
+ *
+ * `executionSessionId` + `expectedWorkingProjectSha256` (multi-scene-
+ * accumulation phase, section 6/9) replace the OLD job-scoped-working-copy
+ * model: the working copy is now keyed by the SESSION, not this job's own
+ * jobId, so scene 2's edit lands in the SAME file scene 1's edit produced.
+ * `expectedWorkingProjectSha256` is null only for a session's very first
+ * scene job (no working copy exists yet, so there is nothing to chain
+ * from); for every later job it is the session's own
+ * latestWorkingProjectSha256 as last durably recorded by the API - the
+ * worker fails closed (WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH,
+ * see sceneEditResultSchema below) rather than silently recreating the
+ * working copy from the original source if this ever disagrees with what
+ * is actually on disk (section 6's "chain of custody").
  */
 export const executeSceneEditRequestSchema = z
   .object({
@@ -181,6 +194,8 @@ export const executeSceneEditRequestSchema = z
     planRevision: z.number().int().positive(),
     sourceProjectSha256: z.string().min(1),
     sourceProjectPath: z.string().min(1),
+    executionSessionId: z.string().uuid(),
+    expectedWorkingProjectSha256: z.string().min(1).nullable(),
     scenePlanId: z.string().min(1),
     manifestCompositionId: z.string().min(1),
     /**
@@ -208,6 +223,22 @@ export const executeSceneEditRequestSchema = z
 export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSchema>;
 
 /**
+ * A working-copy chain-of-custody failure specifically (section 7/6) -
+ * distinct from an ordinary operation/AE failure so the API can react
+ * programmatically (mark the execution session FAILED, never silently
+ * recreate the working copy from the original source) rather than pattern-
+ * matching prose in `failureReason`. WORKING_COPY_MISSING: the session's
+ * working copy is expected to already exist (expectedWorkingProjectSha256
+ * was non-null) but no file was found on disk. WORKING_COPY_SHA_MISMATCH:
+ * a file exists but its real sha256 does not match what the session's own
+ * durable record expected - the on-disk state has diverged from what the
+ * API believes happened.
+ */
+export const WORKING_COPY_FAILURE_CODES = ["WORKING_COPY_MISSING", "WORKING_COPY_SHA_MISMATCH"] as const;
+export type WorkingCopyFailureCode = (typeof WORKING_COPY_FAILURE_CODES)[number];
+export const workingCopyFailureCodeSchema = z.enum(WORKING_COPY_FAILURE_CODES);
+
+/**
  * What a real worker execution reports back - metadata alone is never
  * "success"; a real preview frame is required (Phase 7 acceptance).
  * Extended beyond the original Phase 7A draft (jobId/workerId/
@@ -215,20 +246,25 @@ export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSche
  * startedAt/completedAt) once real execution existed to report against -
  * never exposes an arbitrary/unbounded filesystem path to a
  * browser-facing API by itself; workingProjectPath here is the worker's
- * own job-scoped path, already restricted to its configured work root
+ * own session-scoped path, already restricted to its configured work root
  * (see apps/worker/src/workspace/work-root.ts), the same way
- * previewFramePath already was.
+ * previewFramePath already was. `executionSessionId` is simply echoed back
+ * from the request (never invented worker-side) so the API can update the
+ * correct session's durable record without needing to parse job.payload.
  */
 export const sceneEditResultSchema = z.object({
   /** Stamped by job-dispatcher.ts after execution, mirroring RawInspectionCapture's own "the executor doesn't know its own job/worker identity" convention - absent until then. */
   jobId: z.string().min(1).optional(),
   workerId: z.string().min(1).optional(),
+  executionSessionId: z.string().uuid(),
   scenePlanId: z.string().min(1),
   /** Re-verified from the real file on disk at execution time - never merely echoed back from the request. */
   sourceProjectSha256: z.string().min(1),
-  /** Null only when execution failed before a working copy could ever be prepared. */
+  /** Null only when execution failed before a working copy could ever be prepared/verified. */
   workingProjectPath: z.string().min(1).nullable(),
   workingProjectSha256: z.string().min(1).nullable(),
+  /** Non-null only for a working-copy chain-of-custody failure (section 7) - null for every other outcome, including success. */
+  workingCopyFailureCode: workingCopyFailureCodeSchema.nullable(),
   operationsRequested: z.number().int().nonnegative(),
   operationsCompleted: z.array(z.number().int().nonnegative()),
   checkpoint: sceneEditCheckpointSchema,

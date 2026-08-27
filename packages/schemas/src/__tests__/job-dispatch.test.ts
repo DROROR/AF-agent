@@ -3,6 +3,7 @@ import { DISPATCHABLE_OPERATIONS, dispatchJobRequestSchema } from "../job-dispat
 
 const WORKER_ID = "11111111-1111-1111-1111-111111111111";
 const PROJECT_ID = "22222222-2222-2222-2222-222222222222";
+const SESSION_ID = "33333333-3333-3333-3333-333333333333";
 
 describe("DISPATCHABLE_OPERATIONS", () => {
   it("includes all six activated capabilities, in the order routes/dashboard should expect", () => {
@@ -20,8 +21,20 @@ describe("DISPATCHABLE_OPERATIONS", () => {
 describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker payload", () => {
   it("accepts the minimal intent shape", () => {
     expect(() =>
-      dispatchJobRequestSchema.parse({ operation: "EXECUTE_FRAME", workerId: WORKER_ID, projectId: PROJECT_ID, scenePlanId: "scene-1" })
+      dispatchJobRequestSchema.parse({
+        operation: "EXECUTE_FRAME",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
+        scenePlanId: "scene-1"
+      })
     ).not.toThrow();
+  });
+
+  it("rejects a missing executionSessionId - worker affinity/chain-of-custody require a real session, never inferred", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({ operation: "EXECUTE_FRAME", workerId: WORKER_ID, projectId: PROJECT_ID, scenePlanId: "scene-1" })
+    ).toThrow();
   });
 
   it("rejects a raw workingProjectPath - the worker derives it internally, never the caller", () => {
@@ -30,8 +43,9 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
         operation: "EXECUTE_FRAME",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         scenePlanId: "scene-1",
-        workingProjectPath: "C:\\DYO-Agent\\jobs\\job-1\\working-copy.aep"
+        workingProjectPath: "C:\\DYO-Agent\\execution-sessions\\session-1\\working-copy.aep"
       })
     ).toThrow();
   });
@@ -42,6 +56,7 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
         operation: "EXECUTE_FRAME",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         scenePlanId: "scene-1",
         sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep"
       })
@@ -54,6 +69,7 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
         operation: "EXECUTE_FRAME",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         scenePlanId: "scene-1",
         aeProjectItemIndex: 5,
         compositionName: "Scene 01"
@@ -67,6 +83,7 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
         operation: "EXECUTE_FRAME",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         scenePlanId: "scene-1",
         operations: [{ type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "C:\\evil\\payload.jsx" }]
       })
@@ -79,6 +96,7 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
         operation: "EXECUTE_FRAME",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         scenePlanId: "scene-1",
         payload: { anything: "at all" }
       })
@@ -89,16 +107,40 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
 describe("dispatchJobRequestSchema - RENDER never accepts a raw worker payload", () => {
   it("accepts the minimal intent shape (variant only)", () => {
     expect(() =>
-      dispatchJobRequestSchema.parse({ operation: "RENDER", workerId: WORKER_ID, projectId: PROJECT_ID, variant: "LANDSCAPE" })
+      dispatchJobRequestSchema.parse({
+        operation: "RENDER",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
+        variant: "LANDSCAPE"
+      })
     ).not.toThrow();
     expect(() =>
-      dispatchJobRequestSchema.parse({ operation: "RENDER", workerId: WORKER_ID, projectId: PROJECT_ID, variant: "REELS" })
+      dispatchJobRequestSchema.parse({
+        operation: "RENDER",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
+        variant: "REELS"
+      })
     ).not.toThrow();
+  });
+
+  it("rejects a missing executionSessionId - RENDER now derives its working copy from the session, never a raw path", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({ operation: "RENDER", workerId: WORKER_ID, projectId: PROJECT_ID, variant: "LANDSCAPE" })
+    ).toThrow();
   });
 
   it("rejects an invalid variant - never an arbitrary output name", () => {
     expect(() =>
-      dispatchJobRequestSchema.parse({ operation: "RENDER", workerId: WORKER_ID, projectId: PROJECT_ID, variant: "SQUARE" })
+      dispatchJobRequestSchema.parse({
+        operation: "RENDER",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
+        variant: "SQUARE"
+      })
     ).toThrow();
   });
 
@@ -108,8 +150,9 @@ describe("dispatchJobRequestSchema - RENDER never accepts a raw worker payload",
         operation: "RENDER",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         variant: "LANDSCAPE",
-        workingProjectPath: "C:\\DYO-Agent\\jobs\\job-1\\working-copy.aep",
+        workingProjectPath: "C:\\DYO-Agent\\execution-sessions\\session-1\\working-copy.aep",
         sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep"
       })
     ).toThrow();
@@ -121,6 +164,7 @@ describe("dispatchJobRequestSchema - RENDER never accepts a raw worker payload",
         operation: "RENDER",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         variant: "LANDSCAPE",
         renderSettingsTemplateName: "Best Settings",
         outputModuleTemplateName: "H.264 - Match Source",
@@ -135,6 +179,7 @@ describe("dispatchJobRequestSchema - RENDER never accepts a raw worker payload",
         operation: "RENDER",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
+        executionSessionId: SESSION_ID,
         variant: "LANDSCAPE",
         payload: { aerenderArgs: ["-RStemplate", "evil"] }
       })

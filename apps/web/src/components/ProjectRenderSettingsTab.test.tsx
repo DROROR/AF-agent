@@ -32,6 +32,23 @@ function workerWithCapabilities(capabilities: string[]) {
   };
 }
 
+function readyToRenderSession(workerId: string) {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    projectId: PROJECT_ID,
+    executionPlanId: "plan-1",
+    planRevision: 3,
+    sourceProjectSha256: SOURCE_SHA,
+    assignedWorkerId: workerId,
+    status: "READY_TO_RENDER",
+    latestWorkingProjectSha256: "d".repeat(64),
+    completedScenePlanIds: ["s1"],
+    firstPreviewApproved: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
 function manifestWithCompositions() {
   return {
     ...manifestFixture(),
@@ -144,7 +161,7 @@ describe("ProjectRenderSettingsTab", () => {
     await screen.findByText("This configuration is stale");
   });
 
-  it("disables Inspect Render Capabilities and Render with an honest reason when no worker is available", async () => {
+  it("disables Inspect Render Capabilities with an honest reason when no worker is available", async () => {
     stubWorkspace({
       renderOutputs: {
         LANDSCAPE: {
@@ -160,8 +177,78 @@ describe("ProjectRenderSettingsTab", () => {
       }
     });
     renderTab();
-    await screen.findAllByText("No worker available");
+    await screen.findByText("No worker available");
     expect((screen.getByRole("button", { name: "Inspect Render Capabilities" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("disables Render with an honest 'not ready to render yet' reason when no execution session has reached READY_TO_RENDER", async () => {
+    stubWorkspace({
+      renderOutputs: {
+        LANDSCAPE: {
+          manifestCompositionId: "comp-landscape",
+          aeProjectItemIndex: 3,
+          compositionName: "Landscape Master",
+          sourceProjectSha256: SOURCE_SHA,
+          renderSettingsTemplateName: "Best Settings",
+          outputModuleTemplateName: "H.264 - Match Source",
+          configuredAt: new Date().toISOString()
+        },
+        REELS: null
+      }
+    });
+    renderTab();
+    await screen.findAllByText("Not ready to render yet");
+    expect((screen.getAllByRole("button", { name: "Render" })[0] as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("disables Render with an honest 'no worker available' reason when the session's own assigned worker is not currently reachable", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession("99999999-9999-9999-9999-999999999999") } },
+      [`/api/projects/${PROJECT_ID}/execution-plan/render-outputs`]: {
+        status: 200,
+        body: {
+          plan: planFixture({
+            renderOutputs: {
+              LANDSCAPE: {
+                manifestCompositionId: "comp-landscape",
+                aeProjectItemIndex: 3,
+                compositionName: "Landscape Master",
+                sourceProjectSha256: SOURCE_SHA,
+                renderSettingsTemplateName: "Best Settings",
+                outputModuleTemplateName: "H.264 - Match Source",
+                configuredAt: new Date().toISOString()
+              },
+              REELS: null
+            }
+          }),
+          sceneTable: []
+        }
+      },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: {
+          plan: planFixture({
+            renderOutputs: {
+              LANDSCAPE: {
+                manifestCompositionId: "comp-landscape",
+                aeProjectItemIndex: 3,
+                compositionName: "Landscape Master",
+                sourceProjectSha256: SOURCE_SHA,
+                renderSettingsTemplateName: "Best Settings",
+                outputModuleTemplateName: "H.264 - Match Source",
+                configuredAt: new Date().toISOString()
+              },
+              REELS: null
+            }
+          }),
+          sceneTable: []
+        }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } }
+    });
+    renderTab();
+    await screen.findAllByText("No worker available");
     expect((screen.getAllByRole("button", { name: "Render" })[0] as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -189,8 +276,10 @@ describe("ProjectRenderSettingsTab", () => {
   });
 
   it("dispatches RENDER for a configured, non-stale variant when a capable worker is available", async () => {
+    const workerId = "44444444-4444-4444-4444-444444444444";
     stubFetchByUrl({
       "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [workerWithCapabilities(["RENDER"])] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(workerId) } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
         body: {

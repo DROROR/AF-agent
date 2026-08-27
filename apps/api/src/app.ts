@@ -14,6 +14,7 @@ import type { MappingSuggestionRepository } from "./domain/mapping-suggestion/ty
 import type { SceneEvidenceRepository } from "./domain/scene-evidence/types.js";
 import type { RenderArtifactRepository } from "./domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "./domain/render-artifact-upload/types.js";
+import type { ExecutionSessionRepository } from "./domain/execution-session/types.js";
 import type { AiSuggestionProvider } from "./application/mapping-assistant/ai-suggestion-provider.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -27,6 +28,7 @@ import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
 import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upload.js";
 import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-download.js";
+import { registerExecutionSessionRoutes } from "./routes/execution-sessions.js";
 
 export interface AppDependencies {
   env: Pick<
@@ -46,6 +48,7 @@ export interface AppDependencies {
   sceneEvidenceRepository: SceneEvidenceRepository;
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
+  executionSessionRepository: ExecutionSessionRepository;
   aiSuggestionProvider: AiSuggestionProvider;
   checkDatabaseHealth: () => Promise<boolean>;
   now?: () => Date;
@@ -96,6 +99,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     workerRepository: deps.workerRepository,
     projectRepository: deps.projectRepository,
     executionPlanRepository: deps.executionPlanRepository,
+    executionSessionRepository: deps.executionSessionRepository,
     assetRepository: deps.assetRepository,
     sceneEvidenceRepository: deps.sceneEvidenceRepository,
     renderArtifactRepository: deps.renderArtifactRepository,
@@ -103,6 +107,17 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerExecutionSessionRoutes(app, {
+    executionSessionRepository: deps.executionSessionRepository,
+    executionPlanRepository: deps.executionPlanRepository,
+    projectRepository: deps.projectRepository,
+    workerRepository: deps.workerRepository,
+    jobRepository: deps.jobRepository,
+    userRepository: deps.userRepository,
+    sessionRepository: deps.sessionRepository,
+    staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
     ...(deps.now ? { now: deps.now } : {})
   });
   registerRenderArtifactRoutes(app, {

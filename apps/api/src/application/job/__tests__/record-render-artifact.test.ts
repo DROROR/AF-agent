@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { JobDto } from "@dyo/schemas";
 import { InMemoryRenderArtifactRepository } from "../test-support/in-memory-render-artifact-repository.js";
 import { InMemoryRenderArtifactUploadRepository } from "../test-support/in-memory-render-artifact-upload-repository.js";
+import { InMemoryExecutionSessionRepository } from "../../execution-session/test-support/in-memory-execution-session-repository.js";
 import { recordRenderArtifactIfApplicable } from "../record-render-artifact.js";
 
 const NOW = new Date("2026-08-27T00:00:00.000Z");
 const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
 const JOB_ID = "22222222-2222-2222-2222-222222222222";
+const SESSION_ID = "55555555-5555-5555-5555-555555555555";
 
 function validArtifact(overrides: Record<string, unknown> = {}) {
   return {
@@ -36,6 +38,7 @@ function baseJob(overrides: Partial<JobDto> = {}): JobDto {
     status: "SUCCEEDED",
     payload: {},
     result: {
+      executionSessionId: SESSION_ID,
       variant: "LANDSCAPE",
       workingProjectSha256: "b".repeat(64),
       artifact: validArtifact(),
@@ -81,9 +84,11 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("stores a valid SUCCEEDED RENDER result with a VALID artifact AND a matching real upload", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
 
-    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW }, baseJob());
+    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW }, baseJob());
 
     const rows = await renderArtifactRepository.listByProject(PROJECT_ID);
     expect(rows).toHaveLength(1);
@@ -97,18 +102,22 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("never stores anything when NO matching upload exists yet, even with an otherwise fully valid SUCCEEDED result", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     // Deliberately no seedUpload() call - the worker's own report arrived
     // without ever having uploaded real bytes for this job.
-    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW }, baseJob());
+    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW }, baseJob());
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
   });
 
   it("never stores anything for a non-SUCCEEDED job", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW },
+      { renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW },
       baseJob({ status: "FAILED" })
     );
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
@@ -117,9 +126,11 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("never stores anything for a different operation", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW },
+      { renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW },
       baseJob({ operation: "EXECUTE_FRAME" })
     );
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
@@ -128,9 +139,12 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("never stores anything when artifact is null (render never reached a valid output)", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     const job = baseJob({
       result: {
+        executionSessionId: SESSION_ID,
         variant: "LANDSCAPE",
         workingProjectSha256: "b".repeat(64),
         artifact: null,
@@ -144,16 +158,19 @@ describe("recordRenderArtifactIfApplicable", () => {
     // actually be reported as FAILED by job-dispatcher.ts in practice, but
     // this guards the persistence function itself independently of that -
     // never partially trusted, never persisted, regardless of job.status.
-    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW }, job);
+    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW }, job);
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
   });
 
   it("never stores anything when the artifact's own validationStatus is INVALID", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     const job = baseJob({
       result: {
+        executionSessionId: SESSION_ID,
         variant: "LANDSCAPE",
         workingProjectSha256: "b".repeat(64),
         artifact: validArtifact({ validationStatus: "INVALID", validationFailureReason: "zero bytes" }),
@@ -163,16 +180,18 @@ describe("recordRenderArtifactIfApplicable", () => {
         completedAt: new Date(NOW.getTime() + 2000).toISOString()
       }
     });
-    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW }, job);
+    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW }, job);
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
   });
 
   it("discards a malformed result - never partially trusted, never persisted", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW },
+      { renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW },
       baseJob({ result: { nonsense: true } })
     );
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
@@ -181,9 +200,11 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("skips a job that has no projectId", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW },
+      { renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW },
       baseJob({ projectId: null })
     );
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toEqual([]);
@@ -192,10 +213,12 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("is idempotent for a duplicate/retried call against the same jobId - never creates a second record", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, JOB_ID);
     const job = baseJob();
-    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW }, job);
-    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW }, job);
+    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW }, job);
+    await recordRenderArtifactIfApplicable({ renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW }, job);
 
     expect(await renderArtifactRepository.listByProject(PROJECT_ID)).toHaveLength(1);
   });
@@ -203,18 +226,21 @@ describe("recordRenderArtifactIfApplicable", () => {
   it("preserves multiple historical records across different jobs (e.g. LANDSCAPE and REELS), never overwriting", async () => {
     const renderArtifactRepository = new InMemoryRenderArtifactRepository();
     const renderArtifactUploadRepository = new InMemoryRenderArtifactUploadRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await executionSessionRepository.create({ id: SESSION_ID, projectId: PROJECT_ID, executionPlanId: "plan-1", planRevision: 1, sourceProjectSha256: "a".repeat(64), assignedWorkerId: "33333333-3333-3333-3333-333333333333" }, NOW);
     await seedUpload(renderArtifactUploadRepository, "job-landscape");
     await seedUpload(renderArtifactUploadRepository, "job-reels", { variant: "REELS" });
 
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository, renderArtifactUploadRepository, now: () => NOW },
+      { renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => NOW },
       baseJob({ jobId: "job-landscape" })
     );
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository, renderArtifactUploadRepository, now: () => new Date(NOW.getTime() + 5000) },
+      { renderArtifactRepository, renderArtifactUploadRepository, executionSessionRepository, now: () => new Date(NOW.getTime() + 5000) },
       baseJob({
         jobId: "job-reels",
         result: {
+          executionSessionId: SESSION_ID,
           variant: "REELS",
           workingProjectSha256: "b".repeat(64),
           artifact: validArtifact({ variant: "REELS", compositionName: "Reels Master" }),

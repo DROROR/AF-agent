@@ -403,7 +403,22 @@ export const en = {
       executionSection: "Scene execution",
       executeFirstSceneAction: "Execute first approved scene",
       noApprovedSceneTitle: "No approved scene to execute",
-      noApprovedSceneDescription: "Approve at least one scene with fully resolved mappings before executing."
+      noApprovedSceneDescription: "Approve at least one scene with fully resolved mappings before executing.",
+      startExecutionAction: "Start execution",
+      continueExecutionAction: "Continue execution",
+      approvePreviewAction: "Approve preview",
+      allScenesCompleteLabel: "All approved scenes have been executed - ready to render.",
+      sessionStatusLabel: "Status",
+      sessionWorkerLabel: "Worker",
+      sessionProgressLabel: (done: number, total: number): string => `${done} / ${total} scenes completed`,
+      sessionStatusPreparing: "Preparing",
+      sessionStatusEditing: "Editing",
+      sessionStatusAwaitingPreviewApproval: "Awaiting preview approval",
+      sessionStatusReadyToRender: "Ready to render",
+      sessionStatusRendering: "Rendering",
+      sessionStatusCompleted: "Completed",
+      sessionStatusPaused: "Paused (worker offline)",
+      sessionStatusFailed: "Failed - start a new execution session"
     },
     revisions: {
       title: "Revision history",
@@ -441,7 +456,9 @@ export const en = {
       inspectCapabilitiesSection: "Render capabilities",
       inspectCapabilitiesAction: "Inspect Render Capabilities",
       inspectCapabilitiesDescription: "Read-only. Asks the worker to report the real AE Render Queue template names and AE version - never mutates or saves anything.",
-      renderAction: "Render"
+      renderAction: "Render",
+      sessionNotReadyTitle: "Not ready to render yet",
+      sessionNotReadyDescription: "Every approved scene must be executed and its first preview approved before rendering - see Scene execution on the Overview tab."
     },
     editDrawer: {
       title: "Edit scene mapping",

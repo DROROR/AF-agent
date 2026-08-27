@@ -14,6 +14,7 @@ function statusForCode(code: ErrorCode): number {
     case "WORK_MAP_NOT_FOUND":
     case "SUGGESTION_NOT_FOUND":
     case "RENDER_ARTIFACT_NOT_FOUND":
+    case "EXECUTION_SESSION_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
@@ -176,6 +177,13 @@ export class RenderArtifactNotFoundError extends AppError {
   constructor(artifactId: string) {
     super("RENDER_ARTIFACT_NOT_FOUND", `Render artifact ${artifactId} was not found`);
     this.name = "RenderArtifactNotFoundError";
+  }
+}
+
+export class ExecutionSessionNotFoundError extends AppError {
+  constructor(sessionId: string) {
+    super("EXECUTION_SESSION_NOT_FOUND", `Execution session ${sessionId} was not found`);
+    this.name = "ExecutionSessionNotFoundError";
   }
 }
 

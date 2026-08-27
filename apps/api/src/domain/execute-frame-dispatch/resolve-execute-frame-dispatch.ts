@@ -1,4 +1,5 @@
-import type { ExecuteSceneEditRequest, PlanStatus, SceneEditOperationIntent, ScenePlanEntry, TemplateManifest, WorkerCapability } from "@dyo/schemas";
+import type { ExecuteSceneEditRequest, ExecutionSessionStatus, PlanStatus, SceneEditOperationIntent, ScenePlanEntry, TemplateManifest, WorkerCapability } from "@dyo/schemas";
+import { TERMINAL_EXECUTION_SESSION_STATUSES } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 import type { AssetRecord } from "../asset/types.js";
@@ -21,16 +22,30 @@ export interface ExecuteFrameDispatchPlanSnapshot {
   scenePlans: ScenePlanEntry[];
 }
 
+/** The fields resolveExecuteFrameDispatch/resolveRenderDispatch actually need from a real ExecutionSessionRecord - a narrow snapshot, same style as SceneEditWorkerSnapshot/ExecuteFrameDispatchPlanSnapshot. */
+export interface ExecuteFrameDispatchSessionSnapshot {
+  id: string;
+  projectId: string;
+  planRevision: number;
+  sourceProjectSha256: string;
+  assignedWorkerId: string;
+  status: ExecutionSessionStatus;
+  latestWorkingProjectSha256: string | null;
+  completedScenePlanIds: string[];
+}
+
 export interface ResolveExecuteFrameDispatchInput {
   projectId: string;
   scenePlanId: string;
+  /** The session this scene edit is being dispatched into - resolved by the caller from `executionSessionId`, null if it doesn't exist. */
+  session: ExecuteFrameDispatchSessionSnapshot | null;
   /** The CURRENT plan for this project, freshly read - null if none exists. */
   currentPlan: ExecuteFrameDispatchPlanSnapshot | null;
   /** The project's CURRENT manifest, freshly read - null if the project doesn't exist. Used both for its own sha256 and to resolve composition/placeholder identity. */
   currentProjectManifest: TemplateManifest | null;
   /** Every real asset currently in this project's Asset Catalog, freshly read - never fetched by this pure function itself. */
   projectAssets: AssetRecord[];
-  /** The worker's live state, freshly read - null if it has never reported in. */
+  /** The worker actually being dispatched to, freshly read - null if it has never reported in. */
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
@@ -41,13 +56,30 @@ export type ResolveExecuteFrameDispatchResult =
   | { ok: false; reason: string };
 
 /**
- * Activation-phase section 3: "Browser/API should identify approved
- * project/scene intent only. Server derives the Worker payload from
- * trusted persisted state." The caller passes only `projectId` +
- * `scenePlanId` - every other field of the real ExecuteSceneEditRequest is
- * resolved here from data the caller already fetched fresh (pure
- * function, same style as resolveRenderDispatch/
+ * Multi-scene-accumulation phase, section 9: "Safe browser-facing intent
+ * remains project/scene/approved action... Server resolves current
+ * execution session, assigned Worker, plan revision, source SHA, latest
+ * working-copy SHA, scene operations." The caller passes only `projectId` +
+ * `scenePlanId` + the session identified by the browser's own
+ * `executionSessionId` - every other field of the real
+ * ExecuteSceneEditRequest is resolved here from data the caller already
+ * fetched fresh (pure function, same style as resolveRenderDispatch/
  * validateSceneEditPreconditions - never I/O, never a cached/stale value).
+ *
+ * Session-aware preconditions (new in this phase, on top of the original
+ * plan/scene/worker checks below):
+ *   - the session must exist and belong to this project,
+ *   - the session must not be terminal (COMPLETED/FAILED) - section 11's
+ *     "start a new execution session" is the only way forward for those,
+ *   - the session's own bound planRevision/sourceProjectSha256 must still
+ *     match the CURRENT plan (section 11: a plan revision change never
+ *     silently applies to an existing session),
+ *   - the worker actually being dispatched to must be the session's own
+ *     assignedWorkerId (section 8: worker affinity - the cumulative
+ *     working copy exists on ONE worker's local disk only),
+ *   - this exact scenePlanId must not already be in the session's own
+ *     completedScenePlanIds (never a double-edit within one session -
+ *     section 16's own "multi-scene edits accumulate" proof).
  *
  * Operations are derived directly from the scene's own approved mappings -
  * a SET_TEXT operation's `text` is always exactly `mapping.text`, a
@@ -69,13 +101,32 @@ export type ResolveExecuteFrameDispatchResult =
  *     address), and is not itself evidence of anything unresolved.
  */
 export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchInput): ResolveExecuteFrameDispatchResult {
-  const { projectId, scenePlanId, currentPlan, currentProjectManifest, projectAssets, worker, now, staleAfterMs } = input;
+  const { projectId, scenePlanId, session, currentPlan, currentProjectManifest, projectAssets, worker, now, staleAfterMs } = input;
+
+  if (!session) {
+    return { ok: false, reason: "No execution session was found for the requested executionSessionId - start one first" };
+  }
+  if (session.projectId !== projectId) {
+    return { ok: false, reason: "The execution session does not belong to this project" };
+  }
+  if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
+    return { ok: false, reason: `Execution session is ${session.status} - start a new execution session to continue` };
+  }
+  if (session.completedScenePlanIds.includes(scenePlanId)) {
+    return { ok: false, reason: `Scene "${scenePlanId}" has already been edited in this execution session` };
+  }
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project" };
   }
   if (currentPlan.status !== "APPROVED") {
     return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - EXECUTE_FRAME can only be dispatched from an approved plan` };
+  }
+  if (session.planRevision !== currentPlan.revision || session.sourceProjectSha256 !== currentPlan.sourceProjectSha256) {
+    return {
+      ok: false,
+      reason: `Execution session is bound to plan revision ${session.planRevision}, but the current plan is revision ${currentPlan.revision} - the plan changed after this session began; start a new execution session`
+    };
   }
   if (!currentProjectManifest || currentProjectManifest.sourceProject.sha256 !== currentPlan.sourceProjectSha256) {
     return { ok: false, reason: "The project's current manifest sha256 no longer matches this plan - the source project may have changed" };
@@ -159,6 +210,9 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   if (!worker) {
     return { ok: false, reason: "Worker has never reported in" };
   }
+  if (worker.id !== session.assignedWorkerId) {
+    return { ok: false, reason: "This execution session is pinned to a different worker - its cumulative working copy exists only on that worker's local disk" };
+  }
   if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, staleAfterMs)) {
     return { ok: false, reason: "Worker is not currently ONLINE (no fresh heartbeat)" };
   }
@@ -183,6 +237,8 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       planRevision: currentPlan.revision,
       sourceProjectSha256: currentPlan.sourceProjectSha256,
       sourceProjectPath: currentProjectManifest.sourceProject.path,
+      executionSessionId: session.id,
+      expectedWorkingProjectSha256: session.latestWorkingProjectSha256,
       scenePlanId,
       manifestCompositionId: scene.manifestCompositionId,
       aeProjectItemIndex: composition.aeProjectItemIndex,

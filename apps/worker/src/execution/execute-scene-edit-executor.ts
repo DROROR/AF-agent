@@ -1,5 +1,5 @@
-import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult } from "@dyo/schemas";
-import { prepareWorkingCopy } from "../workspace/working-copy.js";
+import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult, WorkingCopyFailureCode } from "@dyo/schemas";
+import { prepareSessionWorkingCopy, type WorkingCopyFailureReason } from "../workspace/working-copy.js";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
 import { EMPTY_SCENE_EDIT_CHECKPOINT, markFailed, markOperationCompleted, nextPendingOperationIndex } from "./scene-edit-checkpoint.js";
 import type { AeEditBridge } from "./ae-edit-bridge.js";
@@ -61,7 +61,15 @@ export interface SceneEditExecutorDeps {
  * checkpoint (via `request.checkpoint`) and resumes from the next
  * incomplete operation, never re-running an already-completed one.
  */
-export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: string, request: ExecuteSceneEditRequest): Promise<SceneEditResult> {
+/** Maps working-copy.ts's own failure-reason vocabulary onto the strict, API-facing chain-of-custody subset (section 7) - every OTHER reason (SAME_PATH/SOURCE_NOT_FOUND/SOURCE_SHA_MISMATCH/COPY_FAILED/WORKING_COPY_INVALID) is a real but ordinary failure, reported via failureReason text only, never mistaken for a chain-of-custody divergence. */
+function toWorkingCopyFailureCode(reason: WorkingCopyFailureReason): WorkingCopyFailureCode | null {
+  if (reason === "WORKING_COPY_MISSING" || reason === "WORKING_COPY_SHA_MISMATCH") {
+    return reason;
+  }
+  return null;
+}
+
+export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: ExecuteSceneEditRequest): Promise<SceneEditResult> {
   const startedAt = deps.now().toISOString();
   let checkpoint: SceneEditCheckpoint = request.checkpoint ?? EMPTY_SCENE_EDIT_CHECKPOINT;
 
@@ -71,12 +79,15 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: strin
     workingProjectSha256: string | null;
     previewFramePath: string | null;
     previewTimestampSeconds: number | null;
+    workingCopyFailureCode?: WorkingCopyFailureCode | null;
   }): SceneEditResult {
     return {
+      executionSessionId: request.executionSessionId,
       scenePlanId: request.scenePlanId,
       sourceProjectSha256: params.sourceProjectSha256,
       workingProjectPath: params.workingProjectPath,
       workingProjectSha256: params.workingProjectSha256,
+      workingCopyFailureCode: params.workingCopyFailureCode ?? null,
       operationsRequested: request.operations.length,
       operationsCompleted: [...checkpoint.completedOperationIndices].sort((a, b) => a - b),
       checkpoint,
@@ -88,11 +99,12 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: strin
     };
   }
 
-  const workingCopy = await prepareWorkingCopy({
+  const workingCopy = await prepareSessionWorkingCopy({
     workRoot: deps.workRoot,
-    jobId,
+    executionSessionId: request.executionSessionId,
     sourceProjectPath: request.sourceProjectPath,
-    expectedSourceSha256: request.sourceProjectSha256
+    expectedSourceSha256: request.sourceProjectSha256,
+    expectedWorkingProjectSha256: request.expectedWorkingProjectSha256
   });
   if (!workingCopy.ok) {
     checkpoint = markFailed(checkpoint, `working copy could not be prepared (${workingCopy.reason}): ${workingCopy.message}`, deps.now());
@@ -101,7 +113,8 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: strin
       workingProjectPath: null,
       workingProjectSha256: null,
       previewFramePath: null,
-      previewTimestampSeconds: null
+      previewTimestampSeconds: null,
+      workingCopyFailureCode: toWorkingCopyFailureCode(workingCopy.reason)
     });
   }
 

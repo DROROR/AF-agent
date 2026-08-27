@@ -2,7 +2,8 @@ import { existsSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import type { RenderArtifact, RenderCheckpoint, RenderProjectRequest, RenderProjectResult } from "@dyo/schemas";
 import { hashSourceProject } from "../../inspection/hash-source-project.js";
-import { ensureWorkRoot, assertPathWithinRoot } from "../../workspace/work-root.js";
+import { ensureWorkRoot } from "../../workspace/work-root.js";
+import { sessionWorkingCopyPath } from "../../workspace/working-copy.js";
 import { EMPTY_SCENE_EDIT_CHECKPOINT, markFailed, markOperationCompleted, nextPendingOperationIndex } from "../scene-edit-checkpoint.js";
 import { renderOutputFilename, renderOutputPath } from "./render-output-path.js";
 import { validateRenderArtifact } from "./validate-render-artifact.js";
@@ -38,9 +39,11 @@ export interface RenderProjectExecutorDeps {
  * PersistCheckpoint's own doc comment (execute-scene-edit-executor.ts).
  *
  * Never renders the ORIGINAL source .aep (CLAUDE.md Safety Rule 1): this
- * only ever opens/renders `request.workingProjectPath`, and independently
- * re-verifies `request.sourceProjectPath` is unchanged both before AND
- * after rendering.
+ * only ever opens/renders the working copy it derives itself from
+ * `request.executionSessionId` (sessionWorkingCopyPath - the same
+ * cumulative file EXECUTE_FRAME edited), and independently re-verifies
+ * `request.sourceProjectPath` is unchanged both before AND after
+ * rendering.
  */
 export async function executeRenderProject(
   deps: RenderProjectExecutorDeps,
@@ -51,10 +54,19 @@ export async function executeRenderProject(
   let checkpoint: RenderCheckpoint = request.checkpoint ?? EMPTY_SCENE_EDIT_CHECKPOINT;
   let artifact: RenderArtifact | null = null;
 
+  // Derived from this worker's own configured workRoot + the session id -
+  // never taken from the request (multi-scene-accumulation phase, section
+  // 12: "Worker derives same execution-session AEP path"). Safe by
+  // construction (sessionWorkingCopyPath/safeJoin block traversal), so no
+  // separate assertPathWithinRoot check is needed the way the OLD
+  // request-supplied workingProjectPath required.
+  const workingProjectPath = sessionWorkingCopyPath(deps.workRoot, request.executionSessionId);
+
   function finish(): RenderProjectResult {
     return {
+      executionSessionId: request.executionSessionId,
       variant: request.variant,
-      workingProjectSha256: request.workingProjectSha256,
+      workingProjectSha256: request.expectedWorkingProjectSha256,
       artifact,
       checkpoint,
       failureReason: checkpoint.failureReason,
@@ -86,27 +98,36 @@ export async function executeRenderProject(
     checkpoint = { ...checkpoint, checkpointBeforeAt: deps.now().toISOString() };
 
     if (pending === 0) {
-      // VERIFY_WORKING_COPY - never trusts the request's own claim; re-hashes
-      // the real file on disk, and confirms the path is genuinely inside
-      // this worker's configured work root even though (unlike EXECUTE_FRAME)
-      // it wasn't derived from this job's own jobId (render-project.ts's own
-      // doc comment on why).
-      try {
-        assertPathWithinRoot(deps.workRoot, request.workingProjectPath);
-      } catch (error) {
-        checkpoint = markFailed(checkpoint, `workingProjectPath is unsafe: ${error instanceof Error ? error.message : String(error)}`, deps.now());
+      // VERIFY_WORKING_COPY - never trusts a caller-supplied path; the
+      // session-derived workingProjectPath above is safe by construction,
+      // so this only needs to re-verify the file's real CONTENT (existence
+      // + sha256) against what the session's own durable record expects,
+      // and that it is genuinely distinct from the original source
+      // (CLAUDE.md Safety Rule 1 - the same defense-in-depth check
+      // EXECUTE_FRAME's own prepareWorkingCopy applies).
+      if (path.resolve(workingProjectPath) === path.resolve(request.sourceProjectPath)) {
+        checkpoint = markFailed(checkpoint, "the derived working copy path resolves to the same file as sourceProjectPath - refusing to render the original .aep", deps.now());
         return finish();
       }
 
-      const workingHash = await hashSourceProject(request.workingProjectPath);
+      if (!existsSync(workingProjectPath)) {
+        checkpoint = markFailed(
+          checkpoint,
+          `no working copy found for this execution session at the expected local path - dispatch EXECUTE_FRAME for at least one approved scene before rendering`,
+          deps.now()
+        );
+        return finish();
+      }
+
+      const workingHash = await hashSourceProject(workingProjectPath);
       if (!workingHash.ok) {
         checkpoint = markFailed(checkpoint, `working copy could not be verified (${workingHash.reason})`, deps.now());
         return finish();
       }
-      if (workingHash.value.sha256 !== request.workingProjectSha256) {
+      if (workingHash.value.sha256 !== request.expectedWorkingProjectSha256) {
         checkpoint = markFailed(
           checkpoint,
-          `working copy sha256 (${workingHash.value.sha256}) does not match the expected sha256 (${request.workingProjectSha256}) - refusing to render a project that has changed`,
+          `working copy sha256 (${workingHash.value.sha256}) does not match the expected sha256 (${request.expectedWorkingProjectSha256}) - refusing to render a project that has changed`,
           deps.now()
         );
         return finish();
@@ -126,7 +147,7 @@ export async function executeRenderProject(
     } else if (pending === 1) {
       // VERIFY_COMPOSITION - see verify-render-composition.ts.
       const verified = await deps.compositionVerifier.verify({
-        workingProjectPath: request.workingProjectPath,
+        workingProjectPath,
         aeProjectItemIndex: request.aeProjectItemIndex,
         compositionName: request.compositionName
       });
@@ -158,7 +179,7 @@ export async function executeRenderProject(
 
       const runResult = await deps.aerenderRunner.run({
         executablePath: deps.aerenderPath,
-        projectPath: request.workingProjectPath,
+        projectPath: workingProjectPath,
         compName: request.compositionName,
         renderSettingsTemplateName: request.renderSettingsTemplateName,
         outputModuleTemplateName: request.outputModuleTemplateName,
@@ -190,7 +211,7 @@ export async function executeRenderProject(
       const logExcerpt = (runResult.stdout + (runResult.stderr ? `\n--- stderr ---\n${runResult.stderr}` : "")).slice(-4000) || null;
       artifact = {
         variant: request.variant,
-        workingProjectSha256: request.workingProjectSha256,
+        workingProjectSha256: request.expectedWorkingProjectSha256,
         compositionName: request.compositionName,
         filename: renderOutputFilename(),
         mimeType: MIME_TYPE_MP4,

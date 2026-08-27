@@ -5,6 +5,7 @@ import type { JobRepository } from "../../domain/job/types.js";
 import type { WorkerRepository } from "../../domain/worker/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
+import type { ExecutionSessionRepository } from "../../domain/execution-session/types.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
 import {
   PreconditionNotMetError,
@@ -23,6 +24,7 @@ export interface DispatchJobDeps {
   workerRepository: WorkerRepository;
   projectRepository: ProjectRepository;
   executionPlanRepository: ExecutionPlanRepository;
+  executionSessionRepository: ExecutionSessionRepository;
   assetRepository: AssetRepository;
   now: () => Date;
   staleAfterMs: number;
@@ -50,9 +52,14 @@ const AE_MCP_DEPENDENT_OPERATIONS = new Set<DispatchJobRequest["operation"]>([
  * job row itself.
  *
  * EXECUTE_FRAME/RENDER never trust `request` for anything beyond the
- * caller's minimal intent (workerId/projectId/scenePlanId or variant) -
- * the real worker-facing payload is entirely resolved here from freshly-
- * read project/plan/asset/worker state via resolveExecuteFrameDispatch/
+ * caller's minimal intent (workerId/projectId/executionSessionId/
+ * scenePlanId or variant) - `workerId` itself is never trusted as "the
+ * worker to use" by itself either; resolveExecuteFrameDispatch/
+ * resolveRenderDispatch independently verify it equals the execution
+ * session's own assignedWorkerId (worker affinity, multi-scene-
+ * accumulation phase section 8). The real worker-facing payload is
+ * entirely resolved here from freshly-read project/plan/session/asset/
+ * worker state via resolveExecuteFrameDispatch/
  * resolveRenderDispatch (activation-phase sections 2-4: "no arbitrary
  * worker payload passthrough from the browser").
  */
@@ -121,9 +128,11 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     projectId = request.projectId;
     const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
     const projectAssets = await deps.assetRepository.listByProjectId(request.projectId);
+    const session = await deps.executionSessionRepository.findById(request.executionSessionId);
     const resolved = resolveExecuteFrameDispatch({
       projectId: request.projectId,
       scenePlanId: request.scenePlanId,
+      session,
       currentPlan: plan,
       currentProjectManifest: project.manifest,
       projectAssets,
@@ -141,9 +150,11 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     }
     projectId = request.projectId;
     const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    const session = await deps.executionSessionRepository.findById(request.executionSessionId);
     const resolved = resolveRenderDispatch({
       projectId: request.projectId,
       variant: request.variant,
+      session,
       currentPlan: plan,
       currentProjectSourceProjectSha256: project.sourceProjectSha256,
       currentProjectSourceProjectPath: project.manifest.sourceProject.path,

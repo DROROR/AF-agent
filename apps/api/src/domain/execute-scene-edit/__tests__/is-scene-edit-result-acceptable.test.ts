@@ -4,10 +4,12 @@ import { isSceneEditResultAcceptable } from "../is-scene-edit-result-acceptable.
 
 function result(overrides: Partial<SceneEditResult> = {}): SceneEditResult {
   return {
+    executionSessionId: "33333333-3333-3333-3333-333333333333",
     scenePlanId: "scene-1",
     sourceProjectSha256: "a".repeat(64),
     workingProjectPath: "/checkpoints/job-1/working-copy.aep",
     workingProjectSha256: "b".repeat(64),
+    workingCopyFailureCode: null,
     operationsRequested: 1,
     operationsCompleted: [0],
     checkpoint: { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: null },

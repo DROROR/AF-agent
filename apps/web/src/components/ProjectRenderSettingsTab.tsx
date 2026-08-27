@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
-import { RENDER_OUTPUT_VARIANTS, type Composition, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
+import { useEffect, useState, type ReactElement } from "react";
+import { RENDER_OUTPUT_VARIANTS, type Composition, type ExecutionSessionDto, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { Card, CardHeader } from "./ui/Card";
@@ -12,7 +12,7 @@ import { Select } from "./ui/Select";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
-import { dispatchJob } from "../lib/projects-api-client";
+import { dispatchJob, fetchCurrentExecutionSession } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 
 /**
@@ -28,6 +28,23 @@ import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
  */
 export function ProjectRenderSettingsTab(): ReactElement | null {
   const { project, plan } = useProjectWorkspaceContext();
+  const [session, setSession] = useState<ExecutionSessionDto | null>(null);
+
+  const projectIdForEffect = project?.project.projectId ?? null;
+  useEffect(() => {
+    if (!projectIdForEffect) {
+      return;
+    }
+    let cancelled = false;
+    void fetchCurrentExecutionSession(projectIdForEffect).then((result) => {
+      if (!cancelled && result.ok) {
+        setSession(result.data);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectIdForEffect]);
 
   if (!project) {
     return null;
@@ -35,6 +52,12 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
 
   const compositions = project.manifest.compositions;
   const projectId = project.project.projectId;
+  // RENDER can only ever dispatch from a session that has actually reached
+  // READY_TO_RENDER (every approved scene executed + preview approved) or
+  // has already COMPLETED one variant (still eligible to render the other -
+  // section 15: the session stays recoverable) - see resolveRenderDispatch's
+  // own server-side gate, mirrored here only for UI honesty.
+  const renderReady = session !== null && (session.status === "READY_TO_RENDER" || session.status === "COMPLETED");
 
   return (
     <div className="overview-grid">
@@ -47,6 +70,8 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
           compositions={compositions}
           currentConfig={plan?.plan.renderOutputs[variant] ?? null}
           currentSourceSha={project.manifest.sourceProject.sha256}
+          session={session}
+          renderReady={renderReady}
         />
       ))}
     </div>
@@ -100,13 +125,17 @@ function VariantConfigCard({
   variant,
   compositions,
   currentConfig,
-  currentSourceSha
+  currentSourceSha,
+  session,
+  renderReady
 }: {
   projectId: string;
   variant: RenderOutputVariant;
   compositions: Composition[];
   currentConfig: RenderOutputConfig | null;
   currentSourceSha: string;
+  session: ExecutionSessionDto | null;
+  renderReady: boolean;
 }): ReactElement {
   const { t } = useLocale();
   const { setRenderOutput } = useProjectWorkspaceContext();
@@ -123,8 +152,12 @@ function VariantConfigCard({
   const isStale = currentConfig !== null && currentConfig.sourceProjectSha256 !== currentSourceSha;
   const selectedComposition = compositions.find((c) => c.compositionId === manifestCompositionId) ?? null;
   const canSave = manifestCompositionId !== "" && renderSettingsTemplateName.trim() !== "" && outputModuleTemplateName.trim() !== "";
-  const renderWorker = findDispatchableWorker(dashboardStatus?.workers ?? null, "RENDER");
-  const canRender = currentConfig !== null && !isStale && renderWorker !== null;
+  // RENDER is always pinned to the execution session's own assigned worker
+  // (worker affinity, section 8) - never re-chosen the way EXECUTE_FRAME's
+  // very first dispatch is.
+  const renderWorker = session ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === session.assignedWorkerId) ?? null : null;
+  const renderWorkerOnline = renderWorker !== null && renderWorker.status === "ONLINE" && renderWorker.currentJobId === null;
+  const canRender = currentConfig !== null && !isStale && renderReady && renderWorkerOnline;
 
   async function handleSave(): Promise<void> {
     setIsSaving(true);
@@ -141,13 +174,19 @@ function VariantConfigCard({
   }
 
   async function handleRender(): Promise<void> {
-    if (!renderWorker) {
+    if (!renderWorker || !session) {
       return;
     }
     setIsDispatching(true);
     setDispatchError(null);
     setDispatchSuccess(null);
-    const result = await dispatchJob({ operation: "RENDER", workerId: renderWorker.workerId, projectId, variant });
+    const result = await dispatchJob({
+      operation: "RENDER",
+      workerId: renderWorker.workerId,
+      projectId,
+      executionSessionId: session.id,
+      variant
+    });
     setIsDispatching(false);
     if (!result.ok) {
       setDispatchError(result.message);
@@ -241,7 +280,9 @@ function VariantConfigCard({
             </p>
           ) : null}
 
-          {!renderWorker && currentConfig && !isStale ? (
+          {currentConfig && !isStale && !renderReady ? (
+            <EmptyState title={t.projectWorkspace.renderSettings.sessionNotReadyTitle} description={t.projectWorkspace.renderSettings.sessionNotReadyDescription} />
+          ) : currentConfig && !isStale && renderReady && !renderWorkerOnline ? (
             <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
           ) : null}
           {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}

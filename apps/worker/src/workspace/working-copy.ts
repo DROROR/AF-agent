@@ -1,30 +1,40 @@
 import { copyFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
-import { ensureWorkRoot, jobWorkspacePath, safeJoin } from "./work-root.js";
+import { ensureWorkRoot, safeJoin, sessionWorkspacePath } from "./work-root.js";
 
 /**
  * Deterministic working-copy lifecycle for EXECUTE_FRAME (CLAUDE.md Safety
  * Rule 1: "never overwrite the original .aep"). The destination path is
  * NEVER taken from caller/network input - it is always re-derived here
- * from (workRoot, jobId), the same job-scoped-workspace primitive
- * INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE already trust for path safety
- * (see workspace/work-root.ts: safeJoin blocks traversal, jobWorkspacePath
- * validates the jobId itself). A request's own `workingProjectPath` field
- * is only ever an ASSERTION to be verified against this locally-derived
- * path, never a value used directly in an `fs` call.
+ * from (workRoot, executionSessionId), the same path-safety primitive
+ * INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE already trust (see
+ * workspace/work-root.ts: safeJoin blocks traversal, sessionWorkspacePath
+ * validates the id itself).
+ *
+ * Session-scoped (multi-scene-accumulation phase, section 3/4) rather than
+ * job-scoped: EVERY scene's EXECUTE_FRAME job for the same
+ * executionSessionId resolves to the SAME working copy file, so scene 2's
+ * edit lands on top of scene 1's, never a fresh copy from the original
+ * source. The FIRST job for a session creates it once (copy-once
+ * semantics, `expectedWorkingProjectSha256: null`); every later job must
+ * find it already there and matching the session's own durably-recorded
+ * chain-of-custody head (`expectedWorkingProjectSha256`, non-null) - see
+ * WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH below (section 6/7).
  */
 const WORKING_COPY_FILENAME = "working-copy.aep";
 
-export function workingCopyPath(workRoot: string, jobId: string): string {
-  return safeJoin(jobWorkspacePath(workRoot, jobId), WORKING_COPY_FILENAME);
+export function sessionWorkingCopyPath(workRoot: string, executionSessionId: string): string {
+  return safeJoin(sessionWorkspacePath(workRoot, executionSessionId), WORKING_COPY_FILENAME);
 }
 
-export interface PrepareWorkingCopyParams {
+export interface PrepareSessionWorkingCopyParams {
   workRoot: string;
-  jobId: string;
+  executionSessionId: string;
   sourceProjectPath: string;
   expectedSourceSha256: string;
+  /** Null only for a session's very first scene job (no working copy has ever been produced yet). Non-null for every later job - the session's own latestWorkingProjectSha256 as last durably recorded by the API. */
+  expectedWorkingProjectSha256: string | null;
 }
 
 export interface WorkingCopyReady {
@@ -33,7 +43,7 @@ export interface WorkingCopyReady {
   /** Re-verified now, from the real file on disk - never merely echoed back from the request. */
   sourceProjectSha256: string;
   workingProjectSha256: string;
-  /** True when an existing, valid working copy was reused rather than freshly copied - the resume path (section 2: "resume reuses existing valid working copy"). */
+  /** True when an existing, valid working copy was reused rather than freshly copied - the resume/accumulation path (section 2/4: "resume reuses existing valid working copy"). */
   resumed: boolean;
 }
 
@@ -42,7 +52,11 @@ export type WorkingCopyFailureReason =
   | "SOURCE_NOT_FOUND"
   | "SOURCE_SHA_MISMATCH"
   | "COPY_FAILED"
-  | "WORKING_COPY_INVALID";
+  | "WORKING_COPY_INVALID"
+  /** expectedWorkingProjectSha256 was non-null (a prior scene already succeeded in this session) but no file exists at the session's derived path - section 7: "return explicit WORKING_COPY_MISSING". Never silently recreated from the original source. */
+  | "WORKING_COPY_MISSING"
+  /** A file exists, but its real sha256 does not match expectedWorkingProjectSha256 - the on-disk state has diverged from what the session's own durable record expects (section 6's chain-of-custody). Never silently overwritten. */
+  | "WORKING_COPY_SHA_MISMATCH";
 
 export interface WorkingCopyFailure {
   ok: false;
@@ -61,19 +75,28 @@ function hashOrFail(filePath: string, failReason: WorkingCopyFailureReason) {
 }
 
 /**
- * Verifies the source .aep still matches `expectedSourceSha256`, then
- * either reuses an existing valid working copy (resume) or creates a new
- * one by copying the source into the job's own workspace directory -
- * never the reverse, never in place. The source is re-hashed a SECOND
- * time immediately after a fresh copy completes, to catch a source file
- * that changed mid-copy (a race the single before-copy check alone cannot
- * detect) - if that happens, the just-created working copy is left on
- * disk (kept for forensic value, matching this project's "never silently
- * discard" convention elsewhere) but the result is still reported as a
- * failure, never a false success.
+ * Verifies the source .aep still matches `expectedSourceSha256`, then:
+ *   - if `expectedWorkingProjectSha256` is null (this session's first
+ *     scene job): reuses an existing valid working copy if one is already
+ *     there (a retried first-attempt - never re-copied over, so
+ *     in-progress edits from that attempt are never discarded), otherwise
+ *     creates a new one by copying the source into the session's own
+ *     workspace directory - never the reverse, never in place.
+ *   - if `expectedWorkingProjectSha256` is non-null (a later scene job):
+ *     the working copy MUST already exist and its real sha256 MUST match
+ *     exactly - WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH otherwise,
+ *     never a silent recreation from the original source (section 6/7's
+ *     chain-of-custody guarantee).
+ *
+ * The source is re-hashed a SECOND time immediately after a fresh copy
+ * completes, to catch a source file that changed mid-copy (a race the
+ * single before-copy check alone cannot detect) - if that happens, the
+ * just-created working copy is left on disk (kept for forensic value,
+ * matching this project's "never silently discard" convention elsewhere)
+ * but the result is still reported as a failure, never a false success.
  */
-export async function prepareWorkingCopy(params: PrepareWorkingCopyParams): Promise<WorkingCopyResult> {
-  const destPath = workingCopyPath(params.workRoot, params.jobId);
+export async function prepareSessionWorkingCopy(params: PrepareSessionWorkingCopyParams): Promise<WorkingCopyResult> {
+  const destPath = sessionWorkingCopyPath(params.workRoot, params.executionSessionId);
 
   if (path.resolve(params.sourceProjectPath) === path.resolve(destPath)) {
     return {
@@ -95,10 +118,41 @@ export async function prepareWorkingCopy(params: PrepareWorkingCopyParams): Prom
     };
   }
 
+  if (params.expectedWorkingProjectSha256 !== null) {
+    // A prior scene already succeeded in this session - the working copy
+    // MUST already exist and match exactly. Never recreated from source.
+    if (!existsSync(destPath)) {
+      return {
+        ok: false,
+        reason: "WORKING_COPY_MISSING",
+        message: `this session's working copy is expected to already exist at ${destPath} (a prior scene edit already succeeded) but no file was found - refusing to recreate it from the original source`
+      };
+    }
+    const workingHash = await hashOrFail(destPath, "WORKING_COPY_INVALID");
+    if (!workingHash.ok) {
+      return workingHash;
+    }
+    if (workingHash.sha256 !== params.expectedWorkingProjectSha256) {
+      return {
+        ok: false,
+        reason: "WORKING_COPY_SHA_MISMATCH",
+        message: `working copy sha256 (${workingHash.sha256}) does not match this session's expected sha256 (${params.expectedWorkingProjectSha256}) - the on-disk state has diverged from what this session's own durable record expects`
+      };
+    }
+    return {
+      ok: true,
+      workingProjectPath: destPath,
+      sourceProjectSha256: sourceHashBefore.sha256,
+      workingProjectSha256: workingHash.sha256,
+      resumed: true
+    };
+  }
+
   if (existsSync(destPath)) {
-    // Resume path: an existing working copy is reused as-is, never
-    // re-copied over - a re-copy here could silently discard in-progress
-    // edits a prior job attempt already made to it.
+    // First-scene resume path: an existing working copy from an earlier
+    // attempt at THIS SAME first job is reused as-is, never re-copied over
+    // - a re-copy here could silently discard in-progress edits a prior
+    // attempt already made to it.
     let stat;
     try {
       stat = statSync(destPath);

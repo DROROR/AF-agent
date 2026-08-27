@@ -19,8 +19,6 @@ function toDomain(row: ExecutionPlanRow): ExecutionPlanRecord {
     scenePlans: row.scenePlans,
     // Existing rows predating this column read back as null - never a crash, never a guessed config (see schema.ts's own doc comment).
     renderOutputs: row.renderOutputs ?? EMPTY_RENDER_OUTPUTS,
-    workingProjectPath: row.workingProjectPath,
-    workingProjectSha256: row.workingProjectSha256,
     approvedAt: row.approvedAt,
     approvedBy: row.approvedBy,
     createdAt: row.createdAt,
@@ -48,10 +46,8 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
         // content edit can change/remove the very composition a prior
         // revision's config pointed at).
         renderOutputs: EMPTY_RENDER_OUTPUTS,
-        // A new revision means scene CONTENT changed - any working copy a
-        // prior revision's EXECUTE_FRAME job produced is stale against the
-        // new content, so this never carries forward either (same "fail
-        // closed on a content edit" rationale as renderOutputs above).
+        // Superseded columns (see schema.ts's own doc comment) - always
+        // null on a fresh insert, never written to again.
         workingProjectPath: null,
         workingProjectSha256: null,
         approvedAt: revisionRow.approvedAt,
@@ -115,15 +111,6 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
     const [row] = await this.db
       .update(executionPlans)
       .set({ renderOutputs: nextRenderOutputs, updatedAt: now })
-      .where(eq(executionPlans.id, id))
-      .returning();
-    return row ? toDomain(row) : null;
-  }
-
-  async updateWorkingCopy(id: string, workingProjectPath: string, workingProjectSha256: string, now: Date): Promise<ExecutionPlanRecord | null> {
-    const [row] = await this.db
-      .update(executionPlans)
-      .set({ workingProjectPath, workingProjectSha256, updatedAt: now })
       .where(eq(executionPlans.id, id))
       .returning();
     return row ? toDomain(row) : null;

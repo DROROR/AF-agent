@@ -22,12 +22,14 @@ import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene
 import { recordRenderArtifactIfApplicable } from "../application/job/record-render-artifact.js";
 import { recordExecuteFrameResultIfApplicable } from "../application/job/record-execute-frame-result.js";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
+import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
 
 export interface JobsRouteDeps {
   jobRepository: JobRepository;
   workerRepository: WorkerRepository;
   projectRepository: ProjectRepository;
   executionPlanRepository: ExecutionPlanRepository;
+  executionSessionRepository: ExecutionSessionRepository;
   assetRepository: AssetRepository;
   sceneEvidenceRepository: SceneEvidenceRepository;
   renderArtifactRepository: RenderArtifactRepository;
@@ -81,6 +83,7 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
         workerRepository: deps.workerRepository,
         projectRepository: deps.projectRepository,
         executionPlanRepository: deps.executionPlanRepository,
+        executionSessionRepository: deps.executionSessionRepository,
         assetRepository: deps.assetRepository,
         now,
         staleAfterMs: deps.staleAfterMs
@@ -129,11 +132,19 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     // the job's own status/result" contract as recordSceneEvidenceIfApplicable
     // above - see record-render-artifact.ts's own doc comment.
     await recordRenderArtifactIfApplicable(
-      { renderArtifactRepository: deps.renderArtifactRepository, renderArtifactUploadRepository: deps.renderArtifactUploadRepository, now },
+      {
+        renderArtifactRepository: deps.renderArtifactRepository,
+        renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
+        executionSessionRepository: deps.executionSessionRepository,
+        now
+      },
       dto
     );
     // Same "best-effort side effect" contract - see record-execute-frame-result.ts's own doc comment.
-    await recordExecuteFrameResultIfApplicable({ executionPlanRepository: deps.executionPlanRepository, now }, dto);
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository: deps.executionSessionRepository, executionPlanRepository: deps.executionPlanRepository, now },
+      dto
+    );
     reply.send(dto);
   });
 

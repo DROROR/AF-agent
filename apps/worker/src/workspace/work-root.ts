@@ -3,6 +3,7 @@ import path from "node:path";
 import { UnsafePathError } from "../errors/worker-error.js";
 
 const JOB_ID_PATTERN = /^[a-zA-Z0-9-]{1,100}$/;
+const EXECUTION_SESSION_ID_PATTERN = /^[a-zA-Z0-9-]{1,100}$/;
 
 /** Normalizes a configured work root to an absolute path. */
 export function resolveWorkRoot(rawRoot: string): string {
@@ -58,13 +59,32 @@ export function jobWorkspacePath(root: string, jobId: string): string {
 }
 
 /**
- * Verifies an ALREADY-ABSOLUTE path (e.g. a RENDER job's `workingProjectPath`,
- * inherited from an earlier job's own workspace rather than derived from
- * this job's own jobId - see render-project-executor.ts) still resolves
- * strictly inside the configured work root - the same traversal-safety
- * guarantee `safeJoin` gives paths it builds itself, applied instead to a
- * path this worker did not construct. Throws UnsafePathError rather than
- * silently clamping, matching safeJoin's own contract.
+ * Every PROJECT EXECUTION SESSION gets its own isolated subdirectory under
+ * the work root, keyed by a validated executionSessionId - never by a
+ * caller-supplied path (multi-scene-accumulation phase, section 3). This
+ * is the workspace the session's CUMULATIVE working copy lives in across
+ * every scene's own EXECUTE_FRAME job and both output renders - distinct
+ * from jobWorkspacePath above, which is scoped to ONE job only.
+ */
+export function sessionWorkspacePath(root: string, executionSessionId: string): string {
+  if (!EXECUTION_SESSION_ID_PATTERN.test(executionSessionId)) {
+    throw new UnsafePathError(`Execution session ID is not a safe path segment: ${executionSessionId}`, "invalid-segment");
+  }
+  return safeJoin(root, "execution-sessions", executionSessionId);
+}
+
+/**
+ * Verifies an ALREADY-ABSOLUTE path still resolves strictly inside the
+ * configured work root - the same traversal-safety guarantee `safeJoin`
+ * gives paths it builds itself, applied instead to a path this worker did
+ * not construct. Throws UnsafePathError rather than silently clamping,
+ * matching safeJoin's own contract. (As of the multi-scene-accumulation
+ * phase, every path this worker touches - including RENDER's
+ * workingProjectPath - is derived internally via sessionWorkingCopyPath/
+ * safeJoin rather than accepted as an already-absolute value, so this is
+ * currently unused in production; kept as a general-purpose safety
+ * primitive for any future caller that does need to verify a path it did
+ * not itself construct.)
  */
 export function assertPathWithinRoot(root: string, candidatePath: string): void {
   const resolvedRoot = path.resolve(root);

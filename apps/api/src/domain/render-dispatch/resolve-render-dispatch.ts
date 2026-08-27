@@ -1,4 +1,5 @@
-import type { PlanStatus, RenderOutputVariant, RenderOutputs, RenderProjectRequest, WorkerCapability } from "@dyo/schemas";
+import type { ExecutionSessionStatus, PlanStatus, RenderOutputVariant, RenderOutputs, RenderProjectRequest, ScenePlanEntry, WorkerCapability } from "@dyo/schemas";
+import { TERMINAL_EXECUTION_SESSION_STATUSES } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 
@@ -15,21 +16,34 @@ export interface RenderDispatchPlanSnapshot {
   status: PlanStatus;
   sourceProjectSha256: string;
   renderOutputs: RenderOutputs;
-  /** The most recently successfully-completed EXECUTE_FRAME job's own working-copy identity - see record-execute-frame-result.ts/schema.ts's own doc comment. Null until at least one EXECUTE_FRAME job has ever succeeded for this plan. */
-  workingProjectPath: string | null;
-  workingProjectSha256: string | null;
+  scenePlans: ScenePlanEntry[];
+}
+
+/** The fields resolveRenderDispatch actually needs from a real ExecutionSessionRecord - mirrors ExecuteFrameDispatchSessionSnapshot. */
+export interface RenderDispatchSessionSnapshot {
+  id: string;
+  projectId: string;
+  planRevision: number;
+  sourceProjectSha256: string;
+  assignedWorkerId: string;
+  status: ExecutionSessionStatus;
+  latestWorkingProjectSha256: string | null;
+  completedScenePlanIds: string[];
+  firstPreviewApproved: boolean;
 }
 
 export interface ResolveRenderDispatchInput {
   projectId: string;
   variant: RenderOutputVariant;
+  /** The session this render is being dispatched from - resolved by the caller from `executionSessionId`, null if it doesn't exist. */
+  session: RenderDispatchSessionSnapshot | null;
   /** The CURRENT plan for this project, freshly read - null if none exists. */
   currentPlan: RenderDispatchPlanSnapshot | null;
   /** The project's CURRENT manifest sha256, freshly read - null if the project doesn't exist. */
   currentProjectSourceProjectSha256: string | null;
   /** The project's CURRENT manifest sourceProject.path, freshly read - null if the project doesn't exist. */
   currentProjectSourceProjectPath: string | null;
-  /** The worker's live state, freshly read - null if it has never reported in. */
+  /** The worker actually being dispatched to, freshly read - null if it has never reported in. */
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
@@ -40,37 +54,66 @@ export type ResolveRenderDispatchResult =
   | { ok: false; reason: string };
 
 /**
- * Render-delivery phase section 9 / activation-phase section 4: "Browser
- * only requests LANDSCAPE or REELS... Server derives... No arbitrary
- * render payload passthrough." The caller passes only `projectId` +
- * `variant` - this resolves (and validates) the REAL, persisted
- * RenderOutputConfig (set-render-output-config.ts) AND the plan's own
- * durably-tracked working-copy identity (record-execute-frame-result.ts -
- * the most recently succeeded EXECUTE_FRAME job's own reported path/
- * sha256, never re-derived or guessed here), building the complete
+ * Multi-scene-accumulation phase, section 12: "RENDER must no longer
+ * create/find an independent working copy... LANDSCAPE and REELS render
+ * requests reference executionSessionId... Worker derives the same
+ * execution-session AEP path and verifies SHA before aerender." The caller
+ * passes only `projectId` + `variant` + the session identified by the
+ * browser's own `executionSessionId` - this resolves (and validates) the
+ * REAL, persisted RenderOutputConfig (set-render-output-config.ts) AND the
+ * session's own READY_TO_RENDER gate (section 13), building the complete
  * RenderProjectRequest a worker actually needs - never accepting any
  * addressing/path field from a browser/API caller directly.
  *
+ * READY_TO_RENDER gate (section 13) - all of the following must hold:
+ *   - the session exists, belongs to this project, is not terminal,
+ *   - the session's own bound planRevision/sourceProjectSha256 still match
+ *     the CURRENT plan (section 11 - same rule as EXECUTE_FRAME),
+ *   - at least one scene edit has ever succeeded for this session
+ *     (latestWorkingProjectSha256 is non-null - there is a cumulative
+ *     working copy to render at all),
+ *   - firstPreviewApproved is true (section 10 - the human preview gate),
+ *   - every plan scene that is use=true/APPROVED/no-unresolved-reasons has
+ *     completed in this session (completedScenePlanIds covers them all -
+ *     never a partial render from an in-progress session).
+ *
  * Every precondition here is checked fresh against data the caller
  * already fetched (pure function, same style as
- * validateSceneEditPreconditions/resolveExecuteFrameDispatch) - never a
+ * resolveExecuteFrameDispatch/validateSceneEditPreconditions) - never a
  * cached/stale value, and this function itself never performs I/O.
  *
  * The working copy's own CONTENT is still independently re-verified by
  * the worker itself at actual render time (render-project-executor.ts's
- * VERIFY_WORKING_COPY stage, re-hashing the real file on disk) - this
- * function only proves a working copy is durably ON RECORD at all before
- * ever dispatching, never that the file still exists/matches (that
- * remains the worker's own real enforcement point, by design).
+ * VERIFY_WORKING_COPY stage, re-hashing the real file it derives from
+ * `executionSessionId`) - this function only proves a working copy is
+ * durably ON RECORD and complete before ever dispatching, never that the
+ * file still exists/matches (that remains the worker's own real
+ * enforcement point, by design).
  */
 export function resolveRenderDispatch(input: ResolveRenderDispatchInput): ResolveRenderDispatchResult {
-  const { projectId, variant, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, worker, now, staleAfterMs } = input;
+  const { projectId, variant, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, worker, now, staleAfterMs } = input;
+
+  if (!session) {
+    return { ok: false, reason: "No execution session was found for the requested executionSessionId" };
+  }
+  if (session.projectId !== projectId) {
+    return { ok: false, reason: "The execution session does not belong to this project" };
+  }
+  if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
+    return { ok: false, reason: `Execution session is ${session.status} - start a new execution session to continue` };
+  }
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project" };
   }
   if (currentPlan.status !== "APPROVED") {
     return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a render can only be dispatched from an approved plan` };
+  }
+  if (session.planRevision !== currentPlan.revision || session.sourceProjectSha256 !== currentPlan.sourceProjectSha256) {
+    return {
+      ok: false,
+      reason: `Execution session is bound to plan revision ${session.planRevision}, but the current plan is revision ${currentPlan.revision} - the plan changed after this session began; start a new execution session`
+    };
   }
   if (
     currentProjectSourceProjectSha256 === null ||
@@ -94,15 +137,32 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
     return { ok: false, reason: `${variant} output configuration is missing a required render template name` };
   }
 
-  if (!currentPlan.workingProjectPath || !currentPlan.workingProjectSha256) {
+  if (!session.latestWorkingProjectSha256) {
     return {
       ok: false,
-      reason: "No working copy has been produced for this plan yet - dispatch EXECUTE_FRAME for at least one approved scene before rendering"
+      reason: "No scene edit has completed in this execution session yet - dispatch EXECUTE_FRAME for at least one approved scene before rendering"
+    };
+  }
+  if (!session.firstPreviewApproved) {
+    return { ok: false, reason: "The first-frame preview for this execution session has not been approved yet" };
+  }
+  const requiredScenePlanIds = currentPlan.scenePlans
+    .filter((s) => s.use && s.approvalState === "APPROVED" && s.unresolvedReasons.length === 0)
+    .map((s) => s.id);
+  const completed = new Set(session.completedScenePlanIds);
+  const missingScenes = requiredScenePlanIds.filter((id) => !completed.has(id));
+  if (missingScenes.length > 0) {
+    return {
+      ok: false,
+      reason: `This execution session has not yet completed every approved scene (${missingScenes.length} remaining) - not ready to render`
     };
   }
 
   if (!worker) {
     return { ok: false, reason: "Worker has never reported in" };
+  }
+  if (worker.id !== session.assignedWorkerId) {
+    return { ok: false, reason: "This execution session is pinned to a different worker - its cumulative working copy exists only on that worker's local disk" };
   }
   if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, staleAfterMs)) {
     return { ok: false, reason: "Worker is not currently ONLINE (no fresh heartbeat)" };
@@ -129,8 +189,8 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
       variant,
       sourceProjectPath: currentProjectSourceProjectPath,
       sourceProjectSha256: currentPlan.sourceProjectSha256,
-      workingProjectPath: currentPlan.workingProjectPath,
-      workingProjectSha256: currentPlan.workingProjectSha256,
+      executionSessionId: session.id,
+      expectedWorkingProjectSha256: session.latestWorkingProjectSha256,
       aeProjectItemIndex: config.aeProjectItemIndex,
       compositionName: config.compositionName,
       renderSettingsTemplateName: config.renderSettingsTemplateName,

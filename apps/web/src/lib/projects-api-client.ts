@@ -29,11 +29,14 @@ import {
   type WorkMapEntry,
   listRenderArtifactsResponseSchema,
   dispatchJobResponseSchema,
+  executionSessionResponseSchema,
+  currentExecutionSessionResponseSchema,
   type RenderArtifactDto,
   type RenderOutputVariant,
   type SetRenderOutputConfigRequest,
   type DispatchJobRequest,
-  type DispatchJobResponse
+  type DispatchJobResponse,
+  type ExecutionSessionDto
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -423,6 +426,59 @@ export async function dispatchJob(dispatchRequest: DispatchJobRequest): Promise<
     return { ok: false, status, code: null, message: "Response did not match the expected job-dispatch contract" };
   }
   return { ok: true, data: parsed.data };
+}
+
+/**
+ * "Start Execution" (multi-scene-accumulation phase, section 14) - idempotent:
+ * returns the existing active session unchanged if one already exists for
+ * the project's current plan revision (create-execution-session.ts), never
+ * creates a duplicate. `workerId` is only ever consulted the FIRST time a
+ * session is created - every later scene-edit/render dispatch is pinned to
+ * whichever worker the session actually ended up with (worker affinity).
+ */
+export async function createExecutionSession(projectId: string, workerId: string): Promise<ApiResult<ExecutionSessionDto>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workerId })
+  });
+  if (status !== 201) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionSessionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-session contract" };
+  }
+  return { ok: true, data: parsed.data.session };
+}
+
+/** The active execution session for this project's current plan, or null - see get-current-execution-session.ts. */
+export async function fetchCurrentExecutionSession(projectId: string): Promise<ApiResult<ExecutionSessionDto | null>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-sessions/current`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = currentExecutionSessionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-session contract" };
+  }
+  return { ok: true, data: parsed.data.session };
+}
+
+/** "Approve Preview" (section 10) - the one human gate between a session's first completed scene and every scene after it. */
+export async function approveFirstPreview(projectId: string, sessionId: string): Promise<ApiResult<ExecutionSessionDto>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/approve-preview`,
+    { method: "POST" }
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionSessionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-session contract" };
+  }
+  return { ok: true, data: parsed.data.session };
 }
 
 /** Accepts several PENDING suggestions as one batched plan revision bump - never partial (see batch-accept-mapping-suggestions.ts). */

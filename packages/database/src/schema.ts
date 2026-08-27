@@ -3,6 +3,7 @@ import { boolean, check, doublePrecision, integer, jsonb, pgTable, text, timesta
 import type {
   AeStatus,
   EvidenceRef,
+  ExecutionSessionStatus,
   JobErrorCode,
   JobStatus,
   McpStatus,
@@ -66,6 +67,16 @@ export const DB_JOB_STATUSES = [
   "SUCCEEDED",
   "FAILED",
   "CANCELLED"
+] as const;
+export const DB_EXECUTION_SESSION_STATUSES = [
+  "PREPARING",
+  "EDITING",
+  "AWAITING_PREVIEW_APPROVAL",
+  "READY_TO_RENDER",
+  "RENDERING",
+  "COMPLETED",
+  "PAUSED",
+  "FAILED"
 ] as const;
 
 export const workers = pgTable(
@@ -237,20 +248,16 @@ export const executionPlans = pgTable(
     /** Explicit, independent-per-variant render delivery config (render-delivery phase section 1) - nullable so existing rows predating this column read back as null; the repository maps that to EMPTY_RENDER_OUTPUTS, never a crash. Updated in place (see updateRenderOutput) - never bumps revision, since choosing a render target isn't scene CONTENT requiring re-approval. */
     renderOutputs: jsonb("render_outputs").$type<RenderOutputs>(),
     /**
-     * The MOST RECENT successfully-completed EXECUTE_FRAME job's own
-     * self-reported working-copy identity (activation-phase RENDER
-     * dispatch: "no durable last-known-working-copy tracking existed" -
-     * see resolve-render-dispatch.ts's own prior doc comment on this exact
-     * gap). Updated in place (see updateWorkingCopy) - never bumps
-     * revision, same rationale as renderOutputs above. Nullable: null
-     * until at least one EXECUTE_FRAME job has ever succeeded for this
-     * plan. Known, accepted scope limit: EXECUTE_FRAME is one job per
-     * scene, each deriving its OWN fresh working copy from the ORIGINAL
-     * source (see workspace/working-copy.ts) - this column always reflects
-     * whichever EXECUTE_FRAME job most recently succeeded, not a
-     * cumulative multi-scene edit session. Real cross-scene continuity
-     * (editing many scenes into ONE accumulating working copy before
-     * render) is a genuine, separate, not-yet-solved architecture question.
+     * SUPERSEDED 2026-08-27 by execution_sessions (see that table's own doc
+     * comment) - no longer written to by any application code. Left in
+     * place rather than dropped (no destructive migration): these columns
+     * used to track the MOST RECENT successfully-completed EXECUTE_FRAME
+     * job's own self-reported working-copy identity, updated in place on
+     * every success, which meant they reflected whichever scene was edited
+     * LAST, never a cumulative multi-scene edit session. That exact gap is
+     * what execution_sessions.latestWorkingProjectSha256 (accumulated
+     * across every scene in one session, chained by expected-sha checks)
+     * now solves - see resolve-render-dispatch.ts's current doc comment.
      */
     workingProjectPath: text("working_project_path"),
     workingProjectSha256: text("working_project_sha256"),
@@ -268,6 +275,78 @@ export const executionPlans = pgTable(
 
 export type ExecutionPlanRow = typeof executionPlans.$inferSelect;
 export type NewExecutionPlanRow = typeof executionPlans.$inferInsert;
+
+/**
+ * PROJECT EXECUTION SESSION (multi-scene-accumulation phase, section 2) -
+ * binds one source .aep + one execution-plan revision + one assigned
+ * Worker + one cumulative Worker-local working copy across many sequential
+ * EXECUTE_FRAME jobs and both output renders. Replaces execution_plans'
+ * own now-superseded workingProjectPath/workingProjectSha256 columns
+ * (which reflected only whichever ONE scene was edited most recently).
+ *
+ * `assignedWorkerId` is pinned for the session's entire lifetime (worker
+ * affinity - section 8): the cumulative working copy lives on that one
+ * worker's local disk, so no later scene-edit/render job for this session
+ * may ever be dispatched to a different worker. `planRevision`/
+ * `sourceProjectSha256` are copied at creation time, never re-joined live
+ * (same "bound to the exact revision it was built for" rule as
+ * execution_plans.sourceProjectSha256) - if the plan changes after a
+ * session begins, dispatch fails closed (stale-session precondition, never
+ * silently mixes operations from two revisions - section 11) rather than
+ * this row being updated.
+ *
+ * `completedScenePlanIds` accumulates one entry per successful EXECUTE_FRAME
+ * job (see record-execute-frame-result.ts) - this is the durable proof
+ * scene edits are landing in the SAME cumulative copy rather than
+ * independent ones. `latestWorkingProjectSha256` is the chain-of-custody
+ * head: null until the session's first scene succeeds, then updated
+ * in-place after every subsequent success - the NEXT scene job's own
+ * dispatch payload asserts this exact value as its
+ * `expectedWorkingProjectSha256` (see resolve-execute-frame-dispatch.ts),
+ * and the worker fails closed if what's actually on disk disagrees.
+ *
+ * `status` is mostly a derived/informational field (see
+ * apps/api/src/domain/execution-session/derive-status.ts) - RENDERING/
+ * PAUSED are computed at read time from live worker/job state and never
+ * persisted here.
+ *
+ * Cleanup policy (section 15): no code anywhere ever deletes a row from
+ * this table. A row reaching COMPLETED (see record-render-artifact.ts's
+ * own session side effect) stays recoverable for a SECOND render of the
+ * other variant against the exact same cumulative working copy - project
+ * deletion cascades (onDelete cascade on project_id above) are the only
+ * removal path, same as every other project-scoped table here.
+ */
+export const executionSessions = pgTable(
+  "execution_sessions",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    executionPlanId: uuid("execution_plan_id")
+      .notNull()
+      .references(() => executionPlans.id, { onDelete: "cascade" }),
+    planRevision: integer("plan_revision").notNull(),
+    sourceProjectSha256: text("source_project_sha256").notNull(),
+    assignedWorkerId: uuid("assigned_worker_id")
+      .notNull()
+      .references(() => workers.id, { onDelete: "restrict" }),
+    status: text("status").notNull().default("PREPARING").$type<ExecutionSessionStatus>(),
+    latestWorkingProjectSha256: text("latest_working_project_sha256"),
+    completedScenePlanIds: jsonb("completed_scene_plan_ids").notNull().default(sql`'[]'::jsonb`).$type<string[]>(),
+    firstPreviewApproved: boolean("first_preview_approved").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("execution_sessions_status_check", sql.raw(sqlEnumCheck("status", DB_EXECUTION_SESSION_STATUSES))),
+    check("execution_sessions_plan_revision_check", sql`${table.planRevision} > 0`)
+  ]
+);
+
+export type ExecutionSessionRow = typeof executionSessions.$inferSelect;
+export type NewExecutionSessionRow = typeof executionSessions.$inferInsert;
 
 /**
  * Real Asset Catalog (asset-workmap-intake phase). `storageKey` is an

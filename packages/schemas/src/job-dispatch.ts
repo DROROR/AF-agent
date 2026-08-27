@@ -39,15 +39,21 @@ export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
  * unlike INSPECT_TEMPLATE/CHECK_HEALTH/INSPECT_SCENE_EVIDENCE (whose
  * payloads are still accepted directly from the caller, an earlier,
  * looser precedent this activation phase does not touch), these two
- * accept ONLY a minimal, non-addressing intent (`scenePlanId` /
- * `variant`) - the real worker-facing ExecuteSceneEditRequest/
- * RenderProjectRequest (Windows paths, composition indices, JSX
- * operations, aerender template names) is entirely SERVER-RESOLVED from
- * trusted persisted state (see resolve-execute-frame-dispatch.ts/
- * resolve-render-dispatch.ts), never accepted from a browser/API caller
- * (activation-phase sections 2-4: "browser/API callers must NOT provide
- * raw worker payloads"). INSPECT_RENDER_CAPABILITIES needs no project/
- * scene context at all - its payload is a fixed empty object, identical
+ * accept ONLY a minimal, non-addressing intent (`executionSessionId` +
+ * `scenePlanId` / `variant`) - the real worker-facing
+ * ExecuteSceneEditRequest/RenderProjectRequest (Windows paths, composition
+ * indices, JSX operations, aerender template names) is entirely
+ * SERVER-RESOLVED from trusted persisted state (see
+ * resolve-execute-frame-dispatch.ts/resolve-render-dispatch.ts), never
+ * accepted from a browser/API caller (activation-phase sections 2-4:
+ * "browser/API callers must NOT provide raw worker payloads").
+ * `workerId` here is never trusted as "the worker to use" by itself for
+ * these two operations - dispatch-job.ts independently verifies it equals
+ * the execution session's own `assignedWorkerId` (multi-scene-accumulation
+ * phase, section 8: "worker affinity" - a session's cumulative working
+ * copy exists on ONE worker's local disk, so it can never be dispatched to
+ * a different one). INSPECT_RENDER_CAPABILITIES needs no project/scene/
+ * session context at all - its payload is a fixed empty object, identical
  * in spirit to CHECK_HEALTH's.
  */
 export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
@@ -83,6 +89,7 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
       operation: z.literal("EXECUTE_FRAME"),
       workerId: z.string().uuid(),
       projectId: z.string().uuid(),
+      executionSessionId: z.string().uuid(),
       scenePlanId: z.string().min(1)
     })
     .strict(),
@@ -91,6 +98,7 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
       operation: z.literal("RENDER"),
       workerId: z.string().uuid(),
       projectId: z.string().uuid(),
+      executionSessionId: z.string().uuid(),
       variant: renderOutputVariantSchema
     })
     .strict()

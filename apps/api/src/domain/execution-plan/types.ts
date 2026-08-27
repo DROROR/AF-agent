@@ -9,9 +9,6 @@ export interface ExecutionPlanRecord {
   sourceProjectSha256: string;
   scenePlans: ScenePlanEntry[];
   renderOutputs: RenderOutputs;
-  /** The most recently successfully-completed EXECUTE_FRAME job's own working-copy identity - see schema.ts's own doc comment on this column. Null until at least one EXECUTE_FRAME job has ever succeeded for this plan. */
-  workingProjectPath: string | null;
-  workingProjectSha256: string | null;
   approvedAt: Date | null;
   approvedBy: string | null;
   createdAt: Date;
@@ -63,12 +60,4 @@ export interface ExecutionPlanRepository {
    * variant's configuration. Returns null only if `id` doesn't exist.
    */
   updateRenderOutput(id: string, variant: RenderOutputVariant, config: RenderOutputConfig | null, now: Date): Promise<ExecutionPlanRecord | null>;
-  /**
-   * In-place update of the plan's own durably-tracked working-copy
-   * identity, called only from record-execute-frame-result.ts after a
-   * REAL EXECUTE_FRAME job succeeds - never bumps revision/status/
-   * scenePlans, same "delivery/derived state, not scene content" rationale
-   * as updateRenderOutput. Returns null only if `id` doesn't exist.
-   */
-  updateWorkingCopy(id: string, workingProjectPath: string, workingProjectSha256: string, now: Date): Promise<ExecutionPlanRecord | null>;
 }
