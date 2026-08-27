@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { executeSceneEditRequestSchema, sceneEditOperationSchema, type ExecuteSceneEditRequest } from "../execute-scene-edit.js";
+import { executeSceneEditRequestSchema, sceneEditOperationSchema, sceneEditResultSchema, type ExecuteSceneEditRequest } from "../execute-scene-edit.js";
 
 function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): ExecuteSceneEditRequest {
   return {
@@ -11,6 +11,8 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
     workingProjectPath: "C:\\vidio agent\\DYO-Working\\White App Promo (converted)-DYO-Working-v001.aep",
     scenePlanId: "scene-1",
     manifestCompositionId: "comp-275",
+    aeProjectItemIndex: 14,
+    compositionName: "Scene 01",
     approvedMappingIds: ["mapping-1"],
     operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" }],
     checkpoint: null,
@@ -91,5 +93,63 @@ describe("executeSceneEditRequestSchema", () => {
   it("rejects an extra/unexpected top-level field", () => {
     const raw = { ...validRequest(), arbitraryShellCommand: "rm -rf /" };
     expect(() => executeSceneEditRequestSchema.parse(raw)).toThrow();
+  });
+
+  it("requires aeProjectItemIndex - manifestCompositionId alone cannot address a real AE composition", () => {
+    const raw = { ...validRequest() } as Partial<ExecuteSceneEditRequest>;
+    delete raw.aeProjectItemIndex;
+    expect(() => executeSceneEditRequestSchema.parse(raw)).toThrow();
+  });
+
+  it("requires compositionName - aeProjectItemIndex alone is never trusted without a name to verify against", () => {
+    const raw = { ...validRequest() } as Partial<ExecuteSceneEditRequest>;
+    delete raw.compositionName;
+    expect(() => executeSceneEditRequestSchema.parse(raw)).toThrow();
+  });
+
+  it("rejects aeProjectItemIndex of 0 - AE's own project item addressing is 1-based, never 0-based", () => {
+    expect(() => executeSceneEditRequestSchema.parse(validRequest({ aeProjectItemIndex: 0 }))).toThrow();
+  });
+});
+
+describe("sceneEditResultSchema", () => {
+  function validResult() {
+    return {
+      scenePlanId: "scene-1",
+      sourceProjectSha256: "a".repeat(64),
+      workingProjectPath: "/work/jobs/job-1/working-copy.aep",
+      workingProjectSha256: "b".repeat(64),
+      operationsRequested: 1,
+      operationsCompleted: [0],
+      checkpoint: { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: "2026-01-01T00:00:00.000Z", failureReason: null },
+      previewFramePath: "/work/jobs/job-1/preview.png",
+      previewTimestampSeconds: 0,
+      failureReason: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:01.000Z"
+    };
+  }
+
+  it("accepts a fully valid successful result", () => {
+    expect(() => sceneEditResultSchema.parse(validResult())).not.toThrow();
+  });
+
+  it("accepts a failed result with null working-copy/preview fields (failure before a working copy could be prepared)", () => {
+    expect(() =>
+      sceneEditResultSchema.parse({
+        ...validResult(),
+        workingProjectPath: null,
+        workingProjectSha256: null,
+        previewFramePath: null,
+        previewTimestampSeconds: null,
+        operationsCompleted: [],
+        failureReason: "working copy could not be prepared: SOURCE_SHA_MISMATCH"
+      })
+    ).not.toThrow();
+  });
+
+  it("accepts jobId/workerId only once stamped (optional)", () => {
+    expect(() => sceneEditResultSchema.parse(validResult())).not.toThrow();
+    expect(() => sceneEditResultSchema.parse({ ...validResult(), jobId: "job-1", workerId: "worker-1" })).not.toThrow();
   });
 });

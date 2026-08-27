@@ -59,6 +59,7 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
 
     return {
       compositionId,
+      aeProjectItemIndex: summary.index,
       name: summary.name,
       widthPx: detail?.widthPx ?? summary.widthPx,
       heightPx: detail?.heightPx ?? summary.heightPx,

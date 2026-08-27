@@ -162,7 +162,7 @@ describe("matchDeterministic", () => {
         sceneEvidence: {
           verifiedSourceProjectSha256: "a".repeat(64),
           manifestCompositionId: "comp-1",
-          compositionIndex: 0,
+          aeProjectItemIndex: 1,
           compositionName: "Scene 01",
           layers: [
             {

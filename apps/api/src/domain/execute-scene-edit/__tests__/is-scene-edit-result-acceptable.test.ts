@@ -5,12 +5,17 @@ import { isSceneEditResultAcceptable } from "../is-scene-edit-result-acceptable.
 function result(overrides: Partial<SceneEditResult> = {}): SceneEditResult {
   return {
     scenePlanId: "scene-1",
+    sourceProjectSha256: "a".repeat(64),
+    workingProjectPath: "/checkpoints/job-1/working-copy.aep",
+    workingProjectSha256: "b".repeat(64),
     operationsRequested: 1,
     operationsCompleted: [0],
     checkpoint: { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: null },
     previewFramePath: "/checkpoints/job-1/preview.png",
     previewTimestampSeconds: 2.5,
     failureReason: null,
+    startedAt: "2026-08-26T00:00:00.000Z",
+    completedAt: "2026-08-26T00:00:01.000Z",
     ...overrides
   };
 }

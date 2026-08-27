@@ -12,6 +12,8 @@ import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repos
 import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
 import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle-mapping-suggestion-repository.js";
 import { DrizzleSceneEvidenceRepository } from "../infrastructure/db/drizzle-scene-evidence-repository.js";
+import { DrizzleRenderArtifactRepository } from "../infrastructure/db/drizzle-render-artifact-repository.js";
+import { DrizzleRenderArtifactUploadRepository } from "../infrastructure/db/drizzle-render-artifact-upload-repository.js";
 import { NotConfiguredAiSuggestionProvider } from "../application/mapping-assistant/ai-suggestion-provider.js";
 import { LocalFilesystemAssetStorage } from "../infrastructure/storage/local-filesystem-asset-storage.js";
 import { mkdtempSync } from "node:fs";
@@ -35,7 +37,8 @@ async function setup(initialNow: Date) {
       WORKER_REGISTRATION_SECRET: REGISTRATION_SECRET,
       WORKER_HEARTBEAT_STALE_AFTER_MS: STALE_AFTER_MS,
       LOG_LEVEL: "silent" as never,
-      ASSET_MAX_UPLOAD_BYTES: 10_000_000
+      ASSET_MAX_UPLOAD_BYTES: 10_000_000,
+      RENDER_ARTIFACT_MAX_UPLOAD_BYTES: 2_000_000_000
     },
     workerRepository: new DrizzleWorkerRepository(db),
     jobRepository: new DrizzleJobRepository(db),
@@ -48,6 +51,8 @@ async function setup(initialNow: Date) {
     workMapRepository: new DrizzleWorkMapRepository(db),
     mappingSuggestionRepository: new DrizzleMappingSuggestionRepository(db),
     sceneEvidenceRepository: new DrizzleSceneEvidenceRepository(db),
+    renderArtifactRepository: new DrizzleRenderArtifactRepository(db),
+    renderArtifactUploadRepository: new DrizzleRenderArtifactUploadRepository(db),
     aiSuggestionProvider: new NotConfiguredAiSuggestionProvider(),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");

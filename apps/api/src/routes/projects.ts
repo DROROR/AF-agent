@@ -5,7 +5,9 @@ import {
   createExecutionPlanRequestSchema,
   createProjectRequestSchema,
   rejectExecutionPlanRequestSchema,
+  renderOutputVariantSchema,
   reopenExecutionPlanRequestSchema,
+  setRenderOutputConfigRequestSchema,
   updateExecutionPlanRequestSchema,
   updateProjectBrandInputsRequestSchema
 } from "@dyo/schemas";
@@ -26,6 +28,7 @@ import { updateExecutionPlan } from "../application/execution-plan/update-execut
 import { approveExecutionPlan } from "../application/execution-plan/approve-execution-plan.js";
 import { rejectExecutionPlan } from "../application/execution-plan/reject-execution-plan.js";
 import { reopenExecutionPlan } from "../application/execution-plan/reopen-execution-plan.js";
+import { setRenderOutputConfig } from "../application/execution-plan/set-render-output-config.js";
 
 export interface ProjectsRouteDeps {
   projectRepository: ProjectRepository;
@@ -37,6 +40,7 @@ export interface ProjectsRouteDeps {
 }
 
 const projectIdParamsSchema = z.object({ projectId: z.string().uuid() });
+const renderOutputParamsSchema = z.object({ projectId: z.string().uuid(), variant: renderOutputVariantSchema });
 
 /**
  * Phase 4 (docs/PHASES.md: "Dynamic Approval Table + Execution Plan") -
@@ -148,6 +152,24 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const body = reopenExecutionPlanRequestSchema.parse(request.body);
     const result = await reopenExecutionPlan({ executionPlanRepository: deps.executionPlanRepository, now }, projectId, body);
+    reply.send(result);
+  });
+
+  /**
+   * Explicit render-output configuration (render-delivery phase section
+   * 1/2/3) - see set-render-output-config.ts for the full contract
+   * (server-resolved composition identity, source-SHA staleness check).
+   */
+  app.put("/api/projects/:projectId/execution-plan/render-outputs/:variant", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, variant } = renderOutputParamsSchema.parse(request.params);
+    const body = setRenderOutputConfigRequestSchema.parse(request.body);
+    const result = await setRenderOutputConfig(
+      { executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository, now },
+      projectId,
+      variant,
+      body
+    );
     reply.send(result);
   });
 }

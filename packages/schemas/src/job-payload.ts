@@ -2,6 +2,9 @@ import type { z } from "zod";
 import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import { sceneEvidenceRequestSchema } from "./scene-evidence.js";
+import { executeSceneEditRequestSchema } from "./execute-scene-edit.js";
+import { renderProjectRequestSchema } from "./render-project.js";
+import { inspectRenderCapabilitiesRequestSchema } from "./inspect-render-capabilities.js";
 import type { WorkerCapability } from "./worker.js";
 
 /**
@@ -16,7 +19,22 @@ import type { WorkerCapability } from "./worker.js";
 export const JOB_PAYLOAD_SCHEMAS: Partial<Record<WorkerCapability, z.ZodTypeAny>> = {
   INSPECT_TEMPLATE: inspectTemplateRequestSchema,
   CHECK_HEALTH: checkHealthRequestSchema,
-  INSPECT_SCENE_EVIDENCE: sceneEvidenceRequestSchema
+  INSPECT_SCENE_EVIDENCE: sceneEvidenceRequestSchema,
+  // Registered here (the worker's own defense-in-depth re-validation
+  // dependency - see job-dispatcher.ts) without also adding EXECUTE_FRAME
+  // to job-dispatch.ts's DISPATCHABLE_OPERATIONS - the dashboard/
+  // control-plane dispatch surface is deliberately untouched this phase;
+  // this operation is exercised directly (unit/integration tests
+  // constructing a JobDto by hand), never through POST /api/jobs, until a
+  // later phase wires real dispatch.
+  EXECUTE_FRAME: executeSceneEditRequestSchema,
+  // Same "not yet on job-dispatch.ts's DISPATCHABLE_OPERATIONS" convention
+  // as EXECUTE_FRAME above - the dashboard/control-plane dispatch surface
+  // stays untouched this phase; RENDER is exercised directly (unit/
+  // integration tests constructing a JobDto by hand), never through
+  // POST /api/jobs, until a later phase wires real dispatch.
+  RENDER: renderProjectRequestSchema,
+  INSPECT_RENDER_CAPABILITIES: inspectRenderCapabilitiesRequestSchema
 };
 
 export function hasJobPayloadSchema(operation: WorkerCapability): boolean {

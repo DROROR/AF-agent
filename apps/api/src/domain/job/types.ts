@@ -69,6 +69,20 @@ export interface JobRepository {
    * IDs by observing a different error).
    */
   updateStatus(jobId: string, workerId: string, update: JobStatusUpdate, now: Date): Promise<Job | null>;
+  /**
+   * Durable MID-JOB progress update - deliberately NEVER a status
+   * transition (no `expectedCurrentStatus`/`status` fields, unlike
+   * updateStatus above): this only ever writes `checkpoint`/`updatedAt`,
+   * gated by a compare-and-swap on (id, workerId, status = 'RUNNING').
+   * Returns null if the job doesn't exist, isn't owned by workerId, or is
+   * no longer RUNNING (already completed, failed, or reassigned) - the
+   * application layer treats all three identically (a real race, not a
+   * distinguishable error), same "never confirm which case" pattern as
+   * updateStatus. Monotonicity (never let completed operation indices
+   * move backward) is enforced by the application layer BEFORE calling
+   * this, not here - this method only ever performs the write.
+   */
+  updateCheckpoint(jobId: string, workerId: string, checkpoint: unknown, now: Date): Promise<Job | null>;
   /** Fails every non-terminal job belonging to a worker whose heartbeat is stale - recovery for "worker goes offline while running/before claim". Returns affected job IDs. */
   failJobsForStaleWorkers(now: Date, staleAfterMs: number): Promise<string[]>;
   /** Count of this worker's non-QUEUED, non-terminal jobs (CLAIMED/RUNNING/WAITING_FOR_ACTION) - the same "in flight" definition claimNextForWorker's concurrency gate uses. Used by job dispatch to refuse creating a job past maxConcurrency. */

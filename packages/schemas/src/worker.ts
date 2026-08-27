@@ -36,6 +36,8 @@ export const WORKER_CAPABILITIES = [
   "CREATE_REELS",
   "PREPARE_RENDER",
   "RENDER",
+  /** Read-only, preparing for final Windows Worker verification - see inspect-render-capabilities.ts's own doc comment. Never mutates, never saves, never contacts the client. */
+  "INSPECT_RENDER_CAPABILITIES",
   "RESUME_JOB"
 ] as const;
 export type WorkerCapability = (typeof WORKER_CAPABILITIES)[number];

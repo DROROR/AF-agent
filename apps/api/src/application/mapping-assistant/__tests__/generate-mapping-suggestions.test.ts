@@ -28,7 +28,7 @@ function manifest(): TemplateManifest {
     afterEffects: { version: "26.3x87" },
     generatedAt: NOW.toISOString(),
     compositions: [
-      { compositionId: "comp-1", name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+      { compositionId: "comp-1", aeProjectItemIndex: 1, name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
     ],
     scenes: [
       {
@@ -78,7 +78,7 @@ function sceneEvidenceFixture(overrides: Partial<{ verifiedSourceProjectSha256: 
   return {
     verifiedSourceProjectSha256: overrides.verifiedSourceProjectSha256 ?? "a".repeat(64),
     manifestCompositionId: "comp-1",
-    compositionIndex: 0,
+    aeProjectItemIndex: 1,
     compositionName: "Scene A",
     layers: [],
     preview: null,

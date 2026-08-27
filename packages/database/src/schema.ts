@@ -10,6 +10,9 @@ import type {
   PlaceholderType,
   PlanStatus,
   ProjectBrandInputs,
+  RenderArtifactValidationStatus,
+  RenderOutputs,
+  RenderOutputVariant,
   SceneEvidenceResponse,
   ScenePlanEntry,
   SuggestionSource,
@@ -52,6 +55,7 @@ export const DB_WORKER_CAPABILITIES = [
   "CREATE_REELS",
   "PREPARE_RENDER",
   "RENDER",
+  "INSPECT_RENDER_CAPABILITIES",
   "RESUME_JOB"
 ] as const;
 export const DB_JOB_STATUSES = [
@@ -230,6 +234,8 @@ export const executionPlans = pgTable(
     /** Copied from the owning project at plan-creation time, not re-joined live - CLAUDE.md Safety Rule 8 / Phase 4: a plan is bound to the EXACT source revision it was built for, even if the project's own manifest is later replaced. */
     sourceProjectSha256: text("source_project_sha256").notNull(),
     scenePlans: jsonb("scene_plans").notNull().$type<ScenePlanEntry[]>(),
+    /** Explicit, independent-per-variant render delivery config (render-delivery phase section 1) - nullable so existing rows predating this column read back as null; the repository maps that to EMPTY_RENDER_OUTPUTS, never a crash. Updated in place (see updateRenderOutput) - never bumps revision, since choosing a render target isn't scene CONTENT requiring re-approval. */
+    renderOutputs: jsonb("render_outputs").$type<RenderOutputs>(),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -402,3 +408,97 @@ export const sceneEvidence = pgTable(
 );
 export type SceneEvidenceRow = typeof sceneEvidence.$inferSelect;
 export type NewSceneEvidenceRow = typeof sceneEvidence.$inferInsert;
+
+export const DB_RENDER_OUTPUT_VARIANTS = ["LANDSCAPE", "REELS"] as const;
+export const DB_RENDER_ARTIFACT_VALIDATION_STATUSES = ["VALID", "INVALID"] as const;
+
+/**
+ * Durable METADATA-only record of one successful RENDER job's own artifact
+ * (render-engine phase section 11/12) - mirrors scene_evidence's own
+ * "append-only, jobId-unique" pattern exactly. Deliberately carries NO
+ * filesystem path (worker-local paths never cross into this table - see
+ * docs/engineering/SECURITY.md). `storageKey`/`sha256` bind this row to
+ * REAL, server-verified uploaded bytes (see render_artifact_uploads and
+ * record-render-artifact.ts) - a row is only ever inserted once a matching
+ * upload already exists, so a render_artifacts row is never downloadable
+ * metadata for bytes that don't actually exist in storage. Only ever
+ * inserted for a job whose reported result's `validationStatus` is
+ * "VALID" AND whose bytes were genuinely uploaded and verified.
+ */
+export const renderArtifacts = pgTable(
+  "render_artifacts",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .unique()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    variant: text("variant").notNull().$type<RenderOutputVariant>(),
+    compositionName: text("composition_name").notNull(),
+    workingProjectSha256: text("working_project_sha256").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    /** Opaque AssetStorage identifier for the REAL uploaded bytes - never a filesystem path exposed to a browser. Server-verified at upload time (see render_artifact_uploads), never worker-self-reported. */
+    storageKey: text("storage_key").notNull(),
+    /** Server-computed from the actual uploaded bytes - never trusted from the worker's own claim alone. */
+    sha256: text("sha256").notNull(),
+    renderStartedAt: timestamp("render_started_at", { withTimezone: true }).notNull(),
+    renderCompletedAt: timestamp("render_completed_at", { withTimezone: true }).notNull(),
+    aerenderExitCode: integer("aerender_exit_code").notNull(),
+    logExcerpt: text("log_excerpt"),
+    validationStatus: text("validation_status").notNull().$type<RenderArtifactValidationStatus>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("render_artifacts_variant_check", sql.raw(sqlEnumCheck("variant", DB_RENDER_OUTPUT_VARIANTS))),
+    check("render_artifacts_validation_status_check", sql.raw(sqlEnumCheck("validation_status", DB_RENDER_ARTIFACT_VALIDATION_STATUSES))),
+    check("render_artifacts_byte_size_check", sql`${table.byteSize} >= 0`),
+    unique("render_artifacts_storage_key_unique").on(table.storageKey)
+  ]
+);
+export type RenderArtifactRow = typeof renderArtifacts.$inferSelect;
+export type NewRenderArtifactRow = typeof renderArtifacts.$inferInsert;
+
+/**
+ * Real, server-verified uploaded bytes for ONE render job (render-delivery
+ * phase section 4) - written by the worker-authenticated artifact-upload
+ * endpoint BEFORE the job's own final status report, deliberately kept
+ * separate from render_artifacts (which describes the finished, delivered
+ * result). record-render-artifact.ts's job-report side effect only ever
+ * creates a render_artifacts row once a matching row here already exists -
+ * a job that reports SUCCEEDED without ever having uploaded real bytes
+ * never becomes a downloadable artifact. `job_id` unique: idempotent by
+ * job, mirroring scene_evidence/render_artifacts' own convention - a
+ * retried/duplicate upload for the same job replaces this row's content
+ * (see upload-render-artifact.ts) rather than ever creating a second one.
+ */
+export const renderArtifactUploads = pgTable(
+  "render_artifact_uploads",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .unique()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    variant: text("variant").notNull().$type<RenderOutputVariant>(),
+    storageKey: text("storage_key").notNull(),
+    sha256: text("sha256").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    mimeType: text("mime_type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("render_artifact_uploads_variant_check", sql.raw(sqlEnumCheck("variant", DB_RENDER_OUTPUT_VARIANTS))),
+    check("render_artifact_uploads_byte_size_check", sql`${table.byteSize} >= 0`),
+    unique("render_artifact_uploads_storage_key_unique").on(table.storageKey)
+  ]
+);
+export type RenderArtifactUploadRow = typeof renderArtifactUploads.$inferSelect;
+export type NewRenderArtifactUploadRow = typeof renderArtifactUploads.$inferInsert;

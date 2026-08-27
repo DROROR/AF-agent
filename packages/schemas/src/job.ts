@@ -104,3 +104,20 @@ export const reportJobStatusRequestSchema = z.object({
   checkpoint: z.unknown().optional()
 });
 export type ReportJobStatusRequest = z.infer<typeof reportJobStatusRequestSchema>;
+
+/**
+ * POST /api/workers/:workerId/jobs/:jobId/checkpoint - a durable MID-JOB
+ * progress update, deliberately NEVER a status transition (there is no
+ * `status` field here at all - see report-job-checkpoint.ts). Exists so a
+ * worker crash between one EXECUTE_FRAME operation completing and the
+ * job's own final report ever reaching the API does not silently lose
+ * that completed operation - the checkpoint itself is validated against
+ * the specific operation's own checkpoint schema at the application
+ * layer (e.g. sceneEditCheckpointSchema for EXECUTE_FRAME), not here -
+ * this wire-level contract stays `unknown` the same way
+ * reportJobStatusRequestSchema's own `checkpoint` field already does.
+ */
+export const reportJobCheckpointRequestSchema = z.object({
+  checkpoint: z.unknown()
+});
+export type ReportJobCheckpointRequest = z.infer<typeof reportJobCheckpointRequestSchema>;

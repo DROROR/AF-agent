@@ -32,7 +32,7 @@ function manifest(): TemplateManifest {
     afterEffects: { version: "26.3x87" },
     generatedAt: NOW.toISOString(),
     compositions: [
-      { compositionId: "comp-1", name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+      { compositionId: "comp-1", aeProjectItemIndex: 1, name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
     ],
     scenes: [
       {

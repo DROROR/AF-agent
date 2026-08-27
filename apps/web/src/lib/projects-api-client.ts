@@ -26,7 +26,11 @@ import {
   type RejectMappingSuggestionResponse,
   type UpdateAssetRequest,
   type WorkMap,
-  type WorkMapEntry
+  type WorkMapEntry,
+  listRenderArtifactsResponseSchema,
+  type RenderArtifactDto,
+  type RenderOutputVariant,
+  type SetRenderOutputConfigRequest
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -349,6 +353,49 @@ export async function rejectMappingSuggestion(projectId: string, suggestionId: s
     return { ok: false, status, code: null, message: "Response did not match the expected reject-suggestion contract" };
   }
   return { ok: true, data: parsed.data };
+}
+
+/**
+ * Explicit render-output configuration (render-delivery phase section
+ * 1/2) - only `manifestCompositionId` (from a real manifest composition)
+ * plus the two template name fields are ever sent; the server resolves
+ * aeProjectItemIndex/compositionName itself (see set-render-output-config.ts).
+ */
+export async function setRenderOutputConfig(
+  projectId: string,
+  variant: RenderOutputVariant,
+  body: SetRenderOutputConfigRequest
+): Promise<ApiResult<ExecutionPlanResponse>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-plan/render-outputs/${encodeURIComponent(variant)}`,
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionPlanResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-plan contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/** Real, persisted render-result metadata (render-delivery phase section 7/12) - only genuinely completed/validated artifacts, never a placeholder/fake card. */
+export async function fetchRenderArtifacts(projectId: string): Promise<ApiResult<RenderArtifactDto[]>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/render-artifacts`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = listRenderArtifactsResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected render-artifact list contract" };
+  }
+  return { ok: true, data: parsed.data.artifacts };
+}
+
+/** Same-origin URL for a render artifact's real stored bytes - safe to use directly as a download link; never a filesystem path or storage key. */
+export function renderArtifactFileUrl(projectId: string, artifactId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/render-artifacts/${encodeURIComponent(artifactId)}/file`;
 }
 
 /** Accepts several PENDING suggestions as one batched plan revision bump - never partial (see batch-accept-mapping-suggestions.ts). */

@@ -23,6 +23,7 @@ import type { ProjectFacts } from "./project-facts.js";
 export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () => new Date()): TemplateManifest {
   const compositions: Composition[] = facts.compositions.map((c) => ({
     compositionId: c.compositionId,
+    aeProjectItemIndex: c.aeProjectItemIndex,
     name: c.name,
     widthPx: c.widthPx,
     heightPx: c.heightPx,

@@ -71,6 +71,7 @@ export function planFixture(overrides: Record<string, unknown> = {}, scenePlans 
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     scenePlans,
+    renderOutputs: { LANDSCAPE: null, REELS: null },
     ...overrides
   };
 }
@@ -166,6 +167,27 @@ export function mappingSuggestionFixture(overrides: Record<string, unknown> = {}
     conflictsWithWorkMap: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+export function renderArtifactFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "33333333-3333-3333-3333-333333333333",
+    projectId: PROJECT_ID,
+    jobId: "22222222-2222-2222-2222-222222222222",
+    variant: "LANDSCAPE",
+    compositionName: "Landscape Master",
+    workingProjectSha256: SOURCE_SHA,
+    filename: "output.mp4",
+    mimeType: "video/mp4",
+    byteSize: 2048,
+    sha256: "c".repeat(64),
+    renderStartedAt: new Date().toISOString(),
+    renderCompletedAt: new Date().toISOString(),
+    aerenderExitCode: 0,
+    validationStatus: "VALID",
+    createdAt: new Date().toISOString(),
     ...overrides
   };
 }

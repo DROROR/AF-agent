@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import pino from "pino";
 import { resolveWorkerCredentials } from "./bootstrap.js";
 import { CURRENT_WORKER_CAPABILITIES } from "./domain/operation-allowlist.js";
@@ -10,6 +11,12 @@ import { runCheckHealthDiagnostics } from "./health/run-check-health-diagnostics
 import { readWorkerBuildInfo } from "./version.js";
 import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-inspector.js";
 import { HeroicSwanSceneEvidenceInspector } from "./inspection/heroic-swan-scene-evidence-inspector.js";
+import { HeroicSwanAeEditBridge, NotAvailableAeEditBridge } from "./execution/ae-edit-bridge.js";
+import { HeroicSwanPreviewCapture, NotAvailablePreviewCapture } from "./execution/preview-capture.js";
+import { RealAerenderRunner, NotAvailableAerenderRunner } from "./execution/render/aerender-runner.js";
+import { HeroicSwanCompositionVerifier, NotAvailableCompositionVerifier } from "./execution/render/verify-render-composition.js";
+import { HeroicSwanRenderCapabilitiesInspector, NotAvailableRenderCapabilitiesInspector } from "./execution/render/inspect-render-capabilities.js";
+import { HeroicSwanRenderArtifactUploader } from "./execution/render/upload-render-artifact.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
@@ -117,6 +124,43 @@ async function main(): Promise<void> {
   // same "safe to construct with no AE_MCP_PATH" contract as above.
   const sceneEvidenceInspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: env.aeMcpPath });
 
+  // Real EXECUTE_FRAME mutation/preview implementations - same "safe to
+  // construct with no AE_MCP_PATH" contract as the two inspectors above.
+  // CODE_COMPLETE, not REAL_WINDOWS_AE_PROVEN (see execution/jsx-templates.ts's
+  // own doc comment on the unverified ae_run_jsx tool assumption) -
+  // EXECUTE_FRAME is deliberately NOT yet added to
+  // CURRENT_WORKER_CAPABILITIES (operation-allowlist.ts), so this worker
+  // build does not yet self-report the capability at registration/
+  // heartbeat time, even though job-dispatcher.ts can now execute one if
+  // ever dispatched directly (e.g. in a test/staging harness).
+  const aeEditBridge = env.aeMcpPath
+    ? new HeroicSwanAeEditBridge({ aeMcpPath: env.aeMcpPath })
+    : new NotAvailableAeEditBridge();
+  const previewCapture = env.aeMcpPath
+    ? new HeroicSwanPreviewCapture(env.aeMcpPath)
+    : new NotAvailablePreviewCapture();
+
+  // Real RENDER (aerender) implementations - CODE_COMPLETE, not
+  // REAL_WINDOWS_AERENDER_PROVEN (see execution/render/render-project-executor.ts's
+  // own doc comment). aerenderRunner is only ever constructed as real when
+  // AERENDER_PATH is configured AND actually points at a real file on this
+  // worker's own disk right now (mirrors ae-health.ts's own
+  // "aerenderAvailable" check) - never assumed just because the env var is
+  // set. RENDER is deliberately NOT yet added to CURRENT_WORKER_CAPABILITIES,
+  // same "not yet self-reported at heartbeat time" convention as EXECUTE_FRAME.
+  const aerenderRunner =
+    env.aerenderPath && existsSync(env.aerenderPath) ? new RealAerenderRunner() : new NotAvailableAerenderRunner();
+  const compositionVerifier = env.aeMcpPath
+    ? new HeroicSwanCompositionVerifier(env.aeMcpPath)
+    : new NotAvailableCompositionVerifier();
+  const renderCapabilitiesInspector = env.aeMcpPath
+    ? new HeroicSwanRenderCapabilitiesInspector({ aeMcpPath: env.aeMcpPath })
+    : new NotAvailableRenderCapabilitiesInspector();
+  // Always real - unlike the AE-dependent implementations above, uploading
+  // already-rendered bytes to the API needs only this worker's own
+  // credentials (already resolved above), never ae-mcp/aerender.
+  const artifactUploader = new HeroicSwanRenderArtifactUploader(apiClient, credentials.workerId, credentials.workerToken);
+
   // The last CONFIRMED (server round-tripped) aeStatus/mcpStatus, updated
   // only on a successful heartbeat - the safety gate INSPECT_TEMPLATE
   // checks before ever touching ae-mcp (see job-dispatcher.ts). null until
@@ -142,7 +186,35 @@ async function main(): Promise<void> {
               runCheckHealthDiagnostics(
                 { aePath: env.aePath, aerenderPath: env.aerenderPath, aeMcpPath: env.aeMcpPath },
                 { processLister }
-              )
+              ),
+            aeEditBridge,
+            previewCapture,
+            aerenderPath: env.aerenderPath,
+            aerenderRunner,
+            compositionVerifier,
+            artifactUploader,
+            renderCapabilitiesInspector,
+            // Durable mid-job checkpoint reporter for THIS job - closes
+            // over job.jobId (job is already known at this call site) and
+            // never marks the job's own status, only the separate
+            // checkpoint endpoint (see report-job-checkpoint.ts). Any
+            // failure - network, or the API rejecting it as stale/no
+            // longer RUNNING - is translated into { ok: false }, never
+            // thrown, so the executor's own "stop rather than guess"
+            // handling (execute-scene-edit-executor.ts) always runs.
+            persistCheckpoint: async (checkpoint) => {
+              try {
+                await apiClient.reportCheckpoint(credentials.workerId, credentials.workerToken, job.jobId, checkpoint);
+                return { ok: true };
+              } catch (cause) {
+                return {
+                  ok: false,
+                  reason: cause instanceof Error ? cause.message : "checkpoint report failed"
+                };
+              }
+            },
+            workRoot,
+            now: () => new Date()
           },
           job
         ),

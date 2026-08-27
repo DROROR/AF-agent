@@ -32,8 +32,20 @@ export const sceneEvidenceRequestSchema = z
      */
     sourceProjectSha256: z.string().length(64),
     manifestCompositionId: z.string().min(1),
-    /** AE's own composition index, as recorded in the manifest this scene came from - never guessed from the composition's display name. */
-    compositionIndex: z.number().int().nonnegative(),
+    /**
+     * The raw, 1-based `app.project.item(n)` position AE itself uses to
+     * address this composition - the exact same convention
+     * `ae_get_composition`/`ae_get_layer`'s own `comp_index` argument
+     * expects (confirmed 2026-08-27 directly from the real upstream
+     * host-scripts/ae-mcp-methods.jsx). Named `aeProjectItemIndex` (not
+     * `compositionIndex`) so it is never confused with a durable identity -
+     * manifestCompositionId is that; this is only the short-lived runtime
+     * locator, verified against `compositionName` below before any
+     * evidence is reported as fact.
+     */
+    aeProjectItemIndex: z.number().int().positive(),
+    /** The composition's expected real AE name (as last observed) - the inspector confirms the resolved composition's own name matches this before reporting evidence, so a stale/wrong aeProjectItemIndex is never silently reported as fact about the wrong composition. */
+    compositionName: z.string().min(1),
     layerIndices: z.array(z.number().int().positive()).min(1).max(MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST),
     /** When set, captures exactly one read-only preview frame at this timestamp via ae_capture_frame. Optional: evidence can be gathered without a preview. */
     previewTimestampSeconds: z.number().nonnegative().nullable().default(null)
@@ -99,7 +111,9 @@ export const sceneEvidenceResponseSchema = z
     /** Confirmed to match the request's sourceProjectSha256 before this response was ever built - see heroic-swan-scene-evidence-inspector.ts. */
     verifiedSourceProjectSha256: z.string().length(64),
     manifestCompositionId: z.string().min(1),
-    compositionIndex: z.number().int().nonnegative(),
+    /** Echoed from the request's own aeProjectItemIndex - the runtime locator this evidence was actually captured against. */
+    aeProjectItemIndex: z.number().int().positive(),
+    /** The composition's REAL, observed name at capture time (confirmed to match the request's expected compositionName before this response was ever built - see heroic-swan-scene-evidence-inspector.ts). */
     compositionName: z.string(),
     layers: z.array(layerEvidenceSchema),
     /** Null whenever previewTimestampSeconds was not requested, or the capture attempt failed - a failed preview never fails the whole evidence result (layer facts are still useful on their own). */

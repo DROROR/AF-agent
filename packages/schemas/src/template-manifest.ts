@@ -80,6 +80,8 @@ export type Scene = z.infer<typeof sceneSchema>;
 
 export const compositionSchema = z.object({
   compositionId: z.string().min(1),
+  /** Raw, 1-based app.project.item(n) position - the SAME runtime locator ae_get_composition/ae_get_layer's own comp_index argument expects (confirmed directly from the real upstream host script - see execute-scene-edit.ts's own doc comment on canonical composition addressing). compositionId remains the durable identity; this is only the short-lived runtime locator, verified against this composition's own `name` before any later mutation/render ever trusts it. */
+  aeProjectItemIndex: z.number().int().positive(),
   name: z.string(),
   widthPx: z.number().int().positive(),
   heightPx: z.number().int().positive(),

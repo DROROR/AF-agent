@@ -112,3 +112,75 @@ describe("ApiClient.sendHeartbeat", () => {
     ).rejects.toThrow(UnauthorizedApiError);
   });
 });
+
+describe("ApiClient.uploadRenderArtifact", () => {
+  const workerId = "11111111-1111-1111-1111-111111111111";
+  const jobId = "22222222-2222-2222-2222-222222222222";
+
+  it("posts a multipart body with the variant field and file part, and returns the parsed response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(201, {
+        id: "33333333-3333-3333-3333-333333333333",
+        jobId,
+        variant: "LANDSCAPE",
+        byteSize: 4,
+        sha256: "deadbeef"
+      })
+    );
+    const client = new ApiClient({ apiUrl: "https://api.example.com", fetchImpl });
+
+    const result = await client.uploadRenderArtifact(
+      workerId,
+      "worker-token",
+      jobId,
+      "LANDSCAPE",
+      Buffer.from("test"),
+      "output.mp4",
+      "video/mp4"
+    );
+
+    expect(result).toEqual({
+      id: "33333333-3333-3333-3333-333333333333",
+      jobId,
+      variant: "LANDSCAPE",
+      byteSize: 4,
+      sha256: "deadbeef"
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://api.example.com/api/workers/${workerId}/jobs/${jobId}/artifact`);
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer worker-token");
+    expect(init.body).toBeInstanceOf(FormData);
+    const form = init.body as FormData;
+    expect(form.get("variant")).toBe("LANDSCAPE");
+    const filePart = form.get("file");
+    expect(filePart).toBeInstanceOf(Blob);
+    expect((filePart as File).name).toBe("output.mp4");
+  });
+
+  it("throws UnauthorizedApiError on a 401", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(401, { error: { code: "UNAUTHORIZED" } }));
+    const client = new ApiClient({ apiUrl: "https://api.example.com", fetchImpl });
+
+    await expect(
+      client.uploadRenderArtifact(workerId, "wrong-token", jobId, "LANDSCAPE", Buffer.from("x"), "output.mp4", "video/mp4")
+    ).rejects.toThrow(UnauthorizedApiError);
+  });
+
+  it("throws ApiResponseError on an unexpected status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(409, { error: { code: "CONFLICT" } }));
+    const client = new ApiClient({ apiUrl: "https://api.example.com", fetchImpl });
+
+    await expect(
+      client.uploadRenderArtifact(workerId, "worker-token", jobId, "LANDSCAPE", Buffer.from("x"), "output.mp4", "video/mp4")
+    ).rejects.toThrow(ApiResponseError);
+  });
+
+  it("throws NetworkError when the request itself fails", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    const client = new ApiClient({ apiUrl: "https://api.example.com", fetchImpl });
+
+    await expect(
+      client.uploadRenderArtifact(workerId, "worker-token", jobId, "LANDSCAPE", Buffer.from("x"), "output.mp4", "video/mp4")
+    ).rejects.toThrow(NetworkError);
+  });
+});

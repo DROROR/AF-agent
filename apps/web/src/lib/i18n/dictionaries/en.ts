@@ -260,17 +260,21 @@ export const en = {
   },
   renders: {
     title: "Renders",
-    description: "Final render outputs, once the recoverable aerender pipeline is wired to a project.",
-    outputs: {
-      landscape: { title: "Landscape", description: "Standard 16:9 landscape output." },
-      reels: { title: "Reels (1080x1920)", description: "Native vertical composition, repositioned elements - not a simple crop." }
-    },
-    noRenderTitle: "No render has been produced yet",
-    preview: "Preview",
-    download: "Download",
-    pendingTitle: "Render dispatch is not connected yet",
-    pendingDescription:
-      "Render status, output location, and preview/download actions will become real once a project can reach the render stage and aerender jobs are dispatched and tracked."
+    description: "Real, persisted final render outputs (Landscape/Reels) for your projects.",
+    projectSelectorLabel: "Project",
+    noProjectsTitle: "No projects yet",
+    noProjectsDescription: "Create a project to see its renders here once they exist.",
+    loadErrorTitle: "Could not load renders for this project",
+    emptyTitle: "No renders yet",
+    emptyDescription: "Completed, validated renders for this project will appear here once produced.",
+    variantColumn: "Variant",
+    variantLabel: { LANDSCAPE: "Landscape", REELS: "Reels" },
+    compositionColumn: "Composition",
+    statusColumn: "Status",
+    statusReady: "Ready",
+    completedColumn: "Completed",
+    sizeColumn: "Size",
+    downloadAction: "Download"
   },
   activity: {
     title: "Activity / Logs",
@@ -352,7 +356,8 @@ export const en = {
       scenes: "Scene Mapping",
       assets: "Assets",
       workMap: "Work Map",
-      revisions: "Revisions"
+      revisions: "Revisions",
+      renderSettings: "Render Settings"
     },
     header: {
       sourceProject: "Source project",
@@ -400,6 +405,27 @@ export const en = {
       currentBadge: "Current",
       emptyTitle: "No revisions yet",
       emptyDescription: "Revision history will appear once this project has an execution plan."
+    },
+    renderSettings: {
+      title: "Render Settings",
+      description: "Explicitly choose the master composition each render output uses - never guessed from an active/first/largest composition.",
+      variantSection: { LANDSCAPE: "Landscape master", REELS: "Reels master" },
+      compositionLabel: "Master composition",
+      compositionPlaceholder: "Select a composition…",
+      noCompositionOption: "Not configured",
+      compositionIdentityLabel: "Manifest composition ID",
+      dimensionsLabel: "Dimensions",
+      renderSettingsTemplateLabel: "Render Settings template name",
+      outputModuleTemplateLabel: "Output Module template name",
+      templateHint: "Exact AE Render Queue template name, as it will appear on the real Windows AE install - not yet auto-discovered here.",
+      saveAction: "Save",
+      savingLabel: "Saving…",
+      saveFailedTitle: "Could not save this render configuration",
+      savedConfiguredAt: (at: string): string => `Configured ${at}`,
+      staleWarningTitle: "This configuration is stale",
+      staleWarningDescription: "The source project has changed since this master composition was selected. Re-select it before rendering.",
+      noCompositionsTitle: "No compositions available",
+      noCompositionsDescription: "This project's manifest has no discovered compositions yet."
     },
     editDrawer: {
       title: "Edit scene mapping",

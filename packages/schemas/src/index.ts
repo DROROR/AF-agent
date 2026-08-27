@@ -18,3 +18,5 @@ export * from "./execution-plan-readiness.js";
 export * from "./asset.js";
 export * from "./work-map.js";
 export * from "./mapping-suggestion.js";
+export * from "./render-project.js";
+export * from "./inspect-render-capabilities.js";

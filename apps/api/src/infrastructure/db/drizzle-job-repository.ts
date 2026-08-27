@@ -116,6 +116,15 @@ export class DrizzleJobRepository implements JobRepository {
     return row ? toDomain(row) : null;
   }
 
+  async updateCheckpoint(jobId: string, workerId: string, checkpoint: unknown, now: Date): Promise<Job | null> {
+    const [row] = await this.db
+      .update(jobs)
+      .set({ checkpoint, updatedAt: now })
+      .where(and(eq(jobs.id, jobId), eq(jobs.workerId, workerId), eq(jobs.status, "RUNNING")))
+      .returning();
+    return row ? toDomain(row) : null;
+  }
+
   async failJobsForStaleWorkers(now: Date, staleAfterMs: number): Promise<string[]> {
     const cutoff = new Date(now.getTime() - staleAfterMs);
     const rows = await this.db

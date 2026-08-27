@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { executionPlans, type Database, type ExecutionPlanRow } from "@dyo/database";
+import { EMPTY_RENDER_OUTPUTS, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
 import type {
   ExecutionPlanRecord,
   ExecutionPlanRepository,
@@ -16,6 +17,8 @@ function toDomain(row: ExecutionPlanRow): ExecutionPlanRecord {
     templateId: row.templateId,
     sourceProjectSha256: row.sourceProjectSha256,
     scenePlans: row.scenePlans,
+    // Existing rows predating this column read back as null - never a crash, never a guessed config (see schema.ts's own doc comment).
+    renderOutputs: row.renderOutputs ?? EMPTY_RENDER_OUTPUTS,
     approvedAt: row.approvedAt,
     approvedBy: row.approvedBy,
     createdAt: row.createdAt,
@@ -37,6 +40,12 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
         templateId: revisionRow.templateId,
         sourceProjectSha256: revisionRow.sourceProjectSha256,
         scenePlans: revisionRow.scenePlans,
+        // A new revision always starts with no render output config -
+        // never silently carries a prior revision's selection forward
+        // (see render-delivery phase section 3's "fail closed" ethos: a
+        // content edit can change/remove the very composition a prior
+        // revision's config pointed at).
+        renderOutputs: EMPTY_RENDER_OUTPUTS,
         approvedAt: revisionRow.approvedAt,
         approvedBy: revisionRow.approvedBy,
         createdAt: now,
@@ -78,6 +87,27 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
       .update(executionPlans)
       .set({ status: update.status, approvedAt: update.approvedAt, approvedBy: update.approvedBy, updatedAt: now })
       .where(and(eq(executionPlans.id, id), eq(executionPlans.revision, expectedRevision)))
+      .returning();
+    return row ? toDomain(row) : null;
+  }
+
+  async updateRenderOutput(
+    id: string,
+    variant: RenderOutputVariant,
+    config: RenderOutputConfig | null,
+    now: Date
+  ): Promise<ExecutionPlanRecord | null> {
+    const [existingRow] = await this.db.select().from(executionPlans).where(eq(executionPlans.id, id));
+    if (!existingRow) {
+      return null;
+    }
+    const current = toDomain(existingRow).renderOutputs;
+    const nextRenderOutputs = { ...current, [variant]: config };
+
+    const [row] = await this.db
+      .update(executionPlans)
+      .set({ renderOutputs: nextRenderOutputs, updatedAt: now })
+      .where(eq(executionPlans.id, id))
       .returning();
     return row ? toDomain(row) : null;
   }

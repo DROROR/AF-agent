@@ -1,0 +1,1 @@
+ALTER TABLE "execution_plans" ADD COLUMN "render_outputs" jsonb;

@@ -15,6 +15,7 @@ export const ERROR_CODES = [
   "ASSET_NOT_FOUND",
   "WORK_MAP_NOT_FOUND",
   "SUGGESTION_NOT_FOUND",
+  "RENDER_ARTIFACT_NOT_FOUND",
   /** Upload's real MIME type is not on the allowlist, or an explicit requested mediaKind doesn't match the real file. */
   "UNSUPPORTED_MEDIA_TYPE",
   /** Upload exceeds the configured maximum byte size. */

@@ -42,6 +42,8 @@ export interface LayerFact {
 
 export interface CompositionFact {
   compositionId: string;
+  /** Raw, 1-based app.project.item(n) position - the SAME runtime locator ae_get_composition/ae_get_layer's own comp_index expects (confirmed directly from the real upstream host script - see execute-scene-edit.ts's own doc comment). Carried through onto the manifest so a later render-configuration step can durably reference it, rather than only ever existing transiently during inspection. */
+  aeProjectItemIndex: number;
   name: string;
   widthPx: number;
   heightPx: number;

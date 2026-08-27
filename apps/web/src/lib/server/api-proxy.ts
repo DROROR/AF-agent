@@ -161,7 +161,14 @@ export async function proxyBinaryDownload(path: string): Promise<NextResponse> {
     }
     const buffer = await response.arrayBuffer();
     const contentType = response.headers.get("content-type") ?? "application/octet-stream";
-    return new NextResponse(buffer, { status: 200, headers: { "content-type": contentType } });
+    const contentDisposition = response.headers.get("content-disposition");
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        "content-type": contentType,
+        ...(contentDisposition ? { "content-disposition": contentDisposition } : {})
+      }
+    });
   } catch (error) {
     return NextResponse.json(
       {

@@ -252,17 +252,21 @@ export const he: Dictionary = {
   },
   renders: {
     title: "רינדורים",
-    description: "פלטי הרינדור הסופיים, לאחר שצינור ה-aerender הניתן לשחזור יחובר לפרויקט.",
-    outputs: {
-      landscape: { title: "לרוחב", description: "פלט סטנדרטי לרוחב ביחס 16:9." },
-      reels: { title: "Reels (1080x1920)", description: "קומפוזיציה אנכית טבעית עם מיקום מחדש של האלמנטים - לא חיתוך פשוט." }
-    },
-    noRenderTitle: "טרם הופק רינדור",
-    preview: "תצוגה מקדימה",
-    download: "הורדה",
-    pendingTitle: "שליחת הרינדור אינה מחוברת עדיין",
-    pendingDescription:
-      "סטטוס הרינדור, מיקום הפלט ופעולות התצוגה המקדימה/ההורדה יהפכו לאמיתיים לאחר שפרויקט יגיע לשלב הרינדור ומשימות aerender יישלחו ויעקבו."
+    description: "פלטי רינדור סופיים אמיתיים ושמורים (לרוחב/Reels) עבור הפרויקטים שלכם.",
+    projectSelectorLabel: "פרויקט",
+    noProjectsTitle: "אין עדיין פרויקטים",
+    noProjectsDescription: "צרו פרויקט כדי לראות כאן את הרינדורים שלו לאחר שייווצרו.",
+    loadErrorTitle: "לא ניתן היה לטעון רינדורים עבור פרויקט זה",
+    emptyTitle: "אין עדיין רינדורים",
+    emptyDescription: "רינדורים שהושלמו ואומתו עבור פרויקט זה יופיעו כאן לאחר הפקתם.",
+    variantColumn: "וריאנט",
+    variantLabel: { LANDSCAPE: "לרוחב", REELS: "Reels" },
+    compositionColumn: "קומפוזיציה",
+    statusColumn: "סטטוס",
+    statusReady: "מוכן",
+    completedColumn: "הושלם",
+    sizeColumn: "גודל",
+    downloadAction: "הורדה"
   },
   activity: {
     title: "פעילות / יומנים",
@@ -344,7 +348,8 @@ export const he: Dictionary = {
       scenes: "מיפוי סצנות",
       assets: "נכסים",
       workMap: "מפת עבודה",
-      revisions: "גרסאות"
+      revisions: "גרסאות",
+      renderSettings: "הגדרות רינדור"
     },
     header: {
       sourceProject: "פרויקט מקור",
@@ -392,6 +397,27 @@ export const he: Dictionary = {
       currentBadge: "נוכחי",
       emptyTitle: "אין עדיין גרסאות",
       emptyDescription: "היסטוריית הגרסאות תופיע לאחר שלפרויקט זה תהיה תוכנית ביצוע."
+    },
+    renderSettings: {
+      title: "הגדרות רינדור",
+      description: "בחרו במפורש את קומפוזיציית האב עבור כל פלט רינדור - לעולם לא ניחוש מתוך קומפוזיציה פעילה/ראשונה/גדולה ביותר.",
+      variantSection: { LANDSCAPE: "אב לרוחב", REELS: "אב Reels" },
+      compositionLabel: "קומפוזיציית אב",
+      compositionPlaceholder: "בחרו קומפוזיציה…",
+      noCompositionOption: "לא מוגדר",
+      compositionIdentityLabel: "מזהה קומפוזיציה במניפסט",
+      dimensionsLabel: "מידות",
+      renderSettingsTemplateLabel: "שם תבנית Render Settings",
+      outputModuleTemplateLabel: "שם תבנית Output Module",
+      templateHint: "שם התבנית המדויק ב-Render Queue של AE, כפי שיופיע בהתקנת AE האמיתית ב-Windows - טרם מתגלה אוטומטית כאן.",
+      saveAction: "שמירה",
+      savingLabel: "שומר…",
+      saveFailedTitle: "לא ניתן היה לשמור את הגדרת הרינדור הזו",
+      savedConfiguredAt: (at) => `הוגדר ${at}`,
+      staleWarningTitle: "הגדרה זו אינה עדכנית",
+      staleWarningDescription: "פרויקט המקור השתנה מאז שנבחרה קומפוזיציית האב הזו. בחרו אותה מחדש לפני הרינדור.",
+      noCompositionsTitle: "אין קומפוזיציות זמינות",
+      noCompositionsDescription: "במניפסט של פרויקט זה עדיין אין קומפוזיציות שהתגלו."
     },
     editDrawer: {
       title: "עריכת מיפוי סצנה",

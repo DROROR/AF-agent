@@ -66,6 +66,8 @@ function request(overrides: Partial<ExecuteSceneEditRequest> = {}): ExecuteScene
     workingProjectPath: "C:\\vidio agent\\DYO-Working\\White App Promo (converted)-DYO-Working-v001.aep",
     scenePlanId: "scene-1",
     manifestCompositionId: "comp-275",
+    aeProjectItemIndex: 14,
+    compositionName: "Text 01",
     approvedMappingIds: ["mapping-1"],
     operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" }],
     checkpoint: null,

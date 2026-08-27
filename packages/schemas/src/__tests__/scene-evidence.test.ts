@@ -14,7 +14,8 @@ function validRequest(overrides: Record<string, unknown> = {}) {
     sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
     sourceProjectSha256: SHA,
     manifestCompositionId: "comp-275",
-    compositionIndex: 14,
+    aeProjectItemIndex: 14,
+    compositionName: "Text 01",
     layerIndices: [1],
     ...overrides
   };
@@ -48,7 +49,7 @@ function validResponse(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
   return {
     verifiedSourceProjectSha256: SHA,
     manifestCompositionId: "comp-275",
-    compositionIndex: 14,
+    aeProjectItemIndex: 14,
     compositionName: "Text 01",
     layers: [validLayer()],
     preview: null,

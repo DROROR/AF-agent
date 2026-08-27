@@ -24,8 +24,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** A real MCP text-content block is never larger than this in practice; a bigger one fails closed instead of risking unbounded JSON.parse work on a malformed/hostile response. */
 const MAX_SAFE_PARSE_CHARS = 5_000_000;
 
-/** Every allowlisted tool's real response is one MCP `content` array of `{type: "text", text: "<JSON string>"}` blocks (confirmed from the real capture). */
-function parseJsonTextContent(content: unknown): ParseResult<unknown> {
+/** Every allowlisted tool's real response is one MCP `content` array of `{type: "text", text: "<JSON string>"}` blocks (confirmed from the real capture). Exported so the (separate, write-only) execution bridge can reuse the exact same parsing convention for its own JSX-returned JSON, rather than reimplementing it. */
+export function parseJsonTextContent(content: unknown): ParseResult<unknown> {
   if (!Array.isArray(content) || content.length === 0) {
     return { ok: false, reason: "content is not a non-empty array" };
   }

@@ -15,7 +15,8 @@ export function toExecutionPlan(record: ExecutionPlanRecord): ExecutionPlan {
     approvedBy: record.approvedBy,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
-    scenePlans: record.scenePlans
+    scenePlans: record.scenePlans,
+    renderOutputs: record.renderOutputs
   };
 }
 

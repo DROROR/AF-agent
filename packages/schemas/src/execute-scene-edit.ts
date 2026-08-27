@@ -128,6 +128,22 @@ export const executeSceneEditRequestSchema = z
     workingProjectPath: z.string().min(1),
     scenePlanId: z.string().min(1),
     manifestCompositionId: z.string().min(1),
+    /**
+     * The raw, 1-based `app.project.item(n)` position AE itself uses to
+     * address this composition - confirmed 2026-08-27 directly from the
+     * real upstream host-scripts/ae-mcp-methods.jsx (`resolveComp`: a raw
+     * `app.project.item(idx)` lookup across ALL project items - folders,
+     * footage, solids, comps - not a 0-based "count only CompItems"
+     * index). Named `aeProjectItemIndex` (not `compositionIndex`)
+     * specifically so it is never confused with a durable identity -
+     * manifestCompositionId is that; this is only ever the short-lived
+     * runtime locator AE needs to find the same composition right now, and
+     * is verified against `compositionName` below before any mutation
+     * (see jsx-templates.ts's own name-verification safety net).
+     */
+    aeProjectItemIndex: z.number().int().positive(),
+    /** The composition's expected real AE name (as last observed/verified) - never trusted alone: the worker-side JSX confirms the resolved CompItem's own `.name` matches this before any mutation is attempted, so a stale/wrong aeProjectItemIndex can never silently target the wrong composition. */
+    compositionName: z.string().min(1),
     /** The specific PlaceholderMapping IDs this edit is allowed to act on - every operation's manifestPlaceholderId must be one of these. */
     approvedMappingIds: z.array(z.string().min(1)).min(1),
     operations: z.array(sceneEditOperationSchema).min(1),
@@ -140,14 +156,35 @@ export const executeSceneEditRequestSchema = z
   });
 export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSchema>;
 
-/** What a real worker execution would report back - metadata alone is never "success"; a real preview frame is required (Phase 7 acceptance). */
+/**
+ * What a real worker execution reports back - metadata alone is never
+ * "success"; a real preview frame is required (Phase 7 acceptance).
+ * Extended beyond the original Phase 7A draft (jobId/workerId/
+ * sourceProjectSha256/workingProjectPath/workingProjectSha256/
+ * startedAt/completedAt) once real execution existed to report against -
+ * never exposes an arbitrary/unbounded filesystem path to a
+ * browser-facing API by itself; workingProjectPath here is the worker's
+ * own job-scoped path, already restricted to its configured work root
+ * (see apps/worker/src/workspace/work-root.ts), the same way
+ * previewFramePath already was.
+ */
 export const sceneEditResultSchema = z.object({
+  /** Stamped by job-dispatcher.ts after execution, mirroring RawInspectionCapture's own "the executor doesn't know its own job/worker identity" convention - absent until then. */
+  jobId: z.string().min(1).optional(),
+  workerId: z.string().min(1).optional(),
   scenePlanId: z.string().min(1),
+  /** Re-verified from the real file on disk at execution time - never merely echoed back from the request. */
+  sourceProjectSha256: z.string().min(1),
+  /** Null only when execution failed before a working copy could ever be prepared. */
+  workingProjectPath: z.string().min(1).nullable(),
+  workingProjectSha256: z.string().min(1).nullable(),
   operationsRequested: z.number().int().nonnegative(),
   operationsCompleted: z.array(z.number().int().nonnegative()),
   checkpoint: sceneEditCheckpointSchema,
   previewFramePath: z.string().min(1).nullable(),
   previewTimestampSeconds: z.number().nonnegative().nullable(),
-  failureReason: z.string().nullable()
+  failureReason: z.string().nullable(),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime()
 });
 export type SceneEditResult = z.infer<typeof sceneEditResultSchema>;

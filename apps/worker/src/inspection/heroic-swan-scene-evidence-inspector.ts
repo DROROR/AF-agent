@@ -54,7 +54,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
 
     try {
       const compResult = await client.callTool("ae_get_composition", {
-        comp_index: request.compositionIndex,
+        comp_index: request.aeProjectItemIndex,
         response_format: "concise"
       });
       if (!compResult.ok) {
@@ -65,10 +65,23 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         return { kind: "failure", reason: `ae_get_composition response did not match the confirmed shape: ${parsedComp.reason}` };
       }
 
+      // Canonical composition addressing safety net (section 8/9): never
+      // trust aeProjectItemIndex alone - a stale manifest, a re-ordered
+      // project item, or an off-by-one could resolve to the WRONG
+      // composition that merely happens to be present at that index. The
+      // resolved CompItem's own name must match what the caller expects
+      // BEFORE any evidence is ever reported as fact.
+      if (parsedComp.value.name !== request.compositionName) {
+        return {
+          kind: "failure",
+          reason: `aeProjectItemIndex ${request.aeProjectItemIndex} resolved to composition "${parsedComp.value.name}", expected "${request.compositionName}" - refusing to report evidence for the wrong composition`
+        };
+      }
+
       const layers = [];
       for (const layerIndex of request.layerIndices) {
         const layerResult = await client.callTool("ae_get_layer", {
-          comp_index: request.compositionIndex,
+          comp_index: request.aeProjectItemIndex,
           layer_index: layerIndex,
           response_format: "detailed"
         });
@@ -110,7 +123,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let previewFailureReason: string | null = null;
       if (request.previewTimestampSeconds !== null) {
         const captureResult = await client.callTool("ae_capture_frame", {
-          comp_index: request.compositionIndex,
+          comp_index: request.aeProjectItemIndex,
           time: request.previewTimestampSeconds
         });
         if (!captureResult.ok) {
@@ -147,7 +160,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         response: {
           verifiedSourceProjectSha256: hashResult.value.sha256,
           manifestCompositionId: request.manifestCompositionId,
-          compositionIndex: request.compositionIndex,
+          aeProjectItemIndex: request.aeProjectItemIndex,
           compositionName: parsedComp.value.name,
           layers,
           preview,

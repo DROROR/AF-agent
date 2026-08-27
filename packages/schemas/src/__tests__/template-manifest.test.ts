@@ -13,6 +13,7 @@ function validManifest(): TemplateManifest {
     compositions: [
       {
         compositionId: "comp-1",
+        aeProjectItemIndex: 1,
         name: "Main Comp",
         widthPx: 1920,
         heightPx: 1080,

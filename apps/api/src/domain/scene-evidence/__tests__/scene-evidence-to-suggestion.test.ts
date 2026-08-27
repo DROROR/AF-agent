@@ -6,7 +6,7 @@ function evidence(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvidence
   return {
     verifiedSourceProjectSha256: "a".repeat(64),
     manifestCompositionId: "comp-275",
-    compositionIndex: 14,
+    aeProjectItemIndex: 14,
     compositionName: "Text 01",
     layers: [
       {

@@ -64,6 +64,7 @@ function validPlan(overrides: Partial<ExecutionPlan> = {}): ExecutionPlan {
     createdAt: NOW,
     updatedAt: NOW,
     scenePlans: [validScene()],
+    renderOutputs: { LANDSCAPE: null, REELS: null },
     ...overrides
   };
 }

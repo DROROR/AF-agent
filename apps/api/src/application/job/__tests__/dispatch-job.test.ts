@@ -225,7 +225,8 @@ describe("dispatchJob", () => {
       sourceProjectPath: "/copies/t.aep",
       sourceProjectSha256: "a".repeat(64),
       manifestCompositionId: "comp-275",
-      compositionIndex: 14,
+      aeProjectItemIndex: 14,
+      compositionName: "Text 01",
       layerIndices: [1],
       previewTimestampSeconds: null
     };
@@ -258,7 +259,8 @@ describe("dispatchJob", () => {
       sourceProjectPath: "/copies/t.aep",
       sourceProjectSha256: "a".repeat(64),
       manifestCompositionId: "comp-275",
-      compositionIndex: 14,
+      aeProjectItemIndex: 14,
+      compositionName: "Text 01",
       layerIndices: [1],
       previewTimestampSeconds: null
     };
@@ -293,7 +295,8 @@ describe("dispatchJob", () => {
       sourceProjectPath: "/copies/t.aep",
       sourceProjectSha256: "a".repeat(64),
       manifestCompositionId: "comp-275",
-      compositionIndex: 14,
+      aeProjectItemIndex: 14,
+      compositionName: "Text 01",
       layerIndices: [1],
       previewTimestampSeconds: null
     };

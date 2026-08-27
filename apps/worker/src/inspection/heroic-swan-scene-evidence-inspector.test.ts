@@ -27,7 +27,8 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
     sourceProjectPath,
     sourceProjectSha256,
     manifestCompositionId: "comp-275",
-    compositionIndex: 14,
+    aeProjectItemIndex: 14,
+    compositionName: "Text 01",
     layerIndices: [1],
     previewTimestampSeconds: null,
     ...overrides
@@ -115,6 +116,18 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(layer?.sourceItemName).toBeNull();
     expect(layer?.textValue).toBeNull();
     expect(layer?.evidenceSource).toBe("AE_GET_LAYER");
+  });
+
+  it("rejects (fails honestly, reports no evidence/layers) when aeProjectItemIndex resolves to a composition whose real name does not match the expected compositionName - canonical composition addressing safety net", async () => {
+    await writeFakeServer(dir);
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = await inspector.inspect(baseRequest({ compositionName: "Some Other Scene" }));
+
+    expect(result.kind).toBe("failure");
+    if (result.kind !== "failure") return;
+    expect(result.reason).toContain("resolved to composition");
+    expect(result.reason).toContain("Text 01");
+    expect(result.reason).toContain("Some Other Scene");
   });
 
   it("never calls ae_run_jsx, even though the (fake, hostile-capable) server offers it", async () => {

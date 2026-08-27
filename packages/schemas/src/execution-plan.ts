@@ -106,6 +106,39 @@ export const scenePlanEntrySchema = z.object({
 });
 export type ScenePlanEntry = z.infer<typeof scenePlanEntrySchema>;
 
+/**
+ * Explicit, human-configured render delivery target for ONE output
+ * variant (render-delivery phase section 1) - never guessed from "active
+ * comp"/"first comp"/"largest comp"/a filename heuristic. Binds the exact
+ * canonical composition identity already established for EXECUTE_FRAME/
+ * INSPECT_SCENE_EVIDENCE (manifestCompositionId + aeProjectItemIndex +
+ * compositionName - see execute-scene-edit.ts's own doc comment) plus the
+ * exact source .aep revision this selection was made against
+ * (sourceProjectSha256) - a later mismatch against the plan's own current
+ * sourceProjectSha256 makes this configuration STALE (section 3), checked
+ * at render-dispatch time, never silently reused across a source change.
+ */
+export const renderOutputConfigSchema = z.object({
+  manifestCompositionId: z.string().min(1),
+  aeProjectItemIndex: z.number().int().positive(),
+  compositionName: z.string().min(1),
+  sourceProjectSha256: z.string().min(1),
+  /** AE Render Queue template names (aerender's own -RStemplate/-OMtemplate flags) - explicit, human-supplied text, never a code-side default (see render-project.ts's own doc comment on why no default is assumed). */
+  renderSettingsTemplateName: z.string().min(1),
+  outputModuleTemplateName: z.string().min(1),
+  configuredAt: z.string().datetime()
+});
+export type RenderOutputConfig = z.infer<typeof renderOutputConfigSchema>;
+
+/** Independent per variant - configuring LANDSCAPE never requires or implies a REELS configuration, and vice versa (section 1: "independent optional configuration"). Reuses render-project.ts's own RenderOutputVariant ("LANDSCAPE"|"REELS") - the one variant vocabulary the whole render pipeline shares, never redeclared. */
+export const renderOutputsSchema = z.object({
+  LANDSCAPE: renderOutputConfigSchema.nullable(),
+  REELS: renderOutputConfigSchema.nullable()
+});
+export type RenderOutputs = z.infer<typeof renderOutputsSchema>;
+
+export const EMPTY_RENDER_OUTPUTS: RenderOutputs = { LANDSCAPE: null, REELS: null };
+
 export const executionPlanSchema = z.object({
   schemaVersion: z.literal(EXECUTION_PLAN_SCHEMA_VERSION),
   id: z.string().min(1),
@@ -124,7 +157,8 @@ export const executionPlanSchema = z.object({
   approvedBy: z.string().min(1).nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  scenePlans: z.array(scenePlanEntrySchema)
+  scenePlans: z.array(scenePlanEntrySchema),
+  renderOutputs: renderOutputsSchema
 });
 export type ExecutionPlan = z.infer<typeof executionPlanSchema>;
 

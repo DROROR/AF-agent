@@ -13,6 +13,7 @@ function statusForCode(code: ErrorCode): number {
     case "ASSET_NOT_FOUND":
     case "WORK_MAP_NOT_FOUND":
     case "SUGGESTION_NOT_FOUND":
+    case "RENDER_ARTIFACT_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
@@ -167,6 +168,14 @@ export class AssetNotFoundError extends AppError {
   constructor(assetId: string) {
     super("ASSET_NOT_FOUND", `Asset ${assetId} was not found`);
     this.name = "AssetNotFoundError";
+  }
+}
+
+/** A render artifact doesn't exist at all, or exists but belongs to a different project - never distinguishable from the outside (same "same shape whether not found or not yours" convention as AssetCrossProjectAccessError below). */
+export class RenderArtifactNotFoundError extends AppError {
+  constructor(artifactId: string) {
+    super("RENDER_ARTIFACT_NOT_FOUND", `Render artifact ${artifactId} was not found`);
+    this.name = "RenderArtifactNotFoundError";
   }
 }
 

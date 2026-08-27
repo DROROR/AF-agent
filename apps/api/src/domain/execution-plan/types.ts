@@ -1,4 +1,4 @@
-import type { PlanStatus, ScenePlanEntry } from "@dyo/schemas";
+import type { PlanStatus, RenderOutputConfig, RenderOutputVariant, RenderOutputs, ScenePlanEntry } from "@dyo/schemas";
 
 export interface ExecutionPlanRecord {
   id: string;
@@ -8,6 +8,7 @@ export interface ExecutionPlanRecord {
   templateId: string;
   sourceProjectSha256: string;
   scenePlans: ScenePlanEntry[];
+  renderOutputs: RenderOutputs;
   approvedAt: Date | null;
   approvedBy: string | null;
   createdAt: Date;
@@ -51,4 +52,12 @@ export interface ExecutionPlanRepository {
   updateStatus(id: string, expectedRevision: number, update: ExecutionPlanStatusUpdate, now: Date): Promise<ExecutionPlanRecord | null>;
   /** Every persisted revision for this project (append-only history), ordered newest-first. Read-only - dashboard revision history view. */
   findAllByProjectId(projectId: string): Promise<ExecutionPlanRecord[]>;
+  /**
+   * In-place update of ONE variant's render output config on the CURRENT
+   * revision - never bumps revision or touches status/scenePlans (setting
+   * a render delivery target is not scene CONTENT requiring re-approval -
+   * see render-delivery phase section 1). `config: null` clears that
+   * variant's configuration. Returns null only if `id` doesn't exist.
+   */
+  updateRenderOutput(id: string, variant: RenderOutputVariant, config: RenderOutputConfig | null, now: Date): Promise<ExecutionPlanRecord | null>;
 }

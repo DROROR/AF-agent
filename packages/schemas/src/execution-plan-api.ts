@@ -36,3 +36,24 @@ export const listExecutionPlanRevisionsResponseSchema = z.object({
   revisions: z.array(executionPlanRevisionSummarySchema)
 });
 export type ListExecutionPlanRevisionsResponse = z.infer<typeof listExecutionPlanRevisionsResponseSchema>;
+
+/**
+ * PUT /api/projects/:projectId/execution-plan/render-outputs/:variant
+ * (render-delivery phase section 1/2) - an explicit, human-confirmed
+ * selection of ONE real manifest composition as the render master for
+ * this variant. The server independently re-verifies `manifestCompositionId`
+ * resolves to a real composition in the project's CURRENT manifest whose
+ * own `aeProjectItemIndex`/`name` match exactly what's submitted here -
+ * never trusts a browser-submitted index/name pair on their own (section
+ * 2: "Do not allow arbitrary numeric index entry"). `sourceProjectSha256`
+ * is NEVER accepted from the request - the server stamps the plan's own
+ * current value at write time (section 3).
+ */
+export const setRenderOutputConfigRequestSchema = z
+  .object({
+    manifestCompositionId: z.string().min(1),
+    renderSettingsTemplateName: z.string().min(1),
+    outputModuleTemplateName: z.string().min(1)
+  })
+  .strict();
+export type SetRenderOutputConfigRequest = z.infer<typeof setRenderOutputConfigRequestSchema>;

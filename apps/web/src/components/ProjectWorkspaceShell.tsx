@@ -12,7 +12,7 @@ import { useLocale } from "./LocaleProvider";
 
 interface TabDef {
   href: string;
-  labelKey: "overview" | "scenes" | "assets" | "workMap" | "revisions";
+  labelKey: "overview" | "scenes" | "assets" | "workMap" | "revisions" | "renderSettings";
 }
 
 function tabsFor(projectId: string): TabDef[] {
@@ -21,6 +21,7 @@ function tabsFor(projectId: string): TabDef[] {
     { href: `/projects/${projectId}/scenes`, labelKey: "scenes" },
     { href: `/projects/${projectId}/assets`, labelKey: "assets" },
     { href: `/projects/${projectId}/work-map`, labelKey: "workMap" },
+    { href: `/projects/${projectId}/render-settings`, labelKey: "renderSettings" },
     { href: `/projects/${projectId}/revisions`, labelKey: "revisions" }
   ];
 }

@@ -21,9 +21,9 @@ function syntheticManifest(overrides: Partial<TemplateManifest> = {}): TemplateM
     afterEffects: { version: "26.3x87" },
     generatedAt: fixedNow().toISOString(),
     compositions: [
-      { compositionId: "comp-detailed", name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
-      { compositionId: "comp-no-detail", name: "Scene B", widthPx: 1920, heightPx: 1080, durationSeconds: 3, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
-      { compositionId: "comp-nested", name: "Nested Precomp", widthPx: 500, heightPx: 500, durationSeconds: 2, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-detailed"] }
+      { compositionId: "comp-detailed", aeProjectItemIndex: 1, name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-no-detail", aeProjectItemIndex: 2, name: "Scene B", widthPx: 1920, heightPx: 1080, durationSeconds: 3, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-nested", aeProjectItemIndex: 3, name: "Nested Precomp", widthPx: 500, heightPx: 500, durationSeconds: 2, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-detailed"] }
     ],
     scenes: [
       {
@@ -149,7 +149,7 @@ describe("buildScenePlans", () => {
     const scenePlansB = buildScenePlans(
       syntheticManifest({
         compositions: [
-          { compositionId: "comp-other", name: "Other", widthPx: 100, heightPx: 100, durationSeconds: 1, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+          { compositionId: "comp-other", aeProjectItemIndex: 4, name: "Other", widthPx: 100, heightPx: 100, durationSeconds: 1, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
         ],
         scenes: []
       }),

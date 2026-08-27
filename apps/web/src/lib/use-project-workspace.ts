@@ -1,13 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ExecutionPlanEditOperation, ExecutionPlanResponse, ProjectResponse } from "@dyo/schemas";
+import type {
+  ExecutionPlanEditOperation,
+  ExecutionPlanResponse,
+  ProjectResponse,
+  RenderOutputVariant,
+  SetRenderOutputConfigRequest
+} from "@dyo/schemas";
 import {
   approveExecutionPlan,
   fetchExecutionPlan,
   fetchProjectDetail,
   rejectExecutionPlan,
   reopenExecutionPlan,
+  setRenderOutputConfig,
   updateExecutionPlan,
   type ApiResult
 } from "./projects-api-client";
@@ -35,6 +42,7 @@ export interface ProjectWorkspaceState {
   approve: () => Promise<MutationOutcome>;
   reject: () => Promise<MutationOutcome>;
   reopen: () => Promise<MutationOutcome>;
+  setRenderOutput: (variant: RenderOutputVariant, body: SetRenderOutputConfigRequest) => Promise<MutationOutcome>;
 }
 
 type PlanTransition = (projectId: string, baseRevision: number) => Promise<ApiResult<ExecutionPlanResponse>>;
@@ -129,6 +137,18 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     [plan, projectId]
   );
 
+  const setRenderOutput = useCallback(
+    async (variant: RenderOutputVariant, body: SetRenderOutputConfigRequest): Promise<MutationOutcome> => {
+      const result = await setRenderOutputConfig(projectId, variant, body);
+      if (result.ok) {
+        setPlan(result.data);
+        return { ok: true };
+      }
+      return { ok: false, message: result.message };
+    },
+    [projectId]
+  );
+
   return {
     project,
     plan,
@@ -139,6 +159,7 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     applyEdit,
     approve: useCallback(() => runTransition(approveExecutionPlan), [runTransition]),
     reject: useCallback(() => runTransition(rejectExecutionPlan), [runTransition]),
-    reopen: useCallback(() => runTransition(reopenExecutionPlan), [runTransition])
+    reopen: useCallback(() => runTransition(reopenExecutionPlan), [runTransition]),
+    setRenderOutput
   };
 }

@@ -57,6 +57,34 @@
       "when": 1787820326266,
       "tag": "0007_heavy_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787837659075,
+      "tag": "0008_lyrical_rage",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787839324628,
+      "tag": "0009_exotic_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787839384274,
+      "tag": "0010_steep_machine_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787840736755,
+      "tag": "0011_quick_zaladane",
+      "breakpoints": true
     }
   ]
 }

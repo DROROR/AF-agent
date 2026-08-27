@@ -56,3 +56,24 @@ export function jobWorkspacePath(root: string, jobId: string): string {
   }
   return safeJoin(root, "jobs", jobId);
 }
+
+/**
+ * Verifies an ALREADY-ABSOLUTE path (e.g. a RENDER job's `workingProjectPath`,
+ * inherited from an earlier job's own workspace rather than derived from
+ * this job's own jobId - see render-project-executor.ts) still resolves
+ * strictly inside the configured work root - the same traversal-safety
+ * guarantee `safeJoin` gives paths it builds itself, applied instead to a
+ * path this worker did not construct. Throws UnsafePathError rather than
+ * silently clamping, matching safeJoin's own contract.
+ */
+export function assertPathWithinRoot(root: string, candidatePath: string): void {
+  const resolvedRoot = path.resolve(root);
+  const resolvedCandidate = path.resolve(candidatePath);
+  const rootWithSep = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+  if (resolvedCandidate !== resolvedRoot && !resolvedCandidate.startsWith(rootWithSep)) {
+    throw new UnsafePathError(
+      `Path escapes the work root: ${resolvedCandidate} is not inside ${resolvedRoot}`,
+      "traversal"
+    );
+  }
+}

@@ -19,6 +19,7 @@ function layer(overrides: Partial<LayerFact>): LayerFact {
 function composition(overrides: Partial<CompositionFact>): CompositionFact {
   return {
     compositionId: "comp-1",
+    aeProjectItemIndex: 1,
     name: "Comp",
     widthPx: 1920,
     heightPx: 1080,

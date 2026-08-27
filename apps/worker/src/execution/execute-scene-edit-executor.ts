@@ -1,0 +1,240 @@
+import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditResult } from "@dyo/schemas";
+import { prepareWorkingCopy } from "../workspace/working-copy.js";
+import { hashSourceProject } from "../inspection/hash-source-project.js";
+import { EMPTY_SCENE_EDIT_CHECKPOINT, markFailed, markOperationCompleted, nextPendingOperationIndex } from "./scene-edit-checkpoint.js";
+import type { AeEditBridge } from "./ae-edit-bridge.js";
+import type { PreviewCapture } from "./preview-capture.js";
+
+/**
+ * The one fixed frame this project's own "first-frame execution" workflow
+ * (CLAUDE.md Required Workflow step 9) captures for EXECUTE_FRAME's
+ * preview - always t=0, never configurable/guessed (section 13: "a
+ * controlled frame time").
+ */
+const PREVIEW_TIMESTAMP_SECONDS = 0;
+
+/**
+ * Durable mid-job progress report - see apps/api's report-job-checkpoint.ts
+ * for the endpoint this is expected to hit. `ok: false` means the durable
+ * checkpoint state is now UNKNOWN (network failure, rejected as stale/
+ * regressed/no-longer-RUNNING, etc.) - the executor's own contract is to
+ * stop applying further mutations in that case rather than guess.
+ */
+export type PersistCheckpoint = (checkpoint: SceneEditCheckpoint) => Promise<{ ok: true } | { ok: false; reason: string }>;
+
+export interface SceneEditExecutorDeps {
+  workRoot: string;
+  aeEditBridge: AeEditBridge;
+  previewCapture: PreviewCapture;
+  persistCheckpoint: PersistCheckpoint;
+  now: () => Date;
+}
+
+/**
+ * The full EXECUTE_FRAME pipeline: verify/prepare a working copy, resume
+ * from any prior checkpoint, apply each still-pending operation through
+ * the fixed AE edit bridge, save the working copy, capture and verify a
+ * real preview frame. Never partially mutates and then reports success -
+ * every early return already has a `failureReason` set and (per
+ * isSceneEditResultAcceptable, apps/api's own acceptance predicate) can
+ * never be treated as complete.
+ *
+ * On any recoverable failure this returns rather than throwing, carrying
+ * forward whatever operations already genuinely completed in
+ * `checkpoint` - a subsequent job attempt with this same checkpoint
+ * resumes from exactly where this one stopped, never from operation 0
+ * (see scene-edit-checkpoint.ts).
+ *
+ * A worker process crash in the middle of this function's own operation
+ * loop is now covered too: after EACH operation completes, its checkpoint
+ * is durably persisted via `deps.persistCheckpoint` (a dedicated MID-JOB
+ * progress report - see PersistCheckpoint's doc comment - deliberately
+ * NEVER a job status transition) before the next operation is ever
+ * attempted. If that crash happens before the next persistCheckpoint call
+ * lands, the durable state still reflects every operation that completed
+ * AND was confirmed persisted; a fresh job attempt loads that same
+ * checkpoint (via `request.checkpoint`) and resumes from the next
+ * incomplete operation, never re-running an already-completed one.
+ */
+export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: string, request: ExecuteSceneEditRequest): Promise<SceneEditResult> {
+  const startedAt = deps.now().toISOString();
+  let checkpoint: SceneEditCheckpoint = request.checkpoint ?? EMPTY_SCENE_EDIT_CHECKPOINT;
+
+  function finish(params: {
+    sourceProjectSha256: string;
+    workingProjectPath: string | null;
+    workingProjectSha256: string | null;
+    previewFramePath: string | null;
+    previewTimestampSeconds: number | null;
+  }): SceneEditResult {
+    return {
+      scenePlanId: request.scenePlanId,
+      sourceProjectSha256: params.sourceProjectSha256,
+      workingProjectPath: params.workingProjectPath,
+      workingProjectSha256: params.workingProjectSha256,
+      operationsRequested: request.operations.length,
+      operationsCompleted: [...checkpoint.completedOperationIndices].sort((a, b) => a - b),
+      checkpoint,
+      previewFramePath: params.previewFramePath,
+      previewTimestampSeconds: params.previewTimestampSeconds,
+      failureReason: checkpoint.failureReason,
+      startedAt,
+      completedAt: deps.now().toISOString()
+    };
+  }
+
+  const workingCopy = await prepareWorkingCopy({
+    workRoot: deps.workRoot,
+    jobId,
+    sourceProjectPath: request.sourceProjectPath,
+    expectedSourceSha256: request.sourceProjectSha256
+  });
+  if (!workingCopy.ok) {
+    checkpoint = markFailed(checkpoint, `working copy could not be prepared (${workingCopy.reason}): ${workingCopy.message}`, deps.now());
+    return finish({
+      sourceProjectSha256: request.sourceProjectSha256,
+      workingProjectPath: null,
+      workingProjectSha256: null,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+
+  // Defense in depth: the worker derives its own working-copy path from
+  // (workRoot, jobId) - never trusts a raw filesystem path from the
+  // request. If the caller's own record of that path disagrees, that is
+  // a real inconsistency worth failing loudly on rather than silently
+  // preferring either value.
+  if (workingCopy.workingProjectPath !== request.workingProjectPath) {
+    checkpoint = markFailed(
+      checkpoint,
+      `workingProjectPath mismatch: the worker's own deterministic path (${workingCopy.workingProjectPath}) does not match the request's workingProjectPath (${request.workingProjectPath})`,
+      deps.now()
+    );
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: workingCopy.workingProjectSha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+
+  let pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
+  while (pendingIndex !== null) {
+    const operation = request.operations[pendingIndex];
+    if (!operation) {
+      checkpoint = markFailed(checkpoint, `internal error: no operation exists at index ${pendingIndex}`, deps.now());
+      return finish({
+        sourceProjectSha256: workingCopy.sourceProjectSha256,
+        workingProjectPath: workingCopy.workingProjectPath,
+        workingProjectSha256: workingCopy.workingProjectSha256,
+        previewFramePath: null,
+        previewTimestampSeconds: null
+      });
+    }
+
+    checkpoint = { ...checkpoint, checkpointBeforeAt: deps.now().toISOString() };
+
+    const outcome = await deps.aeEditBridge.applyOperation({
+      aeProjectItemIndex: request.aeProjectItemIndex,
+      compositionName: request.compositionName,
+      operation
+    });
+    if (!outcome.ok) {
+      checkpoint = markFailed(checkpoint, `operation ${pendingIndex} (${operation.type}) failed: ${outcome.failureReason}`, deps.now());
+      return finish({
+        sourceProjectSha256: workingCopy.sourceProjectSha256,
+        workingProjectPath: workingCopy.workingProjectPath,
+        workingProjectSha256: workingCopy.workingProjectSha256,
+        previewFramePath: null,
+        previewTimestampSeconds: null
+      });
+    }
+
+    // Never report an operation complete before its result is verified -
+    // `outcome.ok` above already IS that verification (the AE-side script
+    // itself only ever reports ok:true after its mutation actually ran).
+    checkpoint = markOperationCompleted(checkpoint, pendingIndex, deps.now());
+
+    // Durably persist BEFORE continuing to the next operation - a worker
+    // crash between this line and the job's own final report must not
+    // silently lose a completed operation (see PersistCheckpoint's doc
+    // comment). If persistence fails, the durable checkpoint state is
+    // unknown, so this stops rather than applying further AE mutations -
+    // the in-memory checkpoint above still carries this operation as
+    // completed, so a later report of this job's own final result (via the
+    // normal, separate reportJobStatus path) still reflects real progress.
+    const persisted = await deps.persistCheckpoint(checkpoint);
+    if (!persisted.ok) {
+      checkpoint = markFailed(
+        checkpoint,
+        `checkpoint persistence failed after operation ${pendingIndex} (${operation.type}) completed: ${persisted.reason} - pausing rather than continuing with unknown durable checkpoint state`,
+        deps.now()
+      );
+      return finish({
+        sourceProjectSha256: workingCopy.sourceProjectSha256,
+        workingProjectPath: workingCopy.workingProjectPath,
+        workingProjectSha256: workingCopy.workingProjectSha256,
+        previewFramePath: null,
+        previewTimestampSeconds: null
+      });
+    }
+
+    pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
+  }
+
+  const saveResult = await deps.aeEditBridge.saveProject();
+  if (!saveResult.ok) {
+    checkpoint = markFailed(checkpoint, `working copy save failed: ${saveResult.failureReason}`, deps.now());
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: workingCopy.workingProjectSha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+
+  // Section 12: verify the SAVED working copy for real - exists, real
+  // file, non-zero size, and record its resulting sha256 (never assume
+  // the save succeeded just because saveProject() didn't error).
+  const savedHash = await hashSourceProject(workingCopy.workingProjectPath);
+  if (!savedHash.ok) {
+    checkpoint = markFailed(checkpoint, `could not verify the saved working copy on disk: ${savedHash.reason}`, deps.now());
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: workingCopy.workingProjectSha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+
+  const previewResult = await deps.previewCapture.capture({
+    aeProjectItemIndex: request.aeProjectItemIndex,
+    timestampSeconds: PREVIEW_TIMESTAMP_SECONDS
+  });
+  if (!previewResult.ok) {
+    // All operations completed and saved, but a result with no verified
+    // preview is still never acceptable (isSceneEditResultAcceptable) -
+    // failureReason must say so explicitly, never leave it ambiguously
+    // null next to a null previewFramePath.
+    checkpoint = markFailed(checkpoint, `preview capture failed: ${previewResult.reason}`, deps.now());
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: savedHash.value.sha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+
+  return finish({
+    sourceProjectSha256: workingCopy.sourceProjectSha256,
+    workingProjectPath: workingCopy.workingProjectPath,
+    workingProjectSha256: savedHash.value.sha256,
+    previewFramePath: previewResult.path,
+    previewTimestampSeconds: previewResult.timestampSeconds
+  });
+}

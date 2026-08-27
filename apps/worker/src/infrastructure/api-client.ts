@@ -2,18 +2,26 @@ import {
   claimJobResponseSchema,
   jobDtoSchema,
   registerWorkerResponseSchema,
+  renderArtifactUploadResponseSchema,
   workerDtoSchema,
   type ClaimJobResponse,
   type HeartbeatRequest,
   type JobDto,
   type RegisterWorkerRequest,
   type RegisterWorkerResponse,
+  type RenderArtifactUploadResponse,
+  type RenderOutputVariant,
   type ReportJobStatusRequest,
   type WorkerDto
 } from "@dyo/schemas";
 import { ApiResponseError, NetworkError, UnauthorizedApiError } from "../errors/worker-error.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+// A real rendered video can legitimately take a long time to transfer over
+// the worker's real outbound connection - this only guards against a truly
+// hung upload, not a slow-but-progressing one (mirrors aerender-runner.ts's
+// own "generous timeout, real guard against a hang" rationale).
+const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface ApiClientConfig {
   apiUrl: string;
@@ -102,6 +110,80 @@ export class ApiClient {
     const json = await parseJson(response);
     if (response.status === 200) {
       return jobDtoSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  /**
+   * Durable MID-JOB progress report - see apps/api's report-job-checkpoint.ts
+   * for the full contract this hits. Never a status transition: this can
+   * fail (job no longer RUNNING, checkpoint regression, wrong worker) and
+   * callers must treat that as "checkpoint state unknown" - see
+   * execute-scene-edit-executor.ts's own handling.
+   */
+  async reportCheckpoint(
+    workerId: string,
+    workerToken: string,
+    jobId: string,
+    checkpoint: unknown
+  ): Promise<JobDto> {
+    const response = await this.request(
+      "POST",
+      `/api/workers/${workerId}/jobs/${jobId}/checkpoint`,
+      workerToken,
+      { checkpoint }
+    );
+    const json = await parseJson(response);
+    if (response.status === 200) {
+      return jobDtoSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  /**
+   * Uploads the real rendered output bytes (render-delivery phase section
+   * 4) - a separate, multipart request, never the JSON `request()` helper
+   * below. Reads the whole file into memory as one Buffer (an accepted
+   * simplification for real render outputs, which are far under typical
+   * worker RAM - not a true streamed upload; see this repo's own
+   * render-artifact-upload.integration.test.ts for the server side, which
+   * DOES stream-parse the incoming multipart body). Idempotent/retry-safe
+   * on the server side by content hash (see upload-render-artifact.ts) -
+   * safe to call again after a network failure here.
+   */
+  async uploadRenderArtifact(
+    workerId: string,
+    workerToken: string,
+    jobId: string,
+    variant: RenderOutputVariant,
+    fileBuffer: Buffer,
+    filename: string,
+    mimeType: string
+  ): Promise<RenderArtifactUploadResponse> {
+    const form = new FormData();
+    form.append("variant", variant);
+    form.append("file", new Blob([fileBuffer], { type: mimeType }), filename);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const path = `/api/workers/${workerId}/jobs/${jobId}/artifact`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.apiUrl}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${workerToken}` },
+        body: form,
+        signal: controller.signal
+      });
+    } catch (cause) {
+      throw new NetworkError(`Failed to reach ${path}`, { cause });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const json = await parseJson(response);
+    if (response.status === 201) {
+      return renderArtifactUploadResponseSchema.parse(json);
     }
     throw this.errorForResponse(response, json);
   }

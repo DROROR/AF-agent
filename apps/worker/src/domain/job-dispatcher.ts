@@ -2,15 +2,25 @@ import {
   validateJobPayload,
   type AeStatus,
   type CheckHealthResponse,
+  type ExecuteSceneEditRequest,
   type InspectTemplateRequest,
   type JobDto,
   type JobError,
   type McpStatus,
+  type RenderProjectRequest,
   type SceneEvidenceRequest
 } from "@dyo/schemas";
 import { isAllowedOperation } from "./operation-allowlist.js";
 import type { TemplateInspector } from "../inspection/template-inspector.js";
 import type { SceneEvidenceInspector } from "../inspection/scene-evidence-inspector.js";
+import { executeSceneEdit, type PersistCheckpoint } from "../execution/execute-scene-edit-executor.js";
+import type { AeEditBridge } from "../execution/ae-edit-bridge.js";
+import type { PreviewCapture } from "../execution/preview-capture.js";
+import { executeRenderProject } from "../execution/render/render-project-executor.js";
+import type { AerenderRunner } from "../execution/render/aerender-runner.js";
+import type { CompositionVerifier } from "../execution/render/verify-render-composition.js";
+import type { RenderArtifactUploader } from "../execution/render/upload-render-artifact.js";
+import type { RenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
 
 export interface JobExecutionResult {
   status: "SUCCEEDED" | "FAILED";
@@ -27,10 +37,24 @@ export interface LatestHealth {
 export interface JobDispatcherDeps {
   templateInspector: TemplateInspector;
   sceneEvidenceInspector: SceneEvidenceInspector;
-  /** Checked before INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE ever touch ae-mcp - see their precondition gates below. */
+  /** Checked before INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE/EXECUTE_FRAME ever touch ae-mcp - see their precondition gates below. */
   getLatestHealth: () => LatestHealth | null;
   /** The one real CHECK_HEALTH implementation - see health/run-check-health-diagnostics.ts. Never gated on getLatestHealth(): diagnosing a bad AE/MCP status is this operation's whole purpose. */
   runCheckHealthDiagnostics: () => Promise<CheckHealthResponse>;
+  /** EXECUTE_FRAME's real (or honest-stub) mutation bridge and preview capture - see execution/execute-scene-edit-executor.ts. */
+  aeEditBridge: AeEditBridge;
+  previewCapture: PreviewCapture;
+  /** EXECUTE_FRAME's durable mid-job checkpoint reporter - see execute-scene-edit-executor.ts's PersistCheckpoint. Reused unchanged by RENDER (see render-project.ts's own doc comment on the shared checkpoint shape). */
+  persistCheckpoint: PersistCheckpoint;
+  /** RENDER's own dependencies - see execution/render/render-project-executor.ts. aerenderPath mirrors env.aerenderPath (AERENDER_PATH) - never a caller-supplied path. */
+  aerenderPath: string | undefined;
+  aerenderRunner: AerenderRunner;
+  compositionVerifier: CompositionVerifier;
+  artifactUploader: RenderArtifactUploader;
+  /** INSPECT_RENDER_CAPABILITIES's own dependency - see execution/render/inspect-render-capabilities.ts. */
+  renderCapabilitiesInspector: RenderCapabilitiesInspector;
+  workRoot: string;
+  now: () => Date;
 }
 
 /**
@@ -57,6 +81,12 @@ export async function executeJob(deps: JobDispatcherDeps, job: JobDto): Promise<
       return runCheckHealth(deps, job);
     case "INSPECT_SCENE_EVIDENCE":
       return runInspectSceneEvidence(deps, job);
+    case "EXECUTE_FRAME":
+      return runExecuteFrame(deps, job);
+    case "RENDER":
+      return runRenderProject(deps, job);
+    case "INSPECT_RENDER_CAPABILITIES":
+      return runInspectRenderCapabilities(deps, job);
     default:
       // Every other WORKER_CAPABILITIES entry is a recognized operation
       // name with no execution handler yet - fail safely, never attempt it.
@@ -194,6 +224,206 @@ async function runInspectSceneEvidence(deps: JobDispatcherDeps, job: JobDto): Pr
       error: {
         code: "NOT_AVAILABLE",
         message: cause instanceof Error ? cause.message : "INSPECT_SCENE_EVIDENCE could not run"
+      }
+    };
+  }
+}
+
+async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (job.operation !== "EXECUTE_FRAME") {
+    return {
+      status: "FAILED",
+      error: { code: "INTERNAL_ERROR", message: "runExecuteFrame called for a non-EXECUTE_FRAME job" }
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = validateJobPayload("EXECUTE_FRAME", job.payload);
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: cause instanceof Error ? cause.message : "EXECUTE_FRAME payload failed validation"
+      }
+    };
+  }
+
+  // Same safety gate as runInspectTemplate/runInspectSceneEvidence: never
+  // let EXECUTE_FRAME touch ae-mcp unless AE and MCP were BOTH confirmed
+  // ONLINE as of the most recent server-round-tripped heartbeat.
+  const health = deps.getLatestHealth();
+  if (!health || health.aeStatus !== "ONLINE" || health.mcpStatus !== "ONLINE") {
+    return {
+      status: "FAILED",
+      error: {
+        code: "PRECONDITION_NOT_MET",
+        message: health
+          ? `AE and MCP must both be ONLINE (aeStatus=${health.aeStatus}, mcpStatus=${health.mcpStatus})`
+          : "No heartbeat has succeeded yet - AE/MCP status is not yet confirmed"
+      }
+    };
+  }
+
+  try {
+    const result = await executeSceneEdit(
+      {
+        workRoot: deps.workRoot,
+        aeEditBridge: deps.aeEditBridge,
+        previewCapture: deps.previewCapture,
+        persistCheckpoint: deps.persistCheckpoint,
+        now: deps.now
+      },
+      job.jobId,
+      payload as ExecuteSceneEditRequest
+    );
+    // job-dispatcher owns job identity - the executor itself is not
+    // handed job/worker IDs, matching the same stamping convention
+    // runInspectTemplate already uses for raw captures.
+    const stamped = { ...result, workerId: job.workerId, jobId: job.jobId };
+    if (result.failureReason !== null) {
+      // A recoverable/typed failure - the checkpoint carried in `result`
+      // already preserves whatever operations genuinely completed, so a
+      // later job attempt with this same checkpoint resumes correctly.
+      // Still reported as a job-level FAILED (never SUCCEEDED with a
+      // failureReason set) so nothing downstream mistakes this for done.
+      return { status: "FAILED", result: stamped, error: { code: "NOT_AVAILABLE", message: result.failureReason } };
+    }
+    return { status: "SUCCEEDED", result: stamped };
+  } catch (cause) {
+    // NotAvailableAeEditBridge/NotAvailablePreviewCapture always throw
+    // here; a real HeroicSwanAeEditBridge/HeroicSwanPreviewCapture should
+    // not (they report typed failures instead), but this remains a real,
+    // safe failure rather than a crash if either ever does.
+    return {
+      status: "FAILED",
+      error: {
+        code: "NOT_AVAILABLE",
+        message: cause instanceof Error ? cause.message : "EXECUTE_FRAME could not run"
+      }
+    };
+  }
+}
+
+async function runRenderProject(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (job.operation !== "RENDER") {
+    return {
+      status: "FAILED",
+      error: { code: "INTERNAL_ERROR", message: "runRenderProject called for a non-RENDER job" }
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = validateJobPayload("RENDER", job.payload);
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: cause instanceof Error ? cause.message : "RENDER payload failed validation"
+      }
+    };
+  }
+
+  // Same safety gate as EXECUTE_FRAME: VERIFY_COMPOSITION touches ae-mcp
+  // (against a live AfterFX.exe instance), so this never runs unless AE and
+  // MCP were BOTH confirmed ONLINE as of the most recent heartbeat - even
+  // though the later RUN_AERENDER stage itself launches a separate,
+  // headless aerender process that does not require an interactive AE
+  // session.
+  const health = deps.getLatestHealth();
+  if (!health || health.aeStatus !== "ONLINE" || health.mcpStatus !== "ONLINE") {
+    return {
+      status: "FAILED",
+      error: {
+        code: "PRECONDITION_NOT_MET",
+        message: health
+          ? `AE and MCP must both be ONLINE (aeStatus=${health.aeStatus}, mcpStatus=${health.mcpStatus})`
+          : "No heartbeat has succeeded yet - AE/MCP status is not yet confirmed"
+      }
+    };
+  }
+
+  try {
+    const result = await executeRenderProject(
+      {
+        workRoot: deps.workRoot,
+        aerenderPath: deps.aerenderPath,
+        aerenderRunner: deps.aerenderRunner,
+        compositionVerifier: deps.compositionVerifier,
+        artifactUploader: deps.artifactUploader,
+        persistCheckpoint: deps.persistCheckpoint,
+        now: deps.now
+      },
+      job.jobId,
+      payload as RenderProjectRequest
+    );
+    // job-dispatcher owns job identity - the executor itself is not handed
+    // job/worker IDs, matching runExecuteFrame's own stamping convention.
+    const stamped = { ...result, workerId: job.workerId, jobId: job.jobId };
+    if (result.failureReason !== null) {
+      return { status: "FAILED", result: stamped, error: { code: "NOT_AVAILABLE", message: result.failureReason } };
+    }
+    return { status: "SUCCEEDED", result: stamped };
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "NOT_AVAILABLE",
+        message: cause instanceof Error ? cause.message : "RENDER could not run"
+      }
+    };
+  }
+}
+
+async function runInspectRenderCapabilities(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (job.operation !== "INSPECT_RENDER_CAPABILITIES") {
+    return {
+      status: "FAILED",
+      error: { code: "INTERNAL_ERROR", message: "runInspectRenderCapabilities called for a non-INSPECT_RENDER_CAPABILITIES job" }
+    };
+  }
+
+  try {
+    validateJobPayload("INSPECT_RENDER_CAPABILITIES", job.payload);
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: cause instanceof Error ? cause.message : "INSPECT_RENDER_CAPABILITIES payload failed validation"
+      }
+    };
+  }
+
+  // Same safety gate as every other operation that touches ae-mcp.
+  const health = deps.getLatestHealth();
+  if (!health || health.aeStatus !== "ONLINE" || health.mcpStatus !== "ONLINE") {
+    return {
+      status: "FAILED",
+      error: {
+        code: "PRECONDITION_NOT_MET",
+        message: health
+          ? `AE and MCP must both be ONLINE (aeStatus=${health.aeStatus}, mcpStatus=${health.mcpStatus})`
+          : "No heartbeat has succeeded yet - AE/MCP status is not yet confirmed"
+      }
+    };
+  }
+
+  try {
+    const result = await deps.renderCapabilitiesInspector.inspect();
+    if (result.kind === "failure") {
+      return { status: "FAILED", error: { code: "NOT_AVAILABLE", message: result.reason } };
+    }
+    return { status: "SUCCEEDED", result: result.response };
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "NOT_AVAILABLE",
+        message: cause instanceof Error ? cause.message : "INSPECT_RENDER_CAPABILITIES could not run"
       }
     };
   }

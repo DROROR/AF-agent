@@ -12,6 +12,8 @@ import type { AssetStorage } from "./domain/asset-storage/types.js";
 import type { WorkMapRepository } from "./domain/work-map/types.js";
 import type { MappingSuggestionRepository } from "./domain/mapping-suggestion/types.js";
 import type { SceneEvidenceRepository } from "./domain/scene-evidence/types.js";
+import type { RenderArtifactRepository } from "./domain/render-artifact/types.js";
+import type { RenderArtifactUploadRepository } from "./domain/render-artifact-upload/types.js";
 import type { AiSuggestionProvider } from "./application/mapping-assistant/ai-suggestion-provider.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -22,9 +24,14 @@ import { registerProjectRoutes } from "./routes/projects.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerWorkMapRoutes } from "./routes/work-map.js";
 import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
+import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
+import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upload.js";
 
 export interface AppDependencies {
-  env: Pick<Env, "WORKER_REGISTRATION_SECRET" | "WORKER_HEARTBEAT_STALE_AFTER_MS" | "LOG_LEVEL" | "ASSET_MAX_UPLOAD_BYTES">;
+  env: Pick<
+    Env,
+    "WORKER_REGISTRATION_SECRET" | "WORKER_HEARTBEAT_STALE_AFTER_MS" | "LOG_LEVEL" | "ASSET_MAX_UPLOAD_BYTES" | "RENDER_ARTIFACT_MAX_UPLOAD_BYTES"
+  >;
   workerRepository: WorkerRepository;
   jobRepository: JobRepository;
   userRepository: UserRepository;
@@ -36,6 +43,8 @@ export interface AppDependencies {
   workMapRepository: WorkMapRepository;
   mappingSuggestionRepository: MappingSuggestionRepository;
   sceneEvidenceRepository: SceneEvidenceRepository;
+  renderArtifactRepository: RenderArtifactRepository;
+  renderArtifactUploadRepository: RenderArtifactUploadRepository;
   aiSuggestionProvider: AiSuggestionProvider;
   checkDatabaseHealth: () => Promise<boolean>;
   now?: () => Date;
@@ -86,9 +95,27 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     workerRepository: deps.workerRepository,
     projectRepository: deps.projectRepository,
     sceneEvidenceRepository: deps.sceneEvidenceRepository,
+    renderArtifactRepository: deps.renderArtifactRepository,
+    renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerRenderArtifactRoutes(app, {
+    renderArtifactRepository: deps.renderArtifactRepository,
+    assetStorage: deps.assetStorage,
+    projectRepository: deps.projectRepository,
+    userRepository: deps.userRepository,
+    sessionRepository: deps.sessionRepository,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerRenderArtifactUploadRoutes(app, {
+    jobRepository: deps.jobRepository,
+    workerRepository: deps.workerRepository,
+    renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
+    assetStorage: deps.assetStorage,
+    maxUploadBytes: deps.env.RENDER_ARTIFACT_MAX_UPLOAD_BYTES,
     ...(deps.now ? { now: deps.now } : {})
   });
   registerProjectRoutes(app, {

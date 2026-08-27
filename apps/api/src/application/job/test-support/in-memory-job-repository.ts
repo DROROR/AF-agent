@@ -90,6 +90,16 @@ export class InMemoryJobRepository implements JobRepository {
     return updated;
   }
 
+  async updateCheckpoint(jobId: string, workerId: string, checkpoint: unknown, now: Date): Promise<Job | null> {
+    const existing = this.rows.get(jobId);
+    if (!existing || existing.workerId !== workerId || existing.status !== "RUNNING") {
+      return null;
+    }
+    const updated: Job = { ...existing, checkpoint, updatedAt: now };
+    this.rows.set(jobId, updated);
+    return updated;
+  }
+
   async failJobsForStaleWorkers(now: Date, staleAfterMs: number): Promise<string[]> {
     const affected: string[] = [];
     for (const job of this.rows.values()) {

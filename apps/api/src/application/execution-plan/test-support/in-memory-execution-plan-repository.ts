@@ -1,3 +1,4 @@
+import { EMPTY_RENDER_OUTPUTS, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
 import type {
   ExecutionPlanRecord,
   ExecutionPlanRepository,
@@ -18,6 +19,7 @@ export class InMemoryExecutionPlanRepository implements ExecutionPlanRepository 
       templateId: revisionRow.templateId,
       sourceProjectSha256: revisionRow.sourceProjectSha256,
       scenePlans: revisionRow.scenePlans,
+      renderOutputs: EMPTY_RENDER_OUTPUTS,
       approvedAt: revisionRow.approvedAt,
       approvedBy: revisionRow.approvedBy,
       createdAt: now,
@@ -54,6 +56,25 @@ export class InMemoryExecutionPlanRepository implements ExecutionPlanRepository 
       status: update.status,
       approvedAt: update.approvedAt,
       approvedBy: update.approvedBy,
+      updatedAt: now
+    };
+    this.rows.set(id, updated);
+    return updated;
+  }
+
+  async updateRenderOutput(
+    id: string,
+    variant: RenderOutputVariant,
+    config: RenderOutputConfig | null,
+    now: Date
+  ): Promise<ExecutionPlanRecord | null> {
+    const existing = this.rows.get(id);
+    if (!existing) {
+      return null;
+    }
+    const updated: ExecutionPlanRecord = {
+      ...existing,
+      renderOutputs: { ...existing.renderOutputs, [variant]: config },
       updatedAt: now
     };
     this.rows.set(id, updated);

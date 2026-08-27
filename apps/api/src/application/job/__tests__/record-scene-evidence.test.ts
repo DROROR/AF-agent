@@ -18,7 +18,7 @@ function baseJob(overrides: Partial<JobDto> = {}): JobDto {
     result: {
       verifiedSourceProjectSha256: "a".repeat(64),
       manifestCompositionId: "comp-1",
-      compositionIndex: 0,
+      aeProjectItemIndex: 1,
       compositionName: "Scene A",
       layers: [],
       preview: null,
@@ -97,7 +97,7 @@ describe("recordSceneEvidenceIfApplicable", () => {
         result: {
           verifiedSourceProjectSha256: "a".repeat(64),
           manifestCompositionId: "comp-1",
-          compositionIndex: 0,
+          aeProjectItemIndex: 1,
           compositionName: "Scene A",
           layers: [],
           preview: null,
