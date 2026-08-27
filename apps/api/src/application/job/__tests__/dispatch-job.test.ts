@@ -1,21 +1,46 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { SCHEMA_VERSION, type TemplateManifest } from "@dyo/schemas";
 import {
   PreconditionNotMetError,
+  ProjectNotFoundError,
   WorkerBusyError,
   WorkerNotFoundError,
   WorkerOfflineError
 } from "../../../errors/app-error.js";
 import { InMemoryWorkerRepository } from "../../worker/test-support/in-memory-worker-repository.js";
 import { InMemoryJobRepository } from "../test-support/in-memory-job-repository.js";
+import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
+import { createProject } from "../../project/create-project.js";
 import { dispatchJob } from "../dispatch-job.js";
+
+function minimalManifest(): TemplateManifest {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    templateId: "tmpl-1",
+    templateName: "tmpl-1",
+    sourceProject: { path: "/copies/test.aep", name: "test.aep", sha256: "a".repeat(64) },
+    afterEffects: { version: "26.3x87" },
+    generatedAt: FIXED_NOW.toISOString(),
+    compositions: [],
+    scenes: [],
+    preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+    unknownItems: []
+  };
+}
 
 const FIXED_NOW = new Date("2026-01-01T00:00:00.000Z");
 const STALE_AFTER_MS = 30_000;
 const PAYLOAD = { templateId: "t", sourceProjectPath: "/copies/t.aep" };
 
 function deps(jobRepository: InMemoryJobRepository, workerRepository: InMemoryWorkerRepository, now = FIXED_NOW) {
-  return { jobRepository, workerRepository, now: () => now, staleAfterMs: STALE_AFTER_MS };
+  return {
+    jobRepository,
+    workerRepository,
+    projectRepository: new InMemoryProjectRepository(),
+    now: () => now,
+    staleAfterMs: STALE_AFTER_MS
+  };
 }
 
 /** A worker in a fully green state: ONLINE, AE/MCP ONLINE, has the capability, fresh heartbeat, no active job. */
@@ -209,8 +234,76 @@ describe("dispatchJob", () => {
       dispatchJob(deps(jobRepository, workerRepository), {
         operation: "INSPECT_SCENE_EVIDENCE",
         workerId,
+        projectId: randomUUID(),
         payload: sceneEvidencePayload
       })
     ).rejects.toThrow(PreconditionNotMetError);
+  });
+
+  it("rejects an INSPECT_SCENE_EVIDENCE dispatch whose projectId does not name a real project - never queued against an unattributable project", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = randomUUID();
+    await workerRepository.create(
+      { id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] },
+      FIXED_NOW
+    );
+    await workerRepository.updateHeartbeat(
+      workerId,
+      { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null },
+      FIXED_NOW
+    );
+
+    const sceneEvidencePayload = {
+      sourceProjectPath: "/copies/t.aep",
+      sourceProjectSha256: "a".repeat(64),
+      manifestCompositionId: "comp-275",
+      compositionIndex: 14,
+      layerIndices: [1],
+      previewTimestampSeconds: null
+    };
+
+    await expect(
+      dispatchJob(deps(jobRepository, workerRepository), {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId,
+        projectId: randomUUID(),
+        payload: sceneEvidencePayload
+      })
+    ).rejects.toThrow(ProjectNotFoundError);
+  });
+
+  it("attaches the real projectId to the created job when dispatching INSPECT_SCENE_EVIDENCE for a project that exists", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const workerId = randomUUID();
+    await workerRepository.create(
+      { id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] },
+      FIXED_NOW
+    );
+    await workerRepository.updateHeartbeat(
+      workerId,
+      { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null },
+      FIXED_NOW
+    );
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: minimalManifest() });
+
+    const sceneEvidencePayload = {
+      sourceProjectPath: "/copies/t.aep",
+      sourceProjectSha256: "a".repeat(64),
+      manifestCompositionId: "comp-275",
+      compositionIndex: 14,
+      layerIndices: [1],
+      previewTimestampSeconds: null
+    };
+
+    const result = await dispatchJob(
+      { jobRepository, workerRepository, projectRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, payload: sceneEvidencePayload }
+    );
+
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.projectId).toBe(project.projectId);
   });
 });

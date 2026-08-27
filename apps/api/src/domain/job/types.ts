@@ -8,6 +8,8 @@ export interface JobFailure {
 export interface Job {
   id: string;
   workerId: string;
+  /** Null for operations not bound to a project (e.g. CHECK_HEALTH) - see job-dispatch.ts. */
+  projectId: string | null;
   operation: WorkerCapability;
   status: JobStatus;
   payload: unknown;
@@ -24,6 +26,7 @@ export interface Job {
 export interface NewJob {
   id: string;
   workerId: string;
+  projectId?: string | null;
   operation: WorkerCapability;
   payload: unknown;
 }

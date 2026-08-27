@@ -10,6 +10,7 @@ function toDomain(row: JobRow): Job {
   return {
     id: row.id,
     workerId: row.workerId,
+    projectId: row.projectId,
     operation: row.operation,
     status: row.status,
     payload: row.payload,
@@ -33,6 +34,7 @@ export class DrizzleJobRepository implements JobRepository {
       .values({
         id: job.id,
         workerId: job.workerId,
+        projectId: job.projectId ?? null,
         operation: job.operation,
         payload: job.payload,
         status: "QUEUED",

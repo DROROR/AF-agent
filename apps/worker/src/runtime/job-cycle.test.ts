@@ -6,6 +6,7 @@ function baseJob(overrides: Partial<JobDto> = {}): JobDto {
   return {
     jobId: "11111111-1111-1111-1111-111111111111",
     workerId: "22222222-2222-2222-2222-222222222222",
+    projectId: null,
     operation: "INSPECT_TEMPLATE",
     status: "CLAIMED",
     payload: {},

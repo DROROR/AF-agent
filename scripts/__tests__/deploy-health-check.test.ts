@@ -127,6 +127,122 @@ describe("wait_for_healthy", () => {
   });
 });
 
+/**
+ * Fake `curl` that distinguishes the two request shapes
+ * verify_static_assets_healthy makes: a plain body fetch (the /login HTML
+ * itself) vs. an asset content-type probe (`-w '%{http_code}
+ * %{content_type}' -o /dev/null <url>`). `assetResponses` is keyed by the
+ * asset's path suffix (e.g. "/_next/static/chunks/x.css") and each entry
+ * says what that specific asset should answer with - this is what lets a
+ * single test simulate "one broken asset among several healthy ones",
+ * the exact 2026-08-27 incident shape.
+ */
+function makeStaticAssetFakeCurl(
+  dir: string,
+  opts: { htmlBody: string | null; assetResponses: Record<string, { status: string; contentType: string }> }
+): void {
+  mkdirSync(dir, { recursive: true });
+  cleanupDirs.push(dir);
+
+  const assetCases = Object.entries(opts.assetResponses)
+    .map(([path, res]) => `  *"${path}") echo "${res.status} ${res.contentType}"; exit 0 ;;`)
+    .join("\n");
+
+  const htmlBlock =
+    opts.htmlBody === null
+      ? `echo 'connection refused' >&2\nexit 7`
+      : `cat <<'HTML'\n${opts.htmlBody}\nHTML\nexit 0`;
+
+  writeFileSync(
+    join(dir, "curl"),
+    `#!/usr/bin/env bash
+last="\${@: -1}"
+if [[ "$*" == *"-w"* ]]; then
+  case "$last" in
+${assetCases}
+  *) echo "404 text/plain" ;;
+  esac
+  exit 0
+fi
+${htmlBlock}
+`
+  );
+  chmodSync(join(dir, "curl"), 0o755);
+}
+
+function runVerifyStaticAssetsHealthy(fakeBinDir: string, baseUrl = "http://127.0.0.1:4100", loginPath = "/login") {
+  return spawnSync(
+    "bash",
+    ["-c", `set -Eeuo pipefail; source '${libPath}'; verify_static_assets_healthy '${baseUrl}' '${loginPath}'`],
+    { env: { ...process.env, PATH: `${fakeBinDir}:${process.env["PATH"]}` }, encoding: "utf8" }
+  );
+}
+
+describe("verify_static_assets_healthy", () => {
+  it("passes when every referenced CSS/JS asset returns 200 with the right content-type", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-asset-health-"));
+    makeStaticAssetFakeCurl(dir, {
+      htmlBody: '<link href="/_next/static/chunks/abc.css"><script src="/_next/static/chunks/def.js"></script>',
+      assetResponses: {
+        "/_next/static/chunks/abc.css": { status: "200", contentType: "text/css; charset=UTF-8" },
+        "/_next/static/chunks/def.js": { status: "200", contentType: "application/javascript; charset=UTF-8" }
+      }
+    });
+
+    const result = runVerifyStaticAssetsHealthy(dir);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("static asset health check passed");
+  });
+
+  it("fails closed when the HTML references no CSS/JS assets at all - an HTML 200 alone is not enough", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-asset-health-"));
+    makeStaticAssetFakeCurl(dir, { htmlBody: "<html><body>nothing here</body></html>", assetResponses: {} });
+
+    const result = runVerifyStaticAssetsHealthy(dir);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("HTML 200 alone is not enough");
+  });
+
+  it("fails when a referenced asset does not return 200 - the exact 2026-08-27 incident shape", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-asset-health-"));
+    makeStaticAssetFakeCurl(dir, {
+      htmlBody: '<link href="/_next/static/chunks/abc.css"><script src="/_next/static/chunks/def.js"></script>',
+      assetResponses: {
+        "/_next/static/chunks/abc.css": { status: "500", contentType: "text/plain" },
+        "/_next/static/chunks/def.js": { status: "200", contentType: "application/javascript" }
+      }
+    });
+
+    const result = runVerifyStaticAssetsHealthy(dir);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("returned HTTP 500");
+  });
+
+  it("fails when a referenced CSS asset returns 200 but the wrong content-type", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-asset-health-"));
+    makeStaticAssetFakeCurl(dir, {
+      htmlBody: '<link href="/_next/static/chunks/abc.css"><script src="/_next/static/chunks/def.js"></script>',
+      assetResponses: {
+        "/_next/static/chunks/abc.css": { status: "200", contentType: "text/html" },
+        "/_next/static/chunks/def.js": { status: "200", contentType: "application/javascript" }
+      }
+    });
+
+    const result = runVerifyStaticAssetsHealthy(dir);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("expected text/css");
+  });
+
+  it("fails when the HTML fetch itself fails", () => {
+    const dir = mkdtempSync(join(tmpdir(), "static-asset-health-"));
+    makeStaticAssetFakeCurl(dir, { htmlBody: null, assetResponses: {} });
+
+    const result = runVerifyStaticAssetsHealthy(dir);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("failed to fetch");
+  });
+});
+
 describe("describe_rollback_decision", () => {
   it("refuses rollback when this deployment changed the schema, regardless of SHA", () => {
     const differentShas = runDescribeRollbackDecision("aaa", "bbb", 1);
@@ -172,6 +288,38 @@ describe("scripts/deploy-production.sh wiring", () => {
     // Fails safely; never runs kill/pkill against whatever it finds.
     expect(script).not.toMatch(/\bkill\b.*unexpected/i);
     expect(script).not.toContain("pkill");
+  });
+
+  /**
+   * 2026-08-27 incident regression coverage: `npm run build` must never
+   * run directly against the live checkout again - web is built in an
+   * isolated release and only ever switched to after being verified.
+   */
+  it("builds web in an isolated release, never with a bare `npm run build` against this checkout", () => {
+    const scriptPath = join(currentDir, "..", "deploy-production.sh");
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain("scripts/create-web-release.sh\" \"$EXPECTED_SHA\"");
+    expect(script).toContain("scripts/switch-web-release.sh\" \"$EXPECTED_SHA\"");
+    expect(script).not.toMatch(/^npm run build$/m);
+    expect(script).toContain("pm2 startOrReload \"$APP_DIR/deploy/pm2/ecosystem.config.cjs\" --only dyo-api --update-env");
+    expect(script).not.toContain("--only dyo-api,dyo-web");
+  });
+
+  it("requires the live static-asset health check in addition to wait_for_healthy on both the forward and rollback paths", () => {
+    const scriptPath = join(currentDir, "..", "deploy-production.sh");
+    const script = readFileSync(scriptPath, "utf8");
+
+    const occurrences = script.split("verify_static_assets_healthy 'http://127.0.0.1:4100' '/login'").length - 1;
+    expect(occurrences).toBe(2);
+  });
+
+  it("rolls back web by switching to the previous release on disk, never by rebuilding", () => {
+    const scriptPath = join(currentDir, "..", "deploy-production.sh");
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain("web_release_complete_marker \"$PREVIOUS_SHA\"");
+    expect(script).toContain("scripts/switch-web-release.sh\" \"$PREVIOUS_SHA\"");
   });
 });
 

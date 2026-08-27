@@ -3,6 +3,10 @@ dist/
 build/
 coverage/
 .next/
+# Pre-incident-fix backup of a corrupted production build (2026-08-27) -
+# preserved on disk for forensics only, kept until the new isolated
+# release mechanism has survived at least one real production deployment.
+apps/web/.next.broken-*/
 *.log
 *.tsbuildinfo
 .env
@@ -40,3 +44,9 @@ deploy/*.zip
 .deploy.lock
 .deploy-build.*
 /.deployed-sha
+
+# Marks THIS checkout as the live production checkout - created once,
+# out-of-band, only on the production server. Never present in a CI
+# checkout, a fresh clone, a developer's machine, or an isolated release
+# worktree - see scripts/guard-production-web-build.mjs.
+/.production-checkout

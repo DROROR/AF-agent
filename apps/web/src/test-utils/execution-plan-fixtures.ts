@@ -145,6 +145,31 @@ export function workMapFixture(overrides: Record<string, unknown> = {}, entries 
   };
 }
 
+export function mappingSuggestionFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "suggestion-1",
+    projectId: PROJECT_ID,
+    scenePlanId: "scene-1",
+    mappingId: "mapping-1",
+    source: "DETERMINISTIC",
+    status: "PENDING",
+    suggestedClassification: null,
+    suggestedAssetId: null,
+    suggestedText: null,
+    suggestedAssetTimestamp: null,
+    suggestedFinalDuration: null,
+    confidence: 1,
+    reasoning: "The Work Map explicitly assigns this asset to this scene.",
+    evidenceRefs: [{ kind: "USER_INTENT", summary: "Work Map entry for this scene names asset \"Client logo\"" }],
+    unresolvedReason: null,
+    requiresHumanReview: false,
+    conflictsWithWorkMap: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
 interface HandlerSpec {
   status: number;
   body: unknown;

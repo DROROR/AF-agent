@@ -69,6 +69,8 @@ export type JobError = z.infer<typeof jobErrorSchema>;
 export const jobDtoSchema = z.object({
   jobId: z.string().uuid(),
   workerId: z.string().uuid(),
+  /** Null for operations not bound to a project (e.g. CHECK_HEALTH) - set at dispatch time, never inferred or backfilled later. */
+  projectId: z.string().uuid().nullable(),
   operation: workerCapabilitySchema,
   status: jobStatusSchema,
   payload: z.unknown(),

@@ -31,6 +31,8 @@ readonly HEALTH_MAX_WAIT_SECONDS=60
 readonly HEALTH_RETRY_INTERVAL_SECONDS=2
 # shellcheck source=scripts/lib/deploy-health-check.sh
 source "$APP_DIR/scripts/lib/deploy-health-check.sh"
+# shellcheck source=scripts/lib/web-release.sh
+source "$APP_DIR/scripts/lib/web-release.sh"
 
 # ---- Pre-flight identity/environment checks - fail closed, before anything else ----
 
@@ -147,20 +149,38 @@ else
   readonly SCHEMA_CHANGED=0
 fi
 
-# ---- Build. If this (or the migration step above) fails, `set -e` has
-#      already aborted the script here - dyo-api/dyo-web are never
-#      reloaded with a broken build or half-migrated schema. ----
+# ---- Build web in an ISOLATED release, never in this checkout. ----
+#
+# dyo-api needs no build step (it runs `apps/api/src/index.ts` directly
+# via tsx - the checkout above already IS its running code). dyo-web is
+# different: `next start` serves a compiled `.next` directory, and this
+# checkout is also where a developer might run `npm run build` to
+# validate other work - see scripts/lib/web-release.sh's own doc comment
+# for the 2026-08-27 incident that caused. create-web-release.sh builds
+# entirely in its own isolated `git worktree` + `npm ci`, verifies the
+# result (BUILD_ID/static/server present, referenced /login CSS+JS assets
+# actually exist on disk), and never touches whatever dyo-web currently
+# serves until explicitly switched to below. If this (or the migration
+# step above) fails, `set -e` has already aborted the script here -
+# nothing is ever reloaded against a broken/half-verified release.
 
-npm run build
+"$APP_DIR/scripts/create-web-release.sh" "$EXPECTED_SHA"
 
-# ---- Reload ONLY dyo-api and dyo-web - never `pm2 restart/reload all`,
-#      never touch dashboard-anthropic-proxy, dashboard-task-email-worker,
-#      or any other PM2 app. `pm2 save` is deliberately NOT run: it would
-#      persist the full current process list (including unrelated apps)
-#      into PM2's resurrect file, which is unnecessary for this deploy and
-#      out of scope for what this script owns. ----
+# ---- Reload dyo-api only - never `pm2 restart/reload all`, never touch
+#      dashboard-anthropic-proxy, dashboard-task-email-worker, or any
+#      other PM2 app. `pm2 save` is deliberately NOT run: it would persist
+#      the full current process list (including unrelated apps) into
+#      PM2's resurrect file, which is unnecessary for this deploy and out
+#      of scope for what this script owns. ----
 
-pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api,dyo-web --update-env
+pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api --update-env
+
+# ---- Atomically switch web to the new, already-verified release and
+#      reload ONLY dyo-web. The previous release directory is left
+#      untouched on disk (never deleted here) - see the ROLLBACK section
+#      below, which switches straight back to it without rebuilding. ----
+
+"$APP_DIR/scripts/switch-web-release.sh" "$EXPECTED_SHA"
 
 # ---- Health checks ----
 #
@@ -169,9 +189,13 @@ pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api,dyo-
 # instant curl right after `pm2 startOrReload` reliably hits connection-
 # refused even on a perfectly healthy deploy. Rollback/failure handling below
 # only runs once this has genuinely exhausted its full timeout - never on
-# the first failed attempt.
+# the first failed attempt. An HTML 200 from dyo-web is NOT sufficient on
+# its own (the exact 2026-08-27 incident) - verify_static_assets_healthy
+# additionally confirms every CSS/JS asset the live /login page references
+# actually resolves with the right content-type.
 
-if wait_for_healthy "$HEALTH_MAX_WAIT_SECONDS" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
+if wait_for_healthy "$HEALTH_MAX_WAIT_SECONDS" "$HEALTH_RETRY_INTERVAL_SECONDS" \
+  && verify_static_assets_healthy 'http://127.0.0.1:4100' '/login'; then
   printf '%s\n' "$EXPECTED_SHA" >"$APP_DIR/.deployed-sha"
   echo "AF-agent production deployed successfully: $EXPECTED_SHA"
   exit 0
@@ -222,19 +246,30 @@ EOF
   exit 73
 fi
 
-echo "No schema change this deployment - attempting a safe code-only rollback to $PREVIOUS_SHA." >&2
+echo "No schema change this deployment - attempting a safe rollback to $PREVIOUS_SHA." >&2
 
-# Detached checkout, not `reset --hard`: the working tree was already
-# clean (we verified that before touching anything), so this cannot
-# discard anything. It also deliberately does not move the local `main`
-# branch ref backward - the next deployment attempt still starts from
-# main's real tip and fast-forwards from there, same as always.
+# API: a code-only rollback - detached checkout, not `reset --hard` (the
+# working tree was already clean, so this cannot discard anything, and it
+# deliberately does not move the local `main` branch ref backward - the
+# next deployment attempt still starts from main's real tip and
+# fast-forwards from there, same as always).
 git checkout --quiet --detach "$PREVIOUS_SHA"
 npm ci --no-audit --no-fund
-npm run build
-pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api,dyo-web --update-env
+pm2 startOrReload "$APP_DIR/deploy/pm2/ecosystem.config.cjs" --only dyo-api --update-env
 
-if wait_for_healthy "$HEALTH_MAX_WAIT_SECONDS" "$HEALTH_RETRY_INTERVAL_SECONDS"; then
+# Web: switch straight back to the previous release, which this same
+# mechanism guarantees is still on disk from the last successful deploy
+# (releases are never deleted here) - never rebuilt on rollback, which is
+# exactly what makes this fast and reliable even if the new SHA's build
+# environment is itself what's broken.
+if [[ -f "$(web_release_complete_marker "$PREVIOUS_SHA")" ]]; then
+  "$APP_DIR/scripts/switch-web-release.sh" "$PREVIOUS_SHA"
+else
+  echo "No previous web release is available on disk for $PREVIOUS_SHA - web could not be rolled back automatically; investigate manually." >&2
+fi
+
+if wait_for_healthy "$HEALTH_MAX_WAIT_SECONDS" "$HEALTH_RETRY_INTERVAL_SECONDS" \
+  && verify_static_assets_healthy 'http://127.0.0.1:4100' '/login'; then
   echo "Rolled back successfully to $PREVIOUS_SHA. Investigate $EXPECTED_SHA before retrying." >&2
   exit 71
 fi

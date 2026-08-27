@@ -1,14 +1,19 @@
 import { sql } from "drizzle-orm";
-import { check, doublePrecision, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { boolean, check, doublePrecision, integer, jsonb, pgTable, text, timestamp, unique, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type {
   AeStatus,
+  EvidenceRef,
   JobErrorCode,
   JobStatus,
   McpStatus,
   MediaKind,
+  PlaceholderType,
   PlanStatus,
   ProjectBrandInputs,
+  SceneEvidenceResponse,
   ScenePlanEntry,
+  SuggestionSource,
+  SuggestionStatus,
   TemplateManifest,
   UserRole,
   WorkerCapability,
@@ -109,6 +114,8 @@ export const jobs = pgTable(
     workerId: uuid("worker_id")
       .notNull()
       .references(() => workers.id, { onDelete: "cascade" }),
+    /** Null for operations not bound to a project (e.g. CHECK_HEALTH) - see job-dispatch.ts. */
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
     operation: text("operation").notNull().$type<WorkerCapability>(),
     status: text("status").notNull().default("QUEUED").$type<JobStatus>(),
     payload: jsonb("payload").notNull(),
@@ -305,3 +312,93 @@ export const projectWorkMaps = pgTable(
 );
 export type ProjectWorkMapRow = typeof projectWorkMaps.$inferSelect;
 export type NewProjectWorkMapRow = typeof projectWorkMaps.$inferInsert;
+
+export const DB_SUGGESTION_SOURCES = ["DETERMINISTIC", "AI"] as const;
+export const DB_SUGGESTION_STATUSES = ["PENDING", "ACCEPTED", "REJECTED"] as const;
+
+/**
+ * Mapping Assistant suggestions (evidence-backed mapping suggestions
+ * phase) - never itself a PlaceholderMapping. `suggestedAssetId` is
+ * deliberately NOT a foreign key: it is re-validated against the real
+ * Asset Catalog at accept time (see accept-mapping-suggestion.ts), so an
+ * asset deleted after a suggestion was generated fails there with a clear
+ * reason rather than the DB silently blocking/cascading the deletion on
+ * a suggestion's behalf. `scenePlanId`/`mappingId` reference ids inside
+ * execution_plans.scene_plans' own jsonb (not a separate table), so they
+ * are plain text columns, not FKs, matching how the plan itself models
+ * scenes/mappings. At most one PENDING row is kept per (projectId,
+ * scenePlanId, mappingId) target - enforced at the application layer
+ * (upsertPending), not a DB constraint, since mappingId can be NULL for a
+ * composition-level-only unresolved scene and Postgres unique
+ * constraints never treat two NULLs as duplicates.
+ */
+export const mappingSuggestions = pgTable(
+  "mapping_suggestions",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    scenePlanId: text("scene_plan_id").notNull(),
+    mappingId: text("mapping_id"),
+    source: text("source").notNull().$type<SuggestionSource>(),
+    status: text("status").notNull().default("PENDING").$type<SuggestionStatus>(),
+    suggestedClassification: text("suggested_classification").$type<PlaceholderType | null>(),
+    suggestedAssetId: uuid("suggested_asset_id"),
+    suggestedText: text("suggested_text"),
+    suggestedAssetTimestamp: doublePrecision("suggested_asset_timestamp"),
+    suggestedFinalDuration: doublePrecision("suggested_final_duration"),
+    confidence: doublePrecision("confidence").notNull(),
+    reasoning: text("reasoning"),
+    evidenceRefs: jsonb("evidence_refs").notNull().$type<EvidenceRef[]>(),
+    unresolvedReason: text("unresolved_reason"),
+    requiresHumanReview: boolean("requires_human_review").notNull(),
+    conflictsWithWorkMap: boolean("conflicts_with_work_map").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("mapping_suggestions_source_check", sql.raw(sqlEnumCheck("source", DB_SUGGESTION_SOURCES))),
+    check("mapping_suggestions_status_check", sql.raw(sqlEnumCheck("status", DB_SUGGESTION_STATUSES))),
+    check("mapping_suggestions_confidence_check", sql`${table.confidence} >= 0 AND ${table.confidence} <= 1`)
+  ]
+);
+export type MappingSuggestionRow = typeof mappingSuggestions.$inferSelect;
+export type NewMappingSuggestionRow = typeof mappingSuggestions.$inferInsert;
+
+/**
+ * Durable, append-only, read-only record of one successful
+ * INSPECT_SCENE_EVIDENCE job result (Phase 7B operation, persisted here for
+ * the first time - see docs/engineering audit for this phase). Never
+ * updated in place: a re-inspection always INSERTs a new row rather than
+ * overwriting an older one, so historical evidence is never silently lost
+ * even after the project's source .aep changes (evidence-persistence phase
+ * section 2/3). `jobId` is unique - at most one evidence row per job,
+ * guarding the write path (record-scene-evidence.ts) against ever creating
+ * a duplicate from a retried/duplicate callback, defense in depth alongside
+ * the jobs table's own compare-and-swap status transition (a job can only
+ * ever transition into SUCCEEDED once).
+ */
+export const sceneEvidence = pgTable(
+  "scene_evidence",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .unique()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    manifestCompositionId: text("manifest_composition_id").notNull(),
+    /** The worker's own re-verified sha256 (SceneEvidenceResponse.verifiedSourceProjectSha256) - never re-derived, never trusted from the request alone. */
+    sourceProjectSha256: text("source_project_sha256").notNull(),
+    /** Full validated SceneEvidenceResponse - validated by record-scene-evidence.ts BEFORE this row is ever inserted, never stored unvalidated. */
+    response: jsonb("response").notNull().$type<SceneEvidenceResponse>(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  () => []
+);
+export type SceneEvidenceRow = typeof sceneEvidence.$inferSelect;
+export type NewSceneEvidenceRow = typeof sceneEvidence.$inferInsert;

@@ -5,6 +5,7 @@ export function toJobDto(job: Job): JobDto {
   return {
     jobId: job.id,
     workerId: job.workerId,
+    projectId: job.projectId,
     operation: job.operation,
     status: job.status,
     payload: job.payload,

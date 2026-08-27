@@ -204,6 +204,66 @@ wait_for_healthy() {
   return 1
 }
 
+# Fetches base_url+login_path's real HTML and verifies every referenced
+# /_next/static/*.css and *.js asset actually resolves with HTTP 200 and
+# the right content-type - an HTML 200 alone proves nothing (the exact
+# 2026-08-27 incident: /login was 200 while its own referenced CSS chunk
+# was a 500, because the running process's cached HTML referenced files a
+# later in-place `npm run build` had already overwritten). Requires at
+# least one CSS and one JS reference; an asset-free page fails closed
+# rather than passing vacuously. Called as its own explicit post-switch
+# deploy step (not folded into wait_for_healthy's retry loop) - by the
+# time this runs, the process is already confirmed up.
+#
+# Usage: verify_static_assets_healthy <base_url> [login_path=/login]
+verify_static_assets_healthy() {
+  local base_url="${1:?base_url required}"
+  local login_path="${2:-/login}"
+
+  local html
+  if ! html="$(curl --fail --silent --max-time 5 "${base_url}${login_path}")"; then
+    echo "static asset health check: failed to fetch ${login_path}" >&2
+    return 1
+  fi
+
+  local assets
+  # `|| true` guards against `pipefail`+`set -e` aborting here when grep
+  # legitimately finds zero matches (its normal "no match" exit status is
+  # 1) - that exact case must fall through to the explicit, diagnosed
+  # failure below, never abort silently before it can be reported.
+  assets="$(printf '%s' "$html" | grep -oE '/_next/static/[^\"'"'"'<>[:space:]]+\.(css|js)' | sort -u || true)"
+  local css_count js_count
+  css_count="$(printf '%s\n' "$assets" | grep -c '\.css$' || true)"
+  js_count="$(printf '%s\n' "$assets" | grep -c '\.js$' || true)"
+  if [[ -z "$assets" || "$css_count" -eq 0 || "$js_count" -eq 0 ]]; then
+    echo "static asset health check: ${login_path} referenced no usable CSS/JS assets - HTML 200 alone is not enough" >&2
+    return 1
+  fi
+
+  local asset probe code content_type
+  while IFS= read -r asset; do
+    [[ -z "$asset" ]] && continue
+    probe="$(curl --silent --max-time 5 -o /dev/null -w '%{http_code} %{content_type}' "${base_url}${asset}")"
+    code="${probe%% *}"
+    content_type="${probe#* }"
+    if [[ "$code" != "200" ]]; then
+      echo "static asset health check: ${asset} returned HTTP ${code} (expected 200)" >&2
+      return 1
+    fi
+    if [[ "$asset" == *.css && "$content_type" != text/css* ]]; then
+      echo "static asset health check: ${asset} has content-type '${content_type}' (expected text/css)" >&2
+      return 1
+    fi
+    if [[ "$asset" == *.js && "$content_type" != *javascript* ]]; then
+      echo "static asset health check: ${asset} has content-type '${content_type}' (expected a javascript type)" >&2
+      return 1
+    fi
+  done <<<"$assets"
+
+  echo "static asset health check passed: verified $(printf '%s\n' "$assets" | wc -l) referenced asset(s)"
+  return 0
+}
+
 # Pure decision logic for what the rollback path should do, kept separate
 # from the actual git/npm/pm2 side effects so it can be unit tested without
 # touching a real checkout or process manager.

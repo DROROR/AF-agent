@@ -10,6 +10,9 @@ import { DrizzleProjectRepository } from "./infrastructure/db/drizzle-project-re
 import { DrizzleExecutionPlanRepository } from "./infrastructure/db/drizzle-execution-plan-repository.js";
 import { DrizzleAssetRepository } from "./infrastructure/db/drizzle-asset-repository.js";
 import { DrizzleWorkMapRepository } from "./infrastructure/db/drizzle-work-map-repository.js";
+import { DrizzleMappingSuggestionRepository } from "./infrastructure/db/drizzle-mapping-suggestion-repository.js";
+import { DrizzleSceneEvidenceRepository } from "./infrastructure/db/drizzle-scene-evidence-repository.js";
+import { NotConfiguredAiSuggestionProvider } from "./application/mapping-assistant/ai-suggestion-provider.js";
 import { LocalFilesystemAssetStorage } from "./infrastructure/storage/local-filesystem-asset-storage.js";
 
 async function main(): Promise<void> {
@@ -30,6 +33,11 @@ async function main(): Promise<void> {
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(env.ASSET_STORAGE_ROOT),
     workMapRepository: new DrizzleWorkMapRepository(db),
+    mappingSuggestionRepository: new DrizzleMappingSuggestionRepository(db),
+    sceneEvidenceRepository: new DrizzleSceneEvidenceRepository(db),
+    // No real AI provider is integrated yet (mapping-assistant phase section 5/15) - deterministic
+    // matching remains fully functional; the dashboard reports AI as unavailable via aiAvailable: false.
+    aiSuggestionProvider: new NotConfiguredAiSuggestionProvider(),
     checkDatabaseHealth: async () => {
       try {
         await pool.query("SELECT 1");

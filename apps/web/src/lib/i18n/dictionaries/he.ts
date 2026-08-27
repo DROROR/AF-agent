@@ -469,5 +469,39 @@ export const he: Dictionary = {
       desiredAssetId: "מזהה נכס אמיתי מקטלוג הנכסים של הפרויקט - לא מאומת כאן, רק כאשר הוא ממופה בפועל במיפוי סצנות.",
       sourceCompositionId: "השאירו ריק אם התבנית טרם נבדקה."
     }
+  },
+  mappingAssistant: {
+    title: "עוזר המיפוי",
+    description: "מציע מיפויי סצנה/פלייסהולדר מראיות אמיתיות - מניפסט התבנית, קטלוג הנכסים, מפת העבודה, קלטי המותג וההנחיות שלכם. שום דבר כאן אינו מוחל אוטומטית.",
+    generateAction: "יצירת הצעות",
+    generating: "יוצר…",
+    aiAvailable: "בינה מלאכותית: זמינה",
+    aiUnavailable: "בינה מלאכותית: לא מוגדרת (התאמה דטרמיניסטית בלבד)",
+    emptyTitle: "אין עדיין הצעות",
+    emptyDescription: "צרו הצעות כדי לראות הצעות אמיתיות המבוססות על ראיות עבור סצנות לא פתורות.",
+    sourceDeterministic: "דטרמיניסטי",
+    sourceAi: "הצעת בינה מלאכותית",
+    confidenceLabel: (percent) => `רמת ביטחון: ${percent}%`,
+    suggestedAssetLabel: "נכס מוצע",
+    suggestedTextLabel: "טקסט מוצע",
+    suggestedTimestampLabel: "חותמת זמן מוצעת בנכס",
+    suggestedDurationLabel: "משך מוצע",
+    workMapConflict: "הצעה זו מתנגשת עם רשומה במפת העבודה - יש לבדוק בעיון לפני האישור.",
+    acceptAction: "אישור",
+    rejectAction: "דחייה",
+    historyTitle: "נבדקו",
+    userConfirmed: "אושר על ידי משתמש",
+    rejectedLabel: "נדחה",
+    evidenceKind: {
+      FACT: "עובדה",
+      USER_INTENT: "כוונת משתמש",
+      AI_INFERENCE: "היסק בינה מלאכותית"
+    },
+    sceneEvidenceLabel: "ראיות סצנה",
+    sceneEvidenceStatus: {
+      AVAILABLE: "זמינות",
+      STALE: "לא עדכניות (נלכדו על גרסה ישנה יותר של הפרויקט)",
+      NOT_INSPECTED: "לא נבדקו"
+    }
   }
 };

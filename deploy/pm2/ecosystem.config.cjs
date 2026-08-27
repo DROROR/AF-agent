@@ -8,6 +8,19 @@ const path = require("node:path");
 const repoRoot = path.resolve(__dirname, "..", "..");
 const envPath = path.join(repoRoot, ".env");
 
+// dyo-web serves an ISOLATED release directory, never the canonical
+// checkout's own apps/web/.next - see scripts/lib/web-release.sh's own
+// doc comment for the 2026-08-27 incident this exists to prevent (a
+// developer/validation `npm run build` run directly in this checkout
+// overwrote the exact .next directory the already-running production
+// process was serving static assets from). `current` is a symlink,
+// atomically re-pointed by scripts/switch-web-release.sh at one
+// specific, already-built, already-verified release before every reload -
+// see scripts/deploy-production.sh and scripts/create-web-release.sh.
+const webReleasesRoot = process.env.DYO_WEB_RELEASES_ROOT || "/home/fahad/dyo-web-releases";
+const webCurrentDir = path.join(webReleasesRoot, "current", "apps", "web");
+const webCurrentBin = path.join(webReleasesRoot, "current", "node_modules", ".bin", "next");
+
 function loadEnvFile(filePath) {
   const env = {};
   const raw = fs.readFileSync(filePath, "utf8");
@@ -44,9 +57,9 @@ module.exports = {
       // exposed publicly yet (no Nginx config in front of it) - see
       // docs/engineering/SECURITY.md and CLAUDE.md Phase 3 task 10/11.
       name: "dyo-web",
-      script: path.join(repoRoot, "node_modules", ".bin", "next"),
+      script: webCurrentBin,
       args: ["start", "-H", "127.0.0.1", "-p", "4100"],
-      cwd: path.join(repoRoot, "apps", "web"),
+      cwd: webCurrentDir,
       env: {
         NODE_ENV: "production",
         // Loopback-only, server-side call from the dashboard to the API -

@@ -477,5 +477,39 @@ export const en = {
       desiredAssetId: "A real asset ID from this project's Asset Catalog - not yet validated here, only when actually mapped in Scene Mapping.",
       sourceCompositionId: "Leave empty if no template has been inspected yet."
     }
+  },
+  mappingAssistant: {
+    title: "Mapping Assistant",
+    description: "Proposes scene/placeholder mappings from real evidence - the Template Manifest, Asset Catalog, Work Map, brand inputs, and your own instructions. Nothing here is ever applied automatically.",
+    generateAction: "Generate suggestions",
+    generating: "Generating…",
+    aiAvailable: "AI: available",
+    aiUnavailable: "AI: not configured (deterministic only)",
+    emptyTitle: "No suggestions yet",
+    emptyDescription: "Generate suggestions to see real, evidence-backed proposals for unresolved scenes.",
+    sourceDeterministic: "Deterministic",
+    sourceAi: "AI Suggested",
+    confidenceLabel: (percent: number): string => `Confidence: ${percent}%`,
+    suggestedAssetLabel: "Suggested asset",
+    suggestedTextLabel: "Suggested text",
+    suggestedTimestampLabel: "Suggested asset timestamp",
+    suggestedDurationLabel: "Suggested duration",
+    workMapConflict: "This conflicts with a Work Map entry - review carefully before accepting.",
+    acceptAction: "Accept",
+    rejectAction: "Reject",
+    historyTitle: "Reviewed",
+    userConfirmed: "User Confirmed",
+    rejectedLabel: "Rejected",
+    evidenceKind: {
+      FACT: "Fact",
+      USER_INTENT: "User intent",
+      AI_INFERENCE: "AI inference"
+    },
+    sceneEvidenceLabel: "Scene evidence",
+    sceneEvidenceStatus: {
+      AVAILABLE: "Available",
+      STALE: "Stale (captured against an older version of this project)",
+      NOT_INSPECTED: "Not inspected"
+    }
   }
 } as const;

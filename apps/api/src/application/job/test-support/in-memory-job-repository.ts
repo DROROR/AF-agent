@@ -30,6 +30,7 @@ export class InMemoryJobRepository implements JobRepository {
     const row: Job = {
       id: job.id,
       workerId: job.workerId,
+      projectId: job.projectId ?? null,
       operation: job.operation,
       status: "QUEUED",
       payload: job.payload,

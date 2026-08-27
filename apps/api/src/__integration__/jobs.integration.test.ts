@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { authSessionResponseSchema, registerWorkerResponseSchema } from "@dyo/schemas";
+import { SCHEMA_VERSION, authSessionResponseSchema, registerWorkerResponseSchema } from "@dyo/schemas";
 import { buildApp } from "../app.js";
 import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
 import { DrizzleSessionRepository } from "../infrastructure/db/drizzle-session-repository.js";
@@ -11,6 +11,9 @@ import { DrizzleProjectRepository } from "../infrastructure/db/drizzle-project-r
 import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
 import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repository.js";
 import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
+import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle-mapping-suggestion-repository.js";
+import { DrizzleSceneEvidenceRepository } from "../infrastructure/db/drizzle-scene-evidence-repository.js";
+import { NotConfiguredAiSuggestionProvider } from "../application/mapping-assistant/ai-suggestion-provider.js";
 import { LocalFilesystemAssetStorage } from "../infrastructure/storage/local-filesystem-asset-storage.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,6 +35,7 @@ async function setup(initialNow: Date) {
   const { db, close } = await createTestDatabase();
   let current = initialNow;
   const jobRepository = new DrizzleJobRepository(db);
+  const sceneEvidenceRepository = new DrizzleSceneEvidenceRepository(db);
   const app: FastifyInstance = await buildApp({
     env: {
       WORKER_REGISTRATION_SECRET: REGISTRATION_SECRET,
@@ -48,6 +52,9 @@ async function setup(initialNow: Date) {
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(mkdtempSync(join(tmpdir(), "dyo-test-assets-"))),
     workMapRepository: new DrizzleWorkMapRepository(db),
+    mappingSuggestionRepository: new DrizzleMappingSuggestionRepository(db),
+    sceneEvidenceRepository,
+    aiSuggestionProvider: new NotConfiguredAiSuggestionProvider(),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;
@@ -58,6 +65,7 @@ async function setup(initialNow: Date) {
     app,
     db,
     jobRepository,
+    sceneEvidenceRepository,
     close,
     advanceTime: (ms: number) => {
       current = new Date(current.getTime() + ms);
@@ -562,5 +570,149 @@ describe("POST /api/jobs (dispatch) - CHECK_HEALTH", () => {
     const response = await dispatch({ operation: "CHECK_HEALTH", workerId, payload: {} });
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe("PRECONDITION_NOT_MET");
+  });
+});
+
+describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistence (full real HTTP cycle)", () => {
+  const SOURCE_SHA = "a".repeat(64);
+
+  async function createRealProject(): Promise<string> {
+    const response = await harness.app.inject({
+      method: "POST",
+      url: "/api/projects",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: {
+        name: "Evidence Test Project",
+        manifest: {
+          schemaVersion: SCHEMA_VERSION,
+          templateId: "tmpl-1",
+          templateName: "tmpl-1",
+          sourceProject: { path: "/copies/test.aep", name: "test.aep", sha256: SOURCE_SHA },
+          afterEffects: { version: "26.3x87" },
+          generatedAt: new Date().toISOString(),
+          compositions: [],
+          scenes: [],
+          preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+          unknownItems: []
+        }
+      }
+    });
+    expect(response.statusCode).toBe(201);
+    return response.json().projectId as string;
+  }
+
+  it("persists a durable scene_evidence record only once the reported job genuinely reaches SUCCEEDED with a valid result", async () => {
+    const projectId = await createRealProject();
+    const { workerId, workerToken } = await registerHealthyWorker(harness.app, { capabilities: ["INSPECT_SCENE_EVIDENCE"] });
+
+    const dispatchResponse = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId,
+        projectId,
+        payload: {
+          sourceProjectPath: "/copies/test.aep",
+          sourceProjectSha256: SOURCE_SHA,
+          manifestCompositionId: "comp-1",
+          compositionIndex: 0,
+          layerIndices: [1],
+          previewTimestampSeconds: null
+        }
+      }
+    });
+    expect(dispatchResponse.statusCode).toBe(201);
+    const jobId = dispatchResponse.json().jobId as string;
+
+    const claimResponse = await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    expect(claimResponse.json().job.jobId).toBe(jobId);
+
+    // No evidence yet - a claimed-but-not-succeeded job must never persist anything.
+    const beforeSuccess = await harness.sceneEvidenceRepository.listLatestByProject(projectId);
+    expect(beforeSuccess).toEqual([]);
+
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "RUNNING" }
+    });
+
+    const result = {
+      verifiedSourceProjectSha256: SOURCE_SHA,
+      manifestCompositionId: "comp-1",
+      compositionIndex: 0,
+      compositionName: "Scene A",
+      layers: [],
+      preview: null,
+      previewFailureReason: null,
+      capturedAt: new Date().toISOString()
+    };
+
+    const reportResponse = await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "SUCCEEDED", result }
+    });
+    expect(reportResponse.statusCode).toBe(200);
+
+    const rows = await harness.sceneEvidenceRepository.listLatestByProject(projectId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.manifestCompositionId).toBe("comp-1");
+    expect(rows[0]?.sourceProjectSha256).toBe(SOURCE_SHA);
+
+    const compatible = await harness.sceneEvidenceRepository.listCompatibleByProject(projectId, SOURCE_SHA);
+    expect(compatible).toHaveLength(1);
+  });
+
+  it("never persists scene evidence for a FAILED job, even one that reports a result-shaped payload", async () => {
+    const projectId = await createRealProject();
+    const { workerId, workerToken } = await registerHealthyWorker(harness.app, { capabilities: ["INSPECT_SCENE_EVIDENCE"] });
+
+    const dispatchResponse = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId,
+        projectId,
+        payload: {
+          sourceProjectPath: "/copies/test.aep",
+          sourceProjectSha256: SOURCE_SHA,
+          manifestCompositionId: "comp-1",
+          compositionIndex: 0,
+          layerIndices: [1],
+          previewTimestampSeconds: null
+        }
+      }
+    });
+    const jobId = dispatchResponse.json().jobId as string;
+
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: {
+        status: "FAILED",
+        error: { code: "TRANSPORT_ERROR", message: "AE crashed mid-inspection" }
+      }
+    });
+
+    const rows = await harness.sceneEvidenceRepository.listLatestByProject(projectId);
+    expect(rows).toEqual([]);
   });
 });

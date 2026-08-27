@@ -10,6 +10,9 @@ import type { ProjectRepository } from "./domain/project/types.js";
 import type { AssetRepository } from "./domain/asset/types.js";
 import type { AssetStorage } from "./domain/asset-storage/types.js";
 import type { WorkMapRepository } from "./domain/work-map/types.js";
+import type { MappingSuggestionRepository } from "./domain/mapping-suggestion/types.js";
+import type { SceneEvidenceRepository } from "./domain/scene-evidence/types.js";
+import type { AiSuggestionProvider } from "./application/mapping-assistant/ai-suggestion-provider.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -18,6 +21,7 @@ import { registerWorkerRoutes } from "./routes/workers.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerAssetRoutes } from "./routes/assets.js";
 import { registerWorkMapRoutes } from "./routes/work-map.js";
+import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 
 export interface AppDependencies {
   env: Pick<Env, "WORKER_REGISTRATION_SECRET" | "WORKER_HEARTBEAT_STALE_AFTER_MS" | "LOG_LEVEL" | "ASSET_MAX_UPLOAD_BYTES">;
@@ -30,6 +34,9 @@ export interface AppDependencies {
   assetRepository: AssetRepository;
   assetStorage: AssetStorage;
   workMapRepository: WorkMapRepository;
+  mappingSuggestionRepository: MappingSuggestionRepository;
+  sceneEvidenceRepository: SceneEvidenceRepository;
+  aiSuggestionProvider: AiSuggestionProvider;
   checkDatabaseHealth: () => Promise<boolean>;
   now?: () => Date;
 }
@@ -77,6 +84,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   registerJobRoutes(app, {
     jobRepository: deps.jobRepository,
     workerRepository: deps.workerRepository,
+    projectRepository: deps.projectRepository,
+    sceneEvidenceRepository: deps.sceneEvidenceRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
@@ -102,6 +111,18 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   });
   registerWorkMapRoutes(app, {
     workMapRepository: deps.workMapRepository,
+    userRepository: deps.userRepository,
+    sessionRepository: deps.sessionRepository,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerMappingAssistantRoutes(app, {
+    projectRepository: deps.projectRepository,
+    executionPlanRepository: deps.executionPlanRepository,
+    assetRepository: deps.assetRepository,
+    workMapRepository: deps.workMapRepository,
+    mappingSuggestionRepository: deps.mappingSuggestionRepository,
+    sceneEvidenceRepository: deps.sceneEvidenceRepository,
+    aiSuggestionProvider: deps.aiSuggestionProvider,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     ...(deps.now ? { now: deps.now } : {})

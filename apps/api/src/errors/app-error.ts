@@ -12,6 +12,7 @@ function statusForCode(code: ErrorCode): number {
     case "EXECUTION_PLAN_NOT_FOUND":
     case "ASSET_NOT_FOUND":
     case "WORK_MAP_NOT_FOUND":
+    case "SUGGESTION_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
@@ -221,5 +222,36 @@ export class StaleWorkMapRevisionError extends AppError {
   constructor(expected: number, actual: number) {
     super("CONFLICT", `Expected revision ${expected}, but the current work map revision is ${actual} - reload and retry`);
     this.name = "StaleWorkMapRevisionError";
+  }
+}
+
+export class SuggestionNotFoundError extends AppError {
+  constructor(suggestionId: string) {
+    super("SUGGESTION_NOT_FOUND", `Mapping suggestion ${suggestionId} was not found`);
+    this.name = "SuggestionNotFoundError";
+  }
+}
+
+/** A suggestion belongs to a different project than the one named in the request - refused identically to SuggestionNotFoundError (never confirms it exists elsewhere), same pattern as AssetCrossProjectAccessError. */
+export class SuggestionCrossProjectAccessError extends AppError {
+  constructor(suggestionId: string, projectId: string) {
+    super("SUGGESTION_NOT_FOUND", `Mapping suggestion ${suggestionId} was not found in project ${projectId}`);
+    this.name = "SuggestionCrossProjectAccessError";
+  }
+}
+
+/** Accept/reject refused: this suggestion has already been accepted or rejected - a suggestion's status is a one-way transition out of PENDING, never re-decided. */
+export class SuggestionNotPendingError extends AppError {
+  constructor(suggestionId: string, currentStatus: string) {
+    super("CONFLICT", `Mapping suggestion ${suggestionId} is already ${currentStatus} - it can no longer be accepted or rejected`);
+    this.name = "SuggestionNotPendingError";
+  }
+}
+
+/** Accept refused: the suggested asset no longer exists (or belongs to a different project) - re-checked at accept time, never trusted from when the suggestion was generated. */
+export class SuggestedAssetInvalidError extends AppError {
+  constructor(assetId: string) {
+    super("ASSET_NOT_FOUND", `Suggested asset ${assetId} no longer exists in this project's Asset Catalog`);
+    this.name = "SuggestedAssetInvalidError";
   }
 }

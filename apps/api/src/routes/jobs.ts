@@ -3,6 +3,8 @@ import { z } from "zod";
 import { dispatchJobRequestSchema, reportJobStatusRequestSchema } from "@dyo/schemas";
 import type { JobRepository } from "../domain/job/types.js";
 import type { WorkerRepository } from "../domain/worker/types.js";
+import type { ProjectRepository } from "../domain/project/types.js";
+import type { SceneEvidenceRepository } from "../domain/scene-evidence/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { UnauthorizedError } from "../errors/app-error.js";
 import { extractBearerToken } from "../infrastructure/auth/bearer-token.js";
@@ -12,10 +14,13 @@ import { requireSessionUser } from "../application/auth/require-session-user.js"
 import { claimNextJob } from "../application/job/claim-next-job.js";
 import { dispatchJob } from "../application/job/dispatch-job.js";
 import { reportJobStatus } from "../application/job/report-job-status.js";
+import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene-evidence.js";
 
 export interface JobsRouteDeps {
   jobRepository: JobRepository;
   workerRepository: WorkerRepository;
+  projectRepository: ProjectRepository;
+  sceneEvidenceRepository: SceneEvidenceRepository;
   staleAfterMs: number;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
@@ -60,7 +65,13 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const body = dispatchJobRequestSchema.parse(request.body);
     const dto = await dispatchJob(
-      { jobRepository: deps.jobRepository, workerRepository: deps.workerRepository, now, staleAfterMs: deps.staleAfterMs },
+      {
+        jobRepository: deps.jobRepository,
+        workerRepository: deps.workerRepository,
+        projectRepository: deps.projectRepository,
+        now,
+        staleAfterMs: deps.staleAfterMs
+      },
       body
     );
     reply.status(201).send(dto);
@@ -96,6 +107,11 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
       token,
       body
     );
+    // Best-effort side effect of a successful report - never a second,
+    // competing source of truth for the job's own status/result (see
+    // record-scene-evidence.ts's own doc comment), so a real failure here
+    // must never make this response look like the job report itself failed.
+    await recordSceneEvidenceIfApplicable({ sceneEvidenceRepository: deps.sceneEvidenceRepository, now }, dto);
     reply.send(dto);
   });
 }

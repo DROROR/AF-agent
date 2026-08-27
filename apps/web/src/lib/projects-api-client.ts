@@ -1,21 +1,29 @@
 import {
+  acceptMappingSuggestionResponseSchema,
   assetResponseSchema,
+  batchAcceptMappingSuggestionsResponseSchema,
   errorResponseSchema,
   executionPlanResponseSchema,
   listAssetsResponseSchema,
   listExecutionPlanRevisionsResponseSchema,
+  listMappingSuggestionsResponseSchema,
   listProjectsResponseSchema,
   projectDtoSchema,
   projectResponseSchema,
+  rejectMappingSuggestionResponseSchema,
   workMapResponseSchema,
+  type AcceptMappingSuggestionResponse,
   type AssetDto,
+  type BatchAcceptMappingSuggestionsResponse,
   type CreateProjectRequest,
   type ExecutionPlanEditOperation,
   type ExecutionPlanResponse,
   type ListExecutionPlanRevisionsResponse,
+  type ListMappingSuggestionsResponse,
   type MediaKind,
   type ProjectDto,
   type ProjectResponse,
+  type RejectMappingSuggestionResponse,
   type UpdateAssetRequest,
   type WorkMap,
   type WorkMapEntry
@@ -280,4 +288,86 @@ export async function updateWorkMap(
     return { ok: false, status, code: null, message: "Response did not match the expected work-map contract" };
   }
   return { ok: true, data: parsed.data.workMap };
+}
+
+/** Runs deterministic evidence matching (and the AI provider, if configured) over every currently-unresolved mapping and persists the results as PENDING suggestions - never mutates the execution plan itself. */
+export async function generateMappingSuggestions(projectId: string): Promise<ApiResult<ListMappingSuggestionsResponse>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions/generate`, { method: "POST" });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = listMappingSuggestionsResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected mapping-suggestions contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+export async function fetchMappingSuggestions(projectId: string): Promise<ApiResult<ListMappingSuggestionsResponse>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = listMappingSuggestionsResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected mapping-suggestions contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/** Turns one PENDING suggestion into a real execution-plan edit via the exact same typed MAP_ASSET/SET_TEXT/... operations a human uses manually - never a second, less-validated write path. */
+export async function acceptMappingSuggestion(
+  projectId: string,
+  suggestionId: string,
+  baseRevision: number
+): Promise<ApiResult<AcceptMappingSuggestionResponse>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions/${encodeURIComponent(suggestionId)}/accept`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ baseRevision })
+  });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = acceptMappingSuggestionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected accept-suggestion contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/** Leaves the execution plan completely untouched - reject is purely a review decision, never an edit. */
+export async function rejectMappingSuggestion(projectId: string, suggestionId: string): Promise<ApiResult<RejectMappingSuggestionResponse>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions/${encodeURIComponent(suggestionId)}/reject`, {
+    method: "POST"
+  });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = rejectMappingSuggestionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected reject-suggestion contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/** Accepts several PENDING suggestions as one batched plan revision bump - never partial (see batch-accept-mapping-suggestions.ts). */
+export async function batchAcceptMappingSuggestions(
+  projectId: string,
+  suggestionIds: string[],
+  baseRevision: number
+): Promise<ApiResult<BatchAcceptMappingSuggestionsResponse>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions/accept-batch`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ baseRevision, suggestionIds })
+  });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = batchAcceptMappingSuggestionsResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected batch-accept contract" };
+  }
+  return { ok: true, data: parsed.data };
 }

@@ -110,3 +110,16 @@ export const sceneEvidenceResponseSchema = z
   })
   .strict();
 export type SceneEvidenceResponse = z.infer<typeof sceneEvidenceResponseSchema>;
+
+/**
+ * Per-scene evidence availability, computed against the project's CURRENT
+ * sourceProjectSha256 - never a claim that any evidence exists at all.
+ * AVAILABLE: a compatible (SHA-matching) record exists and is used as FACT
+ * input to the Mapping Assistant. STALE: evidence exists for this scene but
+ * was captured against a different source SHA (the project's .aep changed
+ * since) - retained historically, never used as current fact. NOT_INSPECTED:
+ * no evidence has ever been captured for this scene.
+ */
+export const SCENE_EVIDENCE_STATUSES = ["AVAILABLE", "STALE", "NOT_INSPECTED"] as const;
+export type SceneEvidenceStatus = (typeof SCENE_EVIDENCE_STATUSES)[number];
+export const sceneEvidenceStatusSchema = z.enum(SCENE_EVIDENCE_STATUSES);

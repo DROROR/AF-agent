@@ -17,3 +17,4 @@ export * from "./scene-evidence.js";
 export * from "./execution-plan-readiness.js";
 export * from "./asset.js";
 export * from "./work-map.js";
+export * from "./mapping-suggestion.js";

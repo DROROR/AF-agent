@@ -11,6 +11,11 @@ export default [
       "**/node_modules/**",
       "**/dist/**",
       "**/.next/**",
+      // Pre-incident-fix backup of a corrupted production build - see
+      // scripts/lib/web-release.sh's own doc comment. Not matched by the
+      // `.next` pattern above (different name), preserved on disk for
+      // forensics only, never source, never linted.
+      "apps/web/.next.broken-*/**",
       "**/*.d.ts",
       // Build-tool config, deliberately outside every tsconfig's rootDir.
       "packages/database/drizzle.config.ts",
@@ -20,6 +25,8 @@ export default [
       "scripts/package-windows-worker.mjs",
       "scripts/windows-worker-format-status.mjs",
       "scripts/windows-worker-validate-env.mjs",
+      // Production-web-build guard, plain JS, outside every tsconfig's rootDir - same convention as the other scripts/*.mjs entries above.
+      "scripts/guard-production-web-build.mjs",
       // Regenerated build artifact - see deploy/windows-worker/worker-app/ in .gitignore.
       "deploy/windows-worker/worker-app/**"
     ]

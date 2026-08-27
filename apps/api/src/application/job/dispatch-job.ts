@@ -3,13 +3,21 @@ import { isHeartbeatStale } from "../../domain/worker/rules.js";
 import { canClaimAnotherJob } from "../../domain/job/rules.js";
 import type { JobRepository } from "../../domain/job/types.js";
 import type { WorkerRepository } from "../../domain/worker/types.js";
-import { PreconditionNotMetError, WorkerBusyError, WorkerNotFoundError, WorkerOfflineError } from "../../errors/app-error.js";
+import type { ProjectRepository } from "../../domain/project/types.js";
+import {
+  PreconditionNotMetError,
+  ProjectNotFoundError,
+  WorkerBusyError,
+  WorkerNotFoundError,
+  WorkerOfflineError
+} from "../../errors/app-error.js";
 import { sweepStaleWorkers } from "../worker/sweep-stale-workers.js";
 import { createJob } from "./create-job.js";
 
 export interface DispatchJobDeps {
   jobRepository: JobRepository;
   workerRepository: WorkerRepository;
+  projectRepository: ProjectRepository;
   now: () => Date;
   staleAfterMs: number;
 }
@@ -58,6 +66,17 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     throw new PreconditionNotMetError(`Worker ${worker.id} does not report the ${request.operation} capability`);
   }
 
+  // INSPECT_SCENE_EVIDENCE is the only operation whose result can become a
+  // durable, project-attributed fact record (see record-scene-evidence.ts) -
+  // its projectId is verified real here, at dispatch time, rather than
+  // trusted blindly through to job completion.
+  if (request.operation === "INSPECT_SCENE_EVIDENCE") {
+    const project = await deps.projectRepository.findById(request.projectId);
+    if (!project) {
+      throw new ProjectNotFoundError(request.projectId);
+    }
+  }
+
   // Duplicate-dispatch check first (a more specific signal than plain
   // busy): refuses a second live INSPECT_TEMPLATE job for this worker
   // even on a worker whose maxConcurrency could otherwise fit it.
@@ -78,7 +97,12 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
 
   const job = await createJob(
     { jobRepository: deps.jobRepository, now: deps.now },
-    { workerId: worker.id, operation: request.operation, payload: request.payload }
+    {
+      workerId: worker.id,
+      projectId: request.operation === "INSPECT_SCENE_EVIDENCE" ? request.projectId : null,
+      operation: request.operation,
+      payload: request.payload
+    }
   );
 
   return {

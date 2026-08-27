@@ -8,6 +8,9 @@ import { buildApp } from "../app.js";
 import { DrizzleExecutionPlanRepository } from "../infrastructure/db/drizzle-execution-plan-repository.js";
 import { DrizzleAssetRepository } from "../infrastructure/db/drizzle-asset-repository.js";
 import { DrizzleWorkMapRepository } from "../infrastructure/db/drizzle-work-map-repository.js";
+import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle-mapping-suggestion-repository.js";
+import { DrizzleSceneEvidenceRepository } from "../infrastructure/db/drizzle-scene-evidence-repository.js";
+import { NotConfiguredAiSuggestionProvider } from "../application/mapping-assistant/ai-suggestion-provider.js";
 import { LocalFilesystemAssetStorage } from "../infrastructure/storage/local-filesystem-asset-storage.js";
 import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
 import { DrizzleProjectRepository } from "../infrastructure/db/drizzle-project-repository.js";
@@ -37,6 +40,9 @@ async function setup() {
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(mkdtempSync(join(tmpdir(), "dyo-test-assets-"))),
     workMapRepository: new DrizzleWorkMapRepository(db),
+    mappingSuggestionRepository: new DrizzleMappingSuggestionRepository(db),
+    sceneEvidenceRepository: new DrizzleSceneEvidenceRepository(db),
+    aiSuggestionProvider: new NotConfiguredAiSuggestionProvider(),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");
       return true;

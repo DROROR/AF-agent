@@ -40,6 +40,13 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
   z.object({
     operation: z.literal("INSPECT_SCENE_EVIDENCE"),
     workerId: z.string().uuid(),
+    /**
+     * Required (unlike INSPECT_TEMPLATE/CHECK_HEALTH, which are not
+     * project-bound) - a successful result can only be persisted as scene
+     * evidence (see record-scene-evidence.ts) if the job that produced it is
+     * attributable to a real project.
+     */
+    projectId: z.string().uuid(),
     payload: sceneEvidenceRequestSchema
   })
 ]);

@@ -4,6 +4,7 @@ import { useState, type ReactElement } from "react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { SceneTable } from "./SceneTable";
 import { SceneEditDrawer } from "./SceneEditDrawer";
+import { MappingAssistantPanel } from "./MappingAssistantPanel";
 import { ErrorState } from "./ErrorState";
 import { Card } from "./ui/Card";
 import { EmptyState } from "./EmptyState";
@@ -62,6 +63,7 @@ export function ProjectScenesTab(): ReactElement {
     <>
       {isStale ? <ErrorState title={t.projectWorkspace.staleRevisionTitle} description={t.projectWorkspace.staleRevisionDescription} /> : null}
       {mutationError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={mutationError} /> : null}
+      <MappingAssistantPanel />
       <Card>
         <SceneTable
           rows={plan.sceneTable}
