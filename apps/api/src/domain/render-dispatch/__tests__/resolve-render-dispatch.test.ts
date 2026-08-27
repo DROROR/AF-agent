@@ -6,6 +6,8 @@ import type { SceneEditWorkerSnapshot } from "../../execute-scene-edit/validate-
 const SHA = "a".repeat(64);
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 const STALE_AFTER_MS = 30_000;
+const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
+const SOURCE_PATH = "C:\\vidio agent\\White App Promo (converted).aep";
 
 function validConfig(overrides: Partial<RenderOutputConfig> = {}): RenderOutputConfig {
   return {
@@ -27,6 +29,8 @@ function validPlan(overrides: Partial<RenderDispatchPlanSnapshot> = {}): RenderD
     status: "APPROVED",
     sourceProjectSha256: SHA,
     renderOutputs: { LANDSCAPE: validConfig(), REELS: null },
+    workingProjectPath: "/work/jobs/job-1/working-copy.aep",
+    workingProjectSha256: "d".repeat(64),
     ...overrides
   };
 }
@@ -45,9 +49,11 @@ function validWorker(overrides: Partial<SceneEditWorkerSnapshot> = {}): SceneEdi
 
 function baseInput(overrides: Partial<Parameters<typeof resolveRenderDispatch>[0]> = {}) {
   return {
+    projectId: PROJECT_ID,
     variant: "LANDSCAPE" as const,
     currentPlan: validPlan(),
     currentProjectSourceProjectSha256: SHA,
+    currentProjectSourceProjectPath: SOURCE_PATH,
     worker: validWorker(),
     now: NOW,
     staleAfterMs: STALE_AFTER_MS,
@@ -56,12 +62,24 @@ function baseInput(overrides: Partial<Parameters<typeof resolveRenderDispatch>[0
 }
 
 describe("resolveRenderDispatch", () => {
-  it("succeeds and returns the persisted config when every precondition holds", () => {
+  it("succeeds and returns the full worker payload, built from the persisted config + the plan's own working-copy identity", () => {
     const result = resolveRenderDispatch(baseInput());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.config.compositionName).toBe("Landscape Master");
-    expect(result.config.aeProjectItemIndex).toBe(5);
+    expect(result.payload).toEqual({
+      projectId: PROJECT_ID,
+      planId: "plan-1",
+      planRevision: 2,
+      variant: "LANDSCAPE",
+      sourceProjectPath: SOURCE_PATH,
+      sourceProjectSha256: SHA,
+      workingProjectPath: "/work/jobs/job-1/working-copy.aep",
+      workingProjectSha256: "d".repeat(64),
+      aeProjectItemIndex: 5,
+      compositionName: "Landscape Master",
+      renderSettingsTemplateName: "Best Settings",
+      outputModuleTemplateName: "H.264 - Match Source"
+    });
   });
 
   it("fails when no plan exists", () => {
@@ -100,6 +118,13 @@ describe("resolveRenderDispatch", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("stale");
+  });
+
+  it("fails closed when no working copy has ever been produced for this plan yet", () => {
+    const result = resolveRenderDispatch(baseInput({ currentPlan: validPlan({ workingProjectPath: null, workingProjectSha256: null }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("No working copy has been produced");
   });
 
   it("fails when the worker has never reported in", () => {
@@ -146,13 +171,15 @@ describe("resolveRenderDispatch", () => {
     expect(result.reason).toContain("already has a job in progress");
   });
 
-  it("never accepts an aeProjectItemIndex/compositionName from the caller - the resolved config always comes from the persisted plan, not the input", () => {
+  it("never accepts an aeProjectItemIndex/compositionName/workingProjectPath from the caller - the resolved payload always comes from persisted state, not the input", () => {
     const result = resolveRenderDispatch(baseInput());
     expect(result.ok).toBe(true);
     // The function's own input type has no field through which a caller
-    // could smuggle an addressing value - proven structurally: only
-    // `variant` selects WHICH persisted config is used.
+    // could smuggle an addressing/path value - proven structurally: only
+    // `variant` selects WHICH persisted config is used, and
+    // workingProjectPath/Sha256 always come from the plan snapshot.
     if (!result.ok) return;
-    expect(result.config).toEqual(validConfig());
+    expect(result.payload.aeProjectItemIndex).toBe(5);
+    expect(result.payload.workingProjectPath).toBe("/work/jobs/job-1/working-copy.aep");
   });
 });

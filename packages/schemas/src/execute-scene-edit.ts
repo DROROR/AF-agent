@@ -49,7 +49,7 @@ const mapFootageOperationSchema = z
     type: z.literal("MAP_FOOTAGE"),
     manifestPlaceholderId: z.string().min(1),
     layerIndex: z.number().int().positive(),
-    /** Real file path on the worker's own filesystem to relink this layer's footage source to - never a URL, never fetched by the worker itself. */
+    /** Real file path on the worker's OWN filesystem, already downloaded and sha256-verified by the worker itself - see resolve-scene-edit-operation.ts. Never a URL, never a value that ever crossed the wire from the API - this operation shape is worker-internal only (constructed by the worker after asset resolution), never the dispatch-facing wire contract (see mapFootageOperationIntentSchema below for that). */
     assetPath: z.string().min(1)
   })
   .strict();
@@ -101,6 +101,54 @@ export const sceneEditOperationSchema = z.discriminatedUnion("type", [
 ]);
 export type SceneEditOperation = z.infer<typeof sceneEditOperationSchema>;
 
+/**
+ * MAP_FOOTAGE's DISPATCH-FACING intent - identifies the project asset to
+ * relink to by `assetId` + the exact bytes expected (`expectedSha256`),
+ * never a filesystem path of any kind (no browser/API caller, and no
+ * server-side dispatch resolver, ever knows or invents a path on the
+ * worker's own disk). The worker downloads this asset through its own
+ * authenticated `GET /api/workers/:workerId/jobs/:jobId/assets/:assetId/file`
+ * call, verifies the received bytes against `expectedSha256`, caches them
+ * inside its own job workspace under a name IT derives (never a
+ * server-supplied filename), and only then constructs the real, resolved
+ * `mapFootageOperationSchema` (with a real local `assetPath`) to hand to
+ * the AE edit bridge - see resolve-scene-edit-operation.ts (worker) and
+ * resolve-execute-frame-dispatch.ts (API).
+ */
+const mapFootageOperationIntentSchema = z
+  .object({
+    type: z.literal("MAP_FOOTAGE"),
+    manifestPlaceholderId: z.string().min(1),
+    layerIndex: z.number().int().positive(),
+    assetId: z.string().uuid(),
+    /** The asset's real, server-computed sha256 (AssetRecord.sha256) - the worker refuses to use downloaded bytes that don't match this. */
+    expectedSha256: z.string().min(1),
+    /** Used only to pick a sensible local file extension for the cached copy - never trusted as a security boundary by itself. */
+    mimeType: z.string().min(1)
+  })
+  .strict();
+
+/**
+ * The dispatch-facing (server -> worker) counterpart to
+ * sceneEditOperationSchema - identical for every operation type that
+ * never touches an asset; only MAP_FOOTAGE differs (intent vs. resolved -
+ * see mapFootageOperationIntentSchema's own doc comment). This is what
+ * executeSceneEditRequestSchema.operations actually carries; the worker's
+ * own executor resolves each intent into a real SceneEditOperation
+ * immediately before applying it (see resolve-scene-edit-operation.ts) -
+ * ae-edit-bridge.ts/jsx-templates.ts only ever see the resolved shape,
+ * never this one.
+ */
+export const sceneEditOperationIntentSchema = z.discriminatedUnion("type", [
+  setTextOperationSchema,
+  mapFootageOperationIntentSchema,
+  setLayerVisibilityOperationSchema,
+  setTimeRemapFreezeOperationSchema,
+  setDurationOperationSchema,
+  setBrandColorOperationSchema
+]);
+export type SceneEditOperationIntent = z.infer<typeof sceneEditOperationIntentSchema>;
+
 /** Resumability state - which requested operations (by array index) already completed, so a re-attempt never blindly restarts from operation 0. */
 export const sceneEditCheckpointSchema = z.object({
   completedOperationIndices: z.array(z.number().int().nonnegative()),
@@ -115,8 +163,16 @@ export type SceneEditCheckpoint = z.infer<typeof sceneEditCheckpointSchema>;
  * execution-plan revision (planId/planRevision/sourceProjectSha256 all
  * pinned explicitly, never re-resolved live at dispatch time - see
  * validate-scene-edit-preconditions.ts for what checks this against).
- * workingProjectPath must differ from sourceProjectPath - the original
- * .aep is never a mutation target (CLAUDE.md Safety Rule 1).
+ *
+ * Deliberately carries NO `workingProjectPath` (removed 2026-08-27, see
+ * apps/worker/src/execution/execute-scene-edit-executor.ts's own doc
+ * comment on why): the working copy's real location is entirely the
+ * worker's own concern, derived internally from (its own configured
+ * workRoot, this job's real jobId) - the API/browser never knows or needs
+ * to know that value, and the worker never accepts it as an assertion to
+ * verify against. The original-vs-working-copy distinctness safety check
+ * (CLAUDE.md Safety Rule 1) is enforced entirely worker-side too (see
+ * workspace/working-copy.ts's own SAME_PATH check).
  */
 export const executeSceneEditRequestSchema = z
   .object({
@@ -125,7 +181,6 @@ export const executeSceneEditRequestSchema = z
     planRevision: z.number().int().positive(),
     sourceProjectSha256: z.string().min(1),
     sourceProjectPath: z.string().min(1),
-    workingProjectPath: z.string().min(1),
     scenePlanId: z.string().min(1),
     manifestCompositionId: z.string().min(1),
     /**
@@ -146,14 +201,10 @@ export const executeSceneEditRequestSchema = z
     compositionName: z.string().min(1),
     /** The specific PlaceholderMapping IDs this edit is allowed to act on - every operation's manifestPlaceholderId must be one of these. */
     approvedMappingIds: z.array(z.string().min(1)).min(1),
-    operations: z.array(sceneEditOperationSchema).min(1),
+    operations: z.array(sceneEditOperationIntentSchema).min(1),
     checkpoint: sceneEditCheckpointSchema.nullable()
   })
-  .strict()
-  .refine((data) => data.workingProjectPath !== data.sourceProjectPath, {
-    message: "workingProjectPath must differ from sourceProjectPath - the original .aep is never a mutation target",
-    path: ["workingProjectPath"]
-  });
+  .strict();
 export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSchema>;
 
 /**

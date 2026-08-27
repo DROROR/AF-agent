@@ -349,6 +349,14 @@ export const en = {
     APPROVED: "Approved",
     REJECTED: "Rejected"
   },
+  jobDispatch: {
+    noWorkerTitle: "No worker available",
+    noWorkerDescription: "No ONLINE worker currently reports this capability and is idle - it may be offline, busy with another job, or not yet updated to a build that supports this.",
+    dispatching: "Dispatching…",
+    queuedTitle: "Job queued",
+    queuedDescription: (jobId: string): string => `Job ${jobId} was queued for the worker. It will run once claimed - this page does not yet show live progress.`,
+    failedTitle: "Could not dispatch this job"
+  },
   projectWorkspace: {
     backToProjects: "Back to Projects",
     tabs: {
@@ -391,7 +399,11 @@ export const en = {
       unresolvedScenesReason: (count: number): string => `${count} unresolved scene(s)`,
       approveAction: "Approve plan",
       rejectAction: "Reject plan",
-      reopenAction: "Reopen for editing"
+      reopenAction: "Reopen for editing",
+      executionSection: "Scene execution",
+      executeFirstSceneAction: "Execute first approved scene",
+      noApprovedSceneTitle: "No approved scene to execute",
+      noApprovedSceneDescription: "Approve at least one scene with fully resolved mappings before executing."
     },
     revisions: {
       title: "Revision history",
@@ -425,7 +437,11 @@ export const en = {
       staleWarningTitle: "This configuration is stale",
       staleWarningDescription: "The source project has changed since this master composition was selected. Re-select it before rendering.",
       noCompositionsTitle: "No compositions available",
-      noCompositionsDescription: "This project's manifest has no discovered compositions yet."
+      noCompositionsDescription: "This project's manifest has no discovered compositions yet.",
+      inspectCapabilitiesSection: "Render capabilities",
+      inspectCapabilitiesAction: "Inspect Render Capabilities",
+      inspectCapabilitiesDescription: "Read-only. Asks the worker to report the real AE Render Queue template names and AE version - never mutates or saves anything.",
+      renderAction: "Render"
     },
     editDrawer: {
       title: "Edit scene mapping",

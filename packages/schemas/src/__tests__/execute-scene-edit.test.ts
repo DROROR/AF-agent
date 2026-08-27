@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { executeSceneEditRequestSchema, sceneEditOperationSchema, sceneEditResultSchema, type ExecuteSceneEditRequest } from "../execute-scene-edit.js";
+import {
+  executeSceneEditRequestSchema,
+  sceneEditOperationIntentSchema,
+  sceneEditOperationSchema,
+  sceneEditResultSchema,
+  type ExecuteSceneEditRequest
+} from "../execute-scene-edit.js";
 
 function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): ExecuteSceneEditRequest {
   return {
@@ -8,7 +14,6 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
     planRevision: 1,
     sourceProjectSha256: "a".repeat(64),
     sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
-    workingProjectPath: "C:\\vidio agent\\DYO-Working\\White App Promo (converted)-DYO-Working-v001.aep",
     scenePlanId: "scene-1",
     manifestCompositionId: "comp-275",
     aeProjectItemIndex: 14,
@@ -69,17 +74,66 @@ describe("sceneEditOperationSchema", () => {
   });
 });
 
+describe("sceneEditOperationIntentSchema - the dispatch-facing (server -> worker) shape", () => {
+  it("accepts a MAP_FOOTAGE intent with assetId/expectedSha256/mimeType - never a filesystem path", () => {
+    expect(() =>
+      sceneEditOperationIntentSchema.parse({
+        type: "MAP_FOOTAGE",
+        manifestPlaceholderId: "ph-1",
+        layerIndex: 1,
+        assetId: "22222222-2222-2222-2222-222222222222",
+        expectedSha256: "c".repeat(64),
+        mimeType: "video/mp4"
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects a MAP_FOOTAGE intent that still tries to supply a raw assetPath", () => {
+    expect(() =>
+      sceneEditOperationIntentSchema.parse({
+        type: "MAP_FOOTAGE",
+        manifestPlaceholderId: "ph-1",
+        layerIndex: 1,
+        assetPath: "/some/worker/path.mp4"
+      })
+    ).toThrow();
+  });
+
+  it("rejects a MAP_FOOTAGE intent with a non-uuid assetId", () => {
+    expect(() =>
+      sceneEditOperationIntentSchema.parse({
+        type: "MAP_FOOTAGE",
+        manifestPlaceholderId: "ph-1",
+        layerIndex: 1,
+        assetId: "not-a-uuid",
+        expectedSha256: "c".repeat(64),
+        mimeType: "video/mp4"
+      })
+    ).toThrow();
+  });
+
+  it("accepts every non-asset operation type identically to the resolved schema", () => {
+    const ops = [
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" },
+      { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: false },
+      { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 2.5 },
+      { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 4 },
+      { type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "#1A2B3C" }
+    ];
+    for (const op of ops) {
+      expect(() => sceneEditOperationIntentSchema.parse(op)).not.toThrow();
+    }
+  });
+});
+
 describe("executeSceneEditRequestSchema", () => {
   it("accepts a fully valid request", () => {
     expect(() => executeSceneEditRequestSchema.parse(validRequest())).not.toThrow();
   });
 
-  it("rejects when workingProjectPath equals sourceProjectPath - the original .aep is never a mutation target", () => {
-    expect(() =>
-      executeSceneEditRequestSchema.parse(
-        validRequest({ workingProjectPath: "C:\\vidio agent\\White App Promo (converted).aep" })
-      )
-    ).toThrow();
+  it("rejects a request that still tries to supply workingProjectPath - the worker derives it internally now, never the caller", () => {
+    const raw = { ...validRequest(), workingProjectPath: "C:\\vidio agent\\DYO-Working\\working-copy.aep" };
+    expect(() => executeSceneEditRequestSchema.parse(raw)).toThrow();
   });
 
   it("rejects a request with zero operations", () => {

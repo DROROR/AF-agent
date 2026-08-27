@@ -141,6 +141,34 @@ export class ApiClient {
   }
 
   /**
+   * Downloads one project asset's real bytes (activation-phase Gap 2:
+   * asset delivery to the worker), bound to this worker's OWN currently-
+   * assigned job - a plain authenticated GET, never a JSON body in
+   * either direction. The API independently verifies job/project
+   * ownership before ever returning bytes (see get-asset-file-for-worker.ts) -
+   * this method itself never claims the returned bytes are correct; the
+   * caller (workspace/asset-cache.ts) always re-verifies them against its
+   * own expected sha256 before use.
+   */
+  async downloadAsset(workerId: string, workerToken: string, jobId: string, assetId: string): Promise<Buffer> {
+    const path = `/api/workers/${workerId}/jobs/${jobId}/assets/${assetId}/file`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.apiUrl}${path}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${workerToken}` }
+      });
+    } catch (cause) {
+      throw new NetworkError(`Failed to reach ${path}`, { cause });
+    }
+    if (response.status !== 200) {
+      const json = await parseJson(response);
+      throw this.errorForResponse(response, json);
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  /**
    * Uploads the real rendered output bytes (render-delivery phase section
    * 4) - a separate, multipart request, never the JSON `request()` helper
    * below. Reads the whole file into memory as one Buffer (an accepted

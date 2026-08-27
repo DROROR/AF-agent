@@ -28,9 +28,12 @@ import {
   type WorkMap,
   type WorkMapEntry,
   listRenderArtifactsResponseSchema,
+  dispatchJobResponseSchema,
   type RenderArtifactDto,
   type RenderOutputVariant,
-  type SetRenderOutputConfigRequest
+  type SetRenderOutputConfigRequest,
+  type DispatchJobRequest,
+  type DispatchJobResponse
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -396,6 +399,30 @@ export async function fetchRenderArtifacts(projectId: string): Promise<ApiResult
 /** Same-origin URL for a render artifact's real stored bytes - safe to use directly as a download link; never a filesystem path or storage key. */
 export function renderArtifactFileUrl(projectId: string, artifactId: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}/render-artifacts/${encodeURIComponent(artifactId)}/file`;
+}
+
+/**
+ * Real job dispatch (activation-phase section 6) - the ONE call that turns
+ * a dashboard action into a real queued job. `request` is always one of
+ * the narrow, allowlisted DispatchJobRequest shapes (never a generic
+ * payload) - for EXECUTE_FRAME/RENDER this is only a minimal intent
+ * (workerId/projectId/scenePlanId or variant); the server resolves the
+ * entire real worker payload itself (see dispatch-job.ts).
+ */
+export async function dispatchJob(dispatchRequest: DispatchJobRequest): Promise<ApiResult<DispatchJobResponse>> {
+  const { status, json } = await request(`/api/jobs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(dispatchRequest)
+  });
+  if (status !== 201) {
+    return toErrorResult(status, json);
+  }
+  const parsed = dispatchJobResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected job-dispatch contract" };
+  }
+  return { ok: true, data: parsed.data };
 }
 
 /** Accepts several PENDING suggestions as one batched plan revision bump - never partial (see batch-accept-mapping-suggestions.ts). */

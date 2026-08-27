@@ -3,10 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperation } from "@dyo/schemas";
-import { executeSceneEdit } from "../execute-scene-edit-executor.js";
+import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperation, SceneEditOperationIntent } from "@dyo/schemas";
+import { executeSceneEdit, type ResolveOperation } from "../execute-scene-edit-executor.js";
 import type { AeEditBridge, OperationExecutionResult, SaveProjectResult } from "../ae-edit-bridge.js";
 import type { PreviewCapture, PreviewCaptureResult } from "../preview-capture.js";
+
+/** No MAP_FOOTAGE in these fixtures - every intent is already a resolved operation, so this is a pure pass-through (the real resolver's own asset-download/verification behavior is covered separately, in resolve-scene-edit-operation.test.ts). */
+const defaultResolveOperation: ResolveOperation = async (intent) => ({ ok: true, operation: intent as SceneEditOperation });
 
 const cleanupDirs: string[] = [];
 afterEach(() => {
@@ -28,10 +31,10 @@ function makeSourceProject(): { root: string; sourcePath: string; sha256: string
   return { root, sourcePath, sha256: sha256(content) };
 }
 
-const OP_0: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "first" };
-const OP_1: SceneEditOperation = { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-2", layerIndex: 2, visible: false };
+const OP_0: SceneEditOperationIntent = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "first" };
+const OP_1: SceneEditOperationIntent = { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-2", layerIndex: 2, visible: false };
 
-function makeRequest(overrides: Partial<ExecuteSceneEditRequest> & { sourceProjectPath: string; workingProjectPath: string; sourceProjectSha256: string }): ExecuteSceneEditRequest {
+function makeRequest(overrides: Partial<ExecuteSceneEditRequest> & { sourceProjectPath: string; sourceProjectSha256: string }): ExecuteSceneEditRequest {
   return {
     projectId: "11111111-1111-1111-1111-111111111111",
     planId: "plan-1",
@@ -98,15 +101,17 @@ describe("executeSceneEdit", () => {
     const bridge = new FakeAeEditBridge(alwaysSucceed);
     const preview = new FakePreviewCapture(REAL_PREVIEW);
 
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath: "" });
-    // Derive the real working copy path the executor will compute, and set it on the request (matches how a real caller must agree with the worker's own derivation).
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+    // The real working copy path the executor will compute internally -
+    // only used below to assert the RESULT reports it, never sent as part
+    // of the request itself (the worker derives it, never the caller).
     const workingCopyPathModule = await import("../../workspace/working-copy.js");
     const workingProjectPath = workingCopyPathModule.workingCopyPath(workRoot, "job-1");
 
     const result = await executeSceneEdit(
-      { workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date("2026-01-01T00:00:00.000Z") },
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date("2026-01-01T00:00:00.000Z") },
       "job-1",
-      { ...request, workingProjectPath }
+      request
     );
 
     expect(result.failureReason).toBeNull();
@@ -129,9 +134,9 @@ describe("executeSceneEdit", () => {
     const bridge = new FakeAeEditBridge(alwaysSucceed);
     const preview = new FakePreviewCapture(REAL_PREVIEW);
 
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: "f".repeat(64), workingProjectPath: "irrelevant" });
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: "f".repeat(64) });
 
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() }, "job-2", request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, "job-2", request);
 
     expect(result.failureReason).toContain("working copy could not be prepared");
     expect(result.workingProjectPath).toBeNull();
@@ -147,11 +152,9 @@ describe("executeSceneEdit", () => {
       callIndex === 0 ? { ok: false, operationType: operation.type, failureReason: "layer not found" } : alwaysSucceed(operation)
     );
     const preview = new FakePreviewCapture(REAL_PREVIEW);
-    const { workingCopyPath } = await import("../../workspace/working-copy.js");
-    const workingProjectPath = workingCopyPath(workRoot, "job-3");
 
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() }, "job-3", request);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, "job-3", request);
 
     expect(result.failureReason).toContain("layer not found");
     expect(result.operationsCompleted).toEqual([]);
@@ -162,16 +165,14 @@ describe("executeSceneEdit", () => {
   it("resumes from a partial checkpoint - never reapplies an already-completed operation", async () => {
     const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
     const workRoot = join(root, "work-root");
-    const { workingCopyPath } = await import("../../workspace/working-copy.js");
-    const workingProjectPath = workingCopyPath(workRoot, "job-4");
 
     // First attempt: operation 1 fails.
     const firstBridge = new FakeAeEditBridge((operation, callIndex) =>
       callIndex === 1 ? { ok: false, operationType: operation.type, failureReason: "transient AE error" } : alwaysSucceed(operation)
     );
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
     const firstResult = await executeSceneEdit(
-      { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() },
+      { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       "job-4",
       request
     );
@@ -182,7 +183,7 @@ describe("executeSceneEdit", () => {
     const secondBridge = new FakeAeEditBridge(alwaysSucceed);
     const secondPreview = new FakePreviewCapture(REAL_PREVIEW);
     const secondResult = await executeSceneEdit(
-      { workRoot, aeEditBridge: secondBridge, previewCapture: secondPreview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() },
+      { workRoot, aeEditBridge: secondBridge, previewCapture: secondPreview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       "job-4",
       { ...request, checkpoint: firstResult.checkpoint }
     );
@@ -197,9 +198,6 @@ describe("executeSceneEdit", () => {
   it("a duplicate invocation of an already-fully-completed job never re-applies any operation", async () => {
     const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
     const workRoot = join(root, "work-root");
-    const { workingCopyPath } = await import("../../workspace/working-copy.js");
-    const workingProjectPath = workingCopyPath(workRoot, "job-5");
-
     const completedCheckpoint = {
       completedOperationIndices: [0, 1],
       checkpointBeforeAt: "2026-01-01T00:00:00.000Z",
@@ -209,13 +207,12 @@ describe("executeSceneEdit", () => {
     const request = makeRequest({
       sourceProjectPath: sourcePath,
       sourceProjectSha256: sourceSha,
-      workingProjectPath,
       checkpoint: completedCheckpoint
     });
 
     const bridge = new FakeAeEditBridge(alwaysSucceed);
     const result = await executeSceneEdit(
-      { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() },
+      { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       "job-5",
       request
     );
@@ -228,14 +225,12 @@ describe("executeSceneEdit", () => {
   it("preview capture failure is reported even though every operation and the save both succeeded", async () => {
     const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
     const workRoot = join(root, "work-root");
-    const { workingCopyPath } = await import("../../workspace/working-copy.js");
-    const workingProjectPath = workingCopyPath(workRoot, "job-6");
 
     const bridge = new FakeAeEditBridge(alwaysSucceed);
     const preview = new FakePreviewCapture({ ok: false, reason: "captured preview file exists but is empty or not a regular file" });
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() }, "job-6", request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, "job-6", request);
 
     expect(result.operationsCompleted.sort()).toEqual([0, 1]); // all operations DID complete
     expect(result.previewFramePath).toBeNull();
@@ -246,47 +241,25 @@ describe("executeSceneEdit", () => {
   it("a save failure is reported and never produces a preview", async () => {
     const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
     const workRoot = join(root, "work-root");
-    const { workingCopyPath } = await import("../../workspace/working-copy.js");
-    const workingProjectPath = workingCopyPath(workRoot, "job-7");
 
     const bridge = new FakeAeEditBridge(alwaysSucceed, { ok: false, failureReason: "disk full" });
     const preview = new FakePreviewCapture(REAL_PREVIEW);
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() }, "job-7", request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, "job-7", request);
 
     expect(result.failureReason).toContain("working copy save failed");
     expect(result.previewFramePath).toBeNull();
     expect(preview.calls).toBe(0);
   });
 
-  it("refuses when the request's workingProjectPath disagrees with the worker's own deterministic derivation", async () => {
-    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
-    const workRoot = join(root, "work-root");
-    const bridge = new FakeAeEditBridge(alwaysSucceed);
-    const preview = new FakePreviewCapture(REAL_PREVIEW);
-
-    const request = makeRequest({
-      sourceProjectPath: sourcePath,
-      sourceProjectSha256: sourceSha,
-      workingProjectPath: "/some/other/path/not-derived.aep"
-    });
-
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() }, "job-8", request);
-
-    expect(result.failureReason).toContain("workingProjectPath mismatch");
-    expect(bridge.calls).toHaveLength(0);
-  });
-
   it("never touches the original source file, even across a full successful run", async () => {
     const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
     const workRoot = join(root, "work-root");
-    const { workingCopyPath } = await import("../../workspace/working-copy.js");
-    const workingProjectPath = workingCopyPath(workRoot, "job-9");
-    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
     await executeSceneEdit(
-      { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), now: () => new Date() },
+      { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       "job-9",
       request
     );
@@ -299,9 +272,7 @@ describe("executeSceneEdit", () => {
     it("persists a checkpoint after EACH operation, before the next one is attempted", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");
-      const { workingCopyPath } = await import("../../workspace/working-copy.js");
-      const workingProjectPath = workingCopyPath(workRoot, "job-10");
-      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
       const persistedCheckpoints: number[][] = [];
       const bridge = new FakeAeEditBridge(alwaysSucceed);
@@ -311,7 +282,7 @@ describe("executeSceneEdit", () => {
       });
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, now: () => new Date() },
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
         "job-10",
         request
       );
@@ -326,15 +297,13 @@ describe("executeSceneEdit", () => {
     it("pauses (does not apply further operations) when checkpoint persistence fails after an operation completes", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");
-      const { workingCopyPath } = await import("../../workspace/working-copy.js");
-      const workingProjectPath = workingCopyPath(workRoot, "job-11");
-      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
       const bridge = new FakeAeEditBridge(alwaysSucceed);
       const persistCheckpoint = vi.fn(async () => ({ ok: false as const, reason: "network error reaching the API" }));
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, now: () => new Date() },
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
         "job-11",
         request
       );
@@ -355,9 +324,7 @@ describe("executeSceneEdit", () => {
     it("crash/resume: operation 0 succeeds and its checkpoint is durably persisted, then the process 'dies' before op 1's checkpoint ever durably lands - a retry starting from the LAST DURABLY-PERSISTED checkpoint (not the crashed process's own in-memory state) skips op 0 and only re-attempts op 1", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");
-      const { workingCopyPath } = await import("../../workspace/working-copy.js");
-      const workingProjectPath = workingCopyPath(workRoot, "job-12");
-      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
       // A stand-in for the API's own durable checkpoint record - only
       // updated when a persistCheckpoint call actually succeeds. Op 1's
@@ -377,7 +344,7 @@ describe("executeSceneEdit", () => {
         return { ok: false as const, reason: "process died before this checkpoint was confirmed durable" };
       });
       const firstResult = await executeSceneEdit(
-        { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: firstPersist, now: () => new Date() },
+        { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: firstPersist, resolveOperation: defaultResolveOperation, now: () => new Date() },
         "job-12",
         request
       );
@@ -397,6 +364,7 @@ describe("executeSceneEdit", () => {
           aeEditBridge: secondBridge,
           previewCapture: new FakePreviewCapture(REAL_PREVIEW),
           persistCheckpoint: secondPersist,
+          resolveOperation: defaultResolveOperation,
           now: () => new Date()
         },
         "job-12",
@@ -413,9 +381,7 @@ describe("executeSceneEdit", () => {
     it("a duplicate persistCheckpoint call for an already-persisted checkpoint is harmless (idempotent from the executor's perspective - it never inspects the persisted response's content)", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");
-      const { workingCopyPath } = await import("../../workspace/working-copy.js");
-      const workingProjectPath = workingCopyPath(workRoot, "job-13");
-      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, workingProjectPath });
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
       const bridge = new FakeAeEditBridge(alwaysSucceed);
       // Always reports ok:true regardless of how many times it's called
@@ -424,7 +390,7 @@ describe("executeSceneEdit", () => {
       const persistCheckpoint = vi.fn(async () => ({ ok: true as const }));
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, now: () => new Date() },
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
         "job-13",
         request
       );

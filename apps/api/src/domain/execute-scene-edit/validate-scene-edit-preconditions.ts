@@ -49,13 +49,11 @@ export type SceneEditPreconditionResult = { ok: true } | { ok: false; reason: st
 export function validateSceneEditPreconditions(input: ValidateSceneEditPreconditionsInput): SceneEditPreconditionResult {
   const { request, currentPlan, currentProjectSourceProjectSha256, worker, now, staleAfterMs } = input;
 
-  // Redundant with the request schema's own .refine (defense in depth,
-  // matching this project's established style) - the original .aep must
-  // never be a mutation target, checked again here independently of
-  // whatever validated the request shape.
-  if (request.workingProjectPath === request.sourceProjectPath) {
-    return { ok: false, reason: "workingProjectPath must differ from sourceProjectPath - refusing to target the original .aep" };
-  }
+  // The working-copy-vs-source distinctness check (CLAUDE.md Safety Rule
+  // 1) now lives entirely worker-side (see workspace/working-copy.ts's own
+  // SAME_PATH check) - this request no longer carries a workingProjectPath
+  // field for the server/API to compare here at all (see
+  // execute-scene-edit.ts's own doc comment on why).
 
   if (!currentPlan || currentPlan.id !== request.planId) {
     return { ok: false, reason: `No execution plan found matching planId "${request.planId}"` };

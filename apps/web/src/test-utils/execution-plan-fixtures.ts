@@ -215,13 +215,22 @@ export function stubFetchByUrl(handlers: Record<string, HandlerSpec | HandlerSpe
           .sort((a, b) => b[0].length - a[0].length)
           .find(([candidate]) => url.includes(candidate)) ?? [];
       if (!spec) {
-        return { ok: false, status: 404, text: async () => "" };
+        return { ok: false, status: 404, text: async () => "", json: async () => ({}) };
       }
       const specs = Array.isArray(spec) ? spec : [spec];
       const callIndex = callCounts.get(pattern!) ?? 0;
       callCounts.set(pattern!, callIndex + 1);
       const resolved = specs[Math.min(callIndex, specs.length - 1)]!;
-      return { ok: resolved.status >= 200 && resolved.status < 300, status: resolved.status, text: async () => JSON.stringify(resolved.body) };
+      return {
+        ok: resolved.status >= 200 && resolved.status < 300,
+        status: resolved.status,
+        // Both provided - projects-api-client.ts's own request() helper only
+        // ever calls .text() (then JSON.parses it manually), but other
+        // callers (e.g. use-dashboard-status.ts) call .json() directly on a
+        // real Response - a faithful stub supports both the same way.
+        text: async () => JSON.stringify(resolved.body),
+        json: async () => resolved.body
+      };
     })
   );
 }

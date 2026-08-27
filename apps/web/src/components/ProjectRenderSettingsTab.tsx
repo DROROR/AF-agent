@@ -3,6 +3,7 @@
 import { useState, type ReactElement } from "react";
 import { RENDER_OUTPUT_VARIANTS, type Composition, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
@@ -11,6 +12,8 @@ import { Select } from "./ui/Select";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
+import { dispatchJob } from "../lib/projects-api-client";
+import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 
 /**
  * Real Output Config UI (render-delivery phase section 2) - the composition
@@ -31,12 +34,15 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
   }
 
   const compositions = project.manifest.compositions;
+  const projectId = project.project.projectId;
 
   return (
     <div className="overview-grid">
+      <InspectRenderCapabilitiesCard />
       {RENDER_OUTPUT_VARIANTS.map((variant) => (
         <VariantConfigCard
           key={variant}
+          projectId={projectId}
           variant={variant}
           compositions={compositions}
           currentConfig={plan?.plan.renderOutputs[variant] ?? null}
@@ -47,12 +53,56 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
   );
 }
 
+function InspectRenderCapabilitiesCard(): ReactElement {
+  const { t } = useLocale();
+  const { data: dashboardStatus } = useDashboardStatusContext();
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [dispatchSuccess, setDispatchSuccess] = useState<string | null>(null);
+
+  const worker = findDispatchableWorker(dashboardStatus?.workers ?? null, "INSPECT_RENDER_CAPABILITIES");
+
+  async function handleInspect(): Promise<void> {
+    if (!worker) {
+      return;
+    }
+    setIsDispatching(true);
+    setDispatchError(null);
+    setDispatchSuccess(null);
+    // Not project-bound - see job-dispatch.ts's own doc comment.
+    const result = await dispatchJob({ operation: "INSPECT_RENDER_CAPABILITIES", workerId: worker.workerId, payload: {} });
+    setIsDispatching(false);
+    if (!result.ok) {
+      setDispatchError(result.message);
+      return;
+    }
+    setDispatchSuccess(t.jobDispatch.queuedDescription(result.data.jobId));
+  }
+
+  return (
+    <Card className="overview-section">
+      <CardHeader title={t.projectWorkspace.renderSettings.inspectCapabilitiesSection} />
+      <p>{t.projectWorkspace.renderSettings.inspectCapabilitiesDescription}</p>
+      {!worker ? <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} /> : null}
+      {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
+      {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
+      <div className="overview-actions">
+        <Button variant="secondary" disabled={!worker || isDispatching} onClick={() => void handleInspect()}>
+          {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.inspectCapabilitiesAction}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function VariantConfigCard({
+  projectId,
   variant,
   compositions,
   currentConfig,
   currentSourceSha
 }: {
+  projectId: string;
   variant: RenderOutputVariant;
   compositions: Composition[];
   currentConfig: RenderOutputConfig | null;
@@ -60,15 +110,21 @@ function VariantConfigCard({
 }): ReactElement {
   const { t } = useLocale();
   const { setRenderOutput } = useProjectWorkspaceContext();
+  const { data: dashboardStatus } = useDashboardStatusContext();
   const [manifestCompositionId, setManifestCompositionId] = useState(currentConfig?.manifestCompositionId ?? "");
   const [renderSettingsTemplateName, setRenderSettingsTemplateName] = useState(currentConfig?.renderSettingsTemplateName ?? "");
   const [outputModuleTemplateName, setOutputModuleTemplateName] = useState(currentConfig?.outputModuleTemplateName ?? "");
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [dispatchSuccess, setDispatchSuccess] = useState<string | null>(null);
 
   const isStale = currentConfig !== null && currentConfig.sourceProjectSha256 !== currentSourceSha;
   const selectedComposition = compositions.find((c) => c.compositionId === manifestCompositionId) ?? null;
   const canSave = manifestCompositionId !== "" && renderSettingsTemplateName.trim() !== "" && outputModuleTemplateName.trim() !== "";
+  const renderWorker = findDispatchableWorker(dashboardStatus?.workers ?? null, "RENDER");
+  const canRender = currentConfig !== null && !isStale && renderWorker !== null;
 
   async function handleSave(): Promise<void> {
     setIsSaving(true);
@@ -82,6 +138,22 @@ function VariantConfigCard({
     if (!result.ok) {
       setSaveError(result.message ?? null);
     }
+  }
+
+  async function handleRender(): Promise<void> {
+    if (!renderWorker) {
+      return;
+    }
+    setIsDispatching(true);
+    setDispatchError(null);
+    setDispatchSuccess(null);
+    const result = await dispatchJob({ operation: "RENDER", workerId: renderWorker.workerId, projectId, variant });
+    setIsDispatching(false);
+    if (!result.ok) {
+      setDispatchError(result.message);
+      return;
+    }
+    setDispatchSuccess(t.jobDispatch.queuedDescription(result.data.jobId));
   }
 
   return (
@@ -169,9 +241,18 @@ function VariantConfigCard({
             </p>
           ) : null}
 
+          {!renderWorker && currentConfig && !isStale ? (
+            <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
+          ) : null}
+          {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
+          {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
+
           <div className="overview-actions">
             <Button variant="primary" disabled={!canSave || isSaving} onClick={() => void handleSave()}>
               {isSaving ? t.projectWorkspace.renderSettings.savingLabel : t.projectWorkspace.renderSettings.saveAction}
+            </Button>
+            <Button variant="secondary" disabled={!canRender || isDispatching} onClick={() => void handleRender()}>
+              {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.renderAction}
             </Button>
           </div>
         </>

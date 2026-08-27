@@ -11,6 +11,8 @@ import {
 import { InMemoryWorkerRepository } from "../../worker/test-support/in-memory-worker-repository.js";
 import { InMemoryJobRepository } from "../test-support/in-memory-job-repository.js";
 import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
+import { InMemoryExecutionPlanRepository } from "../../execution-plan/test-support/in-memory-execution-plan-repository.js";
+import { InMemoryAssetRepository } from "../../asset/test-support/in-memory-asset-repository.js";
 import { createProject } from "../../project/create-project.js";
 import { dispatchJob } from "../dispatch-job.js";
 
@@ -33,11 +35,20 @@ const FIXED_NOW = new Date("2026-01-01T00:00:00.000Z");
 const STALE_AFTER_MS = 30_000;
 const PAYLOAD = { templateId: "t", sourceProjectPath: "/copies/t.aep" };
 
-function deps(jobRepository: InMemoryJobRepository, workerRepository: InMemoryWorkerRepository, now = FIXED_NOW) {
+function deps(
+  jobRepository: InMemoryJobRepository,
+  workerRepository: InMemoryWorkerRepository,
+  now = FIXED_NOW,
+  projectRepository: InMemoryProjectRepository = new InMemoryProjectRepository(),
+  executionPlanRepository: InMemoryExecutionPlanRepository = new InMemoryExecutionPlanRepository(),
+  assetRepository: InMemoryAssetRepository = new InMemoryAssetRepository()
+) {
   return {
     jobRepository,
     workerRepository,
-    projectRepository: new InMemoryProjectRepository(),
+    projectRepository,
+    executionPlanRepository,
+    assetRepository,
     now: () => now,
     staleAfterMs: STALE_AFTER_MS
   };
@@ -302,11 +313,309 @@ describe("dispatchJob", () => {
     };
 
     const result = await dispatchJob(
-      { jobRepository, workerRepository, projectRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      {
+        jobRepository,
+        workerRepository,
+        projectRepository,
+        executionPlanRepository: new InMemoryExecutionPlanRepository(),
+        assetRepository: new InMemoryAssetRepository(),
+        now: () => FIXED_NOW,
+        staleAfterMs: STALE_AFTER_MS
+      },
       { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, payload: sceneEvidencePayload }
     );
 
     const job = await jobRepository.findById(result.jobId);
     expect(job?.projectId).toBe(project.projectId);
+  });
+});
+
+function manifestWithTextPlaceholder(): TemplateManifest {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    templateId: "tmpl-1",
+    templateName: "tmpl-1",
+    sourceProject: { path: "C:\\vidio agent\\White App Promo (converted).aep", name: "White App Promo (converted).aep", sha256: "a".repeat(64) },
+    afterEffects: { version: "26.3x87" },
+    generatedAt: FIXED_NOW.toISOString(),
+    compositions: [
+      { compositionId: "comp-1", aeProjectItemIndex: 5, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+    ],
+    scenes: [
+      {
+        sceneId: "scene-a",
+        displayName: null,
+        compositionId: "comp-1",
+        originalOrderIndex: 0,
+        startTimeSeconds: 0,
+        durationSeconds: 5,
+        placeholders: [
+          {
+            placeholderId: "ph-1",
+            displayLabel: null,
+            compositionId: "comp-1",
+            layerName: "Headline",
+            layerIndex: 2,
+            layerPath: [],
+            placeholderType: "text",
+            editable: true,
+            sourceType: "TextLayer",
+            dimensions: null,
+            startTimeSeconds: 0,
+            durationSeconds: 5,
+            evidence: { source: "read_directly", reason: "confirmed via ae_get_composition" }
+          }
+        ]
+      }
+    ],
+    preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+    unknownItems: []
+  };
+}
+
+function approvedTextScene() {
+  return {
+    id: "scene-1",
+    manifestCompositionId: "comp-1",
+    compositionName: "Scene 01",
+    use: true,
+    sourcePosition: 0,
+    finalOrder: 0,
+    finalDuration: null,
+    approvalState: "APPROVED" as const,
+    instructions: null,
+    notes: null,
+    unresolvedReasons: [],
+    evidence: [],
+    mappings: [
+      {
+        id: "mapping-1",
+        manifestPlaceholderId: "ph-1",
+        placeholderName: "Headline",
+        placeholderClassification: { value: "text" as const, source: "MANIFEST" as const, evidence: [] },
+        selectedAssetId: null,
+        selectedAssetType: null,
+        text: "Approved Headline",
+        assetTimestamp: null,
+        mappingSource: "HUMAN" as const,
+        confidence: null,
+        createdAt: FIXED_NOW.toISOString(),
+        updatedAt: FIXED_NOW.toISOString()
+      }
+    ],
+    createdAt: FIXED_NOW.toISOString(),
+    updatedAt: FIXED_NOW.toISOString()
+  };
+}
+
+async function setupWorkerWithCapability(workerRepository: InMemoryWorkerRepository, capability: "EXECUTE_FRAME" | "RENDER" | "INSPECT_RENDER_CAPABILITIES") {
+  const workerId = randomUUID();
+  await workerRepository.create({ id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: [capability] }, FIXED_NOW);
+  await workerRepository.updateHeartbeat(workerId, { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null }, FIXED_NOW);
+  return workerId;
+}
+
+describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
+  it("resolves the full worker payload from trusted state and creates a job carrying it - never the raw request", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "EXECUTE_FRAME");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+
+    const result = await dispatchJob(
+      { jobRepository, workerRepository, projectRepository, executionPlanRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { operation: "EXECUTE_FRAME", workerId, projectId: project.projectId, scenePlanId: "scene-1" }
+    );
+
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.projectId).toBe(project.projectId);
+    const payload = job?.payload as Record<string, unknown>;
+    expect(payload.aeProjectItemIndex).toBe(5);
+    expect(payload.compositionName).toBe("Scene 01");
+    expect(payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
+    expect(payload.checkpoint).toBeNull();
+  });
+
+  it("rejects with PreconditionNotMetError when the resolver itself refuses (e.g. no execution plan exists) - never queues a job anyway", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "EXECUTE_FRAME");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+
+    await expect(
+      dispatchJob(deps(jobRepository, workerRepository, FIXED_NOW, projectRepository), {
+        operation: "EXECUTE_FRAME",
+        workerId,
+        projectId: project.projectId,
+        scenePlanId: "scene-1"
+      })
+    ).rejects.toThrow(PreconditionNotMetError);
+
+    const active = await jobRepository.countActiveForWorker(workerId);
+    expect(active).toBe(0);
+  });
+
+  it("rejects when the worker does not report the EXECUTE_FRAME capability", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = await setupWorkerWithCapability(workerRepository, "RENDER");
+
+    await expect(
+      dispatchJob(deps(jobRepository, workerRepository), {
+        operation: "EXECUTE_FRAME",
+        workerId,
+        projectId: randomUUID(),
+        scenePlanId: "scene-1"
+      })
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
+});
+
+describe("dispatchJob - RENDER (safe dispatch)", () => {
+  it("resolves the full worker payload from the persisted RenderOutputConfig + the plan's own working-copy identity, and creates a job carrying it", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "RENDER");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    const plan = await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    await executionPlanRepository.updateRenderOutput(
+      plan.id,
+      "LANDSCAPE",
+      {
+        manifestCompositionId: "comp-1",
+        aeProjectItemIndex: 5,
+        compositionName: "Scene 01",
+        sourceProjectSha256: "a".repeat(64),
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Source",
+        configuredAt: FIXED_NOW.toISOString()
+      },
+      FIXED_NOW
+    );
+    await executionPlanRepository.updateWorkingCopy(plan.id, "/work/jobs/job-1/working-copy.aep", "d".repeat(64), FIXED_NOW);
+
+    const result = await dispatchJob(
+      { jobRepository, workerRepository, projectRepository, executionPlanRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { operation: "RENDER", workerId, projectId: project.projectId, variant: "LANDSCAPE" }
+    );
+
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.projectId).toBe(project.projectId);
+    const payload = job?.payload as Record<string, unknown>;
+    expect(payload.workingProjectPath).toBe("/work/jobs/job-1/working-copy.aep");
+    expect(payload.renderSettingsTemplateName).toBe("Best Settings");
+    expect(payload.checkpoint).toBeNull();
+  });
+
+  it("rejects with PreconditionNotMetError when no working copy has been produced yet - never queues a job anyway", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "RENDER");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    const plan = await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    await executionPlanRepository.updateRenderOutput(
+      plan.id,
+      "LANDSCAPE",
+      {
+        manifestCompositionId: "comp-1",
+        aeProjectItemIndex: 5,
+        compositionName: "Scene 01",
+        sourceProjectSha256: "a".repeat(64),
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Source",
+        configuredAt: FIXED_NOW.toISOString()
+      },
+      FIXED_NOW
+    );
+    // Deliberately never calls updateWorkingCopy - no EXECUTE_FRAME job has ever succeeded for this plan.
+
+    await expect(
+      dispatchJob(
+        { jobRepository, workerRepository, projectRepository, executionPlanRepository, assetRepository: new InMemoryAssetRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+        { operation: "RENDER", workerId, projectId: project.projectId, variant: "LANDSCAPE" }
+      )
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
+});
+
+describe("dispatchJob - INSPECT_RENDER_CAPABILITIES (safe dispatch, read-only)", () => {
+  it("creates a QUEUED job with no projectId - INSPECT_RENDER_CAPABILITIES is not project-bound", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = await setupWorkerWithCapability(workerRepository, "INSPECT_RENDER_CAPABILITIES");
+
+    const result = await dispatchJob(deps(jobRepository, workerRepository), {
+      operation: "INSPECT_RENDER_CAPABILITIES",
+      workerId,
+      payload: {}
+    });
+
+    expect(result.status).toBe("QUEUED");
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.projectId).toBeNull();
+  });
+
+  it("applies the same AE/MCP-ONLINE precondition as every other ae-mcp-touching operation", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = randomUUID();
+    await workerRepository.create(
+      { id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_RENDER_CAPABILITIES"] },
+      FIXED_NOW
+    );
+    await workerRepository.updateHeartbeat(workerId, { aeStatus: "OFFLINE", mcpStatus: "ONLINE", aeVersion: null, currentJobId: null }, FIXED_NOW);
+
+    await expect(
+      dispatchJob(deps(jobRepository, workerRepository), { operation: "INSPECT_RENDER_CAPABILITIES", workerId, payload: {} })
+    ).rejects.toThrow(PreconditionNotMetError);
   });
 });

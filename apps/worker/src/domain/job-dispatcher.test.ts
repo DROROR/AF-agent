@@ -14,11 +14,17 @@ import { NotAvailableAerenderRunner } from "../execution/render/aerender-runner.
 import { NotAvailableCompositionVerifier } from "../execution/render/verify-render-composition.js";
 import { NotAvailableRenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
 import type { RenderArtifactUploader, UploadRenderArtifactResult } from "../execution/render/upload-render-artifact.js";
-import { workingCopyPath } from "../workspace/working-copy.js";
+import type { AssetDownloadClient } from "../workspace/asset-cache.js";
 
 class FakeArtifactUploader implements RenderArtifactUploader {
   async upload(): Promise<UploadRenderArtifactResult> {
     return { ok: true };
+  }
+}
+
+class FakeAssetDownloadClient implements AssetDownloadClient {
+  async download(): Promise<Buffer> {
+    throw new Error("no asset download expected in these fixtures");
   }
 }
 
@@ -60,6 +66,7 @@ function healthyDeps(overrides: Partial<JobDispatcherDeps> = {}): JobDispatcherD
     aeEditBridge: new NotAvailableAeEditBridge(),
     previewCapture: new NotAvailablePreviewCapture(),
     persistCheckpoint: async () => ({ ok: true }),
+    assetDownloadClient: new FakeAssetDownloadClient(),
     aerenderPath: undefined,
     aerenderRunner: new NotAvailableAerenderRunner(),
     compositionVerifier: new NotAvailableCompositionVerifier(),
@@ -315,14 +322,12 @@ describe("executeJob - EXECUTE_FRAME", () => {
     const { root, sourcePath, sha256 } = makeSourceProject();
     const workRoot = join(root, "work-root");
     const jobId = overrides.jobId ?? "job-execute-frame-1";
-    const workingProjectPath = workingCopyPath(workRoot, jobId);
     const payload = {
       projectId: "11111111-1111-1111-1111-111111111111",
       planId: "plan-1",
       planRevision: 1,
       sourceProjectSha256: sha256,
       sourceProjectPath: sourcePath,
-      workingProjectPath,
       scenePlanId: "scene-1",
       manifestCompositionId: "comp-1",
       aeProjectItemIndex: 1,

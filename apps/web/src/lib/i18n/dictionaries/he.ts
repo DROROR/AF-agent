@@ -341,6 +341,14 @@ export const he: Dictionary = {
     APPROVED: "מאושר",
     REJECTED: "נדחה"
   },
+  jobDispatch: {
+    noWorkerTitle: "אין וורקר זמין",
+    noWorkerDescription: "אף וורקר במצב ONLINE לא מדווח כרגע על היכולת הזו כפנוי - ייתכן שהוא לא מחובר, עסוק במשימה אחרת, או שטרם עודכן לגרסה התומכת בכך.",
+    dispatching: "שולח…",
+    queuedTitle: "המשימה נכנסה לתור",
+    queuedDescription: (jobId) => `המשימה ${jobId} נכנסה לתור עבור הוורקר. היא תרוץ לאחר שתילקח - עמוד זה עדיין לא מציג התקדמות בזמן אמת.`,
+    failedTitle: "לא ניתן היה לשלוח את המשימה"
+  },
   projectWorkspace: {
     backToProjects: "חזרה לפרויקטים",
     tabs: {
@@ -383,7 +391,11 @@ export const he: Dictionary = {
       unresolvedScenesReason: (count) => `${count} סצנות לא פתורות`,
       approveAction: "אישור התוכנית",
       rejectAction: "דחיית התוכנית",
-      reopenAction: "פתיחה מחדש לעריכה"
+      reopenAction: "פתיחה מחדש לעריכה",
+      executionSection: "ביצוע סצנות",
+      executeFirstSceneAction: "ביצוע הסצנה המאושרת הראשונה",
+      noApprovedSceneTitle: "אין סצנה מאושרת לביצוע",
+      noApprovedSceneDescription: "יש לאשר לפחות סצנה אחת עם מיפויים פתורים במלואם לפני הביצוע."
     },
     revisions: {
       title: "היסטוריית גרסאות",
@@ -417,7 +429,11 @@ export const he: Dictionary = {
       staleWarningTitle: "הגדרה זו אינה עדכנית",
       staleWarningDescription: "פרויקט המקור השתנה מאז שנבחרה קומפוזיציית האב הזו. בחרו אותה מחדש לפני הרינדור.",
       noCompositionsTitle: "אין קומפוזיציות זמינות",
-      noCompositionsDescription: "במניפסט של פרויקט זה עדיין אין קומפוזיציות שהתגלו."
+      noCompositionsDescription: "במניפסט של פרויקט זה עדיין אין קומפוזיציות שהתגלו.",
+      inspectCapabilitiesSection: "יכולות רינדור",
+      inspectCapabilitiesAction: "בדיקת יכולות רינדור",
+      inspectCapabilitiesDescription: "קריאה בלבד. מבקש מהוורקר לדווח על שמות תבניות Render Queue האמיתיים של AE וגרסת AE - לעולם לא משנה או שומר דבר.",
+      renderAction: "רינדור"
     },
     editDrawer: {
       title: "עריכת מיפוי סצנה",

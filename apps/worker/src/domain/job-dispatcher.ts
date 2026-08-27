@@ -16,6 +16,8 @@ import type { SceneEvidenceInspector } from "../inspection/scene-evidence-inspec
 import { executeSceneEdit, type PersistCheckpoint } from "../execution/execute-scene-edit-executor.js";
 import type { AeEditBridge } from "../execution/ae-edit-bridge.js";
 import type { PreviewCapture } from "../execution/preview-capture.js";
+import { resolveSceneEditOperation } from "../execution/resolve-scene-edit-operation.js";
+import type { AssetDownloadClient } from "../workspace/asset-cache.js";
 import { executeRenderProject } from "../execution/render/render-project-executor.js";
 import type { AerenderRunner } from "../execution/render/aerender-runner.js";
 import type { CompositionVerifier } from "../execution/render/verify-render-composition.js";
@@ -46,6 +48,8 @@ export interface JobDispatcherDeps {
   previewCapture: PreviewCapture;
   /** EXECUTE_FRAME's durable mid-job checkpoint reporter - see execute-scene-edit-executor.ts's PersistCheckpoint. Reused unchanged by RENDER (see render-project.ts's own doc comment on the shared checkpoint shape). */
   persistCheckpoint: PersistCheckpoint;
+  /** MAP_FOOTAGE's asset-delivery dependency - see workspace/asset-cache.ts/execution/resolve-scene-edit-operation.ts. */
+  assetDownloadClient: AssetDownloadClient;
   /** RENDER's own dependencies - see execution/render/render-project-executor.ts. aerenderPath mirrors env.aerenderPath (AERENDER_PATH) - never a caller-supplied path. */
   aerenderPath: string | undefined;
   aerenderRunner: AerenderRunner;
@@ -273,6 +277,8 @@ async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<Jo
         aeEditBridge: deps.aeEditBridge,
         previewCapture: deps.previewCapture,
         persistCheckpoint: deps.persistCheckpoint,
+        resolveOperation: (intent) =>
+          resolveSceneEditOperation({ workRoot: deps.workRoot, jobId: job.jobId, assetDownloadClient: deps.assetDownloadClient }, intent),
         now: deps.now
       },
       job.jobId,

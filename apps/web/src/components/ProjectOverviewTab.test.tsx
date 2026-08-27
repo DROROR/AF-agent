@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectOverviewTab } from "./ProjectOverviewTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
@@ -21,15 +22,18 @@ afterEach(() => {
 
 function renderOverview(): void {
   renderWithLocale(
-    <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <ProjectOverviewTab />
-    </ProjectWorkspaceProvider>
+    <DashboardStatusProvider>
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <ProjectOverviewTab />
+      </ProjectWorkspaceProvider>
+    </DashboardStatusProvider>
   );
 }
 
 describe("ProjectOverviewTab", () => {
   it("shows the real plan revision and status, never a fabricated value", async () => {
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 3, status: "DRAFT" }), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
     });
@@ -44,6 +48,7 @@ describe("ProjectOverviewTab", () => {
       sceneFixture({ id: "s2", unresolvedReasons: ["no confident structural classification"] })
     ];
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({}, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
     });
@@ -56,6 +61,7 @@ describe("ProjectOverviewTab", () => {
   it("enables Approve plan once every scene is resolved", async () => {
     const scenes = [sceneFixture({ id: "s1", unresolvedReasons: [] })];
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({}, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
     });
@@ -67,6 +73,7 @@ describe("ProjectOverviewTab", () => {
   it("shows the stale-revision recovery state (never silently overwrites) on a 409 CONFLICT", async () => {
     const scenes = [sceneFixture({ id: "s1", unresolvedReasons: [] })];
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({}, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-plan/approve`]: {
@@ -89,6 +96,7 @@ describe("ProjectOverviewTab", () => {
     // and that refusal must render as a clear error, never be swallowed.
     const scenes = [sceneFixture({ id: "s1", unresolvedReasons: [] })];
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({}, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-plan/approve`]: {
@@ -106,6 +114,7 @@ describe("ProjectOverviewTab", () => {
   it("updates to the new revision returned by the backend after a successful approval", async () => {
     const scenes = [sceneFixture({ id: "s1", unresolvedReasons: [] })];
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 3 }, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-plan/approve`]: {
@@ -118,5 +127,57 @@ describe("ProjectOverviewTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Approve plan" }));
     const approvedLabels = await screen.findAllByText("Approved");
     expect(approvedLabels.length).toBeGreaterThan(0);
+  });
+
+  it("disables Execute first approved scene with an honest reason when no worker reports EXECUTE_FRAME", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+    renderOverview();
+    await screen.findByText("No worker available");
+    expect((screen.getByRole("button", { name: "Execute first approved scene" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("dispatches EXECUTE_FRAME for the first approved+resolved scene when a real worker is available, and shows the real queued job id", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    stubFetchByUrl({
+      "/api/dashboard/status": {
+        status: 200,
+        body: {
+          api: "ok",
+          database: "ok",
+          workers: [
+            {
+              workerId: "44444444-4444-4444-4444-444444444444",
+              name: "worker-a",
+              status: "ONLINE",
+              lastHeartbeatAt: new Date().toISOString(),
+              aeStatus: "ONLINE",
+              mcpStatus: "ONLINE",
+              aeVersion: "26.0",
+              capabilities: ["EXECUTE_FRAME"],
+              maxConcurrency: 1,
+              currentJobId: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          ]
+        }
+      },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      "/api/jobs": {
+        status: 201,
+        body: { jobId: "55555555-5555-5555-5555-555555555555", workerId: "44444444-4444-4444-4444-444444444444", operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() }
+      }
+    });
+    renderOverview();
+    const button = await screen.findByRole("button", { name: "Execute first approved scene" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await screen.findByText(/55555555-5555-5555-5555-555555555555/);
   });
 });

@@ -236,6 +236,24 @@ export const executionPlans = pgTable(
     scenePlans: jsonb("scene_plans").notNull().$type<ScenePlanEntry[]>(),
     /** Explicit, independent-per-variant render delivery config (render-delivery phase section 1) - nullable so existing rows predating this column read back as null; the repository maps that to EMPTY_RENDER_OUTPUTS, never a crash. Updated in place (see updateRenderOutput) - never bumps revision, since choosing a render target isn't scene CONTENT requiring re-approval. */
     renderOutputs: jsonb("render_outputs").$type<RenderOutputs>(),
+    /**
+     * The MOST RECENT successfully-completed EXECUTE_FRAME job's own
+     * self-reported working-copy identity (activation-phase RENDER
+     * dispatch: "no durable last-known-working-copy tracking existed" -
+     * see resolve-render-dispatch.ts's own prior doc comment on this exact
+     * gap). Updated in place (see updateWorkingCopy) - never bumps
+     * revision, same rationale as renderOutputs above. Nullable: null
+     * until at least one EXECUTE_FRAME job has ever succeeded for this
+     * plan. Known, accepted scope limit: EXECUTE_FRAME is one job per
+     * scene, each deriving its OWN fresh working copy from the ORIGINAL
+     * source (see workspace/working-copy.ts) - this column always reflects
+     * whichever EXECUTE_FRAME job most recently succeeded, not a
+     * cumulative multi-scene edit session. Real cross-scene continuity
+     * (editing many scenes into ONE accumulating working copy before
+     * render) is a genuine, separate, not-yet-solved architecture question.
+     */
+    workingProjectPath: text("working_project_path"),
+    workingProjectSha256: text("working_project_sha256"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

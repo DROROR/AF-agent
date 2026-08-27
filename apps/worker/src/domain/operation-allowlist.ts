@@ -27,5 +27,8 @@ export function isAllowedOperation(operation: string): operation is WorkerCapabi
 export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = [
   "CHECK_HEALTH",
   "INSPECT_TEMPLATE",
-  "INSPECT_SCENE_EVIDENCE"
+  "INSPECT_SCENE_EVIDENCE",
+  "INSPECT_RENDER_CAPABILITIES",
+  "EXECUTE_FRAME",
+  "RENDER"
 ];

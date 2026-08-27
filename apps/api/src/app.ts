@@ -26,6 +26,7 @@ import { registerWorkMapRoutes } from "./routes/work-map.js";
 import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
 import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upload.js";
+import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-download.js";
 
 export interface AppDependencies {
   env: Pick<
@@ -94,6 +95,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     jobRepository: deps.jobRepository,
     workerRepository: deps.workerRepository,
     projectRepository: deps.projectRepository,
+    executionPlanRepository: deps.executionPlanRepository,
+    assetRepository: deps.assetRepository,
     sceneEvidenceRepository: deps.sceneEvidenceRepository,
     renderArtifactRepository: deps.renderArtifactRepository,
     renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
@@ -117,6 +120,12 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     assetStorage: deps.assetStorage,
     maxUploadBytes: deps.env.RENDER_ARTIFACT_MAX_UPLOAD_BYTES,
     ...(deps.now ? { now: deps.now } : {})
+  });
+  registerWorkerAssetDownloadRoutes(app, {
+    jobRepository: deps.jobRepository,
+    workerRepository: deps.workerRepository,
+    assetRepository: deps.assetRepository,
+    assetStorage: deps.assetStorage
   });
   registerProjectRoutes(app, {
     projectRepository: deps.projectRepository,

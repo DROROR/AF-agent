@@ -4,6 +4,8 @@ import { canClaimAnotherJob } from "../../domain/job/rules.js";
 import type { JobRepository } from "../../domain/job/types.js";
 import type { WorkerRepository } from "../../domain/worker/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
+import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
+import type { AssetRepository } from "../../domain/asset/types.js";
 import {
   PreconditionNotMetError,
   ProjectNotFoundError,
@@ -12,15 +14,28 @@ import {
   WorkerOfflineError
 } from "../../errors/app-error.js";
 import { sweepStaleWorkers } from "../worker/sweep-stale-workers.js";
+import { resolveExecuteFrameDispatch } from "../../domain/execute-frame-dispatch/resolve-execute-frame-dispatch.js";
+import { resolveRenderDispatch } from "../../domain/render-dispatch/resolve-render-dispatch.js";
 import { createJob } from "./create-job.js";
 
 export interface DispatchJobDeps {
   jobRepository: JobRepository;
   workerRepository: WorkerRepository;
   projectRepository: ProjectRepository;
+  executionPlanRepository: ExecutionPlanRepository;
+  assetRepository: AssetRepository;
   now: () => Date;
   staleAfterMs: number;
 }
+
+/** Every operation whose worker execution touches ae-mcp/AE at all - never dispatched unless the worker's most recent heartbeat confirmed both ONLINE. CHECK_HEALTH is deliberately exempt (its whole purpose is diagnosing a disagreement in that exact status). */
+const AE_MCP_DEPENDENT_OPERATIONS = new Set<DispatchJobRequest["operation"]>([
+  "INSPECT_TEMPLATE",
+  "INSPECT_SCENE_EVIDENCE",
+  "INSPECT_RENDER_CAPABILITIES",
+  "EXECUTE_FRAME",
+  "RENDER"
+]);
 
 /**
  * The one production-safe entry point that turns a dashboard operator's
@@ -33,6 +48,13 @@ export interface DispatchJobDeps {
  * Actual job creation is delegated entirely to create-job.ts - this
  * function only decides whether it is safe to call it, it never inserts a
  * job row itself.
+ *
+ * EXECUTE_FRAME/RENDER never trust `request` for anything beyond the
+ * caller's minimal intent (workerId/projectId/scenePlanId or variant) -
+ * the real worker-facing payload is entirely resolved here from freshly-
+ * read project/plan/asset/worker state via resolveExecuteFrameDispatch/
+ * resolveRenderDispatch (activation-phase sections 2-4: "no arbitrary
+ * worker payload passthrough from the browser").
  */
 export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobRequest): Promise<DispatchJobResponse> {
   await sweepStaleWorkers({ repository: deps.workerRepository, now: deps.now, staleAfterMs: deps.staleAfterMs });
@@ -46,13 +68,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
   if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, deps.staleAfterMs)) {
     throw new WorkerOfflineError(worker.id);
   }
-  // AE/MCP-ONLINE preconditions apply only to operations that actually
-  // touch ae-mcp/AE (INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE).
-  // CHECK_HEALTH is deliberately exempt: its whole purpose is to remotely
-  // diagnose why AE/MCP status disagrees with reality, so requiring
-  // either to already be ONLINE would make it useless exactly when it's
-  // needed most.
-  if (request.operation === "INSPECT_TEMPLATE" || request.operation === "INSPECT_SCENE_EVIDENCE") {
+  if (AE_MCP_DEPENDENT_OPERATIONS.has(request.operation)) {
     if (worker.aeStatus !== "ONLINE") {
       throw new PreconditionNotMetError(
         `Worker ${worker.id} reports After Effects status "${worker.aeStatus}", not ONLINE`
@@ -66,20 +82,20 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     throw new PreconditionNotMetError(`Worker ${worker.id} does not report the ${request.operation} capability`);
   }
 
-  // INSPECT_SCENE_EVIDENCE is the only operation whose result can become a
-  // durable, project-attributed fact record (see record-scene-evidence.ts) -
-  // its projectId is verified real here, at dispatch time, rather than
-  // trusted blindly through to job completion.
-  if (request.operation === "INSPECT_SCENE_EVIDENCE") {
-    const project = await deps.projectRepository.findById(request.projectId);
-    if (!project) {
-      throw new ProjectNotFoundError(request.projectId);
-    }
+  // Every project-bound operation's projectId is verified real here, at
+  // dispatch time, rather than trusted blindly through to job completion -
+  // same rationale as INSPECT_SCENE_EVIDENCE's own pre-existing check.
+  const project =
+    request.operation === "INSPECT_SCENE_EVIDENCE" || request.operation === "EXECUTE_FRAME" || request.operation === "RENDER"
+      ? await deps.projectRepository.findById(request.projectId)
+      : null;
+  if ((request.operation === "INSPECT_SCENE_EVIDENCE" || request.operation === "EXECUTE_FRAME" || request.operation === "RENDER") && !project) {
+    throw new ProjectNotFoundError(request.projectId);
   }
 
   // Duplicate-dispatch check first (a more specific signal than plain
-  // busy): refuses a second live INSPECT_TEMPLATE job for this worker
-  // even on a worker whose maxConcurrency could otherwise fit it.
+  // busy): refuses a second live job of this exact operation for this
+  // worker even on a worker whose maxConcurrency could otherwise fit it.
   const hasDuplicate = await deps.jobRepository.hasNonTerminalJobForOperation(worker.id, request.operation);
   if (hasDuplicate) {
     throw new WorkerBusyError(`Worker ${worker.id} already has a live ${request.operation} job in progress`);
@@ -95,13 +111,64 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     throw new WorkerBusyError(`Worker ${worker.id} is already at its concurrency limit`);
   }
 
+  let payload: unknown;
+  let projectId: string | null = null;
+
+  if (request.operation === "EXECUTE_FRAME") {
+    if (!project) {
+      throw new ProjectNotFoundError(request.projectId);
+    }
+    projectId = request.projectId;
+    const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    const projectAssets = await deps.assetRepository.listByProjectId(request.projectId);
+    const resolved = resolveExecuteFrameDispatch({
+      projectId: request.projectId,
+      scenePlanId: request.scenePlanId,
+      currentPlan: plan,
+      currentProjectManifest: project.manifest,
+      projectAssets,
+      worker,
+      now,
+      staleAfterMs: deps.staleAfterMs
+    });
+    if (!resolved.ok) {
+      throw new PreconditionNotMetError(resolved.reason);
+    }
+    payload = { ...resolved.payload, checkpoint: null };
+  } else if (request.operation === "RENDER") {
+    if (!project) {
+      throw new ProjectNotFoundError(request.projectId);
+    }
+    projectId = request.projectId;
+    const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    const resolved = resolveRenderDispatch({
+      projectId: request.projectId,
+      variant: request.variant,
+      currentPlan: plan,
+      currentProjectSourceProjectSha256: project.sourceProjectSha256,
+      currentProjectSourceProjectPath: project.manifest.sourceProject.path,
+      worker,
+      now,
+      staleAfterMs: deps.staleAfterMs
+    });
+    if (!resolved.ok) {
+      throw new PreconditionNotMetError(resolved.reason);
+    }
+    payload = { ...resolved.payload, checkpoint: null };
+  } else if (request.operation === "INSPECT_SCENE_EVIDENCE") {
+    projectId = request.projectId;
+    payload = request.payload;
+  } else {
+    payload = request.payload;
+  }
+
   const job = await createJob(
     { jobRepository: deps.jobRepository, now: deps.now },
     {
       workerId: worker.id,
-      projectId: request.operation === "INSPECT_SCENE_EVIDENCE" ? request.projectId : null,
+      projectId,
       operation: request.operation,
-      payload: request.payload
+      payload
     }
   );
 

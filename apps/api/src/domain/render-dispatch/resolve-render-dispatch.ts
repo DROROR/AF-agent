@@ -1,4 +1,4 @@
-import type { PlanStatus, RenderOutputConfig, RenderOutputVariant, RenderOutputs, WorkerCapability } from "@dyo/schemas";
+import type { PlanStatus, RenderOutputVariant, RenderOutputs, RenderProjectRequest, WorkerCapability } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 
@@ -15,49 +15,56 @@ export interface RenderDispatchPlanSnapshot {
   status: PlanStatus;
   sourceProjectSha256: string;
   renderOutputs: RenderOutputs;
+  /** The most recently successfully-completed EXECUTE_FRAME job's own working-copy identity - see record-execute-frame-result.ts/schema.ts's own doc comment. Null until at least one EXECUTE_FRAME job has ever succeeded for this plan. */
+  workingProjectPath: string | null;
+  workingProjectSha256: string | null;
 }
 
 export interface ResolveRenderDispatchInput {
+  projectId: string;
   variant: RenderOutputVariant;
   /** The CURRENT plan for this project, freshly read - null if none exists. */
   currentPlan: RenderDispatchPlanSnapshot | null;
   /** The project's CURRENT manifest sha256, freshly read - null if the project doesn't exist. */
   currentProjectSourceProjectSha256: string | null;
+  /** The project's CURRENT manifest sourceProject.path, freshly read - null if the project doesn't exist. */
+  currentProjectSourceProjectPath: string | null;
   /** The worker's live state, freshly read - null if it has never reported in. */
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
 }
 
-export type ResolveRenderDispatchResult = { ok: true; config: RenderOutputConfig } | { ok: false; reason: string };
+export type ResolveRenderDispatchResult =
+  | { ok: true; payload: Omit<RenderProjectRequest, "checkpoint"> }
+  | { ok: false; reason: string };
 
 /**
- * Render-delivery phase section 9: "Dashboard/API must NOT be able to
- * dispatch arbitrary aeProjectItemIndex/compositionName/output path/
- * aerender args... Server resolves the exact persisted approved
- * configuration." The caller passes only `variant` - this resolves (and
- * validates) the REAL RenderOutputConfig already persisted via
- * set-render-output-config.ts, never accepting any addressing field from
- * a browser/API caller directly.
+ * Render-delivery phase section 9 / activation-phase section 4: "Browser
+ * only requests LANDSCAPE or REELS... Server derives... No arbitrary
+ * render payload passthrough." The caller passes only `projectId` +
+ * `variant` - this resolves (and validates) the REAL, persisted
+ * RenderOutputConfig (set-render-output-config.ts) AND the plan's own
+ * durably-tracked working-copy identity (record-execute-frame-result.ts -
+ * the most recently succeeded EXECUTE_FRAME job's own reported path/
+ * sha256, never re-derived or guessed here), building the complete
+ * RenderProjectRequest a worker actually needs - never accepting any
+ * addressing/path field from a browser/API caller directly.
  *
  * Every precondition here is checked fresh against data the caller
  * already fetched (pure function, same style as
- * validateSceneEditPreconditions) - never a cached/stale value, and this
- * function itself never performs I/O.
+ * validateSceneEditPreconditions/resolveExecuteFrameDispatch) - never a
+ * cached/stale value, and this function itself never performs I/O.
  *
- * Known, honest limitation: this cannot verify "the working copy is
- * genuinely valid on disk" (section 9's own bullet list) - no durable
- * "last known working copy path/sha256" is tracked at the plan level
- * today (that only exists transiently inside a completed EXECUTE_FRAME
- * job's own result). The worker's own render-project-executor.ts already
- * re-verifies the working copy independently at actual render time
- * (VERIFY_WORKING_COPY stage) - this remains the real enforcement point
- * for that specific check until/unless a durable "current working copy"
- * concept is added to the plan (a larger change, deliberately not done
- * here per "do not redesign the existing render engine").
+ * The working copy's own CONTENT is still independently re-verified by
+ * the worker itself at actual render time (render-project-executor.ts's
+ * VERIFY_WORKING_COPY stage, re-hashing the real file on disk) - this
+ * function only proves a working copy is durably ON RECORD at all before
+ * ever dispatching, never that the file still exists/matches (that
+ * remains the worker's own real enforcement point, by design).
  */
 export function resolveRenderDispatch(input: ResolveRenderDispatchInput): ResolveRenderDispatchResult {
-  const { variant, currentPlan, currentProjectSourceProjectSha256, worker, now, staleAfterMs } = input;
+  const { projectId, variant, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, worker, now, staleAfterMs } = input;
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project" };
@@ -65,7 +72,11 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
   if (currentPlan.status !== "APPROVED") {
     return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a render can only be dispatched from an approved plan` };
   }
-  if (currentProjectSourceProjectSha256 === null || currentProjectSourceProjectSha256 !== currentPlan.sourceProjectSha256) {
+  if (
+    currentProjectSourceProjectSha256 === null ||
+    currentProjectSourceProjectPath === null ||
+    currentProjectSourceProjectSha256 !== currentPlan.sourceProjectSha256
+  ) {
     return { ok: false, reason: "The project's current manifest sha256 no longer matches this plan - the source project may have changed" };
   }
 
@@ -81,6 +92,13 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
   }
   if (!config.renderSettingsTemplateName || !config.outputModuleTemplateName) {
     return { ok: false, reason: `${variant} output configuration is missing a required render template name` };
+  }
+
+  if (!currentPlan.workingProjectPath || !currentPlan.workingProjectSha256) {
+    return {
+      ok: false,
+      reason: "No working copy has been produced for this plan yet - dispatch EXECUTE_FRAME for at least one approved scene before rendering"
+    };
   }
 
   if (!worker) {
@@ -102,5 +120,21 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
     return { ok: false, reason: "Worker already has a job in progress (currentJobId is not empty)" };
   }
 
-  return { ok: true, config };
+  return {
+    ok: true,
+    payload: {
+      projectId,
+      planId: currentPlan.id,
+      planRevision: currentPlan.revision,
+      variant,
+      sourceProjectPath: currentProjectSourceProjectPath,
+      sourceProjectSha256: currentPlan.sourceProjectSha256,
+      workingProjectPath: currentPlan.workingProjectPath,
+      workingProjectSha256: currentPlan.workingProjectSha256,
+      aeProjectItemIndex: config.aeProjectItemIndex,
+      compositionName: config.compositionName,
+      renderSettingsTemplateName: config.renderSettingsTemplateName,
+      outputModuleTemplateName: config.outputModuleTemplateName
+    }
+  };
 }

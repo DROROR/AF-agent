@@ -1,9 +1,10 @@
-import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditResult } from "@dyo/schemas";
+import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult } from "@dyo/schemas";
 import { prepareWorkingCopy } from "../workspace/working-copy.js";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
 import { EMPTY_SCENE_EDIT_CHECKPOINT, markFailed, markOperationCompleted, nextPendingOperationIndex } from "./scene-edit-checkpoint.js";
 import type { AeEditBridge } from "./ae-edit-bridge.js";
 import type { PreviewCapture } from "./preview-capture.js";
+import type { ResolveSceneEditOperationResult } from "./resolve-scene-edit-operation.js";
 
 /**
  * The one fixed frame this project's own "first-frame execution" workflow
@@ -22,11 +23,15 @@ const PREVIEW_TIMESTAMP_SECONDS = 0;
  */
 export type PersistCheckpoint = (checkpoint: SceneEditCheckpoint) => Promise<{ ok: true } | { ok: false; reason: string }>;
 
+/** Resolves one dispatch-facing operation intent into the real, resolved operation ae-edit-bridge.ts expects - see resolve-scene-edit-operation.ts. Called lazily, once per still-pending operation, never for the whole array up front (an asset download only ever happens for the operation about to actually run). */
+export type ResolveOperation = (intent: SceneEditOperationIntent) => Promise<ResolveSceneEditOperationResult>;
+
 export interface SceneEditExecutorDeps {
   workRoot: string;
   aeEditBridge: AeEditBridge;
   previewCapture: PreviewCapture;
   persistCheckpoint: PersistCheckpoint;
+  resolveOperation: ResolveOperation;
   now: () => Date;
 }
 
@@ -100,30 +105,10 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: strin
     });
   }
 
-  // Defense in depth: the worker derives its own working-copy path from
-  // (workRoot, jobId) - never trusts a raw filesystem path from the
-  // request. If the caller's own record of that path disagrees, that is
-  // a real inconsistency worth failing loudly on rather than silently
-  // preferring either value.
-  if (workingCopy.workingProjectPath !== request.workingProjectPath) {
-    checkpoint = markFailed(
-      checkpoint,
-      `workingProjectPath mismatch: the worker's own deterministic path (${workingCopy.workingProjectPath}) does not match the request's workingProjectPath (${request.workingProjectPath})`,
-      deps.now()
-    );
-    return finish({
-      sourceProjectSha256: workingCopy.sourceProjectSha256,
-      workingProjectPath: workingCopy.workingProjectPath,
-      workingProjectSha256: workingCopy.workingProjectSha256,
-      previewFramePath: null,
-      previewTimestampSeconds: null
-    });
-  }
-
   let pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
   while (pendingIndex !== null) {
-    const operation = request.operations[pendingIndex];
-    if (!operation) {
+    const intent = request.operations[pendingIndex];
+    if (!intent) {
       checkpoint = markFailed(checkpoint, `internal error: no operation exists at index ${pendingIndex}`, deps.now());
       return finish({
         sourceProjectSha256: workingCopy.sourceProjectSha256,
@@ -135,6 +120,23 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, jobId: strin
     }
 
     checkpoint = { ...checkpoint, checkpointBeforeAt: deps.now().toISOString() };
+
+    // Resolved lazily, right before this exact operation runs - a
+    // MAP_FOOTAGE intent's asset download/verification only ever happens
+    // for the operation about to actually be applied, never speculatively
+    // for the whole array up front (see resolve-scene-edit-operation.ts).
+    const resolved = await deps.resolveOperation(intent);
+    if (!resolved.ok) {
+      checkpoint = markFailed(checkpoint, `operation ${pendingIndex} (${intent.type}) could not be resolved: ${resolved.reason}`, deps.now());
+      return finish({
+        sourceProjectSha256: workingCopy.sourceProjectSha256,
+        workingProjectPath: workingCopy.workingProjectPath,
+        workingProjectSha256: workingCopy.workingProjectSha256,
+        previewFramePath: null,
+        previewTimestampSeconds: null
+      });
+    }
+    const operation = resolved.operation;
 
     const outcome = await deps.aeEditBridge.applyOperation({
       aeProjectItemIndex: request.aeProjectItemIndex,

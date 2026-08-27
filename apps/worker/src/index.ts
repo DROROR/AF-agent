@@ -17,6 +17,7 @@ import { RealAerenderRunner, NotAvailableAerenderRunner } from "./execution/rend
 import { HeroicSwanCompositionVerifier, NotAvailableCompositionVerifier } from "./execution/render/verify-render-composition.js";
 import { HeroicSwanRenderCapabilitiesInspector, NotAvailableRenderCapabilitiesInspector } from "./execution/render/inspect-render-capabilities.js";
 import { HeroicSwanRenderArtifactUploader } from "./execution/render/upload-render-artifact.js";
+import { HeroicSwanAssetDownloadClient } from "./execution/resolve-scene-edit-operation.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
@@ -160,6 +161,9 @@ async function main(): Promise<void> {
   // already-rendered bytes to the API needs only this worker's own
   // credentials (already resolved above), never ae-mcp/aerender.
   const artifactUploader = new HeroicSwanRenderArtifactUploader(apiClient, credentials.workerId, credentials.workerToken);
+  // Same reasoning - MAP_FOOTAGE's asset delivery only needs this worker's
+  // own credentials, never ae-mcp/aerender.
+  const assetDownloadClient = new HeroicSwanAssetDownloadClient(apiClient, credentials.workerId, credentials.workerToken);
 
   // The last CONFIRMED (server round-tripped) aeStatus/mcpStatus, updated
   // only on a successful heartbeat - the safety gate INSPECT_TEMPLATE
@@ -189,6 +193,7 @@ async function main(): Promise<void> {
               ),
             aeEditBridge,
             previewCapture,
+            assetDownloadClient,
             aerenderPath: env.aerenderPath,
             aerenderRunner,
             compositionVerifier,

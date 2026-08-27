@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectRenderSettingsTab } from "./ProjectRenderSettingsTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import { PROJECT_ID, SOURCE_SHA, manifestFixture, planFixture, projectDtoFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
 
@@ -11,6 +12,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+const NO_WORKERS_STATUS = { "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } } };
+
+function workerWithCapabilities(capabilities: string[]) {
+  return {
+    workerId: "44444444-4444-4444-4444-444444444444",
+    name: "worker-a",
+    status: "ONLINE",
+    lastHeartbeatAt: new Date().toISOString(),
+    aeStatus: "ONLINE",
+    mcpStatus: "ONLINE",
+    aeVersion: "26.0",
+    capabilities,
+    maxConcurrency: 1,
+    currentJobId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
 
 function manifestWithCompositions() {
   return {
@@ -24,6 +44,7 @@ function manifestWithCompositions() {
 
 function stubWorkspace(planOverrides: Record<string, unknown> = {}, manifest = manifestWithCompositions()): void {
   stubFetchByUrl({
+    ...NO_WORKERS_STATUS,
     [`/api/projects/${PROJECT_ID}/execution-plan/render-outputs`]: { status: 200, body: { plan: planFixture(planOverrides), sceneTable: [] } },
     [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(planOverrides), sceneTable: [] } },
     [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest } }
@@ -32,9 +53,11 @@ function stubWorkspace(planOverrides: Record<string, unknown> = {}, manifest = m
 
 function renderTab(): void {
   renderWithLocale(
-    <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <ProjectRenderSettingsTab />
-    </ProjectWorkspaceProvider>
+    <DashboardStatusProvider>
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <ProjectRenderSettingsTab />
+      </ProjectWorkspaceProvider>
+    </DashboardStatusProvider>
   );
 }
 
@@ -62,6 +85,7 @@ describe("ProjectRenderSettingsTab", () => {
   it("saves a configuration and shows the configured-at confirmation", async () => {
     const configuredAt = "2026-08-27T00:00:00.000Z";
     stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan/render-outputs/LANDSCAPE`]: {
         status: 200,
         body: {
@@ -120,12 +144,101 @@ describe("ProjectRenderSettingsTab", () => {
     await screen.findByText("This configuration is stale");
   });
 
+  it("disables Inspect Render Capabilities and Render with an honest reason when no worker is available", async () => {
+    stubWorkspace({
+      renderOutputs: {
+        LANDSCAPE: {
+          manifestCompositionId: "comp-landscape",
+          aeProjectItemIndex: 3,
+          compositionName: "Landscape Master",
+          sourceProjectSha256: SOURCE_SHA,
+          renderSettingsTemplateName: "Best Settings",
+          outputModuleTemplateName: "H.264 - Match Source",
+          configuredAt: new Date().toISOString()
+        },
+        REELS: null
+      }
+    });
+    renderTab();
+    await screen.findAllByText("No worker available");
+    expect((screen.getByRole("button", { name: "Inspect Render Capabilities" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getAllByRole("button", { name: "Render" })[0] as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("dispatches INSPECT_RENDER_CAPABILITIES when a capable worker is available, and shows the real queued job id", async () => {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [workerWithCapabilities(["INSPECT_RENDER_CAPABILITIES"])] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      "/api/jobs": {
+        status: 201,
+        body: {
+          jobId: "66666666-6666-6666-6666-666666666666",
+          workerId: "44444444-4444-4444-4444-444444444444",
+          operation: "INSPECT_RENDER_CAPABILITIES",
+          status: "QUEUED",
+          createdAt: new Date().toISOString()
+        }
+      }
+    });
+    renderTab();
+    const button = await screen.findByRole("button", { name: "Inspect Render Capabilities" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await screen.findByText(/66666666-6666-6666-6666-666666666666/);
+  });
+
+  it("dispatches RENDER for a configured, non-stale variant when a capable worker is available", async () => {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [workerWithCapabilities(["RENDER"])] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: {
+          plan: planFixture({
+            renderOutputs: {
+              LANDSCAPE: {
+                manifestCompositionId: "comp-landscape",
+                aeProjectItemIndex: 3,
+                compositionName: "Landscape Master",
+                sourceProjectSha256: SOURCE_SHA,
+                renderSettingsTemplateName: "Best Settings",
+                outputModuleTemplateName: "H.264 - Match Source",
+                configuredAt: new Date().toISOString()
+              },
+              REELS: null
+            }
+          }),
+          sceneTable: []
+        }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      "/api/jobs": {
+        status: 201,
+        body: {
+          jobId: "77777777-7777-7777-7777-777777777777",
+          workerId: "44444444-4444-4444-4444-444444444444",
+          operation: "RENDER",
+          status: "QUEUED",
+          createdAt: new Date().toISOString()
+        }
+      }
+    });
+    renderTab();
+    await screen.findAllByRole("button", { name: "Render" });
+    await waitFor(() => expect((screen.getAllByRole("button", { name: "Render" })[0] as HTMLButtonElement).disabled).toBe(false));
+    const renderButtons = screen.getAllByRole("button", { name: "Render" });
+    fireEvent.click(renderButtons[0]!);
+    await screen.findByText(/77777777-7777-7777-7777-777777777777/);
+  });
+
   it("renders in Hebrew when the active locale is he - real translated strings, not English fallback text", async () => {
     stubWorkspace({}, manifestFixture());
     renderWithLocale(
-      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-        <ProjectRenderSettingsTab />
-      </ProjectWorkspaceProvider>,
+      <DashboardStatusProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <ProjectRenderSettingsTab />
+        </ProjectWorkspaceProvider>
+      </DashboardStatusProvider>,
       { locale: "he" }
     );
     const titles = await screen.findAllByText("אין קומפוזיציות זמינות");

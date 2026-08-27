@@ -7,6 +7,7 @@ import type { ProjectRepository } from "../domain/project/types.js";
 import type { SceneEvidenceRepository } from "../domain/scene-evidence/types.js";
 import type { RenderArtifactRepository } from "../domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "../domain/render-artifact-upload/types.js";
+import type { AssetRepository } from "../domain/asset/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { UnauthorizedError } from "../errors/app-error.js";
 import { extractBearerToken } from "../infrastructure/auth/bearer-token.js";
@@ -19,11 +20,15 @@ import { reportJobStatus } from "../application/job/report-job-status.js";
 import { reportJobCheckpoint } from "../application/job/report-job-checkpoint.js";
 import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene-evidence.js";
 import { recordRenderArtifactIfApplicable } from "../application/job/record-render-artifact.js";
+import { recordExecuteFrameResultIfApplicable } from "../application/job/record-execute-frame-result.js";
+import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 
 export interface JobsRouteDeps {
   jobRepository: JobRepository;
   workerRepository: WorkerRepository;
   projectRepository: ProjectRepository;
+  executionPlanRepository: ExecutionPlanRepository;
+  assetRepository: AssetRepository;
   sceneEvidenceRepository: SceneEvidenceRepository;
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
@@ -75,6 +80,8 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
         jobRepository: deps.jobRepository,
         workerRepository: deps.workerRepository,
         projectRepository: deps.projectRepository,
+        executionPlanRepository: deps.executionPlanRepository,
+        assetRepository: deps.assetRepository,
         now,
         staleAfterMs: deps.staleAfterMs
       },
@@ -125,6 +132,8 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
       { renderArtifactRepository: deps.renderArtifactRepository, renderArtifactUploadRepository: deps.renderArtifactUploadRepository, now },
       dto
     );
+    // Same "best-effort side effect" contract - see record-execute-frame-result.ts's own doc comment.
+    await recordExecuteFrameResultIfApplicable({ executionPlanRepository: deps.executionPlanRepository, now }, dto);
     reply.send(dto);
   });
 

@@ -63,7 +63,6 @@ function request(overrides: Partial<ExecuteSceneEditRequest> = {}): ExecuteScene
     planRevision: 1,
     sourceProjectSha256: SHA,
     sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
-    workingProjectPath: "C:\\vidio agent\\DYO-Working\\White App Promo (converted)-DYO-Working-v001.aep",
     scenePlanId: "scene-1",
     manifestCompositionId: "comp-275",
     aeProjectItemIndex: 14,
@@ -115,7 +114,11 @@ describe("validateSceneEditPreconditions", () => {
           sourceProjectSha256: SHA,
           scenePlans: [scene({ mappings: [mapping({ selectedAssetId: null })] })]
         },
-        request: request({ operations: [{ type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/assets/clip.mp4" }] })
+        request: request({
+          operations: [
+            { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetId: "22222222-2222-2222-2222-222222222222", expectedSha256: "c".repeat(64), mimeType: "video/mp4" }
+          ]
+        })
       })
     );
     expect(result.ok).toBe(false);
@@ -133,13 +136,6 @@ describe("validateSceneEditPreconditions", () => {
 
   it("rejects when the project's CURRENT manifest sha256 no longer matches (source project changed)", () => {
     const result = validateSceneEditPreconditions(baseInput({ currentProjectSourceProjectSha256: "b".repeat(64) }));
-    expect(result.ok).toBe(false);
-  });
-
-  it("rejects when workingProjectPath equals sourceProjectPath", () => {
-    const result = validateSceneEditPreconditions(
-      baseInput({ request: request({ workingProjectPath: "C:\\vidio agent\\White App Promo (converted).aep" }) })
-    );
     expect(result.ok).toBe(false);
   });
 

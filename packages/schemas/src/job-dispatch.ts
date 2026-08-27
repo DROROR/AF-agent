@@ -2,6 +2,8 @@ import { z } from "zod";
 import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import { sceneEvidenceRequestSchema } from "./scene-evidence.js";
+import { inspectRenderCapabilitiesRequestSchema } from "./inspect-render-capabilities.js";
+import { renderOutputVariantSchema } from "./render-project.js";
 import { jobStatusSchema } from "./job.js";
 
 /**
@@ -13,7 +15,14 @@ import { jobStatusSchema } from "./job.js";
  * Rule 2 ("never execute arbitrary AI-generated JSX... only tested,
  * versioned, allowlisted scripts/operations").
  */
-export const DISPATCHABLE_OPERATIONS = ["INSPECT_TEMPLATE", "CHECK_HEALTH", "INSPECT_SCENE_EVIDENCE"] as const;
+export const DISPATCHABLE_OPERATIONS = [
+  "INSPECT_TEMPLATE",
+  "CHECK_HEALTH",
+  "INSPECT_SCENE_EVIDENCE",
+  "INSPECT_RENDER_CAPABILITIES",
+  "EXECUTE_FRAME",
+  "RENDER"
+] as const;
 export type DispatchableOperation = (typeof DISPATCHABLE_OPERATIONS)[number];
 export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
 
@@ -25,6 +34,21 @@ export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
  * object - no command string, no path, no arbitrary field is ever
  * accepted for it. Defense in depth alongside create-job.ts's own
  * validateJobPayload() call, which validates again independently.
+ *
+ * EXECUTE_FRAME/RENDER deliberately carry NO `payload` field at all -
+ * unlike INSPECT_TEMPLATE/CHECK_HEALTH/INSPECT_SCENE_EVIDENCE (whose
+ * payloads are still accepted directly from the caller, an earlier,
+ * looser precedent this activation phase does not touch), these two
+ * accept ONLY a minimal, non-addressing intent (`scenePlanId` /
+ * `variant`) - the real worker-facing ExecuteSceneEditRequest/
+ * RenderProjectRequest (Windows paths, composition indices, JSX
+ * operations, aerender template names) is entirely SERVER-RESOLVED from
+ * trusted persisted state (see resolve-execute-frame-dispatch.ts/
+ * resolve-render-dispatch.ts), never accepted from a browser/API caller
+ * (activation-phase sections 2-4: "browser/API callers must NOT provide
+ * raw worker payloads"). INSPECT_RENDER_CAPABILITIES needs no project/
+ * scene context at all - its payload is a fixed empty object, identical
+ * in spirit to CHECK_HEALTH's.
  */
 export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
   z.object({
@@ -48,7 +72,28 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
      */
     projectId: z.string().uuid(),
     payload: sceneEvidenceRequestSchema
-  })
+  }),
+  z.object({
+    operation: z.literal("INSPECT_RENDER_CAPABILITIES"),
+    workerId: z.string().uuid(),
+    payload: inspectRenderCapabilitiesRequestSchema
+  }),
+  z
+    .object({
+      operation: z.literal("EXECUTE_FRAME"),
+      workerId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      scenePlanId: z.string().min(1)
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("RENDER"),
+      workerId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      variant: renderOutputVariantSchema
+    })
+    .strict()
 ]);
 export type DispatchJobRequest = z.infer<typeof dispatchJobRequestSchema>;
 
