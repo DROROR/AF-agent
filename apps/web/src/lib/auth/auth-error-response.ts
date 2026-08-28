@@ -21,3 +21,19 @@ export function validationErrorResponse(message: string): NextResponse {
   const body: ErrorResponse = { error: { code: "VALIDATION_ERROR", message, requestId: randomUUID() } };
   return NextResponse.json(body, { status: 400 });
 }
+
+/**
+ * Login-only mode (see lib/feature-flags.ts) - a purely web-app-local
+ * refusal that never reaches the Fastify API at all, so "SIGNUP_DISABLED"
+ * is deliberately not part of @dyo/schemas' own ErrorCode enum (that
+ * enum is for errors the API itself can return - see its own doc
+ * comment). Shaped the same as every other auth error response anyway
+ * (error.code/message/requestId) since translateServerErrorCode reads
+ * `code` as a loose string, not the strict enum type.
+ */
+export function signupDisabledResponse(): NextResponse {
+  return NextResponse.json(
+    { error: { code: "SIGNUP_DISABLED", message: "Signup is temporarily disabled", requestId: randomUUID() } },
+    { status: 403 }
+  );
+}

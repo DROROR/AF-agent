@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { signUpRequestSchema, userFacingAuthResponseSchema } from "@dyo/schemas";
 import { getApiBaseUrl } from "../../../../lib/api-base-url";
 import { signUpRequest } from "../../../../lib/auth/auth-api-client";
-import { toErrorResponse, validationErrorResponse } from "../../../../lib/auth/auth-error-response";
+import { signupDisabledResponse, toErrorResponse, validationErrorResponse } from "../../../../lib/auth/auth-error-response";
 import { sessionCookieOptions, SESSION_COOKIE_NAME } from "../../../../lib/auth/session-cookie";
+import { SIGNUP_ENABLED } from "../../../../lib/feature-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,16 @@ export const dynamic = "force-dynamic";
  * entirely - it only ever leaves this handler as an HttpOnly cookie, never
  * in a response a client script could read (CLAUDE.md: "no auth token
  * stored in localStorage").
+ *
+ * Login-only mode (see lib/feature-flags.ts): gated here too, not just on
+ * the page - a direct POST (bypassing the UI entirely) must never create
+ * an account while Signup is disabled.
  */
 export async function POST(request: Request): Promise<NextResponse> {
+  if (!SIGNUP_ENABLED) {
+    return signupDisabledResponse();
+  }
+
   const rawBody: unknown = await request.json().catch(() => null);
   const parsed = signUpRequestSchema.safeParse(rawBody);
   if (!parsed.success) {

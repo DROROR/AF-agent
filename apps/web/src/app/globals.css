@@ -1333,19 +1333,30 @@ thead th {
   inset-inline-end: var(--space-5);
 }
 
-/* Premium glass panel: the background photo stays faintly visible through
-   the card (backdrop-filter), not hidden behind a solid surface color. */
+/* Premium dark frosted-glass panel - deliberately the SAME translucent
+   dark treatment regardless of the light/dark theme toggle (unlike every
+   other surface in the app): the background photo is a fixed dark/neon
+   image that never changes with theme, so a card that flipped to an
+   opaque white surface in light mode looked inconsistent against it.
+   Translucent enough that the photo stays visible through and around the
+   card (backdrop-filter, never a solid fill); the border and shadow are
+   deliberately subtle - no colored/heavy glow. Text/inputs inside are
+   styled explicitly for this fixed dark surface below, not via the
+   theme-driven --color-text tokens (those still flip with the toggle and
+   would go invisible against a card that no longer does). */
 .auth-shell__card {
   position: relative;
   z-index: 1;
   width: 100%;
   max-width: 27rem;
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(18px) saturate(120%);
-  -webkit-backdrop-filter: blur(18px) saturate(120%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(16, 20, 32, 0.55);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-lg);
-  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 24px 60px -24px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   padding: var(--space-8) var(--space-6);
   display: flex;
   flex-direction: column;
@@ -1382,16 +1393,20 @@ thead th {
   object-fit: contain;
 }
 
+/* Fixed light text on the fixed dark glass card (see .auth-shell__card's
+   own doc comment) - deliberately not the theme-driven --color-text
+   tokens, which flip to dark-on-light in light mode and would be
+   unreadable here. */
 .auth-shell__title {
   font-size: 1.15rem;
   font-weight: 650;
-  color: var(--color-text);
+  color: rgba(255, 255, 255, 0.95);
   text-align: center;
 }
 
 .auth-shell__subtitle {
   font-size: 0.82rem;
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.68);
   text-align: center;
   margin-bottom: var(--space-5);
 }
@@ -1399,12 +1414,12 @@ thead th {
 .auth-shell__switch {
   margin-top: var(--space-5);
   font-size: 0.82rem;
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.68);
   text-align: center;
 }
 
 .auth-shell__switch a {
-  color: var(--brand-primary);
+  color: var(--brand-accent);
   font-weight: 600;
   text-decoration: none;
 }
@@ -1440,12 +1455,12 @@ thead th {
   align-items: center;
   gap: var(--space-2);
   font-size: 0.8rem;
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.68);
 }
 
 .auth-form__pending-link {
   font-size: 0.8rem;
-  color: var(--color-text-faint);
+  color: rgba(255, 255, 255, 0.45);
   cursor: not-allowed;
 }
 
@@ -1455,27 +1470,38 @@ thead th {
   margin-top: var(--space-1);
 }
 
-/* Glass-matched inputs: slightly transparent, not the opaque surface used
-   elsewhere in the app - scoped to .auth-form so no other page is affected. */
+/* Field label/hint text on the fixed dark glass card - scoped to
+   .auth-form so no other page's fields are affected. */
+.auth-form .field__label {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.auth-form .field__hint {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Glass-matched inputs: translucent against the fixed dark card,
+   deliberately not the theme-driven surface tokens used elsewhere in the
+   app - scoped to .auth-form so no other page is affected. */
 .auth-form .input {
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  border-color: rgba(255, 255, 255, 0.4);
-  color: var(--color-text);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .auth-form .input::placeholder {
-  color: var(--color-text-muted);
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .auth-form .input:hover {
-  border-color: rgba(255, 255, 255, 0.55);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .auth-form .input:focus-visible {
-  border-color: var(--brand-primary);
-  box-shadow: 0 0 0 3px rgba(38, 64, 140, 0.18);
+  border-color: var(--brand-accent);
+  box-shadow: 0 0 0 3px rgba(111, 214, 209, 0.25);
 }
 
 @media (max-width: 480px) {
@@ -1488,58 +1514,18 @@ thead th {
   }
 }
 
+/* The background photo's own readability overlay still deepens slightly
+   in dark mode (unchanged - the photo itself and this overlay are
+   untouched by the glass-card work above); the card, its text, and its
+   inputs are the same fixed dark-glass treatment either way. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .auth-shell::before {
     background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/brand/auth-background.png");
-  }
-
-  :root:not([data-theme="light"]) .auth-shell__card {
-    background: rgba(10, 14, 20, 0.48);
-    border-color: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.6);
-  }
-
-  :root:not([data-theme="light"]) .auth-form .input {
-    background: rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    border-color: rgba(255, 255, 255, 0.14);
-  }
-
-  :root:not([data-theme="light"]) .auth-form .input:hover {
-    border-color: rgba(255, 255, 255, 0.22);
-  }
-
-  :root:not([data-theme="light"]) .auth-form .input:focus-visible {
-    border-color: var(--brand-primary);
-    box-shadow: 0 0 0 3px rgba(74, 108, 212, 0.28);
   }
 }
 
 :root[data-theme="dark"] .auth-shell::before {
   background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/brand/auth-background.png");
-}
-
-:root[data-theme="dark"] .auth-shell__card {
-  background: rgba(10, 14, 20, 0.48);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.6);
-}
-
-:root[data-theme="dark"] .auth-form .input {
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-:root[data-theme="dark"] .auth-form .input:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-:root[data-theme="dark"] .auth-form .input:focus-visible {
-  border-color: var(--brand-primary);
-  box-shadow: 0 0 0 3px rgba(74, 108, 212, 0.28);
 }
 
 /* ==========================================================================

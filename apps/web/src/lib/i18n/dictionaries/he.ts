@@ -92,6 +92,7 @@ export const he: Dictionary = {
       invalidCredentials: "אימייל או סיסמה שגויים",
       emailAlreadyExists: "כבר קיים חשבון עם כתובת אימייל זו",
       tooManyAttempts: "יותר מדי ניסיונות. יש להמתין רגע ולנסות שוב.",
+      signupDisabled: "ההרשמה מושבתת זמנית.",
       somethingWentWrong: "משהו השתבש. נסו שוב."
     }
   },

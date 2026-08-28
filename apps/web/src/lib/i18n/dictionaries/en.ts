@@ -98,6 +98,7 @@ export const en = {
       invalidCredentials: "Invalid email or password",
       emailAlreadyExists: "An account with this email already exists",
       tooManyAttempts: "Too many attempts. Please wait a moment and try again.",
+      signupDisabled: "Signup is temporarily disabled.",
       somethingWentWrong: "Something went wrong. Please try again."
     }
   },

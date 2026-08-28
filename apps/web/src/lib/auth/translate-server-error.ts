@@ -17,6 +17,8 @@ export function translateServerErrorCode(code: string | undefined, errors: AuthE
       return errors.tooManyAttempts;
     case "VALIDATION_ERROR":
       return errors.invalidValue;
+    case "SIGNUP_DISABLED":
+      return errors.signupDisabled;
     default:
       return errors.somethingWentWrong;
   }
