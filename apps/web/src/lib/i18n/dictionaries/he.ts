@@ -135,55 +135,50 @@ export const he: Dictionary = {
   },
   projectsNew: {
     title: "פרויקט חדש",
-    description: "הגדירו פרויקט הפקת וידאו חדש. שום דבר כאן עדיין לא נשמר.",
+    description: "צרו פרויקט על ידי בדיקת תבנית After Effects אמיתית וללא תוספים על עובד מחובר.",
     stepperLabel: "שלבי הגדרת הפרויקט",
     steps: {
       details: "פרטי הפרויקט",
-      template: "תבנית",
-      "work-map": "מפת עבודה",
-      assets: "נכסים",
-      inspection: "בדיקת תבנית",
-      scenes: "טבלת סצנות",
-      review: "בדיקה / אישור",
-      render: "רינדור"
+      template: "בדיקת תבנית"
     },
-    submitForApproval: "שליחה לאישור",
-    submitDisabledTitle: "קליטת הפרויקט אינה מחוברת עדיין לשרת",
     fields: {
       projectName: "שם הפרויקט",
-      projectNamePlaceholder: "לדוגמה: Cognetica - השקת אביב",
-      client: "לקוח",
-      clientPlaceholder: "לדוגמה: Cognetica",
-      orientation: "כיוון",
-      orientationHint: "פלט לרוחב ופלט Reels אנכי (1080x1920) מופקים שניהם מאותו פרויקט.",
-      orientationBoth: "לרוחב + Reels",
-      orientationLandscape: "לרוחב בלבד",
-      orientationReels: "Reels בלבד"
+      projectNamePlaceholder: "לדוגמה: Cognetica - השקת אביב"
     },
     template: {
-      title: "ספריית התבניות אינה מחוברת עדיין",
-      description: "לאחר שקליטת תבניות תהיה זמינה בצד השרת, תבניות Envato מאושרות יהיו ניתנות לבחירה כאן."
-    },
-    workMap: {
-      title: "העלאת מפת העבודה אינה מחוברת עדיין",
-      description: "שלב זה יקבל את מפת הנכסים/הטקסט של הלקוח לאחר שקיים API לקליטה."
-    },
-    assets: {
-      title: "העלאת נכסים אינה מחוברת עדיין",
-      description: "תמונות, סרטונים ולוגואים שסופקו על ידי הלקוח יצורפו לפרויקט כאן."
-    },
-    inspection: {
-      title: "בדיקת התבנית טרם בוצעה עבור פרויקט זה",
-      description:
-        "INSPECT_TEMPLATE מחובר מקצה לקצה בעובד האמיתי (ראו עובדים), אך תהליך קליטת הפרויקט הזה עדיין אינו שולח משימה אוטומטית. התוצאות יאכלסו את template-manifest.json כאן לאחר שזה יקרה."
-    },
-    review: {
-      title: "שערי האישור אינם מחוברים עדיין",
-      description: "אישורי תוכנית הסצנות, הפריים הראשון, המיתוג והתצוגה המקדימה המלאה יופיעו כאן - ראו את עמוד האישורים לאותם שערים."
-    },
-    render: {
-      title: "שליחת הרינדור אינה מחוברת עדיין",
-      description: "משימות רינדור לרוחב ו-Reels יופעלו ויעקבו כאן לאחר שצינור הרינדור יחובר לפרויקט - ראו את עמוד הרינדורים."
+      workerLabel: "עובד",
+      workerPlaceholder: "בחרו עובד מחובר...",
+      noWorkersTitle: "אף עובד אינו מדווח על יכולת INSPECT_TEMPLATE",
+      noWorkersDescription: "רשמו/עדכנו עובד עם יכולת זו לפני יצירת פרויקט - ראו עובדים.",
+      workerStatusLabel: "סטטוס עובד",
+      aeStatusLabel: "After Effects",
+      mcpStatusLabel: "גשר ae-mcp",
+      templateIdLabel: "מזהה תבנית",
+      templateIdPlaceholder: "לדוגמה: white-app-promo-v1",
+      sourceProjectPathLabel: "נתיב פרויקט המקור (על מחשב העובד)",
+      sourceProjectPathPlaceholder: "לדוגמה: C:\\DYO-Agent\\copies\\template.aep",
+      sourceProjectPathHint: "חייב להצביע על עותק של קובץ ה-.aep, לעולם לא הקובץ המקורי - העובד לעולם אינו דורס את המקור.",
+      inspectAction: "בדיקת תבנית",
+      inspecting: "שולח…",
+      statusQueued: "בתור אצל העובד - ממתין שיאסוף את המשימה.",
+      statusClaimed: "נאסף על ידי העובד - יתחיל בקרוב.",
+      statusRunning: "בודק את התבנית האמיתית על העובד כעת...",
+      statusWaiting: "ממתין לפעולה נדרשת לפני שניתן להמשיך.",
+      inspectionFailedTitle: "הבדיקה נכשלה",
+      resultTitle: "תוצאת הבדיקה",
+      resultCompositions: "קומפוזיציות",
+      resultScenes: "סצנות מועמדות",
+      resultPlaceholders: "פלייסהולדרים ניתנים לעריכה",
+      resultNested: "קומפוזיציות מקוננות",
+      resultFonts: "גופנים נדרשים",
+      resultFootage: "פוטג' שהופנה",
+      resultMissingFootage: "פוטג' חסר",
+      resultPlugins: "הפניות לתוספים",
+      resultUnknown: "פריטים לא פתורים/מוגבלים",
+      createProjectAction: "יצירת פרויקט",
+      creatingProject: "יוצר…",
+      createProjectFailedTitle: "לא ניתן היה ליצור את הפרויקט",
+      retryAction: "בדיקה נוספת"
     },
     stepNotAvailableTitle: "לא זמין",
     stepNotAvailableDescription: "שלב זה עדיין לא מומש."

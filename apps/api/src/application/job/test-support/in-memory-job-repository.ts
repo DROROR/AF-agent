@@ -31,6 +31,7 @@ export class InMemoryJobRepository implements JobRepository {
       id: job.id,
       workerId: job.workerId,
       projectId: job.projectId ?? null,
+      createdByUserId: job.createdByUserId ?? null,
       operation: job.operation,
       status: "QUEUED",
       payload: job.payload,

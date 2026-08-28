@@ -199,6 +199,37 @@ describe("dispatchJob", () => {
     expect(job?.status).toBe("QUEUED");
   });
 
+  it("persists the dispatching dashboard user's own id on the created job - the only ownership anchor a not-yet-project-bound job (INSPECT_TEMPLATE) has", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = await setupHealthyWorker(workerRepository);
+    const dispatchingUserId = "22222222-2222-2222-2222-222222222222";
+
+    const result = await dispatchJob(
+      deps(jobRepository, workerRepository),
+      { operation: "INSPECT_TEMPLATE", workerId, payload: PAYLOAD },
+      dispatchingUserId
+    );
+
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.createdByUserId).toBe(dispatchingUserId);
+  });
+
+  it("leaves createdByUserId null when no dispatching user is supplied", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const workerId = await setupHealthyWorker(workerRepository);
+
+    const result = await dispatchJob(deps(jobRepository, workerRepository), {
+      operation: "INSPECT_TEMPLATE",
+      workerId,
+      payload: PAYLOAD
+    });
+
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.createdByUserId).toBeNull();
+  });
+
   it("rejects a second dispatch while a live INSPECT_TEMPLATE job already exists for this worker (double-submit protection)", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);

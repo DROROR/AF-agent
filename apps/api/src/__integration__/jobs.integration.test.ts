@@ -681,6 +681,164 @@ describe("POST /api/jobs (dispatch)", () => {
   });
 });
 
+describe("GET /api/jobs/:jobId", () => {
+  const validPayload = { templateId: "t1", sourceProjectPath: "/copies/t1.aep" };
+
+  it("rejects an unauthenticated request", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    const dispatched = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { operation: "INSPECT_TEMPLATE", workerId, payload: validPayload }
+    });
+    const { jobId } = dispatched.json();
+
+    const response = await harness.app.inject({ method: "GET", url: `/api/jobs/${jobId}` });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("returns the real QUEUED job for the dashboard user who dispatched it, never leaking a worker secret", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    const dispatched = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { operation: "INSPECT_TEMPLATE", workerId, payload: validPayload }
+    });
+    const { jobId } = dispatched.json();
+
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/jobs/${jobId}`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.job.jobId).toBe(jobId);
+    expect(body.job.status).toBe("QUEUED");
+    expect(body.job.operation).toBe("INSPECT_TEMPLATE");
+    expect(JSON.stringify(body)).not.toMatch(/token/i);
+  });
+
+  it("refuses a job dispatched by a DIFFERENT dashboard user with a 404 - never confirms it exists, never a 403", async () => {
+    const { workerId } = await registerHealthyWorker(harness.app);
+    const dispatched = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { operation: "INSPECT_TEMPLATE", workerId, payload: validPayload }
+    });
+    const { jobId } = dispatched.json();
+
+    const otherUserToken = await signUpAndGetSessionToken(harness.app);
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/jobs/${jobId}`,
+      headers: { authorization: `Bearer ${otherUserToken}` }
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("JOB_NOT_FOUND");
+  });
+
+  it("returns 404 for a genuinely nonexistent job id", async () => {
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/jobs/${randomUUID()}`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("JOB_NOT_FOUND");
+  });
+
+  it("reflects a real SUCCEEDED result (including source SHA inside the manifest) once the worker reports it - a real claim/report HTTP cycle, not a fabricated status", async () => {
+    const { workerId, workerToken } = await registerHealthyWorker(harness.app);
+    const dispatched = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { operation: "INSPECT_TEMPLATE", workerId, payload: validPayload }
+    });
+    const { jobId } = dispatched.json();
+
+    const claim = await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    expect(claim.json().job.jobId).toBe(jobId);
+
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "RUNNING" }
+    });
+
+    const fakeManifest = {
+      schemaVersion: SCHEMA_VERSION,
+      templateId: "t1",
+      templateName: "t1",
+      sourceProject: { path: "/copies/t1.aep", name: "t1.aep", sha256: "a".repeat(64) },
+      afterEffects: { version: "26.0" },
+      generatedAt: new Date().toISOString(),
+      compositions: [],
+      scenes: [],
+      preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+      unknownItems: []
+    };
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "SUCCEEDED", result: { manifest: fakeManifest, summary: { compositionCount: 0, candidateSceneCount: 0, editablePlaceholderCount: 0, nestedCompositionCount: 0, requiredFontCount: 0, footageReferencedCount: 0, missingFootageCount: 0, pluginReferenceCount: 0, unknownItemCount: 0 } } }
+    });
+
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/jobs/${jobId}`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.job.status).toBe("SUCCEEDED");
+    expect(body.job.result.manifest.sourceProject.sha256).toBe("a".repeat(64));
+  });
+
+  it("never lets a FAILED job masquerade as a successful inspection", async () => {
+    const { workerId, workerToken } = await registerHealthyWorker(harness.app);
+    const dispatched = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: { operation: "INSPECT_TEMPLATE", workerId, payload: validPayload }
+    });
+    const { jobId } = dispatched.json();
+
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "FAILED", error: { code: "TRANSPORT_ERROR", message: "bridge unreachable" } }
+    });
+
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/jobs/${jobId}`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    const body = response.json();
+    expect(body.job.status).toBe("FAILED");
+    expect(body.job.result).toBeNull();
+    expect(body.job.error).toEqual({ code: "TRANSPORT_ERROR", message: "bridge unreachable" });
+  });
+});
+
 describe("POST /api/jobs (dispatch) - CHECK_HEALTH", () => {
   function dispatch(body: Record<string, unknown>, token = sessionToken) {
     return harness.app.inject({

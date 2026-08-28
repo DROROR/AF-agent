@@ -11,6 +11,7 @@ export interface CreateJobDeps {
 export interface CreateJobRequest {
   workerId: string;
   projectId?: string | null;
+  createdByUserId?: string | null;
   operation: WorkerCapability;
   payload: unknown;
 }
@@ -35,6 +36,7 @@ export async function createJob(deps: CreateJobDeps, request: CreateJobRequest) 
       id: randomUUID(),
       workerId: request.workerId,
       projectId: request.projectId ?? null,
+      createdByUserId: request.createdByUserId ?? null,
       operation: request.operation,
       payload: validatedPayload
     },

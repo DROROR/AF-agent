@@ -4,9 +4,10 @@ import { templateManifestSchema } from "./template-manifest.js";
 /**
  * Request/response contract for the INSPECT_TEMPLATE worker operation
  * (already a recognized entry in WORKER_CAPABILITIES - see worker.ts).
- * This is the CONTRACT only - no job-dispatch transport exists yet to
- * actually deliver this request to a worker or return this response from
- * one. See docs/TEMPLATE-INSPECTOR.md.
+ * Dispatched via POST /api/jobs (dispatch-job.ts) and its result read back
+ * via GET /api/jobs/:jobId (get-job-for-user.ts) - a SUCCEEDED job's own
+ * `result` field validates against inspectTemplateResponseSchema below.
+ * See docs/TEMPLATE-INSPECTOR.md.
  */
 
 export const inspectTemplateRequestSchema = z.object({

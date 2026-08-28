@@ -47,6 +47,12 @@ const AE_MCP_DEPENDENT_OPERATIONS = new Set<DispatchJobRequest["operation"]>([
  * (Phase 5 requirement: "Do not trust stale DB status alone"; see also
  * CLAUDE.md Safety Rule 9, "pause safely instead of endless retries").
  *
+ * `createdByUserId` (the caller's own session-authenticated id, never
+ * caller-supplied) is stored on the created job so a not-yet-project-bound
+ * operation (INSPECT_TEMPLATE/INSPECT_RENDER_CAPABILITIES) can still be
+ * read back safely later - see get-job-for-user.ts, the only place this
+ * field is ever read.
+ *
  * Actual job creation is delegated entirely to create-job.ts - this
  * function only decides whether it is safe to call it, it never inserts a
  * job row itself.
@@ -63,7 +69,7 @@ const AE_MCP_DEPENDENT_OPERATIONS = new Set<DispatchJobRequest["operation"]>([
  * resolveRenderDispatch (activation-phase sections 2-4: "no arbitrary
  * worker payload passthrough from the browser").
  */
-export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobRequest): Promise<DispatchJobResponse> {
+export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobRequest, createdByUserId: string | null = null): Promise<DispatchJobResponse> {
   await sweepStaleWorkers({ repository: deps.workerRepository, now: deps.now, staleAfterMs: deps.staleAfterMs });
 
   const worker = await deps.workerRepository.findById(request.workerId);
@@ -178,6 +184,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     {
       workerId: worker.id,
       projectId,
+      createdByUserId,
       operation: request.operation,
       payload
     }

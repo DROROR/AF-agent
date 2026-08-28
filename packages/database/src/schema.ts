@@ -131,6 +131,19 @@ export const jobs = pgTable(
       .references(() => workers.id, { onDelete: "cascade" }),
     /** Null for operations not bound to a project (e.g. CHECK_HEALTH) - see job-dispatch.ts. */
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    /**
+     * The dashboard user who dispatched this job via POST /api/jobs - null
+     * for jobs created any other way (there is currently no other way, but
+     * this stays nullable rather than assumed). This is the ONLY ownership
+     * anchor a dashboard-facing GET (see routes/jobs.ts's GET /api/jobs/:jobId)
+     * can use for INSPECT_TEMPLATE/INSPECT_RENDER_CAPABILITIES, which are
+     * dispatched before any project exists to scope access to instead - see
+     * get-job-for-user.ts. ON DELETE SET NULL (not cascade): a deleted
+     * user's own past job history is not deleted with them, it just becomes
+     * unreadable by that ownership check (same as it would be for anyone
+     * else who isn't them).
+     */
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     operation: text("operation").notNull().$type<WorkerCapability>(),
     status: text("status").notNull().default("QUEUED").$type<JobStatus>(),
     payload: jsonb("payload").notNull(),

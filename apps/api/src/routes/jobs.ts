@@ -16,6 +16,7 @@ import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
 import { claimNextJob } from "../application/job/claim-next-job.js";
 import { dispatchJob } from "../application/job/dispatch-job.js";
+import { getJobForUser } from "../application/job/get-job-for-user.js";
 import { reportJobStatus } from "../application/job/report-job-status.js";
 import { reportJobCheckpoint } from "../application/job/report-job-checkpoint.js";
 import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene-evidence.js";
@@ -42,6 +43,7 @@ export interface JobsRouteDeps {
 
 const workerIdParamsSchema = z.object({ workerId: z.string().uuid() });
 const jobParamsSchema = z.object({ workerId: z.string().uuid(), jobId: z.string().uuid() });
+const jobIdParamsSchema = z.object({ jobId: z.string().uuid() });
 
 /**
  * Worker job endpoints (claim/report) require the worker's own bearer
@@ -75,7 +77,7 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
    * busy, no duplicate live inspection) live in dispatch-job.ts, not here.
    */
   app.post("/api/jobs", async (request, reply) => {
-    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
     const body = dispatchJobRequestSchema.parse(request.body);
     const dto = await dispatchJob(
       {
@@ -88,9 +90,25 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
         now,
         staleAfterMs: deps.staleAfterMs
       },
-      body
+      body,
+      user.id
     );
     reply.status(201).send(dto);
+  });
+
+  /**
+   * The one dashboard-facing read of a job's own status/result - see
+   * get-job-for-user.ts for the ownership rule this enforces (only the
+   * user who dispatched it, via createdByUserId - never a worker's
+   * credentials, and never any other dashboard user). Primarily for
+   * polling an INSPECT_TEMPLATE/INSPECT_RENDER_CAPABILITIES job that has
+   * no project yet to scope access through.
+   */
+  app.get("/api/jobs/:jobId", async (request, reply) => {
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { jobId } = jobIdParamsSchema.parse(request.params);
+    const job = await getJobForUser({ jobRepository: deps.jobRepository }, user.id, jobId);
+    reply.send({ job });
   });
 
   app.post("/api/workers/:workerId/jobs/claim", async (request, reply) => {

@@ -39,4 +39,28 @@ describe("createJob", () => {
       )
     ).rejects.toThrow();
   });
+
+  it("persists createdByUserId when the caller supplies one", async () => {
+    const jobRepository = new InMemoryJobRepository();
+    const userId = randomUUID();
+    const job = await createJob(
+      { jobRepository, now: () => FIXED_NOW },
+      {
+        workerId: randomUUID(),
+        createdByUserId: userId,
+        operation: "INSPECT_TEMPLATE",
+        payload: { templateId: "tmpl-1", sourceProjectPath: "/copies/test.aep" }
+      }
+    );
+    expect(job.createdByUserId).toBe(userId);
+  });
+
+  it("defaults createdByUserId to null when the caller supplies none", async () => {
+    const jobRepository = new InMemoryJobRepository();
+    const job = await createJob(
+      { jobRepository, now: () => FIXED_NOW },
+      { workerId: randomUUID(), operation: "INSPECT_TEMPLATE", payload: { templateId: "tmpl-1", sourceProjectPath: "/copies/test.aep" } }
+    );
+    expect(job.createdByUserId).toBeNull();
+  });
 });

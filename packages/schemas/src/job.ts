@@ -92,6 +92,19 @@ export const claimJobResponseSchema = z.object({
 export type ClaimJobResponse = z.infer<typeof claimJobResponseSchema>;
 
 /**
+ * GET /api/jobs/:jobId (dashboard session) - see get-job-for-user.ts. The
+ * caller must check `status` before ever treating `result` as valid data:
+ * only "SUCCEEDED" means `result` is the operation's real output (e.g.
+ * InspectTemplateResponse for INSPECT_TEMPLATE) - QUEUED/CLAIMED/RUNNING
+ * carry no result yet, and FAILED/CANCELLED never carry a usable one
+ * regardless of what `result` happens to hold.
+ */
+export const getJobResponseSchema = z.object({
+  job: jobDtoSchema
+});
+export type GetJobResponse = z.infer<typeof getJobResponseSchema>;
+
+/**
  * POST /api/workers/:workerId/jobs/:jobId/report - a worker moving its own
  * claimed job forward. `status` must be one JOB_STATUS_TRANSITIONS allows
  * from the job's current status; the API re-validates this, it never trusts

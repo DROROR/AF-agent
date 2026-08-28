@@ -29,6 +29,7 @@ import {
   type WorkMapEntry,
   listRenderArtifactsResponseSchema,
   dispatchJobResponseSchema,
+  getJobResponseSchema,
   executionSessionResponseSchema,
   currentExecutionSessionResponseSchema,
   type RenderArtifactDto,
@@ -36,7 +37,8 @@ import {
   type SetRenderOutputConfigRequest,
   type DispatchJobRequest,
   type DispatchJobResponse,
-  type ExecutionSessionDto
+  type ExecutionSessionDto,
+  type JobDto
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -426,6 +428,27 @@ export async function dispatchJob(dispatchRequest: DispatchJobRequest): Promise<
     return { ok: false, status, code: null, message: "Response did not match the expected job-dispatch contract" };
   }
   return { ok: true, data: parsed.data };
+}
+
+/**
+ * The one dashboard-facing read of a job's own status/result (see
+ * routes/jobs.ts's GET /api/jobs/:jobId) - primarily for polling an
+ * INSPECT_TEMPLATE job dispatched from the New Project flow, which has no
+ * project yet to read progress through any other way. The server scopes
+ * this to the dashboard user who dispatched the job; a job that isn't
+ * theirs (or doesn't exist) comes back as a 404, same as any other
+ * not-found resource in this app.
+ */
+export async function fetchJobStatus(jobId: string): Promise<ApiResult<JobDto>> {
+  const { status, json } = await request(`/api/jobs/${encodeURIComponent(jobId)}`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = getJobResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected job-status contract" };
+  }
+  return { ok: true, data: parsed.data.job };
 }
 
 /**

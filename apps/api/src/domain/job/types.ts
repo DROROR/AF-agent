@@ -10,6 +10,8 @@ export interface Job {
   workerId: string;
   /** Null for operations not bound to a project (e.g. CHECK_HEALTH) - see job-dispatch.ts. */
   projectId: string | null;
+  /** The dashboard user who dispatched this job, or null - see schema.ts's own doc comment and get-job-for-user.ts. */
+  createdByUserId: string | null;
   operation: WorkerCapability;
   status: JobStatus;
   payload: unknown;
@@ -27,6 +29,7 @@ export interface NewJob {
   id: string;
   workerId: string;
   projectId?: string | null;
+  createdByUserId?: string | null;
   operation: WorkerCapability;
   payload: unknown;
 }

@@ -141,56 +141,50 @@ export const en = {
   },
   projectsNew: {
     title: "New project",
-    description: "Set up a new video production project. Nothing here is saved yet.",
+    description: "Create a project by inspecting a real, plugin-free After Effects template on a connected Worker.",
     stepperLabel: "Project setup steps",
     steps: {
       details: "Project details",
-      template: "Template",
-      "work-map": "Work map",
-      assets: "Assets",
-      inspection: "Template inspection",
-      scenes: "Scene table",
-      review: "Review / approval",
-      render: "Render"
+      template: "Inspect template"
     },
-    submitForApproval: "Submit for approval",
-    submitDisabledTitle: "Project intake is not yet connected to a backend",
     fields: {
       projectName: "Project name",
-      projectNamePlaceholder: "e.g. Cognetica - Spring launch",
-      client: "Client",
-      clientPlaceholder: "e.g. Cognetica",
-      orientation: "Orientation",
-      orientationHint: "Landscape and native 1080x1920 Reels are both produced from one project.",
-      orientationBoth: "Landscape + Reels",
-      orientationLandscape: "Landscape only",
-      orientationReels: "Reels only"
+      projectNamePlaceholder: "e.g. Cognetica - Spring launch"
     },
     template: {
-      title: "Template library is not connected yet",
-      description: "Once template intake exists server-side, approved Envato templates will be selectable here."
-    },
-    workMap: {
-      title: "Work map upload is not connected yet",
-      description: "This step will accept the client's asset/text work map once the intake API exists."
-    },
-    assets: {
-      title: "Asset upload is not connected yet",
-      description: "Client-supplied images, videos, and logos will be attached to the project here."
-    },
-    inspection: {
-      title: "Template inspection has not been run for this project",
-      description:
-        "INSPECT_TEMPLATE is wired end-to-end on the real worker (see Workers), but this project-intake flow does not yet dispatch a job automatically. Results will populate template-manifest.json here once it does."
-    },
-    review: {
-      title: "Approval gates are not connected yet",
-      description: "Scene plan, first frame, branding, and full-preview approvals will appear here - see the Approvals page for the same gates."
-    },
-    render: {
-      title: "Render dispatch is not connected yet",
-      description:
-        "Landscape and Reels render jobs will be started and tracked here once the render pipeline is wired to a project - see the Renders page."
+      workerLabel: "Worker",
+      workerPlaceholder: "Select a connected Worker...",
+      noWorkersTitle: "No Worker reports the INSPECT_TEMPLATE capability",
+      noWorkersDescription: "Register/update a Worker with this capability before creating a project - see Workers.",
+      workerStatusLabel: "Worker status",
+      aeStatusLabel: "After Effects",
+      mcpStatusLabel: "ae-mcp bridge",
+      templateIdLabel: "Template ID",
+      templateIdPlaceholder: "e.g. white-app-promo-v1",
+      sourceProjectPathLabel: "Source project path (on the Worker machine)",
+      sourceProjectPathPlaceholder: "e.g. C:\\DYO-Agent\\copies\\template.aep",
+      sourceProjectPathHint: "Must point to a COPY of the .aep, never the original file - the Worker never overwrites the original.",
+      inspectAction: "Inspect Template",
+      inspecting: "Dispatching…",
+      statusQueued: "Queued on the Worker - waiting for it to pick this up.",
+      statusClaimed: "Claimed by the Worker - starting shortly.",
+      statusRunning: "Inspecting the real template on the Worker now...",
+      statusWaiting: "Waiting on a required action before this can continue.",
+      inspectionFailedTitle: "Inspection failed",
+      resultTitle: "Inspection result",
+      resultCompositions: "Compositions",
+      resultScenes: "Candidate scenes",
+      resultPlaceholders: "Editable placeholders",
+      resultNested: "Nested compositions",
+      resultFonts: "Required fonts",
+      resultFootage: "Footage referenced",
+      resultMissingFootage: "Missing footage",
+      resultPlugins: "Plugin references",
+      resultUnknown: "Unresolved/degraded items",
+      createProjectAction: "Create Project",
+      creatingProject: "Creating…",
+      createProjectFailedTitle: "Could not create the project",
+      retryAction: "Inspect again"
     },
     stepNotAvailableTitle: "Not available",
     stepNotAvailableDescription: "This step is not yet implemented."
