@@ -21,6 +21,10 @@ function validMapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderM
     selectedAssetType: null,
     text: null,
     assetTimestamp: null,
+    colorHex: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
     mappingSource: "MANIFEST",
     confidence: null,
     createdAt: NOW,
@@ -138,5 +142,31 @@ describe("executionPlanSchema", () => {
 
   it("rejects an unrecognized plan status", () => {
     expect(() => executionPlanSchema.parse(validPlan({ status: "PENDING" as never }))).toThrow();
+  });
+
+  it("accepts the canonical #RRGGBB (uppercase) colorHex and rejects any non-canonical form - the persisted plan only ever stores the already-normalized value", () => {
+    expect(() => placeholderMappingSchema.parse(validMapping({ colorHex: "#1A2B3C" }))).not.toThrow();
+    expect(() => placeholderMappingSchema.parse(validMapping({ colorHex: "#1a2b3c" }))).toThrow(); // lowercase - not canonical
+    expect(() => placeholderMappingSchema.parse(validMapping({ colorHex: "1A2B3C" }))).toThrow(); // missing '#'
+    expect(() => placeholderMappingSchema.parse(validMapping({ colorHex: "#ABC" }))).toThrow(); // 3-digit shorthand - not canonical
+    expect(() => placeholderMappingSchema.parse(validMapping({ colorHex: "blue" }))).toThrow();
+  });
+
+  it("keeps colorHex/layerVisible/freezeAtSeconds/layerDurationSeconds as four distinct, independently-nullable operator-intent fields - never collapsed or defaulted", () => {
+    const mapping = validMapping({ colorHex: "#1A2B3C", layerVisible: false, freezeAtSeconds: 2.5, layerDurationSeconds: 4 });
+    const parsed = placeholderMappingSchema.parse(mapping);
+    expect(parsed.colorHex).toBe("#1A2B3C");
+    expect(parsed.layerVisible).toBe(false);
+    expect(parsed.freezeAtSeconds).toBe(2.5);
+    expect(parsed.layerDurationSeconds).toBe(4);
+  });
+
+  it("rejects a zero/negative layerDurationSeconds (must be positive, matching the worker's own SET_DURATION contract)", () => {
+    expect(() => placeholderMappingSchema.parse(validMapping({ layerDurationSeconds: 0 }))).toThrow();
+    expect(() => placeholderMappingSchema.parse(validMapping({ layerDurationSeconds: -1 }))).toThrow();
+  });
+
+  it("rejects a negative freezeAtSeconds", () => {
+    expect(() => placeholderMappingSchema.parse(validMapping({ freezeAtSeconds: -0.01 }))).toThrow();
   });
 });

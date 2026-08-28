@@ -148,6 +148,48 @@ describe("execution plan lifecycle", () => {
     expect(updated.plan.scenePlans[0]?.use).toBe(false);
   });
 
+  it("SET_LAYER_VISIBILITY resolves through the full stack: persists onto the correct mapping and bumps the revision", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = initial.plan.scenePlans[0]?.id as string;
+    const mappingId = initial.plan.scenePlans[0]?.mappings[0]?.id as string;
+
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_LAYER_VISIBILITY", scenePlanId: sceneId, mappingId, enabled: false }]
+    });
+    expect(updated.plan.revision).toBe(2);
+    expect(updated.plan.scenePlans[0]?.mappings[0]?.layerVisible).toBe(false);
+  });
+
+  it("rejects a stale baseRevision for one of the newly-resolvable operations too (SET_LAYER_VISIBILITY) - the same generic revision check applies to every operation type", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = initial.plan.scenePlans[0]?.id as string;
+    const mappingId = initial.plan.scenePlans[0]?.mappings[0]?.id as string;
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 999,
+        operations: [{ type: "SET_LAYER_VISIBILITY", scenePlanId: sceneId, mappingId, enabled: false }]
+      })
+    ).rejects.toThrow(StaleExecutionPlanRevisionError);
+  });
+
+  it("rejects SET_BRAND_COLOR against an unsupported (non-color-classified) target mapping through the full stack", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = initial.plan.scenePlans[0]?.id as string;
+    const mappingId = initial.plan.scenePlans[0]?.mappings[0]?.id as string; // this fixture's mapping is classified "text", not "color"
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 1,
+        operations: [{ type: "SET_BRAND_COLOR", scenePlanId: sceneId, mappingId, colorHex: "#1A2B3C" }]
+      })
+    ).rejects.toThrow(ExecutionPlanEditError);
+  });
+
   it("rejects an update whose edit operation references an unknown scenePlanId", async () => {
     const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);

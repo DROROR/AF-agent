@@ -28,6 +28,14 @@ export const EXECUTION_PLAN_EDIT_OPERATION_TYPES = [
   "CLEAR_FINAL_DURATION",
   "SET_INSTRUCTIONS",
   "CLEAR_INSTRUCTIONS",
+  "SET_BRAND_COLOR",
+  "CLEAR_BRAND_COLOR",
+  "SET_LAYER_VISIBILITY",
+  "CLEAR_LAYER_VISIBILITY",
+  "SET_TIME_REMAP_FREEZE",
+  "CLEAR_TIME_REMAP_FREEZE",
+  "SET_LAYER_DURATION",
+  "CLEAR_LAYER_DURATION",
   "APPROVE_SCENE",
   "REJECT_SCENE"
 ] as const;
@@ -106,6 +114,74 @@ const setFinalDurationSchema = z
   .strict();
 const clearFinalDurationSchema = z.object({ type: z.literal("CLEAR_FINAL_DURATION"), scenePlanId: z.string().min(1) }).strict();
 
+/** Accepts a 3- or 6-digit hex color, with or without a leading "#" - the operator-facing input is deliberately more forgiving than the canonical persisted form; apply-execution-plan-edit.ts normalizes it to #RRGGBB (uppercase) before it is ever written to a mapping (execution-plan.ts's own doc comment on colorHex). */
+const HEX_COLOR_INPUT_PATTERN = /^#?[0-9A-Fa-f]{3}$|^#?[0-9A-Fa-f]{6}$/;
+
+const setBrandColorSchema = z
+  .object({
+    type: z.literal("SET_BRAND_COLOR"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    colorHex: z.string().regex(HEX_COLOR_INPUT_PATTERN, "colorHex must be a 3 or 6 digit hex color, with or without a leading #")
+  })
+  .strict();
+const clearBrandColorSchema = z
+  .object({
+    type: z.literal("CLEAR_BRAND_COLOR"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
+const setLayerVisibilitySchema = z
+  .object({
+    type: z.literal("SET_LAYER_VISIBILITY"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    enabled: z.boolean()
+  })
+  .strict();
+const clearLayerVisibilitySchema = z
+  .object({
+    type: z.literal("CLEAR_LAYER_VISIBILITY"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
+const setTimeRemapFreezeSchema = z
+  .object({
+    type: z.literal("SET_TIME_REMAP_FREEZE"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    freezeAtSeconds: z.number().nonnegative()
+  })
+  .strict();
+const clearTimeRemapFreezeSchema = z
+  .object({
+    type: z.literal("CLEAR_TIME_REMAP_FREEZE"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
+/** Layer-scoped duration override - deliberately named/typed distinctly from SET_FINAL_DURATION (scene-level, above) - see execution-plan.ts's layerDurationSeconds doc comment. */
+const setLayerDurationSchema = z
+  .object({
+    type: z.literal("SET_LAYER_DURATION"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    layerDurationSeconds: z.number().positive()
+  })
+  .strict();
+const clearLayerDurationSchema = z
+  .object({
+    type: z.literal("CLEAR_LAYER_DURATION"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
 const setInstructionsSchema = z
   .object({
     type: z.literal("SET_INSTRUCTIONS"),
@@ -139,6 +215,14 @@ export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   clearFinalDurationSchema,
   setInstructionsSchema,
   clearInstructionsSchema,
+  setBrandColorSchema,
+  clearBrandColorSchema,
+  setLayerVisibilitySchema,
+  clearLayerVisibilitySchema,
+  setTimeRemapFreezeSchema,
+  clearTimeRemapFreezeSchema,
+  setLayerDurationSchema,
+  clearLayerDurationSchema,
   approveSceneSchema,
   rejectSceneSchema
 ]);

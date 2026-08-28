@@ -89,16 +89,23 @@ export type ResolveExecuteFrameDispatchResult =
  * is built from the SAME mappings the operations themselves came from, so
  * it can never disagree with them.
  *
- * Honest, deliberate scope limits (never silently worked around):
- *   - SET_BRAND_COLOR/SET_LAYER_VISIBILITY/SET_TIME_REMAP_FREEZE/
- *     SET_DURATION have no resolvable data source in the current mapping
- *     model (no per-mapping colorHex/visibility/freeze/duration field
- *     exists yet) - a mapping classified "color" fails dispatch outright
- *     rather than fabricating a value never actually approved.
- *   - A mapping with `manifestPlaceholderId: null` (human-added, no
- *     manifest layer target) is silently excluded from `operations` - it
- *     cannot be translated into any fixed operation (no layerIndex to
- *     address), and is not itself evidence of anything unresolved.
+ * SET_BRAND_COLOR/SET_LAYER_VISIBILITY/SET_TIME_REMAP_FREEZE/SET_DURATION
+ * (operation-resolution phase, section A) are now fully resolvable:
+ *   - SET_BRAND_COLOR fires only for a mapping classified "color", from
+ *     its own explicit `colorHex` (already canonical #RRGGBB - normalized
+ *     at edit time, never here) - a "color" mapping with no colorHex set
+ *     fails dispatch closed rather than fabricating a value.
+ *   - SET_LAYER_VISIBILITY/SET_TIME_REMAP_FREEZE/SET_DURATION are
+ *     independent, OPTIONAL per-mapping overrides (`layerVisible`/
+ *     `freezeAtSeconds`/`layerDurationSeconds`) - orthogonal to the
+ *     mapping's own classification (a text/asset mapping can also carry
+ *     one of these), only ever emitted when the operator explicitly set
+ *     it, never required for a scene to be otherwise dispatchable.
+ *
+ * A mapping with `manifestPlaceholderId: null` (human-added, no manifest
+ * layer target) is silently excluded from `operations` entirely - it
+ * cannot be translated into any fixed operation (no layerIndex to
+ * address), and is not itself evidence of anything unresolved.
  */
 export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchInput): ResolveExecuteFrameDispatchResult {
   const { projectId, scenePlanId, session, currentPlan, currentProjectManifest, projectAssets, worker, now, staleAfterMs } = input;
@@ -168,6 +175,18 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       };
     }
 
+    // Defensive against a plan revision persisted before these four fields
+    // existed (a real .aep working DB row's scenePlans jsonb blob predating
+    // this schema addition would have these keys entirely absent, not
+    // merely null) - `??` coalesces that "never set" case the exact same
+    // way an explicit `null` already means "no override", so an old row
+    // can never be misread as an operator-set SET_LAYER_VISIBILITY(visible:
+    // undefined) etc.
+    const colorHex = mapping.colorHex ?? null;
+    const layerVisible = mapping.layerVisible ?? null;
+    const freezeAtSeconds = mapping.freezeAtSeconds ?? null;
+    const layerDurationSeconds = mapping.layerDurationSeconds ?? null;
+
     const classification = mapping.placeholderClassification.value;
     if (classification === "text") {
       if (mapping.text === null) {
@@ -192,14 +211,69 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         mimeType: asset.mimeType
       });
       approvedMappingIds.push(mapping.id);
-    } else {
+    } else if (classification === "color") {
+      // SET_BRAND_COLOR - only supported target: a placeholder explicitly
+      // classified "color" (operation-resolution phase, section A). The
+      // canonical #RRGGBB value itself was already normalized at edit time
+      // (apply-execution-plan-edit.ts) - this never fabricates a default
+      // for an unset color.
+      if (colorHex === null) {
+        return { ok: false, reason: `Mapping "${mapping.id}" is classified as "color" but has no colorHex set` };
+      }
+      operations.push({
+        type: "SET_BRAND_COLOR",
+        manifestPlaceholderId: mapping.manifestPlaceholderId,
+        layerIndex: placeholder.layerIndex,
+        colorHex
+      });
+      approvedMappingIds.push(mapping.id);
+    } else if (layerVisible === null && freezeAtSeconds === null && layerDurationSeconds === null) {
+      // No resolvable primary classification AND no independent override
+      // either - genuinely nothing to derive an operation from.
       return {
         ok: false,
-        reason:
-          classification === "color"
-            ? `Mapping "${mapping.id}" is classified as "color" - SET_BRAND_COLOR has no resolvable data source yet, cannot be dispatched`
-            : `Mapping "${mapping.id}" has no resolved classification (${String(classification)}) - cannot derive an operation from it`
+        reason: `Mapping "${mapping.id}" has no resolved classification (${String(classification)}) - cannot derive an operation from it`
       };
+    }
+    // else: classification isn't itself resolvable (or inapplicable), but
+    // at least one independent override below still applies to this same
+    // layer - never an error by itself (section A: these three are
+    // orthogonal to classification, not gated behind it).
+
+    // SET_LAYER_VISIBILITY / SET_TIME_REMAP_FREEZE / SET_DURATION are
+    // independent, OPTIONAL per-mapping operator overrides (section A) -
+    // orthogonal to the mapping's own classification above (a text or
+    // asset mapping can ALSO carry a visibility/freeze/duration override
+    // on the same layer). Each is only ever emitted when the operator
+    // explicitly set it (apply-execution-plan-edit.ts's SET_*/CLEAR_*
+    // operations) - never a fabricated default, and never required for a
+    // scene to be dispatchable by themselves.
+    if (layerVisible !== null) {
+      operations.push({
+        type: "SET_LAYER_VISIBILITY",
+        manifestPlaceholderId: mapping.manifestPlaceholderId,
+        layerIndex: placeholder.layerIndex,
+        visible: layerVisible
+      });
+      if (!approvedMappingIds.includes(mapping.id)) approvedMappingIds.push(mapping.id);
+    }
+    if (freezeAtSeconds !== null) {
+      operations.push({
+        type: "SET_TIME_REMAP_FREEZE",
+        manifestPlaceholderId: mapping.manifestPlaceholderId,
+        layerIndex: placeholder.layerIndex,
+        freezeAtSeconds
+      });
+      if (!approvedMappingIds.includes(mapping.id)) approvedMappingIds.push(mapping.id);
+    }
+    if (layerDurationSeconds !== null) {
+      operations.push({
+        type: "SET_DURATION",
+        manifestPlaceholderId: mapping.manifestPlaceholderId,
+        layerIndex: placeholder.layerIndex,
+        durationSeconds: layerDurationSeconds
+      });
+      if (!approvedMappingIds.includes(mapping.id)) approvedMappingIds.push(mapping.id);
     }
   }
 

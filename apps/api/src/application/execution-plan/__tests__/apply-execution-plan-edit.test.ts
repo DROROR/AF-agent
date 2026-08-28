@@ -15,6 +15,10 @@ function mapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMappin
     selectedAssetType: null,
     text: null,
     assetTimestamp: null,
+    colorHex: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
     mappingSource: "MANIFEST",
     confidence: null,
     createdAt: "2026-08-25T00:00:00.000Z",
@@ -166,5 +170,110 @@ describe("applyExecutionPlanEdit", () => {
     applyExecutionPlanEdit(original, { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1", text: "Hello" }, fixedNow);
     expect(original[0]?.mappings[0]).toBe(originalMapping);
     expect(original[0]?.mappings[0]?.text).toBeNull();
+  });
+
+  describe("SET_BRAND_COLOR / CLEAR_BRAND_COLOR", () => {
+    it("sets the normalized #RRGGBB colorHex on a color-classified mapping", () => {
+      const colorScene = scene({ mappings: [mapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] } })] });
+      const result = applyExecutionPlanEdit([colorScene], { type: "SET_BRAND_COLOR", scenePlanId: "scene-1", mappingId: "mapping-1", colorHex: "#1a2b3c" }, fixedNow);
+      expect(result.ok).toBe(true);
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.colorHex).toBe("#1A2B3C");
+    });
+
+    it("normalizes a 3-digit shorthand and a '#'-less input to canonical #RRGGBB", () => {
+      const colorScene = scene({ mappings: [mapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] } })] });
+      const shorthand = applyExecutionPlanEdit([colorScene], { type: "SET_BRAND_COLOR", scenePlanId: "scene-1", mappingId: "mapping-1", colorHex: "abc" }, fixedNow);
+      expect(shorthand.ok && shorthand.scenePlans[0]?.mappings[0]?.colorHex).toBe("#AABBCC");
+    });
+
+    it("rejects SET_BRAND_COLOR when the target mapping is NOT classified as color - unsupported target type", () => {
+      const textScene = scene({ mappings: [mapping({ placeholderClassification: { value: "text", source: "MANIFEST", evidence: [] } })] });
+      const result = applyExecutionPlanEdit([textScene], { type: "SET_BRAND_COLOR", scenePlanId: "scene-1", mappingId: "mapping-1", colorHex: "#1A2B3C" }, fixedNow);
+      expect(result.ok).toBe(false);
+    });
+
+    it("CLEAR_BRAND_COLOR resets colorHex to null", () => {
+      const colorScene = scene({
+        mappings: [mapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] }, colorHex: "#1A2B3C" })]
+      });
+      const result = applyExecutionPlanEdit([colorScene], { type: "CLEAR_BRAND_COLOR", scenePlanId: "scene-1", mappingId: "mapping-1" }, fixedNow);
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.colorHex).toBeNull();
+    });
+  });
+
+  describe("SET_LAYER_VISIBILITY / CLEAR_LAYER_VISIBILITY", () => {
+    it("sets the explicit boolean intent on the exact mapping", () => {
+      const result = applyExecutionPlanEdit([scene()], { type: "SET_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1", enabled: false }, fixedNow);
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.layerVisible).toBe(false);
+    });
+
+    it("rejects when the target mapping has no manifestPlaceholderId - no exact canonical layer identity to target", () => {
+      const humanScene = scene({ mappings: [mapping({ manifestPlaceholderId: null })] });
+      const result = applyExecutionPlanEdit([humanScene], { type: "SET_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1", enabled: true }, fixedNow);
+      expect(result.ok).toBe(false);
+    });
+
+    it("CLEAR_LAYER_VISIBILITY resets to null (no override, not false)", () => {
+      const visScene = scene({ mappings: [mapping({ layerVisible: true })] });
+      const result = applyExecutionPlanEdit([visScene], { type: "CLEAR_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1" }, fixedNow);
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.layerVisible).toBeNull();
+    });
+  });
+
+  describe("SET_TIME_REMAP_FREEZE / CLEAR_TIME_REMAP_FREEZE", () => {
+    it("sets the explicit approved freeze timestamp", () => {
+      const result = applyExecutionPlanEdit(
+        [scene()],
+        { type: "SET_TIME_REMAP_FREEZE", scenePlanId: "scene-1", mappingId: "mapping-1", freezeAtSeconds: 3.25 },
+        fixedNow
+      );
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.freezeAtSeconds).toBe(3.25);
+    });
+
+    it("rejects when the target mapping has no manifestPlaceholderId", () => {
+      const humanScene = scene({ mappings: [mapping({ manifestPlaceholderId: null })] });
+      const result = applyExecutionPlanEdit(
+        [humanScene],
+        { type: "SET_TIME_REMAP_FREEZE", scenePlanId: "scene-1", mappingId: "mapping-1", freezeAtSeconds: 1 },
+        fixedNow
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("CLEAR_TIME_REMAP_FREEZE resets to null", () => {
+      const freezeScene = scene({ mappings: [mapping({ freezeAtSeconds: 3 })] });
+      const result = applyExecutionPlanEdit([freezeScene], { type: "CLEAR_TIME_REMAP_FREEZE", scenePlanId: "scene-1", mappingId: "mapping-1" }, fixedNow);
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.freezeAtSeconds).toBeNull();
+    });
+  });
+
+  describe("SET_LAYER_DURATION / CLEAR_LAYER_DURATION", () => {
+    it("sets the explicit approved layer duration, distinct from the scene's own finalDuration", () => {
+      const durationScene = scene({ finalDuration: 10 });
+      const result = applyExecutionPlanEdit(
+        [durationScene],
+        { type: "SET_LAYER_DURATION", scenePlanId: "scene-1", mappingId: "mapping-1", layerDurationSeconds: 4 },
+        fixedNow
+      );
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.layerDurationSeconds).toBe(4);
+      // The scene-level finalDuration is never touched by a layer-scoped edit.
+      expect(result.ok && result.scenePlans[0]?.finalDuration).toBe(10);
+    });
+
+    it("rejects when the target mapping has no manifestPlaceholderId", () => {
+      const humanScene = scene({ mappings: [mapping({ manifestPlaceholderId: null })] });
+      const result = applyExecutionPlanEdit(
+        [humanScene],
+        { type: "SET_LAYER_DURATION", scenePlanId: "scene-1", mappingId: "mapping-1", layerDurationSeconds: 4 },
+        fixedNow
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("CLEAR_LAYER_DURATION resets to null", () => {
+      const durationScene = scene({ mappings: [mapping({ layerDurationSeconds: 4 })] });
+      const result = applyExecutionPlanEdit([durationScene], { type: "CLEAR_LAYER_DURATION", scenePlanId: "scene-1", mappingId: "mapping-1" }, fixedNow);
+      expect(result.ok && result.scenePlans[0]?.mappings[0]?.layerDurationSeconds).toBeNull();
+    });
   });
 });

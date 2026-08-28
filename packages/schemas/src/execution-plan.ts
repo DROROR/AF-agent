@@ -69,6 +69,31 @@ export const placeholderMappingSchema = z.object({
   text: z.string().nullable(),
   /** Seconds into the source asset - only meaningful for a video assetType, never confused with finalDuration (a scene-level concept, see below). */
   assetTimestamp: z.number().nonnegative().nullable(),
+  /**
+   * Explicit, operator-approved SET_BRAND_COLOR value (operation-resolution
+   * phase, section A) - always the CANONICAL normalized form (#RRGGBB,
+   * uppercase) by the time it lands here; normalization happens in
+   * apply-execution-plan-edit.ts at edit time, never left to whatever case/
+   * shorthand the operator typed. Only meaningful when this mapping's own
+   * placeholderClassification is "color" (see resolveExecuteFrameDispatch's
+   * own gate) - never a silently-fabricated default for an unset color.
+   */
+  colorHex: z
+    .string()
+    .regex(/^#[0-9A-F]{6}$/, "colorHex must be canonical #RRGGBB (uppercase)")
+    .nullable(),
+  /** Explicit SET_LAYER_VISIBILITY intent - null means "no override, leave the layer exactly as authored", never defaulted to true/false. */
+  layerVisible: z.boolean().nullable(),
+  /** Explicit SET_TIME_REMAP_FREEZE intent (seconds) - null means no freeze-frame override requested for this layer. Never guessed from assetTimestamp or any other field. */
+  freezeAtSeconds: z.number().nonnegative().nullable(),
+  /**
+   * Explicit SET_DURATION intent (seconds) - a LAYER-scoped override,
+   * deliberately distinct from the scene-level `finalDuration` above (how
+   * long the whole scene stays in the final output). Setting this never
+   * derives or mutates the composition's own duration - only the one
+   * layer's outPoint, per SET_DURATION's own worker-side contract.
+   */
+  layerDurationSeconds: z.number().positive().nullable(),
   mappingSource: mappingSourceSchema,
   /** AI-suggestion confidence only - null for MANIFEST/HUMAN mappingSource, never fabricated for those. */
   confidence: z.number().min(0).max(1).nullable(),

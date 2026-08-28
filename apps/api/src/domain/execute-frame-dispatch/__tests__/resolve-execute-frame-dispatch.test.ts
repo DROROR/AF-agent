@@ -81,6 +81,10 @@ function textMapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMa
     selectedAssetType: null,
     text: "Approved Headline",
     assetTimestamp: null,
+    colorHex: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
     mappingSource: "HUMAN",
     confidence: null,
     createdAt: NOW.toISOString(),
@@ -99,6 +103,10 @@ function imageMapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderM
     selectedAssetType: "image",
     text: null,
     assetTimestamp: null,
+    colorHex: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
     mappingSource: "HUMAN",
     confidence: null,
     createdAt: NOW.toISOString(),
@@ -297,7 +305,24 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.reason).toContain("does not match any composition");
   });
 
-  it("fails when a mapping is classified as color - SET_BRAND_COLOR has no resolvable data source", () => {
+  it("resolves a SET_BRAND_COLOR operation from a color-classified mapping's own approved colorHex", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [textMapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] }, colorHex: "#1A2B3C" })]
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 2, colorHex: "#1A2B3C" }]);
+  });
+
+  it("fails closed when a mapping is classified as color but has no colorHex set - no fabricated default", () => {
     const result = resolveExecuteFrameDispatch(
       baseInput({
         currentPlan: validPlan({
@@ -307,7 +332,66 @@ describe("resolveExecuteFrameDispatch", () => {
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("SET_BRAND_COLOR");
+    expect(result.reason).toContain("colorHex");
+  });
+
+  it("resolves SET_LAYER_VISIBILITY/SET_TIME_REMAP_FREEZE/SET_LAYER_DURATION as independent overrides, additional to the mapping's own primary (text) operation", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [validScene({ mappings: [textMapping({ layerVisible: false, freezeAtSeconds: 2.5, layerDurationSeconds: 4 })] })]
+        })
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" },
+      { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 2, visible: false },
+      { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 2, freezeAtSeconds: 2.5 },
+      { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 2, durationSeconds: 4 }
+    ]);
+    // The mapping is still counted exactly once, never duplicated.
+    expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
+  });
+
+  it("never emits SET_LAYER_VISIBILITY/SET_TIME_REMAP_FREEZE/SET_DURATION when the operator never set them - no fabricated overrides", () => {
+    const result = resolveExecuteFrameDispatch(baseInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
+  });
+
+  it("resolves a visibility-only override on a mapping with no other resolvable classification, so the scene is still dispatchable", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [textMapping({ placeholderClassification: { value: null, source: "MANIFEST", evidence: [] }, text: null, layerVisible: true })]
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 2, visible: true }]);
+  });
+
+  it("treats a pre-existing plan row missing colorHex/layerVisible/freezeAtSeconds/layerDurationSeconds entirely (predating this schema addition) the same as explicit null - never a fabricated SET_LAYER_VISIBILITY(visible: undefined) etc.", () => {
+    const legacyMapping = textMapping();
+    // Simulates a real DB row's scenePlans jsonb blob persisted before these
+    // four fields existed - the keys are genuinely ABSENT, not merely null.
+    delete (legacyMapping as Partial<PlaceholderMapping>).colorHex;
+    delete (legacyMapping as Partial<PlaceholderMapping>).layerVisible;
+    delete (legacyMapping as Partial<PlaceholderMapping>).freezeAtSeconds;
+    delete (legacyMapping as Partial<PlaceholderMapping>).layerDurationSeconds;
+
+    const result = resolveExecuteFrameDispatch(baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ mappings: [legacyMapping] })] }) }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
   });
 
   it("fails when an asset-classified mapping has no selectedAssetId", () => {

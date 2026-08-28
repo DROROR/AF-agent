@@ -2,6 +2,20 @@ import type { ExecutionPlanEditOperation, PlaceholderMapping, ScenePlanEntry } f
 
 export type ApplyEditResult = { ok: true; scenePlans: ScenePlanEntry[] } | { ok: false; reason: string };
 
+/**
+ * Normalizes an operator-facing hex color (3 or 6 digits, "#" optional -
+ * see execution-plan-edit.ts's own HEX_COLOR_INPUT_PATTERN) to the
+ * canonical #RRGGBB uppercase form placeholderMappingSchema requires -
+ * the ONLY place this normalization ever happens, so the persisted plan
+ * never carries two mappings' worth of the "same" color in different
+ * cases/shorthand.
+ */
+function normalizeColorHex(input: string): string {
+  const hex = input.startsWith("#") ? input.slice(1) : input;
+  const expanded = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  return `#${expanded.toUpperCase()}`;
+}
+
 function replaceScene(scenePlans: ScenePlanEntry[], index: number, updated: ScenePlanEntry): ScenePlanEntry[] {
   const next = [...scenePlans];
   next[index] = updated;
@@ -129,6 +143,108 @@ export function applyExecutionPlanEdit(
 
     case "CLEAR_FINAL_DURATION":
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, finalDuration: null, updatedAt: timestamp }) };
+
+    case "SET_BRAND_COLOR": {
+      // Only supported target layer/source types allowed (operation-
+      // resolution phase, section A) - the same "color" classification
+      // gate resolveExecuteFrameDispatch itself checks before ever
+      // building a SET_BRAND_COLOR worker operation, enforced here too so
+      // an invalid target is refused at EDIT time, not silently accepted
+      // and only discovered unresolvable at dispatch time.
+      const target = scene.mappings.find((m) => m.id === operation.mappingId);
+      if (!target) {
+        return { ok: false, reason: `Unknown mappingId "${operation.mappingId}" on scene "${scene.id}"` };
+      }
+      if (target.placeholderClassification.value !== "color") {
+        return {
+          ok: false,
+          reason: `Mapping "${operation.mappingId}" is not classified as "color" - SET_BRAND_COLOR only applies to color-classified placeholders`
+        };
+      }
+      const result = updateMapping(scene, operation.mappingId, (m) => ({
+        ...m,
+        colorHex: normalizeColorHex(operation.colorHex),
+        updatedAt: timestamp
+      }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_BRAND_COLOR": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, colorHex: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "SET_LAYER_VISIBILITY": {
+      const target = scene.mappings.find((m) => m.id === operation.mappingId);
+      if (!target) {
+        return { ok: false, reason: `Unknown mappingId "${operation.mappingId}" on scene "${scene.id}"` };
+      }
+      if (target.manifestPlaceholderId === null) {
+        return {
+          ok: false,
+          reason: `Mapping "${operation.mappingId}" has no manifestPlaceholderId - it cannot be addressed to any real AE layer, so SET_LAYER_VISIBILITY has no exact canonical layer identity to target`
+        };
+      }
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, layerVisible: operation.enabled, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_LAYER_VISIBILITY": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, layerVisible: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "SET_TIME_REMAP_FREEZE": {
+      const target = scene.mappings.find((m) => m.id === operation.mappingId);
+      if (!target) {
+        return { ok: false, reason: `Unknown mappingId "${operation.mappingId}" on scene "${scene.id}"` };
+      }
+      if (target.manifestPlaceholderId === null) {
+        return {
+          ok: false,
+          reason: `Mapping "${operation.mappingId}" has no manifestPlaceholderId - it cannot be addressed to any real AE layer, so SET_TIME_REMAP_FREEZE has no exact canonical layer identity to target`
+        };
+      }
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, freezeAtSeconds: operation.freezeAtSeconds, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_TIME_REMAP_FREEZE": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, freezeAtSeconds: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "SET_LAYER_DURATION": {
+      const target = scene.mappings.find((m) => m.id === operation.mappingId);
+      if (!target) {
+        return { ok: false, reason: `Unknown mappingId "${operation.mappingId}" on scene "${scene.id}"` };
+      }
+      if (target.manifestPlaceholderId === null) {
+        return {
+          ok: false,
+          reason: `Mapping "${operation.mappingId}" has no manifestPlaceholderId - it cannot be addressed to any real AE layer, so SET_LAYER_DURATION has no exact canonical layer identity to target`
+        };
+      }
+      const result = updateMapping(scene, operation.mappingId, (m) => ({
+        ...m,
+        layerDurationSeconds: operation.layerDurationSeconds,
+        updatedAt: timestamp
+      }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_LAYER_DURATION": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, layerDurationSeconds: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
 
     case "SET_INSTRUCTIONS":
       return {
