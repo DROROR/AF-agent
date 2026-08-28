@@ -1320,7 +1320,7 @@ thead th {
   position: absolute;
   inset: 0;
   z-index: 0;
-  background-image: linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2)), url("/auth-background.png");
+  background-image: linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2)), url("/brand/auth-background.png");
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -1490,7 +1490,7 @@ thead th {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .auth-shell::before {
-    background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/auth-background.png");
+    background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/brand/auth-background.png");
   }
 
   :root:not([data-theme="light"]) .auth-shell__card {
@@ -1517,7 +1517,7 @@ thead th {
 }
 
 :root[data-theme="dark"] .auth-shell::before {
-  background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/auth-background.png");
+  background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/brand/auth-background.png");
 }
 
 :root[data-theme="dark"] .auth-shell__card {
