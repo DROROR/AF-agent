@@ -13,11 +13,15 @@ apps/web/.next.broken-*/
 .env.local
 .DS_Store
 
-# Job workspaces and generated artifacts are never source-controlled
-jobs/
-outputs/
-previews/
-checkpoints/
+# Job workspaces and generated artifacts are never source-controlled -
+# root-anchored (a local worker's own scratch WORK_ROOT, e.g. ./jobs/ from
+# ad-hoc local testing) so this can never accidentally shadow a
+# same-named directory elsewhere in the tree (e.g.
+# apps/web/src/app/(dashboard)/jobs/, a real, committed dashboard route).
+/jobs/
+/outputs/
+/previews/
+/checkpoints/
 
 # Preflight reports contain machine-specific details; not committed
 DYO-Preflight-Report.txt
