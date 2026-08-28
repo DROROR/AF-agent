@@ -312,38 +312,107 @@ Write-CheckResult $true "Runtime dependencies are up to date"
 
 # ---- Step 3b: refresh the Scheduled Task's automatic-recovery settings ----
 #
-# Same Action/Trigger/Principal this machine already had (same
+# CONFIRMED BUG (real client machine, 2026-08-28): a legacy Scheduled Task
+# - one registered by a much older Setup.ps1 revision, or otherwise
+# degraded over time - can have a NULL or EMPTY Action.Execute path. The
+# very first version of this refresh step called Unregister-ScheduledTask
+# then Register-ScheduledTask as two separate calls with no error
+# handling at all: against a legacy task like that, one of those calls can
+# throw, and since $ErrorActionPreference = "Stop" is set at the top of
+# this script, an uncaught throw here aborted the ENTIRE update immediately
+# - after Step 2 had already stopped the old process, so DYO Worker was
+# left fully stopped with no restart attempted at all (Step 5, which owns
+# starting it, was never reached).
+#
+# Fixed by Set-DyoWorkerScheduledTaskRecovery below: every Task Scheduler
+# cmdlet call is wrapped so nothing here can throw an uncaught error, it
+# tries two independent recovery strategies before giving up, and it
+# VERIFIES the resulting task's own Action.Execute is real (non-null,
+# non-empty) rather than trusting that Register-ScheduledTask succeeding
+# alone means the task is actually healthy. If recovery still cannot be
+# confirmed after both attempts, this step logs a clear warning and the
+# script CONTINUES to Step 5 regardless - refreshing these settings is a
+# reliability improvement, never a precondition for restarting DYO Worker
+# today. Same Action/Trigger/Principal identity as always (same
 # run-worker.bat path, same Windows user, same AtLogon trigger) - only the
-# Settings block is guaranteed current. A machine set up a while ago may
-# still be running whatever RestartCount/RestartInterval/MultipleInstances/
-# ExecutionTimeLimit values its ORIGINAL DYO-Worker-Setup.ps1 run applied
-# (or lack thereof, on a very old install) - re-registering here brings it
-# up to the same robust policy a fresh install/repair gets, every time this
-# update runs, regardless of that history. The task is already stopped
-# (Step 2 above) before this runs, and is left stopped afterward - Step 5
-# below still owns starting it, with its own PID-diff verification.
+# Settings block (and the recovery from a corrupted legacy Action) is new.
 Write-Host ""
 Write-Host "Refreshing automatic-recovery settings on the existing Scheduled Task..."
 
-$existingTaskForRefresh = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($existingTaskForRefresh) {
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+function Test-DyoWorkerTaskActionHealthy {
+  param([string]$TaskName)
+  try {
+    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $actions = @($t.Actions)
+    if ($actions.Count -eq 0) { return $false }
+    return -not [string]::IsNullOrWhiteSpace($actions[0].Execute)
+  } catch {
+    return $false
+  }
 }
 
-$taskAction = New-ScheduledTaskAction -Execute $runWorkerBat -WorkingDirectory $InstallDir
-$taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-$taskSettings = New-ScheduledTaskSettingsSet `
-  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-  -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) `
-  -MultipleInstances IgnoreNew
+function Register-DyoWorkerTaskDefinition {
+  param([string]$TaskName, [string]$RunWorkerBat, [string]$InstallDir, [switch]$Force)
+  $taskAction = New-ScheduledTaskAction -Execute $RunWorkerBat -WorkingDirectory $InstallDir
+  $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+  $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+  $taskSettings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -MultipleInstances IgnoreNew
+  $description = "Runs the DYO Video Worker automatically when $env:USERNAME logs into Windows. Installed/updated by DYO-Worker-Final-Update.ps1 - safe to remove via DYO-Worker-Uninstall.bat."
+  $forceArg = @{}
+  if ($Force) { $forceArg = @{ Force = $true } }
+  Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
+    -Description $description -ErrorAction Stop @forceArg | Out-Null
+}
 
-Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
-  -Description "Runs the DYO Video Worker automatically when $env:USERNAME logs into Windows. Installed/updated by DYO-Worker-Final-Update.ps1 - safe to remove via DYO-Worker-Uninstall.bat." `
-  | Out-Null
+function Set-DyoWorkerScheduledTaskRecovery {
+  <#
+  Ensures the "DYO Video Worker" Scheduled Task has our known-good
+  Action/Trigger/Principal/Settings. Never throws - every Task Scheduler
+  cmdlet call is wrapped, so a pre-existing legacy task with a corrupted
+  or null/empty Execute path can never abort the caller or leave the
+  worker with no recoverable task at all. Returns $true only once the
+  resulting task is independently VERIFIED healthy (a real, non-empty
+  Execute path) - $false means both recovery attempts failed, which the
+  caller treats as "log a warning, continue anyway" (see this function's
+  own call site's doc comment for why that is the correct behavior here).
+  #>
+  param([string]$TaskName, [string]$RunWorkerBat, [string]$InstallDir)
 
-Write-CheckResult $true "Automatic-recovery settings refreshed (restarts automatically after a crash, no duplicate instances, same identity)"
+  # Attempt 1: -Force overwrites an existing task (including a legacy one
+  # with a corrupted/null Execute path) in one atomic call - avoids ever
+  # calling Unregister-ScheduledTask against a possibly-malformed legacy
+  # task definition at all.
+  try {
+    Register-DyoWorkerTaskDefinition -TaskName $TaskName -RunWorkerBat $RunWorkerBat -InstallDir $InstallDir -Force
+    if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
+  } catch {}
+
+  # Attempt 2: a legacy/corrupted task occasionally resists -Force alone -
+  # explicitly remove it first (best-effort; SilentlyContinue because it
+  # may already be gone or already broken), then register fresh. Same
+  # recovery sequence DYO-Worker-Repair.ps1 already uses successfully.
+  try {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Register-DyoWorkerTaskDefinition -TaskName $TaskName -RunWorkerBat $RunWorkerBat -InstallDir $InstallDir
+    if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
+  } catch {}
+
+  return $false
+}
+
+$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -RunWorkerBat $runWorkerBat -InstallDir $InstallDir
+if ($taskRefreshOk) {
+  Write-CheckResult $true "Automatic-recovery settings refreshed (restarts automatically after a crash, no duplicate instances, same identity)"
+} else {
+  Write-Host "[NEEDS ATTENTION] Could not confirm the Scheduled Task's recovery settings after two recovery attempts."
+  Write-Host "Continuing anyway - this does not stop today's update. DYO Worker will still be"
+  Write-Host "restarted below with whatever task definition is currently in place. Contact DYO"
+  Write-Host "to fully repair the Scheduled Task's automatic-recovery policy separately."
+}
 
 # ---- Step 4: guarantee a clean log slate before restarting ----
 $logPath = Join-Path $InstallDir "logs\worker.log"
@@ -369,7 +438,14 @@ function Get-FreshLogContent {
 Write-Host ""
 Write-Host "Restarting DYO Worker with the updated program files..."
 
-Start-ScheduledTask -TaskName $TaskName
+# -ErrorAction SilentlyContinue: if the Scheduled Task refresh above could
+# not be confirmed AND somehow left no task registered at all (the one
+# truly worst-case outcome of the legacy-task recovery above), this must
+# never throw an uncaught error here - it falls through to the same
+# $started/PID-diff check below either way, which correctly reports the
+# real outcome and prints the existing, already-clear NEEDS ATTENTION
+# message rather than an unhandled PowerShell stack trace.
+Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 $started = Wait-Until -TimeoutSeconds 8 -PollSeconds 1 -Condition {
   $newPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
   ($newPids | Where-Object { $oldPids -notcontains $_ }).Count -gt 0
@@ -378,7 +454,7 @@ if (-not $started) {
   # A stale IgnoreNew flag on Task Scheduler's own side (distinct from the
   # process-level race already closed above) is rare but possible - one
   # extra explicit start attempt before treating this as a real failure.
-  Start-ScheduledTask -TaskName $TaskName
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   $started = Wait-Until -TimeoutSeconds 20 -PollSeconds 1 -Condition {
     $newPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
     ($newPids | Where-Object { $oldPids -notcontains $_ }).Count -gt 0

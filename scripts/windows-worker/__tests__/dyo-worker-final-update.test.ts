@@ -301,18 +301,18 @@ describe("DYO-Worker-Final-Update.ps1 refreshes the Scheduled Task's recovery se
     expect(updateScript).toMatch(/\$TaskName = "DYO Video Worker"/);
   });
 
-  it("stops the task, refreshes its registration, then starts it again", () => {
+  it("stops the task, refreshes its registration via the recovery helper, then starts it again", () => {
     expect(updateScript).toMatch(/Stop-ScheduledTask -TaskName \$TaskName/);
-    expect(updateScript).toMatch(/Unregister-ScheduledTask -TaskName \$TaskName -Confirm:\$false/);
+    expect(updateScript).toMatch(/\$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery/);
     expect(updateScript).toMatch(/Register-ScheduledTask -TaskName \$TaskName/);
     expect(updateScript).toMatch(/Start-ScheduledTask -TaskName \$TaskName/);
   });
 
   it("re-registers with the SAME identity - same run-worker.bat path, same Windows user, same AtLogon trigger", () => {
-    const idx = updateScript.indexOf("$taskAction = New-ScheduledTaskAction");
-    expect(idx, "task refresh block not found").toBeGreaterThan(-1);
+    const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
+    expect(idx, "task definition helper not found").toBeGreaterThan(-1);
     const block = updateScript.slice(idx, idx + 900);
-    expect(block).toMatch(/New-ScheduledTaskAction -Execute \$runWorkerBat -WorkingDirectory \$InstallDir/);
+    expect(block).toMatch(/New-ScheduledTaskAction -Execute \$RunWorkerBat -WorkingDirectory \$InstallDir/);
     expect(block).toMatch(/New-ScheduledTaskTrigger -AtLogOn -User "\$env:USERDOMAIN\\\$env:USERNAME"/);
     expect(block).toMatch(/New-ScheduledTaskPrincipal -UserId "\$env:USERDOMAIN\\\$env:USERNAME" -LogonType Interactive -RunLevel Limited/);
   });
@@ -329,7 +329,7 @@ describe("DYO-Worker-Final-Update.ps1 refreshes the Scheduled Task's recovery se
 
   it("refreshes the task's registration AFTER the old process is confirmed stopped, and BEFORE the new one is started", () => {
     const stoppedIdx = updateScript.indexOf('Write-CheckResult $true "DYO Worker fully stopped');
-    const refreshIdx = updateScript.indexOf("$taskAction = New-ScheduledTaskAction");
+    const refreshIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
     const startIdx = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName", refreshIdx);
     expect(stoppedIdx).toBeGreaterThan(-1);
     expect(refreshIdx).toBeGreaterThan(stoppedIdx);
@@ -341,6 +341,98 @@ describe("DYO-Worker-Final-Update.ps1 refreshes the Scheduled Task's recovery se
     expect(idx).toBeGreaterThan(-1);
     const block = updateScript.slice(idx, updateScript.indexOf("Step 4", idx));
     expect(block).not.toMatch(/WORKER_ID|WORKER_TOKEN|WORKER_REGISTRATION_SECRET|worker-credentials/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 recovers from a legacy Scheduled Task with a null/empty Action.Execute (real client-machine bug)", () => {
+  it("verifies the resulting task's own Action.Execute is real (non-null, non-empty) rather than trusting Register-ScheduledTask alone", () => {
+    const idx = updateScript.indexOf("function Test-DyoWorkerTaskActionHealthy");
+    expect(idx, "action-health verifier not found").toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/\$actions\[0\]\.Execute/);
+    expect(block).toMatch(/IsNullOrWhiteSpace/);
+  });
+
+  it("tries -Force registration FIRST, so a legacy/corrupted task is overwritten atomically without ever calling Unregister-ScheduledTask against it directly", () => {
+    const idx = updateScript.indexOf("function Set-DyoWorkerScheduledTaskRecovery");
+    expect(idx, "recovery function not found").toBeGreaterThan(-1);
+    const forceIdx = updateScript.indexOf("-Force", idx);
+    const unregisterIdx = updateScript.indexOf("Unregister-ScheduledTask", idx);
+    expect(forceIdx).toBeGreaterThan(idx);
+    expect(unregisterIdx).toBeGreaterThan(forceIdx);
+  });
+
+  it("falls back to an explicit Unregister + fresh Register as a second recovery attempt if -Force alone did not produce a healthy action", () => {
+    const idx = updateScript.indexOf("function Set-DyoWorkerScheduledTaskRecovery");
+    const block = updateScript.slice(idx, idx + 2000);
+    expect(block).toMatch(/Unregister-ScheduledTask -TaskName \$TaskName -Confirm:\$false -ErrorAction SilentlyContinue/);
+    // Two independent Register-DyoWorkerTaskDefinition calls - one for
+    // each recovery attempt - never just one.
+    const registerCalls = block.match(/Register-DyoWorkerTaskDefinition/g) ?? [];
+    expect(registerCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("never throws out of the recovery function itself - every Task Scheduler call is wrapped in try/catch", () => {
+    const idx = updateScript.indexOf("function Set-DyoWorkerScheduledTaskRecovery");
+    const endIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    const block = updateScript.slice(idx, endIdx);
+    const tryCount = (block.match(/\btry\s*\{/g) ?? []).length;
+    expect(tryCount).toBeGreaterThanOrEqual(2);
+    expect(block).toMatch(/return \$false/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 never leaves DYO Worker stopped just because the task-recovery refresh failed", () => {
+  it("does not exit when Set-DyoWorkerScheduledTaskRecovery returns $false - it logs a warning and continues to Step 5", () => {
+    const callIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    expect(callIdx).toBeGreaterThan(-1);
+    const ifIdx = updateScript.indexOf("if ($taskRefreshOk)", callIdx);
+    expect(ifIdx).toBeGreaterThan(callIdx);
+    const elseIdx = updateScript.indexOf("} else {", ifIdx);
+    expect(elseIdx).toBeGreaterThan(ifIdx);
+    const elseBlock = updateScript.slice(elseIdx, elseIdx + 500);
+    expect(elseBlock).not.toMatch(/exit 1/);
+    expect(elseBlock).toMatch(/Continuing anyway/i);
+
+    // The very next real step after this if/else must still be Step 5's
+    // restart - never an early return/exit sitting between them.
+    const step5Idx = updateScript.indexOf("Step 5: restart DYO Worker", elseIdx);
+    const anyExitBetween = updateScript.slice(elseIdx, step5Idx).match(/^\s*exit 1\s*$/m);
+    expect(step5Idx).toBeGreaterThan(elseIdx);
+    expect(anyExitBetween).toBeNull();
+  });
+
+  it("hardens both Start-ScheduledTask calls with -ErrorAction SilentlyContinue, so a task that ended up missing/broken cannot crash the script with an unhandled error", () => {
+    const startCalls = [...updateScript.matchAll(/Start-ScheduledTask -TaskName \$TaskName[^\n]*/g)].map((m) => m[0]);
+    expect(startCalls.length).toBeGreaterThanOrEqual(2);
+    for (const call of startCalls) {
+      expect(call).toMatch(/-ErrorAction SilentlyContinue/);
+    }
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 protects against duplicate worker instances end to end", () => {
+  it("the refreshed task's own Settings block sets MultipleInstances IgnoreNew - Task Scheduler itself refuses to start a second run while one is active", () => {
+    const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 900);
+    expect(block).toMatch(/-MultipleInstances IgnoreNew/);
+  });
+
+  it("recovering a legacy/corrupted task (both attempts) still preserves MultipleInstances IgnoreNew - a corrupted Action does not mean a corrupted duplicate-protection policy too", () => {
+    const idx = updateScript.indexOf("function Set-DyoWorkerScheduledTaskRecovery");
+    const endIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    const block = updateScript.slice(idx, endIdx);
+    // Both recovery attempts go through Register-DyoWorkerTaskDefinition,
+    // which is the one place MultipleInstances IgnoreNew is set - so
+    // proving both attempts call it (already covered above) is what
+    // guarantees this, restated here as its own explicit regression case.
+    const registerCalls = block.match(/Register-DyoWorkerTaskDefinition/g) ?? [];
+    expect(registerCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("verifies a genuinely NEW process (PID never seen before) before ever declaring the restart successful - never mistakes an old/leftover process for a fresh single instance", () => {
+    expect(updateScript).toMatch(/\$oldPids -notcontains \$_/);
   });
 });
 
