@@ -1310,21 +1310,20 @@ thead th {
   overflow: hidden;
 }
 
-/* Background photo lives on its own layer so it can carry a slight blur
-   without blurring the card/content above it. scale(1.03) only hides the
-   blur's soft edge bleed at the viewport border - background-size: cover
-   still governs the actual image fit, so nothing is cropped or distorted. */
+/* Background photo lives on its own layer, shown crisp (no blur/scale) so
+   the real image is never cropped, stretched, or distorted - background-size:
+   cover + center + no-repeat fits it to the viewport while preserving its
+   aspect ratio. The dark gradient is a subtle readability overlay only,
+   never strong enough to hide the photo underneath. */
 .auth-shell::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: 0;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.22)), url("/brand/background-image.png");
+  background-image: linear-gradient(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.2)), url("/auth-background.png");
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  filter: blur(3px);
-  transform: scale(1.03);
 }
 
 .auth-shell__language {
@@ -1491,7 +1490,7 @@ thead th {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .auth-shell::before {
-    background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/brand/background-image.png");
+    background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/auth-background.png");
   }
 
   :root:not([data-theme="light"]) .auth-shell__card {
@@ -1518,7 +1517,7 @@ thead th {
 }
 
 :root[data-theme="dark"] .auth-shell::before {
-  background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/brand/background-image.png");
+  background-image: linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)), url("/auth-background.png");
 }
 
 :root[data-theme="dark"] .auth-shell__card {
