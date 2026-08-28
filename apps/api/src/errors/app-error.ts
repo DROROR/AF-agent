@@ -3,6 +3,7 @@ import type { ErrorCode } from "@dyo/schemas";
 function statusForCode(code: ErrorCode): number {
   switch (code) {
     case "VALIDATION_ERROR":
+    case "AI_PROVIDER_CONNECTION_FAILED":
       return 400;
     case "UNAUTHORIZED":
       return 401;
@@ -279,5 +280,13 @@ export class SuggestedAssetInvalidError extends AppError {
   constructor(assetId: string) {
     super("ASSET_NOT_FOUND", `Suggested asset ${assetId} no longer exists in this project's Asset Catalog`);
     this.name = "SuggestedAssetInvalidError";
+  }
+}
+
+/** BYOK "Test Connection" / "Save & Connect" refused: the real Anthropic call failed - never persisted (connect-ai-provider.ts always tests before it ever encrypts/stores anything). */
+export class AiProviderConnectionFailedError extends AppError {
+  constructor(reason: string) {
+    super("AI_PROVIDER_CONNECTION_FAILED", reason);
+    this.name = "AiProviderConnectionFailedError";
   }
 }

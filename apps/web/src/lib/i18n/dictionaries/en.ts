@@ -302,7 +302,32 @@ export const en = {
     controlPlaneApi: "Control-plane API",
     controlPlaneApiValue: "Internal only (server-side proxy)",
     apiConnectionHint:
-      "The browser never calls the control-plane API directly - all data on this dashboard is proxied server-side. There is nothing to configure here today."
+      "The browser never calls the control-plane API directly - all data on this dashboard is proxied server-side. There is nothing to configure here today.",
+    aiProvider: {
+      title: "AI Provider",
+      description: "Bring your own Anthropic API key so the Mapping Assistant can generate real, evidence-backed suggestions. Your key is encrypted on the server and never sent back to this browser.",
+      providerLabel: "Provider",
+      providerValue: "Anthropic",
+      apiKeyLabel: "API key",
+      apiKeyPlaceholder: "sk-ant-...",
+      modelLabel: "Model",
+      statusLabel: "Connection status",
+      statusConnected: (last4: string) => `Connected · Key ending in ${last4}`,
+      statusNotConnected: "Not connected",
+      lastVerifiedLabel: (date: string) => `Last verified ${date}`,
+      testAction: "Test connection",
+      testing: "Testing…",
+      testSucceeded: "Connection succeeded.",
+      saveAction: "Save & Connect",
+      replaceAction: "Replace key",
+      saving: "Connecting…",
+      disconnectAction: "Disconnect",
+      disconnecting: "Disconnecting…",
+      loadFailedTitle: "Could not load AI provider status",
+      testFailedTitle: "Connection test failed",
+      saveFailedTitle: "Could not connect provider",
+      disconnectFailedTitle: "Could not disconnect provider"
+    }
   },
   sceneTable: {
     emptyTitle: "No scenes to review yet",
@@ -547,6 +572,7 @@ export const en = {
     generating: "Generating…",
     aiAvailable: "AI: available",
     aiUnavailable: "AI: not configured (deterministic only)",
+    connectProviderHint: "Connect an AI provider in Settings to use AI Mapping Assistant.",
     emptyTitle: "No suggestions yet",
     emptyDescription: "Generate suggestions to see real, evidence-backed proposals for unresolved scenes.",
     sourceDeterministic: "Deterministic",

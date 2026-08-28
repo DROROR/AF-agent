@@ -8,9 +8,10 @@ import type { WorkMapRepository } from "../domain/work-map/types.js";
 import type { MappingSuggestionRepository } from "../domain/mapping-suggestion/types.js";
 import type { SceneEvidenceRepository } from "../domain/scene-evidence/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
+import type { UserAiProviderRepository } from "../domain/user-ai-provider/types.js";
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
-import type { AiSuggestionProvider } from "../application/mapping-assistant/ai-suggestion-provider.js";
+import { resolveAiSuggestionProviderForUser } from "../application/mapping-assistant/resolve-ai-suggestion-provider.js";
 import { generateMappingSuggestions } from "../application/mapping-assistant/generate-mapping-suggestions.js";
 import { listMappingSuggestions } from "../application/mapping-assistant/list-mapping-suggestions.js";
 import { acceptMappingSuggestion } from "../application/mapping-assistant/accept-mapping-suggestion.js";
@@ -24,7 +25,8 @@ export interface MappingAssistantRouteDeps {
   workMapRepository: WorkMapRepository;
   mappingSuggestionRepository: MappingSuggestionRepository;
   sceneEvidenceRepository: SceneEvidenceRepository;
-  aiSuggestionProvider: AiSuggestionProvider;
+  userAiProviderRepository: UserAiProviderRepository;
+  credentialsEncryptionKey: string | undefined;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   now?: () => Date;
@@ -52,8 +54,12 @@ export function registerMappingAssistantRoutes(app: FastifyInstance, deps: Mappi
   };
 
   app.post("/api/projects/:projectId/mapping-suggestions/generate", async (request, reply) => {
-    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId } = projectIdParamsSchema.parse(request.params);
+    const aiSuggestionProvider = await resolveAiSuggestionProviderForUser(
+      { userAiProviderRepository: deps.userAiProviderRepository, credentialsEncryptionKey: deps.credentialsEncryptionKey },
+      user.id
+    );
     const result = await generateMappingSuggestions(
       {
         projectRepository: deps.projectRepository,
@@ -62,7 +68,7 @@ export function registerMappingAssistantRoutes(app: FastifyInstance, deps: Mappi
         workMapRepository: deps.workMapRepository,
         mappingSuggestionRepository: deps.mappingSuggestionRepository,
         sceneEvidenceRepository: deps.sceneEvidenceRepository,
-        aiSuggestionProvider: deps.aiSuggestionProvider,
+        aiSuggestionProvider,
         now
       },
       projectId
@@ -71,15 +77,19 @@ export function registerMappingAssistantRoutes(app: FastifyInstance, deps: Mappi
   });
 
   app.get("/api/projects/:projectId/mapping-suggestions", async (request, reply) => {
-    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId } = projectIdParamsSchema.parse(request.params);
+    const aiSuggestionProvider = await resolveAiSuggestionProviderForUser(
+      { userAiProviderRepository: deps.userAiProviderRepository, credentialsEncryptionKey: deps.credentialsEncryptionKey },
+      user.id
+    );
     const result = await listMappingSuggestions(
       {
         projectRepository: deps.projectRepository,
         executionPlanRepository: deps.executionPlanRepository,
         mappingSuggestionRepository: deps.mappingSuggestionRepository,
         sceneEvidenceRepository: deps.sceneEvidenceRepository,
-        aiSuggestionProvider: deps.aiSuggestionProvider
+        aiSuggestionProvider
       },
       projectId
     );

@@ -91,6 +91,7 @@ export function MappingAssistantPanel(): ReactElement | null {
         }
       />
       <p>{t.mappingAssistant.description}</p>
+      {!isLoading && !aiAvailable ? <p className="field__hint">{t.mappingAssistant.connectProviderHint}</p> : null}
 
       {error ? <ErrorState title={t.projectWorkspace.loadErrorTitle} description={error} /> : null}
       {actionError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} /> : null}

@@ -613,3 +613,39 @@ export const renderArtifactUploads = pgTable(
 );
 export type RenderArtifactUploadRow = typeof renderArtifactUploads.$inferSelect;
 export type NewRenderArtifactUploadRow = typeof renderArtifactUploads.$inferInsert;
+
+/** Single value today (Anthropic only) - a real column + CHECK constraint rather than a boolean flag so adding OpenAI/Gemini later is an enum-value addition, never a schema shape change. */
+export const DB_AI_PROVIDER_NAMES = ["ANTHROPIC"] as const;
+
+/**
+ * BYOK (Bring Your Own Key) AI provider connection - one row per user
+ * (unique on userId: today's UI offers exactly one active connection at a
+ * time, matching Settings -> AI Provider's own single status/model/
+ * replace/disconnect control set). `encryptedApiKey` is the AES-256-GCM
+ * ciphertext (see infrastructure/crypto/secret-cipher.ts) - the plaintext
+ * key is never persisted, never logged, and never sent back to the
+ * browser; `last4` is the only fragment of the real key ever displayed,
+ * purely for the user's own "is this the key I think it is" confirmation.
+ * Deleting a user cascades here - a departing user's own key is never
+ * left behind for someone else to inherit.
+ */
+export const userAiProviders = pgTable(
+  "user_ai_providers",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull().$type<"ANTHROPIC">(),
+    encryptedApiKey: text("encrypted_api_key").notNull(),
+    last4: text("last4").notNull(),
+    model: text("model").notNull(),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  () => [check("user_ai_providers_provider_check", sql.raw(sqlEnumCheck("provider", DB_AI_PROVIDER_NAMES)))]
+);
+export type UserAiProviderRow = typeof userAiProviders.$inferSelect;
+export type NewUserAiProviderRow = typeof userAiProviders.$inferInsert;

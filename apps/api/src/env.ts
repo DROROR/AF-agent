@@ -25,7 +25,19 @@ const envSchema = z.object({
   ASSET_STORAGE_ROOT: z.string().min(1, "ASSET_STORAGE_ROOT is required"),
   ASSET_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(200 * 1024 * 1024),
   /** Rendered videos are far larger than typical input assets - a separate, larger ceiling (render-delivery phase section 4). Default 2GB. */
-  RENDER_ARTIFACT_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024 * 1024)
+  RENDER_ARTIFACT_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024 * 1024),
+  /**
+   * Master secret for encrypting a user's own BYOK AI provider API key at
+   * rest (infrastructure/crypto/secret-cipher.ts) - deliberately OPTIONAL
+   * here (never a hard boot-time requirement, unlike WORKER_REGISTRATION_SECRET
+   * above) so a server without it set still starts normally; only the
+   * BYOK connect/use paths themselves fail closed with a clear error if a
+   * caller ever actually needs it and it's unset (see
+   * EncryptionNotConfiguredError). Any non-empty string works - it is
+   * hashed to a fixed-length AES-256 key internally, never required to be
+   * exactly N hex characters.
+   */
+  CREDENTIALS_ENCRYPTION_KEY: z.string().min(16, "CREDENTIALS_ENCRYPTION_KEY must be at least 16 characters").optional()
 });
 
 export type Env = z.infer<typeof envSchema>;

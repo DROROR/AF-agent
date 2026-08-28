@@ -15,7 +15,7 @@ import type { SceneEvidenceRepository } from "./domain/scene-evidence/types.js";
 import type { RenderArtifactRepository } from "./domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "./domain/render-artifact-upload/types.js";
 import type { ExecutionSessionRepository } from "./domain/execution-session/types.js";
-import type { AiSuggestionProvider } from "./application/mapping-assistant/ai-suggestion-provider.js";
+import type { UserAiProviderRepository } from "./domain/user-ai-provider/types.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -30,11 +30,17 @@ import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upl
 import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-download.js";
 import { registerPreviewUploadRoutes } from "./routes/preview-upload.js";
 import { registerExecutionSessionRoutes } from "./routes/execution-sessions.js";
+import { registerUserAiProviderRoutes } from "./routes/user-ai-provider.js";
 
 export interface AppDependencies {
   env: Pick<
     Env,
-    "WORKER_REGISTRATION_SECRET" | "WORKER_HEARTBEAT_STALE_AFTER_MS" | "LOG_LEVEL" | "ASSET_MAX_UPLOAD_BYTES" | "RENDER_ARTIFACT_MAX_UPLOAD_BYTES"
+    | "WORKER_REGISTRATION_SECRET"
+    | "WORKER_HEARTBEAT_STALE_AFTER_MS"
+    | "LOG_LEVEL"
+    | "ASSET_MAX_UPLOAD_BYTES"
+    | "RENDER_ARTIFACT_MAX_UPLOAD_BYTES"
+    | "CREDENTIALS_ENCRYPTION_KEY"
   >;
   workerRepository: WorkerRepository;
   jobRepository: JobRepository;
@@ -50,7 +56,7 @@ export interface AppDependencies {
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
   executionSessionRepository: ExecutionSessionRepository;
-  aiSuggestionProvider: AiSuggestionProvider;
+  userAiProviderRepository: UserAiProviderRepository;
   checkDatabaseHealth: () => Promise<boolean>;
   now?: () => Date;
 }
@@ -183,7 +189,15 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     workMapRepository: deps.workMapRepository,
     mappingSuggestionRepository: deps.mappingSuggestionRepository,
     sceneEvidenceRepository: deps.sceneEvidenceRepository,
-    aiSuggestionProvider: deps.aiSuggestionProvider,
+    userAiProviderRepository: deps.userAiProviderRepository,
+    credentialsEncryptionKey: deps.env.CREDENTIALS_ENCRYPTION_KEY,
+    userRepository: deps.userRepository,
+    sessionRepository: deps.sessionRepository,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerUserAiProviderRoutes(app, {
+    userAiProviderRepository: deps.userAiProviderRepository,
+    credentialsEncryptionKey: deps.env.CREDENTIALS_ENCRYPTION_KEY,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     ...(deps.now ? { now: deps.now } : {})

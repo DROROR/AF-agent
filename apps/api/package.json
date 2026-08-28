@@ -10,6 +10,7 @@
     "build": "tsc -b tsconfig.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "@dyo/database": "*",
     "@dyo/schemas": "*",
     "@fastify/multipart": "^10.1.1",

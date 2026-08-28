@@ -294,7 +294,32 @@ export const he: Dictionary = {
     controlPlaneApi: "API מישור הבקרה",
     controlPlaneApiValue: "פנימי בלבד (פרוקסי בצד השרת)",
     apiConnectionHint:
-      "הדפדפן לעולם אינו קורא ל-API של מישור הבקרה ישירות - כל הנתונים בלוח בקרה זה עוברים דרך פרוקסי בצד השרת. אין כאן שום דבר להגדיר כיום."
+      "הדפדפן לעולם אינו קורא ל-API של מישור הבקרה ישירות - כל הנתונים בלוח בקרה זה עוברים דרך פרוקסי בצד השרת. אין כאן שום דבר להגדיר כיום.",
+    aiProvider: {
+      title: "ספק בינה מלאכותית",
+      description: "חברו מפתח API אישי של Anthropic כדי שעוזר המיפוי יוכל ליצור הצעות אמיתיות המבוססות על ראיות. המפתח שלכם מוצפן בשרת ולעולם אינו נשלח חזרה לדפדפן.",
+      providerLabel: "ספק",
+      providerValue: "Anthropic",
+      apiKeyLabel: "מפתח API",
+      apiKeyPlaceholder: "sk-ant-...",
+      modelLabel: "מודל",
+      statusLabel: "סטטוס חיבור",
+      statusConnected: (last4) => `מחובר · מפתח שמסתיים ב-${last4}`,
+      statusNotConnected: "לא מחובר",
+      lastVerifiedLabel: (date) => `אומת לאחרונה ${date}`,
+      testAction: "בדיקת חיבור",
+      testing: "בודק…",
+      testSucceeded: "החיבור הצליח.",
+      saveAction: "שמירה וחיבור",
+      replaceAction: "החלפת מפתח",
+      saving: "מתחבר…",
+      disconnectAction: "ניתוק",
+      disconnecting: "מנתק…",
+      loadFailedTitle: "לא ניתן היה לטעון את סטטוס ספק הבינה המלאכותית",
+      testFailedTitle: "בדיקת החיבור נכשלה",
+      saveFailedTitle: "לא ניתן היה לחבר את הספק",
+      disconnectFailedTitle: "לא ניתן היה לנתק את הספק"
+    }
   },
   sceneTable: {
     emptyTitle: "אין עדיין סצנות לבדיקה",
@@ -539,6 +564,7 @@ export const he: Dictionary = {
     generating: "יוצר…",
     aiAvailable: "בינה מלאכותית: זמינה",
     aiUnavailable: "בינה מלאכותית: לא מוגדרת (התאמה דטרמיניסטית בלבד)",
+    connectProviderHint: "חברו ספק בינה מלאכותית בהגדרות כדי להשתמש בעוזר המיפוי.",
     emptyTitle: "אין עדיין הצעות",
     emptyDescription: "צרו הצעות כדי לראות הצעות אמיתיות המבוססות על ראיות עבור סצנות לא פתורות.",
     sourceDeterministic: "דטרמיניסטי",

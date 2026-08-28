@@ -8,6 +8,7 @@ import { useLocale } from "./LocaleProvider";
 import { Card, CardHeader } from "./ui/Card";
 import { PageHeader } from "./ui/PageHeader";
 import { Button } from "./ui/Button";
+import { AiProviderSettingsCard } from "./AiProviderSettingsCard";
 import type { Theme } from "../lib/theme";
 
 export interface SettingsPageProps {
@@ -85,6 +86,8 @@ export function SettingsPage({ user }: SettingsPageProps): ReactElement {
           {t.settings.logout}
         </Button>
       </Card>
+
+      <AiProviderSettingsCard />
 
       <Card>
         <CardHeader title={t.settings.apiConnection} />

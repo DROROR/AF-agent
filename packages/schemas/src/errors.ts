@@ -31,6 +31,8 @@ export const ERROR_CODES = [
   "PRECONDITION_NOT_MET",
   /** Worker is already at its concurrency limit, or already has a live job for the requested operation - dispatch refuses rather than double-queuing. */
   "WORKER_BUSY",
+  /** A BYOK "Test Connection" / "Save & Connect" call to the named AI provider failed - bad key, unknown model, or the provider itself is unreachable. Never persisted. */
+  "AI_PROVIDER_CONNECTION_FAILED",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
