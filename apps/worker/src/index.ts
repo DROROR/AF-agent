@@ -25,6 +25,7 @@ import { createProcessLister } from "./infrastructure/process-lister.js";
 import { HeartbeatLoop, type HeartbeatLoopEvent } from "./runtime/heartbeat-loop.js";
 import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
+import { installProcessSafetyNet } from "./runtime/process-safety-net.js";
 import { buildHeartbeatPayload } from "./application/build-heartbeat-payload.js";
 import { ensureWorkRoot, resolveWorkRoot } from "./workspace/work-root.js";
 
@@ -63,6 +64,21 @@ function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void
       );
       return;
     case "heartbeat_failed":
+      if (event.authRejected) {
+        // Distinct from the generic "will retry" below: a 401 means the
+        // server reachably rejected our credentials, which no amount of
+        // retrying fixes on its own (unlike a network blip or a temporary
+        // 5xx) - an operator needs to look at this, so it's logged at
+        // error level with a message a log scanner/alert can key on,
+        // rather than blending into ordinary transient-failure noise.
+        // Still retried automatically (never re-registers, never exits) -
+        // see heartbeat-loop.ts's own doc comment on this event field.
+        logger.error(
+          { consecutiveFailures: event.consecutiveFailures, nextRetryMs: event.nextRetryMs },
+          "NEEDS_ATTENTION: DYO API rejected this worker's credentials (401) - will keep retrying automatically, but this will not resolve without an administrator re-pairing this worker"
+        );
+        return;
+      }
       logger.warn(
         {
           consecutiveFailures: event.consecutiveFailures,
@@ -87,6 +103,7 @@ function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void
 
 async function main(): Promise<void> {
   const logger = pino({ level: "info" });
+  installProcessSafetyNet({ logger, exit: process.exit.bind(process), process });
 
   const env = loadWorkerEnv();
   const workRoot = resolveWorkRoot(env.workRoot);

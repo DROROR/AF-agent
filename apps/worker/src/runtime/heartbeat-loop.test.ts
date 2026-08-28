@@ -1,6 +1,7 @@
 import type { HeartbeatRequest, WorkerDto } from "@dyo/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HeartbeatLoop, type HeartbeatLoopEvent } from "./heartbeat-loop.js";
+import { ApiResponseError, UnauthorizedApiError } from "../errors/worker-error.js";
 
 const payload: HeartbeatRequest = {
   aeStatus: "UNKNOWN",
@@ -129,6 +130,50 @@ describe("HeartbeatLoop", () => {
       )
       .map((e) => e.nextRetryMs);
     expect(delays).toEqual([1000, 2000, 4000, 8000, 8000]);
+  });
+
+  it("flags a 401 as authRejected, keeps retrying, and never re-registers or exits", async () => {
+    const sendHeartbeat = vi.fn().mockRejectedValue(new UnauthorizedApiError("API rejected worker credentials"));
+    const events: HeartbeatLoopEvent[] = [];
+    const loop = new HeartbeatLoop({
+      buildPayload: async () => payload,
+      sendHeartbeat,
+      intervalMs: 5000,
+      backoff,
+      onEvent: (event) => events.push(event)
+    });
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(backoff.baseMs);
+
+    const failures = events.filter(
+      (e): e is Extract<HeartbeatLoopEvent, { type: "heartbeat_failed" }> => e.type === "heartbeat_failed"
+    );
+    expect(failures).toHaveLength(2);
+    expect(failures.every((f) => f.authRejected)).toBe(true);
+    // Still alive and still retrying - the loop's own contract for every
+    // failure category, auth included (see heartbeat-loop.ts's own doc
+    // comment: "never a reason to exit or re-register").
+    expect(sendHeartbeat).toHaveBeenCalledTimes(2);
+  });
+
+  it("never flags an ordinary API error (non-401) as authRejected", async () => {
+    const sendHeartbeat = vi.fn().mockRejectedValue(new ApiResponseError("server error", 500));
+    const events: HeartbeatLoopEvent[] = [];
+    const loop = new HeartbeatLoop({
+      buildPayload: async () => payload,
+      sendHeartbeat,
+      intervalMs: 5000,
+      backoff,
+      onEvent: (event) => events.push(event)
+    });
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const failure = events.find((e): e is Extract<HeartbeatLoopEvent, { type: "heartbeat_failed" }> => e.type === "heartbeat_failed");
+    expect(failure?.authRejected).toBe(false);
   });
 
   it("stop() prevents any further heartbeats", async () => {

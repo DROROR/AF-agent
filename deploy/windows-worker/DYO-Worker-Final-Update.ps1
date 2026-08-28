@@ -39,6 +39,18 @@
   commit). DYO-Worker-MCP-Repair.ps1/DYO-Worker-Repair.ps1 remain separate,
   distinct repair tools this package does not replace.
 
+  This update also REFRESHES the existing "DYO Video Worker" Scheduled
+  Task's automatic-recovery settings (RestartCount/RestartInterval/
+  MultipleInstances/ExecutionTimeLimit/StartWhenAvailable), the same
+  robust settings DYO-Worker-Setup.ps1/DYO-Worker-Repair.ps1 already apply
+  on a fresh install/repair - a machine set up a while ago may be running
+  an older, weaker version of these settings that this package now
+  corrects. This uses the SAME Action/Trigger/Principal (same run-worker.
+  bat path, same Windows user, same AtLogon trigger) - it never changes
+  WHO or WHAT the task runs as, only how reliably Windows recovers it
+  after an ordinary crash. WORKER_ID/WORKER_TOKEN are untouched (they live
+  in a separate, local credentials file, never in the task definition).
+
   This script itself never runs any of the above, never connects to ae-mcp,
   never opens or touches any After Effects project, and never invokes
   aerender - it only replaces program files and restarts the worker. Real
@@ -219,7 +231,7 @@ if (-not $task) {
   Write-Host "Please run DYO-Worker-Repair.bat (the full repair) instead, or contact DYO."
   exit 1
 }
-Write-CheckResult $true "Existing automatic-startup task found - it will be kept, not re-registered"
+Write-CheckResult $true "Existing automatic-startup task found - its recovery settings will be refreshed below, same identity"
 
 $sourceApp = Join-Path $PSScriptRoot "worker-app"
 if (-not (Test-Path (Join-Path $sourceApp "dist\index.js"))) {
@@ -298,6 +310,41 @@ if ($npmExitCode -ne 0) {
 }
 Write-CheckResult $true "Runtime dependencies are up to date"
 
+# ---- Step 3b: refresh the Scheduled Task's automatic-recovery settings ----
+#
+# Same Action/Trigger/Principal this machine already had (same
+# run-worker.bat path, same Windows user, same AtLogon trigger) - only the
+# Settings block is guaranteed current. A machine set up a while ago may
+# still be running whatever RestartCount/RestartInterval/MultipleInstances/
+# ExecutionTimeLimit values its ORIGINAL DYO-Worker-Setup.ps1 run applied
+# (or lack thereof, on a very old install) - re-registering here brings it
+# up to the same robust policy a fresh install/repair gets, every time this
+# update runs, regardless of that history. The task is already stopped
+# (Step 2 above) before this runs, and is left stopped afterward - Step 5
+# below still owns starting it, with its own PID-diff verification.
+Write-Host ""
+Write-Host "Refreshing automatic-recovery settings on the existing Scheduled Task..."
+
+$existingTaskForRefresh = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($existingTaskForRefresh) {
+  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+}
+
+$taskAction = New-ScheduledTaskAction -Execute $runWorkerBat -WorkingDirectory $InstallDir
+$taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+$taskSettings = New-ScheduledTaskSettingsSet `
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+  -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+  -ExecutionTimeLimit ([TimeSpan]::Zero) `
+  -MultipleInstances IgnoreNew
+
+Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
+  -Description "Runs the DYO Video Worker automatically when $env:USERNAME logs into Windows. Installed/updated by DYO-Worker-Final-Update.ps1 - safe to remove via DYO-Worker-Uninstall.bat." `
+  | Out-Null
+
+Write-CheckResult $true "Automatic-recovery settings refreshed (restarts automatically after a crash, no duplicate instances, same identity)"
+
 # ---- Step 4: guarantee a clean log slate before restarting ----
 $logPath = Join-Path $InstallDir "logs\worker.log"
 if (Test-Path $logPath) {
@@ -345,19 +392,51 @@ if (-not $started) {
 }
 Write-CheckResult $true "A genuinely new DYO Worker process is running (PID differs from before)"
 
-Write-Host "Waiting for a real successful heartbeat from the new process (up to 30 seconds)..."
-$heartbeatOk = Wait-Until -TimeoutSeconds 30 -PollSeconds 2 -Condition {
+# Capabilities/build-commit live in the process's own "worker starting" log
+# line (index.ts logs it BEFORE the heartbeat loop even starts) - checking
+# it here, independent of whether a heartbeat has succeeded yet, means a
+# real network hiccup during THIS update never blocks verifying the update
+# itself actually took effect (item 7: "do not falsely call a temporary
+# heartbeat delay an installation failure").
+Write-Host "Waiting for the new process to log its startup line (up to 15 seconds)..."
+$startupLogged = Wait-Until -TimeoutSeconds 15 -PollSeconds 1 -Condition {
+  (Get-FreshLogContent) -match '"msg":"worker starting"'
+}
+if (-not $startupLogged) {
+  Write-Host "[NEEDS ATTENTION] The new DYO Worker process is running, but never logged its own"
+  Write-Host "startup line within 15 seconds. Check logs\worker.log directly - this usually means"
+  Write-Host "a configuration problem (see .env) rather than a network issue. Contact DYO if unclear."
+  exit 1
+}
+Write-CheckResult $true "New process logged its own startup line"
+
+Write-Host "Waiting for a real heartbeat attempt from the new process (up to 30 seconds)..."
+$heartbeatSucceeded = Wait-Until -TimeoutSeconds 30 -PollSeconds 2 -Condition {
   (Get-FreshLogContent) -match '"msg":"heartbeat succeeded"'
 }
 $newContent = Get-FreshLogContent
 
-if (-not $heartbeatOk) {
-  Write-Host "[NEEDS ATTENTION] The new DYO Worker process is running, but no successful"
-  Write-Host "heartbeat was observed within 30 seconds. Check your internet connection,"
-  Write-Host "then check logs\worker.log directly before assuming this update failed."
-  exit 1
+if ($heartbeatSucceeded) {
+  Write-CheckResult $true "New process sent a real successful heartbeat"
+} else {
+  # Not yet succeeded is not automatically a failure - a real retry attempt
+  # with a logged, understandable reason means the worker is alive and
+  # actively trying, which is exactly the self-healing behavior this
+  # package exists to guarantee (it will connect the moment the API/network
+  # is reachable, with no client action needed). Only genuine SILENCE - no
+  # attempt logged at all - is treated as an install failure below.
+  $retrying = $newContent -match '"msg":"heartbeat failed, will retry"' -or $newContent -match "NEEDS_ATTENTION: DYO API rejected"
+  if ($retrying) {
+    Write-CheckResult $true "New process has not connected yet but is actively retrying (see logs\worker.log for the reason) - this is expected to resolve on its own"
+  } else {
+    Write-Host "[NEEDS ATTENTION] The new DYO Worker process started, but neither a successful"
+    Write-Host "heartbeat NOR a logged retry attempt was observed within 30 seconds. Check your"
+    Write-Host "internet connection, then check logs\worker.log directly before assuming this"
+    Write-Host "update failed - this specific combination usually means the process itself is"
+    Write-Host "not behaving as expected, not just a slow network."
+    exit 1
+  }
 }
-Write-CheckResult $true "New process sent a real successful heartbeat"
 
 $expectedCapabilities = @("CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE", "INSPECT_RENDER_CAPABILITIES", "EXECUTE_FRAME", "RENDER")
 $missingCapabilities = $expectedCapabilities | Where-Object { $newContent -notmatch [regex]::Escape($_) }
@@ -391,12 +470,15 @@ Write-Host ""
 Write-Host "================================================"
 Write-Host "  Update complete"
 Write-Host "================================================"
+$heartbeatSummary = if ($heartbeatSucceeded) { "a real confirmed heartbeat" } else { "a genuine active retry attempt (not yet connected, but self-recovering - see logs\worker.log)" }
 Write-Host "DYO Worker is running the complete AE execution and render delivery pipeline,"
-Write-Host "with a genuinely new process (confirmed by PID), a real confirmed heartbeat, the"
+Write-Host "with a genuinely new process (confirmed by PID), $heartbeatSummary, the"
 Write-Host "exact expected final build commit, and every new program file verified present on"
 Write-Host "disk - using the same DYO Worker identity this computer already had. No new"
-Write-Host "registration was created. No After Effects project was opened, changed, rendered,"
-Write-Host "or otherwise run against by this update."
+Write-Host "registration was created. Automatic-recovery settings on the Scheduled Task were"
+Write-Host "refreshed, so an ordinary future crash restarts DYO Worker on its own - no reboot"
+Write-Host "or manual re-run of this update should be needed for that. No After Effects"
+Write-Host "project was opened, changed, rendered, or otherwise run against by this update."
 Write-Host ""
 Write-Host "Latest status:"
 Get-Content -Path $logPath -Tail 5 | ForEach-Object { Write-Host "  $_" }

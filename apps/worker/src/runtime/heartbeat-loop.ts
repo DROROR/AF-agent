@@ -1,10 +1,29 @@
 import type { HeartbeatRequest, WorkerDto } from "@dyo/schemas";
 import type { BackoffPolicy } from "../infrastructure/backoff.js";
 import { nextBackoffDelayMs } from "../infrastructure/backoff.js";
+import { UnauthorizedApiError } from "../errors/worker-error.js";
 
 export type HeartbeatLoopEvent =
   | { type: "heartbeat_succeeded"; worker: WorkerDto }
-  | { type: "heartbeat_failed"; error: unknown; consecutiveFailures: number; nextRetryMs: number }
+  | {
+      type: "heartbeat_failed";
+      error: unknown;
+      consecutiveFailures: number;
+      nextRetryMs: number;
+      /**
+       * The API reachably rejected our credentials (401) - retrying will
+       * never fix this on its own (a revoked/invalid token stays revoked),
+       * unlike every other failure category here which is expected to
+       * clear up on its own. Still retried the same way (never a reason to
+       * exit or re-register - see resolveWorkerCredentials's own "never
+       * silently register a new, duplicate identity" contract) so the
+       * worker recovers automatically the moment an operator fixes it
+       * server-side, but the caller (index.ts) logs this distinctly as
+       * NEEDS_ATTENTION rather than the generic "will retry" - see that
+       * file's own doc comment.
+       */
+      authRejected: boolean;
+    }
   | { type: "loop_stopped" };
 
 export interface HeartbeatLoopDeps {
@@ -74,7 +93,8 @@ export class HeartbeatLoop {
         type: "heartbeat_failed",
         error,
         consecutiveFailures: this.consecutiveFailures,
-        nextRetryMs
+        nextRetryMs,
+        authRejected: error instanceof UnauthorizedApiError
       });
       this.scheduleNext(nextRetryMs);
     }

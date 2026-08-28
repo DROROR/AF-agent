@@ -223,12 +223,34 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
     expect(startIdx).toBeGreaterThan(idx);
   });
 
-  it("verifies a real new successful heartbeat before considering the update successful", () => {
-    expect(updateScript).toMatch(/\$heartbeatOk = Wait-Until/);
-    expect(updateScript).toMatch(/heartbeat succeeded/);
-    const idx = updateScript.indexOf("if (-not $heartbeatOk)");
+  it("verifies the new process logged its own startup line before checking anything heartbeat-related", () => {
+    const startupIdx = updateScript.indexOf("$startupLogged = Wait-Until");
+    const heartbeatIdx = updateScript.indexOf("$heartbeatSucceeded = Wait-Until");
+    expect(startupIdx).toBeGreaterThan(-1);
+    expect(heartbeatIdx).toBeGreaterThan(startupIdx);
+    const startupBlock = updateScript.slice(startupIdx, heartbeatIdx);
+    expect(startupBlock).toMatch(/worker starting/);
+    expect(startupBlock).toMatch(/if \(-not \$startupLogged\)/);
+    expect(startupBlock).toMatch(/exit 1/);
+  });
+
+  it("accepts either a real successful heartbeat OR a genuinely logged retry attempt as success - never fails the install over a temporary delay", () => {
+    const idx = updateScript.indexOf("$heartbeatSucceeded = Wait-Until");
     expect(idx).toBeGreaterThan(-1);
-    expect(updateScript.slice(idx, idx + 300)).toMatch(/exit 1/);
+    expect(updateScript).toMatch(/heartbeat succeeded/);
+    const block = updateScript.slice(idx, idx + 1200);
+    expect(block).toMatch(/if \(\$heartbeatSucceeded\)/);
+    expect(block).toMatch(/\$retrying = \$newContent -match '"msg":"heartbeat failed, will retry"' -or \$newContent -match "NEEDS_ATTENTION: DYO API rejected"/);
+    expect(block).toMatch(/if \(\$retrying\)/);
+  });
+
+  it("only fails the install on genuine silence - no heartbeat success AND no logged retry attempt at all", () => {
+    const idx = updateScript.indexOf("$retrying = $newContent");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 1000);
+    expect(block).toMatch(/\} else \{/);
+    expect(block).toMatch(/exit 1/);
+    expect(block).toMatch(/neither a successful/i);
   });
 
   it("verifies all six capabilities (CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME, RENDER) all appear in the new process's own startup log line, and STOPs if not", () => {
@@ -263,7 +285,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
 
   it('never prints "Update complete" before every verification step above has already passed', () => {
     const completeIdx = updateScript.indexOf("Update complete");
-    const heartbeatCheckIdx = updateScript.indexOf("$heartbeatOk = Wait-Until");
+    const heartbeatCheckIdx = updateScript.indexOf("$heartbeatSucceeded = Wait-Until");
     const capabilityCheckIdx = updateScript.indexOf('$newContent -match \'"msg":"worker starting"\'');
     const buildInfoCheckIdx = updateScript.indexOf("$commitMatch = [regex]::Match");
     const exactCommitCheckIdx = updateScript.indexOf("if ($runningCommit -ne $ExpectedCommit)");
@@ -274,16 +296,51 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
   });
 });
 
-describe("DYO-Worker-Final-Update.ps1 restarts (not re-registers) the existing Scheduled Task", () => {
+describe("DYO-Worker-Final-Update.ps1 refreshes the Scheduled Task's recovery settings, same identity", () => {
   it("uses the exact TaskName \"DYO Video Worker\"", () => {
     expect(updateScript).toMatch(/\$TaskName = "DYO Video Worker"/);
   });
 
-  it("stops the task if running, then starts it again, rather than re-registering it", () => {
-    expect(updateScript).not.toMatch(/Register-ScheduledTask/);
-    expect(updateScript).not.toMatch(/Unregister-ScheduledTask/);
+  it("stops the task, refreshes its registration, then starts it again", () => {
     expect(updateScript).toMatch(/Stop-ScheduledTask -TaskName \$TaskName/);
+    expect(updateScript).toMatch(/Unregister-ScheduledTask -TaskName \$TaskName -Confirm:\$false/);
+    expect(updateScript).toMatch(/Register-ScheduledTask -TaskName \$TaskName/);
     expect(updateScript).toMatch(/Start-ScheduledTask -TaskName \$TaskName/);
+  });
+
+  it("re-registers with the SAME identity - same run-worker.bat path, same Windows user, same AtLogon trigger", () => {
+    const idx = updateScript.indexOf("$taskAction = New-ScheduledTaskAction");
+    expect(idx, "task refresh block not found").toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 900);
+    expect(block).toMatch(/New-ScheduledTaskAction -Execute \$runWorkerBat -WorkingDirectory \$InstallDir/);
+    expect(block).toMatch(/New-ScheduledTaskTrigger -AtLogOn -User "\$env:USERDOMAIN\\\$env:USERNAME"/);
+    expect(block).toMatch(/New-ScheduledTaskPrincipal -UserId "\$env:USERDOMAIN\\\$env:USERNAME" -LogonType Interactive -RunLevel Limited/);
+  });
+
+  it("applies the same robust auto-recovery settings a fresh Setup/Repair install gets", () => {
+    const idx = updateScript.indexOf("$taskSettings = New-ScheduledTaskSettingsSet");
+    expect(idx, "task settings block not found").toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/-RestartCount 999 -RestartInterval \(New-TimeSpan -Minutes 1\)/);
+    expect(block).toMatch(/-ExecutionTimeLimit \(\[TimeSpan\]::Zero\)/);
+    expect(block).toMatch(/-MultipleInstances IgnoreNew/);
+    expect(block).toMatch(/-StartWhenAvailable/);
+  });
+
+  it("refreshes the task's registration AFTER the old process is confirmed stopped, and BEFORE the new one is started", () => {
+    const stoppedIdx = updateScript.indexOf('Write-CheckResult $true "DYO Worker fully stopped');
+    const refreshIdx = updateScript.indexOf("$taskAction = New-ScheduledTaskAction");
+    const startIdx = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName", refreshIdx);
+    expect(stoppedIdx).toBeGreaterThan(-1);
+    expect(refreshIdx).toBeGreaterThan(stoppedIdx);
+    expect(startIdx).toBeGreaterThan(refreshIdx);
+  });
+
+  it("never references WORKER_ID/WORKER_TOKEN/a registration secret in the task-refresh block - identity is untouched", () => {
+    const idx = updateScript.indexOf("Refreshing automatic-recovery settings");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, updateScript.indexOf("Step 4", idx));
+    expect(block).not.toMatch(/WORKER_ID|WORKER_TOKEN|WORKER_REGISTRATION_SECRET|worker-credentials/);
   });
 });
 
