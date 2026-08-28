@@ -46,6 +46,14 @@ build). It adds:
   DYO has not explicitly configured and approved.
 - Uploading the finished rendered video file back to DYO once a render
   completes successfully, so it appears in DYO's own dashboard.
+- Self-healing reliability: DYO Worker now survives an unreachable
+  internet connection, a temporary DYO outage, or After Effects/ae-mcp
+  being closed - it stays running and reconnects automatically, with no
+  need to reboot this computer or re-run this update. If DYO Worker's own
+  process ever crashes for any reason, Windows now restarts it
+  automatically within about a minute. This update refreshes that
+  automatic-recovery setting on your existing scheduled task even if it
+  was originally set up a while ago, before this setting existed.
 
 This update installs the CODE for all of the above. None of it runs on
 its own - every one of these only ever runs when DYO explicitly dispatches
@@ -55,6 +63,9 @@ inspection already works today.
 WHAT THIS DOES NOT TOUCH
 ---------------------------
 - Your existing DYO Worker registration/identity - kept exactly as-is.
+  (The Scheduled Task's automatic-recovery settings ARE refreshed by this
+  update - see above - but it stays the exact same task, running as the
+  exact same Windows user, pointed at the exact same program folder.)
 - No new registration code is asked for or used.
 - No Windows account password is asked for or stored.
 - Your .env configuration file - not rewritten at all by this update.
@@ -79,8 +90,10 @@ IF IT SAYS "NEEDS ATTENTION"
 This update actively verifies each step - including that DYO Worker
 genuinely stopped before files were changed, that every new program file
 this release adds genuinely exists on disk both before and after the
-copy, that a real new process with a real successful heartbeat is running
-afterward, and that its build marker is the EXACT expected final build -
+copy, that a real new process is running afterward with either a real
+successful heartbeat or a genuine, actively-retrying connection attempt
+(a temporary network delay during the update itself is not treated as a
+failure), and that its build marker is the EXACT expected final build -
 rather than just assuming success. If any step could not be verified, it
 stops and tells you exactly which one, instead of printing "Update
 complete" anyway. Re-running the update is safe; contact DYO if the same
