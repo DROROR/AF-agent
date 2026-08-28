@@ -1,5 +1,6 @@
 import type { UserAiProviderRepository } from "../../domain/user-ai-provider/types.js";
-import { decryptSecret } from "../../infrastructure/crypto/secret-cipher.js";
+import { EncryptionNotConfiguredError, SecretDecryptionError, decryptSecret } from "../../infrastructure/crypto/secret-cipher.js";
+import { AiProviderUnavailableError } from "../../errors/app-error.js";
 import { NotConfiguredAiSuggestionProvider, type AiSuggestionProvider } from "./ai-suggestion-provider.js";
 import { AnthropicSuggestionProvider } from "./anthropic-suggestion-provider.js";
 
@@ -28,6 +29,19 @@ export async function resolveAiSuggestionProviderForUser(deps: ResolveAiSuggesti
   if (!connection) {
     return new NotConfiguredAiSuggestionProvider();
   }
-  const apiKey = decryptSecret(connection.encryptedApiKey, deps.credentialsEncryptionKey ?? "");
-  return new AnthropicSuggestionProvider(apiKey, connection.model);
+  try {
+    const apiKey = decryptSecret(connection.encryptedApiKey, deps.credentialsEncryptionKey ?? "");
+    return new AnthropicSuggestionProvider(apiKey, connection.model);
+  } catch (error) {
+    // Never the generic catch-all 500 - this is always one of the two
+    // typed failures above (see secret-cipher.ts), never something
+    // requiring a raw stack trace to diagnose.
+    if (error instanceof EncryptionNotConfiguredError) {
+      throw new AiProviderUnavailableError("encryption is not configured on this server");
+    }
+    if (error instanceof SecretDecryptionError) {
+      throw new AiProviderUnavailableError("the stored key could not be decrypted");
+    }
+    throw error;
+  }
 }

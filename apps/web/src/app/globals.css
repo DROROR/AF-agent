@@ -661,6 +661,158 @@ select:focus-visible,
   margin-bottom: var(--space-2);
 }
 
+/* ==========================================================================
+   Settings layout (2-column: vertical section nav + content on the right)
+   ========================================================================== */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 15rem 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  position: sticky;
+  top: var(--space-4);
+}
+
+.settings-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 0.86rem;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.settings-nav__item:hover {
+  background: var(--color-surface-sunken);
+}
+
+.settings-nav__item svg {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: color var(--transition-fast);
+}
+
+.settings-nav__item[aria-current="page"] {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--color-text-on-primary);
+}
+
+.settings-nav__item[aria-current="page"] svg {
+  color: var(--color-text-on-primary);
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    position: static;
+    padding-bottom: var(--space-1);
+  }
+
+  .settings-nav__item {
+    flex: 0 0 auto;
+  }
+}
+
+/* Premium glass treatment for the AI Providers card - theme-aware (built
+   from --color-surface, unlike .auth-shell__card's fixed dark overlay,
+   since this lives inside the regular light/dark dashboard, not a fixed
+   background image). Deliberately only ONE `backdrop-filter` declaration -
+   see .auth-shell__card's own doc comment for the Lightning CSS minifier
+   bug a manually-duplicated `-webkit-backdrop-filter` line causes. */
+.card--glass {
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-top: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.provider-row__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-md);
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+  flex-shrink: 0;
+}
+
+.provider-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.provider-row__name {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.provider-row__meta {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.provider-row--disabled {
+  opacity: 0.55;
+}
+
+.provider-row--disabled .provider-row__icon {
+  background: var(--color-neutral-bg);
+  color: var(--color-text-faint);
+}
+
+.provider-manage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
 .page-header__actions {
   display: flex;
   gap: var(--space-2);

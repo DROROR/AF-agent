@@ -20,15 +20,29 @@ export async function testAnthropicConnection(apiKey: string, model: string): Pr
     });
     return { ok: true };
   } catch (error) {
+    // Ordered most-specific-first: PermissionDeniedError/NotFoundError both
+    // extend APIError, so they must be checked before the generic APIError
+    // fallback - otherwise a real "this key can't use this model" response
+    // would be misreported as a generic API error instead of the specific,
+    // actionable reason a human can actually act on.
     if (error instanceof Anthropic.AuthenticationError) {
       return { ok: false, reason: "Invalid API key" };
     }
-    if (error instanceof Anthropic.NotFoundError) {
-      return { ok: false, reason: `Model "${model}" was not found` };
+    if (error instanceof Anthropic.PermissionDeniedError || error instanceof Anthropic.NotFoundError) {
+      return { ok: false, reason: "Model not available for this API key" };
+    }
+    if (error instanceof Anthropic.RateLimitError) {
+      return { ok: false, reason: "Anthropic API rate limit reached - try again shortly" };
+    }
+    if (error instanceof Anthropic.APIConnectionError) {
+      return { ok: false, reason: "Network error - could not reach Anthropic" };
+    }
+    if (error instanceof Anthropic.InternalServerError) {
+      return { ok: false, reason: "Anthropic API unavailable" };
     }
     if (error instanceof Anthropic.APIError) {
       return { ok: false, reason: `Anthropic API error (${error.status}): ${error.message}` };
     }
-    return { ok: false, reason: error instanceof Error ? error.message : "Could not reach Anthropic" };
+    return { ok: false, reason: error instanceof Error ? error.message : "Anthropic API unavailable" };
   }
 }

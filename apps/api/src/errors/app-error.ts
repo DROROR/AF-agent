@@ -290,3 +290,18 @@ export class AiProviderConnectionFailedError extends AppError {
     this.name = "AiProviderConnectionFailedError";
   }
 }
+
+/**
+ * A user's stored BYOK connection exists but could not be decrypted
+ * (CREDENTIALS_ENCRYPTION_KEY missing/rotated on the server, or a
+ * corrupted row) - a real server misconfiguration, surfaced with a clean,
+ * actionable message rather than the generic catch-all "An unexpected
+ * error occurred" (see resolve-ai-suggestion-provider.ts's own doc
+ * comment on why this is never silently degraded past).
+ */
+export class AiProviderUnavailableError extends AppError {
+  constructor(reason: string) {
+    super("INTERNAL_ERROR", `AI provider is unavailable: ${reason}. Try reconnecting it in Settings.`);
+    this.name = "AiProviderUnavailableError";
+  }
+}

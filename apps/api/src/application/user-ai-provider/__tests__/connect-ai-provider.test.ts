@@ -56,6 +56,19 @@ describe("connectAiProvider", () => {
     expect(decryptSecret(stored!.encryptedApiKey, MASTER_KEY)).toBe("sk-ant-second-keyBBBB");
   });
 
+  it("surfaces a missing CREDENTIALS_ENCRYPTION_KEY as a clean AiProviderConnectionFailedError, never a generic unhandled error", async () => {
+    const d = deps({ credentialsEncryptionKey: undefined });
+
+    await expect(connectAiProvider(d, "user-1", { provider: "ANTHROPIC", apiKey: "sk-ant-real-key-value", model: "claude-sonnet-5" })).rejects.toThrow(
+      AiProviderConnectionFailedError
+    );
+    await expect(
+      connectAiProvider(d, "user-1", { provider: "ANTHROPIC", apiKey: "sk-ant-real-key-value", model: "claude-sonnet-5" })
+    ).rejects.toThrow(/[Ee]ncryption/);
+
+    expect(await d.userAiProviderRepository.findByUserId("user-1")).toBeNull();
+  });
+
   it("scopes storage to the given userId only - one user's connect never touches another's row", async () => {
     const d = deps();
     await connectAiProvider(d, "user-1", { provider: "ANTHROPIC", apiKey: "sk-ant-user-oneAAAA", model: "claude-sonnet-5" });

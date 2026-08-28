@@ -1,5 +1,6 @@
 "use client";
 
+import { Bot } from "lucide-react";
 import { useEffect, useState, type ReactElement } from "react";
 import { ANTHROPIC_MODELS, DEFAULT_ANTHROPIC_MODEL, type AiProviderStatus, type AnthropicModel } from "@dyo/schemas";
 import { Card, CardHeader } from "./ui/Card";
@@ -12,10 +13,14 @@ import { Skeleton } from "./ui/Skeleton";
 import { useLocale } from "./LocaleProvider";
 import { connectAiProvider, disconnectAiProvider, fetchAiProviderStatus, testAiProviderConnection } from "../lib/ai-provider-api-client";
 
+type ProviderBadgeTone = "positive" | "neutral" | "negative";
+
 /**
- * BYOK section: Settings -> AI Provider. Anthropic only today
+ * BYOK section: Settings -> AI Providers. Anthropic only today
  * (AI_PROVIDER_NAMES is a real enum in @dyo/schemas, not a boolean, so
- * OpenAI/Gemini are a future enum-value addition, never a shape change).
+ * OpenAI/Gemini are a future enum-value addition, never a shape change) -
+ * they're listed below as disabled "coming soon" rows, never as a fake
+ * "Connected" card, since neither is actually implemented yet.
  *
  * The raw API key lives ONLY in this component's own local state, for the
  * duration of typing it in and clicking Test/Save - it is never written to
@@ -29,6 +34,7 @@ export function AiProviderSettingsCard(): ReactElement {
   const [status, setStatus] = useState<AiProviderStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [manageOpen, setManageOpen] = useState(false);
 
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState<AnthropicModel>(DEFAULT_ANTHROPIC_MODEL);
@@ -46,6 +52,10 @@ export function AiProviderSettingsCard(): ReactElement {
       if (result.ok) {
         setStatus(result.data);
         setLoadError(null);
+        // Not-yet-connected opens the manage form immediately (nothing to
+        // review yet); an already-connected provider stays collapsed to a
+        // summary until the user explicitly asks to manage it.
+        setManageOpen(!result.data.connected);
       } else {
         setLoadError(result.message);
       }
@@ -57,6 +67,8 @@ export function AiProviderSettingsCard(): ReactElement {
   }, []);
 
   const canSubmit = apiKey.trim().length >= 20;
+  const badgeTone: ProviderBadgeTone = loadError ? "negative" : status?.connected ? "positive" : "neutral";
+  const badgeLabel = loadError ? t.settings.aiProvider.badgeError : status?.connected ? t.settings.aiProvider.badgeConnected : t.settings.aiProvider.badgeNotConnected;
 
   async function handleTest(): Promise<void> {
     setIsTesting(true);
@@ -82,6 +94,7 @@ export function AiProviderSettingsCard(): ReactElement {
     setStatus(result.data);
     setApiKey("");
     setTestResult(null);
+    setManageOpen(false);
   }
 
   async function handleDisconnect(): Promise<void> {
@@ -96,93 +109,112 @@ export function AiProviderSettingsCard(): ReactElement {
     setStatus({ connected: false, provider: null, model: null, last4: null, lastVerifiedAt: null });
     setApiKey("");
     setTestResult(null);
+    setManageOpen(true);
   }
 
   return (
-    <Card>
+    <Card className="card--glass">
       <CardHeader title={t.settings.aiProvider.title} />
       <p>{t.settings.aiProvider.description}</p>
 
       {isLoading ? (
-        <Skeleton height="1.5rem" />
-      ) : loadError ? (
-        <ErrorState title={t.settings.aiProvider.loadFailedTitle} description={loadError} />
+        <Skeleton height="3rem" />
       ) : (
         <>
-          <dl className="detail-list">
-            <div className="detail-list__row">
-              <dt className="detail-list__label">{t.settings.aiProvider.statusLabel}</dt>
-              <dd className="detail-list__value">
-                {status?.connected && status.last4
-                  ? t.settings.aiProvider.statusConnected(status.last4)
-                  : t.settings.aiProvider.statusNotConnected}
-              </dd>
+          {loadError ? <ErrorState title={t.settings.aiProvider.loadFailedTitle} description={loadError} /> : null}
+
+          <div className="provider-row">
+            <span className="provider-row__icon">
+              <Bot aria-hidden="true" size={22} />
+            </span>
+            <div className="provider-row__info">
+              <p className="provider-row__name">{t.settings.aiProvider.anthropicName}</p>
+              <p className="provider-row__meta">{t.settings.aiProvider.anthropicModelsSummary}</p>
+              {status?.connected && status.model ? (
+                <p className="provider-row__meta">
+                  {t.settings.aiProvider.selectedModelLabel}: {status.model}
+                </p>
+              ) : null}
+              {status?.connected && status.lastVerifiedAt ? (
+                <p className="provider-row__meta">{t.settings.aiProvider.lastVerifiedLabel(new Date(status.lastVerifiedAt).toLocaleString())}</p>
+              ) : null}
             </div>
-            {status?.connected && status.model ? (
-              <div className="detail-list__row">
-                <dt className="detail-list__label">{t.settings.aiProvider.modelLabel}</dt>
-                <dd className="detail-list__value">{status.model}</dd>
+            <span className={`status-badge status-badge--${badgeTone}`}>{badgeLabel}</span>
+            <Button size="sm" variant="secondary" onClick={() => setManageOpen((open) => !open)}>
+              {manageOpen ? t.settings.aiProvider.collapseAction : status?.connected ? t.settings.aiProvider.manageAction : t.settings.aiProvider.connectAction}
+            </Button>
+          </div>
+
+          {manageOpen ? (
+            <div className="provider-manage">
+              <Field label={t.settings.aiProvider.apiKeyLabel} htmlFor="ai-provider-api-key">
+                <Input
+                  id="ai-provider-api-key"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={t.settings.aiProvider.apiKeyPlaceholder}
+                  value={apiKey}
+                  disabled={isTesting || isSaving}
+                  onChange={(event) => {
+                    setApiKey(event.target.value);
+                    setTestResult(null);
+                  }}
+                />
+              </Field>
+
+              <Field label={t.settings.aiProvider.modelLabel} htmlFor="ai-provider-model">
+                <Select id="ai-provider-model" value={model} disabled={isTesting || isSaving} onChange={(event) => setModel(event.target.value as AnthropicModel)}>
+                  {ANTHROPIC_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              {status?.connected && status.last4 ? <p className="field__hint">{t.settings.aiProvider.statusConnected(status.last4)}</p> : null}
+
+              {testResult ? (
+                testResult.ok ? (
+                  <p role="status">{testResult.message}</p>
+                ) : (
+                  <ErrorState title={t.settings.aiProvider.connectionFailedTitle} description={testResult.message} />
+                )
+              ) : null}
+              {saveError ? <ErrorState title={t.settings.aiProvider.connectionFailedTitle} description={saveError} /> : null}
+              {disconnectError ? <ErrorState title={t.settings.aiProvider.disconnectFailedTitle} description={disconnectError} /> : null}
+
+              <div className="overview-actions">
+                <Button variant="secondary" disabled={!canSubmit || isTesting || isSaving} onClick={() => void handleTest()}>
+                  {isTesting ? t.settings.aiProvider.testing : t.settings.aiProvider.testAction}
+                </Button>
+                <Button variant="primary" disabled={!canSubmit || isTesting || isSaving} onClick={() => void handleSave()}>
+                  {isSaving ? t.settings.aiProvider.saving : status?.connected ? t.settings.aiProvider.replaceAction : t.settings.aiProvider.saveAction}
+                </Button>
+                {status?.connected ? (
+                  <Button variant="ghost" disabled={isDisconnecting} onClick={() => void handleDisconnect()}>
+                    {isDisconnecting ? t.settings.aiProvider.disconnecting : t.settings.aiProvider.disconnectAction}
+                  </Button>
+                ) : null}
               </div>
-            ) : null}
-            {status?.connected && status.lastVerifiedAt ? (
-              <div className="detail-list__row">
-                <dt className="detail-list__label" />
-                <dd className="detail-list__value">{t.settings.aiProvider.lastVerifiedLabel(new Date(status.lastVerifiedAt).toLocaleString())}</dd>
-              </div>
-            ) : null}
-          </dl>
-
-          <Field label={t.settings.aiProvider.providerLabel} htmlFor="ai-provider-name">
-            <Input id="ai-provider-name" value={t.settings.aiProvider.providerValue} disabled readOnly />
-          </Field>
-
-          <Field label={t.settings.aiProvider.apiKeyLabel} htmlFor="ai-provider-api-key">
-            <Input
-              id="ai-provider-api-key"
-              type="password"
-              autoComplete="off"
-              placeholder={t.settings.aiProvider.apiKeyPlaceholder}
-              value={apiKey}
-              disabled={isTesting || isSaving}
-              onChange={(event) => {
-                setApiKey(event.target.value);
-                setTestResult(null);
-              }}
-            />
-          </Field>
-
-          <Field label={t.settings.aiProvider.modelLabel} htmlFor="ai-provider-model">
-            <Select id="ai-provider-model" value={model} disabled={isTesting || isSaving} onChange={(event) => setModel(event.target.value as AnthropicModel)}>
-              {ANTHROPIC_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          {testResult ? (
-            testResult.ok ? (
-              <p role="status">{testResult.message}</p>
-            ) : (
-              <ErrorState title={t.settings.aiProvider.testFailedTitle} description={testResult.message} />
-            )
+            </div>
           ) : null}
-          {saveError ? <ErrorState title={t.settings.aiProvider.saveFailedTitle} description={saveError} /> : null}
-          {disconnectError ? <ErrorState title={t.settings.aiProvider.disconnectFailedTitle} description={disconnectError} /> : null}
 
-          <div className="overview-actions">
-            <Button variant="secondary" disabled={!canSubmit || isTesting || isSaving} onClick={() => void handleTest()}>
-              {isTesting ? t.settings.aiProvider.testing : t.settings.aiProvider.testAction}
-            </Button>
-            <Button variant="primary" disabled={!canSubmit || isTesting || isSaving} onClick={() => void handleSave()}>
-              {isSaving ? t.settings.aiProvider.saving : status?.connected ? t.settings.aiProvider.replaceAction : t.settings.aiProvider.saveAction}
-            </Button>
-            {status?.connected ? (
-              <Button variant="ghost" disabled={isDisconnecting} onClick={() => void handleDisconnect()}>
-                {isDisconnecting ? t.settings.aiProvider.disconnecting : t.settings.aiProvider.disconnectAction}
-              </Button>
-            ) : null}
+          <div className="provider-row provider-row--disabled">
+            <span className="provider-row__icon">
+              <Bot aria-hidden="true" size={22} />
+            </span>
+            <div className="provider-row__info">
+              <p className="provider-row__name">{t.settings.aiProvider.comingSoonName("OpenAI")}</p>
+            </div>
+          </div>
+          <div className="provider-row provider-row--disabled">
+            <span className="provider-row__icon">
+              <Bot aria-hidden="true" size={22} />
+            </span>
+            <div className="provider-row__info">
+              <p className="provider-row__name">{t.settings.aiProvider.comingSoonName("Google Gemini")}</p>
+            </div>
           </div>
         </>
       )}

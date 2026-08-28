@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AiProviderStatus, ConnectAiProviderRequest } from "@dyo/schemas";
 import { AiProviderConnectionFailedError } from "../../errors/app-error.js";
 import type { UserAiProviderRepository } from "../../domain/user-ai-provider/types.js";
-import { encryptSecret, last4 } from "../../infrastructure/crypto/secret-cipher.js";
+import { EncryptionNotConfiguredError, encryptSecret, last4 } from "../../infrastructure/crypto/secret-cipher.js";
 import { testAnthropicConnection } from "./test-anthropic-connection.js";
 
 export interface ConnectAiProviderDeps {
@@ -28,13 +28,28 @@ export async function connectAiProvider(deps: ConnectAiProviderDeps, userId: str
     throw new AiProviderConnectionFailedError(test.reason);
   }
 
+  let encryptedApiKey: string;
+  try {
+    encryptedApiKey = encryptSecret(request.apiKey, deps.credentialsEncryptionKey ?? "");
+  } catch (error) {
+    // A real, actionable server misconfiguration (CREDENTIALS_ENCRYPTION_KEY
+    // unset) - never let this fall through to the generic
+    // "An unexpected error occurred" 500 (error-handler-plugin.ts's own
+    // catch-all only recognizes AppError/ZodError), and never persist a
+    // connection the server cannot actually encrypt.
+    if (error instanceof EncryptionNotConfiguredError) {
+      throw new AiProviderConnectionFailedError("Encryption is not configured on this server. Contact an administrator.");
+    }
+    throw error;
+  }
+
   const now = deps.now();
   const record = await deps.userAiProviderRepository.upsert(
     {
       id: randomUUID(),
       userId,
       provider: request.provider,
-      encryptedApiKey: encryptSecret(request.apiKey, deps.credentialsEncryptionKey ?? ""),
+      encryptedApiKey,
       last4: last4(request.apiKey),
       model: request.model
     },
