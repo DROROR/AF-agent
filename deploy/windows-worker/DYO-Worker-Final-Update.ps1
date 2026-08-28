@@ -111,7 +111,7 @@ $TaskName = "DYO Video Worker"
 # package time) - verified below against the NEW process's own real
 # startup log line, not merely "some" commit marker, since this is meant
 # to be a specific, known-good final release.
-$ExpectedCommit = "939d3b942852087739569a0128a303e7cd203d0c"
+$ExpectedCommit = "cb846d4861b780c04a9a53421634a318b9d9e12b"
 
 # The worker's own fixed, real invocation signature (run-worker.bat:
 # `node --env-file=.env dist\index.js`) - deliberately NOT the install
