@@ -10,7 +10,14 @@ import { Button } from "./ui/Button";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
-import { dispatchJob, createExecutionSession, fetchCurrentExecutionSession, approveFirstPreview } from "../lib/projects-api-client";
+import {
+  dispatchJob,
+  createExecutionSession,
+  fetchCurrentExecutionSession,
+  approveFirstPreview,
+  rejectFirstPreview,
+  executionSessionPreviewUrl
+} from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 
 /**
@@ -180,6 +187,22 @@ export function ProjectOverviewTab(): ReactElement | null {
     setSession(result.data);
   }
 
+  async function handleRejectPreview(): Promise<void> {
+    if (!activeSession) {
+      return;
+    }
+    setIsDispatching(true);
+    setDispatchError(null);
+    setDispatchSuccess(null);
+    const result = await rejectFirstPreview(projectId, activeSession.id);
+    setIsDispatching(false);
+    if (!result.ok) {
+      setDispatchError(result.message);
+      return;
+    }
+    setSession(result.data);
+  }
+
   return (
     <div className="overview-grid">
       <Card className="overview-section">
@@ -304,11 +327,25 @@ export function ProjectOverviewTab(): ReactElement | null {
 
         {allScenesComplete ? <p role="status">{t.projectWorkspace.overview.allScenesCompleteLabel}</p> : null}
 
+        {session?.hasPreview ? (
+          // A same-origin, authenticated API route byte stream, not a static asset next/image could optimize.
+          <img
+            src={executionSessionPreviewUrl(projectId, session.id)}
+            alt={t.projectWorkspace.overview.previewImageAlt}
+            style={{ maxWidth: "100%", borderRadius: "8px", marginBlock: "0.75rem" }}
+          />
+        ) : null}
+
         <div className="overview-actions">
           {activeSession?.status === "AWAITING_PREVIEW_APPROVAL" ? (
-            <Button variant="primary" disabled={isDispatching} onClick={() => void handleApprovePreview()}>
-              {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.approvePreviewAction}
-            </Button>
+            <>
+              <Button variant="primary" disabled={isDispatching} onClick={() => void handleApprovePreview()}>
+                {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.approvePreviewAction}
+              </Button>
+              <Button variant="secondary" disabled={isDispatching} onClick={() => void handleRejectPreview()}>
+                {t.projectWorkspace.overview.rejectPreviewAction}
+              </Button>
+            </>
           ) : !allScenesComplete ? (
             <Button variant="primary" disabled={!canExecute || isDispatching} onClick={() => void handleExecuteNextScene()}>
               {isDispatching

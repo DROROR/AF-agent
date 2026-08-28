@@ -28,6 +28,7 @@ import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
 import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upload.js";
 import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-download.js";
+import { registerPreviewUploadRoutes } from "./routes/preview-upload.js";
 import { registerExecutionSessionRoutes } from "./routes/execution-sessions.js";
 
 export interface AppDependencies {
@@ -115,6 +116,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     projectRepository: deps.projectRepository,
     workerRepository: deps.workerRepository,
     jobRepository: deps.jobRepository,
+    assetStorage: deps.assetStorage,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
@@ -141,6 +143,14 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     workerRepository: deps.workerRepository,
     assetRepository: deps.assetRepository,
     assetStorage: deps.assetStorage
+  });
+  registerPreviewUploadRoutes(app, {
+    jobRepository: deps.jobRepository,
+    workerRepository: deps.workerRepository,
+    executionSessionRepository: deps.executionSessionRepository,
+    assetStorage: deps.assetStorage,
+    maxUploadBytes: deps.env.ASSET_MAX_UPLOAD_BYTES,
+    ...(deps.now ? { now: deps.now } : {})
   });
   registerProjectRoutes(app, {
     projectRepository: deps.projectRepository,

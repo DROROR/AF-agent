@@ -481,6 +481,27 @@ export async function approveFirstPreview(projectId: string, sessionId: string):
   return { ok: true, data: parsed.data.session };
 }
 
+/** "Reject Preview" (section 3/10) - the other half of the human preview gate. Marks the session FAILED (terminal); a corrected mapping/plan starts a NEW session. */
+export async function rejectFirstPreview(projectId: string, sessionId: string): Promise<ApiResult<ExecutionSessionDto>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/reject-preview`,
+    { method: "POST" }
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionSessionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-session contract" };
+  }
+  return { ok: true, data: parsed.data.session };
+}
+
+/** Same-origin URL for a session's current preview PNG - safe to use directly as an <img> src; never a filesystem path or storage key. */
+export function executionSessionPreviewUrl(projectId: string, sessionId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/preview`;
+}
+
 /** Accepts several PENDING suggestions as one batched plan revision bump - never partial (see batch-accept-mapping-suggestions.ts). */
 export async function batchAcceptMappingSuggestions(
   projectId: string,

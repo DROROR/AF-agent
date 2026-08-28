@@ -399,6 +399,8 @@ export const he: Dictionary = {
       startExecutionAction: "התחלת ביצוע",
       continueExecutionAction: "המשך ביצוע",
       approvePreviewAction: "אישור תצוגה מקדימה",
+      rejectPreviewAction: "דחיית תצוגה מקדימה",
+      previewImageAlt: "תצוגה מקדימה של הפריים הראשון",
       allScenesCompleteLabel: "כל הסצנות המאושרות בוצעו - מוכן לרינדור.",
       sessionStatusLabel: "סטטוס",
       sessionWorkerLabel: "עובד",

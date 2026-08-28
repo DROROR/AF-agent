@@ -13,6 +13,9 @@ export function toExecutionSessionDto(record: ExecutionSessionRecord, displaySta
     latestWorkingProjectSha256: record.latestWorkingProjectSha256,
     completedScenePlanIds: record.completedScenePlanIds,
     firstPreviewApproved: record.firstPreviewApproved,
+    hasPreview: record.latestPreviewStorageKey !== null,
+    latestPreviewScenePlanId: record.latestPreviewScenePlanId,
+    latestPreviewCapturedAt: record.latestPreviewCapturedAt ? record.latestPreviewCapturedAt.toISOString() : null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

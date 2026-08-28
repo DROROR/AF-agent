@@ -1,12 +1,14 @@
 import {
   claimJobResponseSchema,
   jobDtoSchema,
+  previewUploadResponseSchema,
   registerWorkerResponseSchema,
   renderArtifactUploadResponseSchema,
   workerDtoSchema,
   type ClaimJobResponse,
   type HeartbeatRequest,
   type JobDto,
+  type PreviewUploadResponse,
   type RegisterWorkerRequest,
   type RegisterWorkerResponse,
   type RenderArtifactUploadResponse,
@@ -212,6 +214,40 @@ export class ApiClient {
     const json = await parseJson(response);
     if (response.status === 201) {
       return renderArtifactUploadResponseSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  /**
+   * Worker->API preview byte transfer (multi-scene-accumulation phase,
+   * section 3) - the ONE place a real captured preview's bytes ever leave
+   * this worker machine. Mirrors uploadRenderArtifact's own shape exactly
+   * (multipart form, worker-authenticated, generous upload timeout).
+   */
+  async uploadPreview(workerId: string, workerToken: string, jobId: string, fileBuffer: Buffer, filename: string, mimeType: string): Promise<PreviewUploadResponse> {
+    const form = new FormData();
+    form.append("file", new Blob([fileBuffer], { type: mimeType }), filename);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const path = `/api/workers/${workerId}/jobs/${jobId}/preview`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.apiUrl}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${workerToken}` },
+        body: form,
+        signal: controller.signal
+      });
+    } catch (cause) {
+      throw new NetworkError(`Failed to reach ${path}`, { cause });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const json = await parseJson(response);
+    if (response.status === 201) {
+      return previewUploadResponseSchema.parse(json);
     }
     throw this.errorForResponse(response, json);
   }

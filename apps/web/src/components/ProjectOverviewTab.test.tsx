@@ -188,6 +188,9 @@ describe("ProjectOverviewTab", () => {
             latestWorkingProjectSha256: null,
             completedScenePlanIds: [],
             firstPreviewApproved: false,
+            hasPreview: false,
+            latestPreviewScenePlanId: null,
+            latestPreviewCapturedAt: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           }
@@ -203,5 +206,60 @@ describe("ProjectOverviewTab", () => {
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
     await screen.findByText(/55555555-5555-5555-5555-555555555555/);
+  });
+
+  function awaitingPreviewSession(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "66666666-6666-6666-6666-666666666666",
+      projectId: PROJECT_ID,
+      executionPlanId: "plan-1",
+      planRevision: 3,
+      sourceProjectSha256: SOURCE_SHA,
+      assignedWorkerId: "44444444-4444-4444-4444-444444444444",
+      status: "AWAITING_PREVIEW_APPROVAL",
+      latestWorkingProjectSha256: "d".repeat(64),
+      completedScenePlanIds: ["s1"],
+      firstPreviewApproved: false,
+      hasPreview: true,
+      latestPreviewScenePlanId: "s1",
+      latestPreviewCapturedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...overrides
+    };
+  }
+
+  it("shows the real captured preview image (never a placeholder) once the session reports hasPreview, and offers both Approve and Reject actions", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: awaitingPreviewSession() } }
+    });
+    renderOverview();
+    const approveButton = await screen.findByRole("button", { name: "Approve preview" });
+    screen.getByRole("button", { name: "Reject preview" });
+    const image = screen.getByAltText("Captured first-frame preview") as HTMLImageElement;
+    expect(image.src).toContain(`/api/projects/${PROJECT_ID}/execution-sessions/66666666-6666-6666-6666-666666666666/preview`);
+    expect(approveButton).toBeTruthy();
+  });
+
+  it("rejects a preview and reflects the session's new FAILED status - never silently continues as if approved", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: awaitingPreviewSession() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/66666666-6666-6666-6666-666666666666/reject-preview`]: {
+        status: 200,
+        body: { session: awaitingPreviewSession({ status: "FAILED" }) }
+      }
+    });
+    renderOverview();
+    const rejectButton = await screen.findByRole("button", { name: "Reject preview" });
+    fireEvent.click(rejectButton);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve preview" })).toBeNull());
   });
 });

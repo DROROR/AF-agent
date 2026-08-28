@@ -17,6 +17,10 @@ export class InMemoryExecutionSessionRepository implements ExecutionSessionRepos
       latestWorkingProjectSha256: null,
       completedScenePlanIds: [],
       firstPreviewApproved: false,
+      latestPreviewStorageKey: null,
+      latestPreviewSha256: null,
+      latestPreviewScenePlanId: null,
+      latestPreviewCapturedAt: null,
       createdAt: now,
       updatedAt: now
     };
@@ -77,5 +81,27 @@ export class InMemoryExecutionSessionRepository implements ExecutionSessionRepos
     const updated: ExecutionSessionRecord = { ...existing, status, updatedAt: now };
     this.rows.set(id, updated);
     return updated;
+  }
+
+  async recordPreview(
+    id: string,
+    preview: { storageKey: string; sha256: string; scenePlanId: string; capturedAt: Date },
+    now: Date
+  ): Promise<{ record: ExecutionSessionRecord; priorStorageKey: string | null } | null> {
+    const existing = this.rows.get(id);
+    if (!existing) {
+      return null;
+    }
+    const priorStorageKey = existing.latestPreviewStorageKey;
+    const updated: ExecutionSessionRecord = {
+      ...existing,
+      latestPreviewStorageKey: preview.storageKey,
+      latestPreviewSha256: preview.sha256,
+      latestPreviewScenePlanId: preview.scenePlanId,
+      latestPreviewCapturedAt: preview.capturedAt,
+      updatedAt: now
+    };
+    this.rows.set(id, updated);
+    return { record: updated, priorStorageKey };
   }
 }

@@ -16,6 +16,7 @@ import type { SceneEvidenceInspector } from "../inspection/scene-evidence-inspec
 import { executeSceneEdit, type PersistCheckpoint } from "../execution/execute-scene-edit-executor.js";
 import type { AeEditBridge } from "../execution/ae-edit-bridge.js";
 import type { PreviewCapture } from "../execution/preview-capture.js";
+import type { PreviewUploader } from "../execution/upload-preview.js";
 import { resolveSceneEditOperation } from "../execution/resolve-scene-edit-operation.js";
 import type { AssetDownloadClient } from "../workspace/asset-cache.js";
 import { executeRenderProject } from "../execution/render/render-project-executor.js";
@@ -46,6 +47,8 @@ export interface JobDispatcherDeps {
   /** EXECUTE_FRAME's real (or honest-stub) mutation bridge and preview capture - see execution/execute-scene-edit-executor.ts. */
   aeEditBridge: AeEditBridge;
   previewCapture: PreviewCapture;
+  /** Multi-scene-accumulation phase, section 3: the real worker->API preview byte transfer - see execution/upload-preview.ts. */
+  previewUploader: PreviewUploader;
   /** EXECUTE_FRAME's durable mid-job checkpoint reporter - see execute-scene-edit-executor.ts's PersistCheckpoint. Reused unchanged by RENDER (see render-project.ts's own doc comment on the shared checkpoint shape). */
   persistCheckpoint: PersistCheckpoint;
   /** MAP_FOOTAGE's asset-delivery dependency - see workspace/asset-cache.ts/execution/resolve-scene-edit-operation.ts. */
@@ -276,6 +279,7 @@ async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<Jo
         workRoot: deps.workRoot,
         aeEditBridge: deps.aeEditBridge,
         previewCapture: deps.previewCapture,
+        uploadPreview: (filePath) => deps.previewUploader.upload({ jobId: job.jobId, filePath }),
         persistCheckpoint: deps.persistCheckpoint,
         resolveOperation: (intent) =>
           resolveSceneEditOperation({ workRoot: deps.workRoot, jobId: job.jobId, assetDownloadClient: deps.assetDownloadClient }, intent),

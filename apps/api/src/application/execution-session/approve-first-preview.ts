@@ -30,7 +30,18 @@ export async function approveFirstPreview(deps: ApproveFirstPreviewDeps, project
   }
 
   const plan = await deps.executionPlanRepository.findCurrentByProjectId(projectId);
-  const requiredScenePlanIds = (plan && plan.revision === session.planRevision ? plan.scenePlans : [])
+  if (!plan || plan.revision !== session.planRevision || plan.sourceProjectSha256 !== session.sourceProjectSha256) {
+    // Fails closed rather than approving against an empty/stale required-
+    // scene set (an empty array would otherwise vacuously satisfy
+    // deriveExecutionSessionStatus's "every required scene complete" check
+    // below) - same "the plan changed after this session began; start a
+    // new execution session" rule resolveExecuteFrameDispatch/
+    // resolveRenderDispatch already enforce.
+    throw new PreconditionNotMetError(
+      "The execution plan has changed since this session began - approval refused; start a new execution session from the current plan revision"
+    );
+  }
+  const requiredScenePlanIds = plan.scenePlans
     .filter((s) => s.use && s.approvalState === "APPROVED" && s.unresolvedReasons.length === 0)
     .map((s) => s.id);
 

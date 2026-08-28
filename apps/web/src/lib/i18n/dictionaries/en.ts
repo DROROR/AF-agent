@@ -407,6 +407,8 @@ export const en = {
       startExecutionAction: "Start execution",
       continueExecutionAction: "Continue execution",
       approvePreviewAction: "Approve preview",
+      rejectPreviewAction: "Reject preview",
+      previewImageAlt: "Captured first-frame preview",
       allScenesCompleteLabel: "All approved scenes have been executed - ready to render.",
       sessionStatusLabel: "Status",
       sessionWorkerLabel: "Worker",

@@ -13,6 +13,7 @@ import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-i
 import { HeroicSwanSceneEvidenceInspector } from "./inspection/heroic-swan-scene-evidence-inspector.js";
 import { HeroicSwanAeEditBridge, NotAvailableAeEditBridge } from "./execution/ae-edit-bridge.js";
 import { HeroicSwanPreviewCapture, NotAvailablePreviewCapture } from "./execution/preview-capture.js";
+import { HeroicSwanPreviewUploader } from "./execution/upload-preview.js";
 import { RealAerenderRunner, NotAvailableAerenderRunner } from "./execution/render/aerender-runner.js";
 import { HeroicSwanCompositionVerifier, NotAvailableCompositionVerifier } from "./execution/render/verify-render-composition.js";
 import { HeroicSwanRenderCapabilitiesInspector, NotAvailableRenderCapabilitiesInspector } from "./execution/render/inspect-render-capabilities.js";
@@ -161,6 +162,9 @@ async function main(): Promise<void> {
   // already-rendered bytes to the API needs only this worker's own
   // credentials (already resolved above), never ae-mcp/aerender.
   const artifactUploader = new HeroicSwanRenderArtifactUploader(apiClient, credentials.workerId, credentials.workerToken);
+  // Same reasoning - uploading an already-captured preview PNG only needs
+  // this worker's own credentials, never ae-mcp/aerender.
+  const previewUploader = new HeroicSwanPreviewUploader(apiClient, credentials.workerId, credentials.workerToken);
   // Same reasoning - MAP_FOOTAGE's asset delivery only needs this worker's
   // own credentials, never ae-mcp/aerender.
   const assetDownloadClient = new HeroicSwanAssetDownloadClient(apiClient, credentials.workerId, credentials.workerToken);
@@ -193,6 +197,7 @@ async function main(): Promise<void> {
               ),
             aeEditBridge,
             previewCapture,
+            previewUploader,
             assetDownloadClient,
             aerenderPath: env.aerenderPath,
             aerenderRunner,

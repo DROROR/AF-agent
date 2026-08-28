@@ -17,6 +17,8 @@ export const ERROR_CODES = [
   "SUGGESTION_NOT_FOUND",
   "RENDER_ARTIFACT_NOT_FOUND",
   "EXECUTION_SESSION_NOT_FOUND",
+  /** An execution session exists, but no preview has ever been captured+uploaded for it yet. */
+  "PREVIEW_NOT_FOUND",
   /** Upload's real MIME type is not on the allowlist, or an explicit requested mediaKind doesn't match the real file. */
   "UNSUPPORTED_MEDIA_TYPE",
   /** Upload exceeds the configured maximum byte size. */

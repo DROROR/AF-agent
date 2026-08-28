@@ -14,11 +14,18 @@ import { NotAvailableAerenderRunner } from "../execution/render/aerender-runner.
 import { NotAvailableCompositionVerifier } from "../execution/render/verify-render-composition.js";
 import { NotAvailableRenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
 import type { RenderArtifactUploader, UploadRenderArtifactResult } from "../execution/render/upload-render-artifact.js";
+import type { PreviewUploader, UploadPreviewResult } from "../execution/upload-preview.js";
 import type { AssetDownloadClient } from "../workspace/asset-cache.js";
 import { sessionWorkingCopyPath } from "../workspace/working-copy.js";
 
 class FakeArtifactUploader implements RenderArtifactUploader {
   async upload(): Promise<UploadRenderArtifactResult> {
+    return { ok: true };
+  }
+}
+
+class FakePreviewUploader implements PreviewUploader {
+  async upload(): Promise<UploadPreviewResult> {
     return { ok: true };
   }
 }
@@ -66,6 +73,7 @@ function healthyDeps(overrides: Partial<JobDispatcherDeps> = {}): JobDispatcherD
     runCheckHealthDiagnostics: () => Promise.resolve(FAKE_CHECK_HEALTH_RESPONSE),
     aeEditBridge: new NotAvailableAeEditBridge(),
     previewCapture: new NotAvailablePreviewCapture(),
+    previewUploader: new FakePreviewUploader(),
     persistCheckpoint: async () => ({ ok: true }),
     assetDownloadClient: new FakeAssetDownloadClient(),
     aerenderPath: undefined,

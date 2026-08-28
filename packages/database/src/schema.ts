@@ -336,6 +336,20 @@ export const executionSessions = pgTable(
     latestWorkingProjectSha256: text("latest_working_project_sha256"),
     completedScenePlanIds: jsonb("completed_scene_plan_ids").notNull().default(sql`'[]'::jsonb`).$type<string[]>(),
     firstPreviewApproved: boolean("first_preview_approved").notNull().default(false),
+    /**
+     * The session's current preview PNG - a real, worker-authenticated-
+     * uploaded image (see upload-preview.ts), not merely a worker-local
+     * path string. Nullable until the session's first scene edit has ever
+     * captured+uploaded a preview; overwritten (old storageKey deleted) by
+     * each new capture, never accumulated - one current preview per
+     * session, matching firstPreviewApproved's own "one gate" semantics.
+     * `latestPreviewStorageKey` is an opaque AssetStorage identifier, never
+     * a filesystem path exposed to the browser (see get-preview-file.ts).
+     */
+    latestPreviewStorageKey: text("latest_preview_storage_key"),
+    latestPreviewSha256: text("latest_preview_sha256"),
+    latestPreviewScenePlanId: text("latest_preview_scene_plan_id"),
+    latestPreviewCapturedAt: timestamp("latest_preview_captured_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },

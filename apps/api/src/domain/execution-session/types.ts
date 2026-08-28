@@ -11,6 +11,11 @@ export interface ExecutionSessionRecord {
   latestWorkingProjectSha256: string | null;
   completedScenePlanIds: string[];
   firstPreviewApproved: boolean;
+  /** Null until the session's first scene edit has ever captured+uploaded a preview - see schema.ts's own doc comment on these four columns. */
+  latestPreviewStorageKey: string | null;
+  latestPreviewSha256: string | null;
+  latestPreviewScenePlanId: string | null;
+  latestPreviewCapturedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,4 +59,20 @@ export interface ExecutionSessionRepository {
   approvePreview(id: string, status: ExecutionSessionStatus, now: Date): Promise<ExecutionSessionRecord | null>;
   /** A bare status transition with no other field change - used for FAILED (a working-copy chain-of-custody failure - section 7) and for resetting after a render outcome. Returns null only if `id` doesn't exist. */
   markStatus(id: string, status: ExecutionSessionStatus, now: Date): Promise<ExecutionSessionRecord | null>;
+  /**
+   * Overwrites the session's current preview identity - called only after
+   * the worker's real preview bytes are already durably stored (see
+   * upload-preview.ts). Never appends/accumulates: a session has exactly
+   * one current preview, so this always replaces whatever was there
+   * before. Returns the record's PRIOR preview fields alongside the
+   * updated record so the caller can delete the old stored object only
+   * AFTER the new one is durably on record (never before - same ordering
+   * upload-render-artifact.ts already established). Returns null only if
+   * `id` doesn't exist.
+   */
+  recordPreview(
+    id: string,
+    preview: { storageKey: string; sha256: string; scenePlanId: string; capturedAt: Date },
+    now: Date
+  ): Promise<{ record: ExecutionSessionRecord; priorStorageKey: string | null } | null>;
 }

@@ -44,6 +44,9 @@ function readyToRenderSession(workerId: string) {
     latestWorkingProjectSha256: "d".repeat(64),
     completedScenePlanIds: ["s1"],
     firstPreviewApproved: true,
+    hasPreview: true,
+    latestPreviewScenePlanId: "s1",
+    latestPreviewCapturedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };

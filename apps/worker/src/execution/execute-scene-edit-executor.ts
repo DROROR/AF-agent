@@ -4,6 +4,7 @@ import { hashSourceProject } from "../inspection/hash-source-project.js";
 import { EMPTY_SCENE_EDIT_CHECKPOINT, markFailed, markOperationCompleted, nextPendingOperationIndex } from "./scene-edit-checkpoint.js";
 import type { AeEditBridge } from "./ae-edit-bridge.js";
 import type { PreviewCapture } from "./preview-capture.js";
+import type { UploadPreviewResult } from "./upload-preview.js";
 import type { ResolveSceneEditOperationResult } from "./resolve-scene-edit-operation.js";
 
 /**
@@ -30,6 +31,14 @@ export interface SceneEditExecutorDeps {
   workRoot: string;
   aeEditBridge: AeEditBridge;
   previewCapture: PreviewCapture;
+  /**
+   * Multi-scene-accumulation phase, section 3: the real byte transfer that
+   * makes a captured preview visible in the dashboard - never merely a
+   * local path. Pre-bound to THIS job's own jobId by job-dispatcher.ts
+   * (this executor is not itself handed job/worker identity, same
+   * convention as ResolveOperation's own closure).
+   */
+  uploadPreview: (filePath: string) => Promise<UploadPreviewResult>;
   persistCheckpoint: PersistCheckpoint;
   resolveOperation: ResolveOperation;
   now: () => Date;
@@ -236,6 +245,23 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     // failureReason must say so explicitly, never leave it ambiguously
     // null next to a null previewFramePath.
     checkpoint = markFailed(checkpoint, `preview capture failed: ${previewResult.reason}`, deps.now());
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: savedHash.value.sha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+
+  // Section 3: "Worker preview PNG -> authenticated upload". A preview
+  // that only ever exists on the worker's own local disk can never
+  // actually be SEEN by the operator in the dashboard - the real bytes
+  // must reach the API's durable storage before this job is ever reported
+  // acceptable, mirroring RENDER's own "upload before SUCCEEDED" ordering.
+  const uploaded = await deps.uploadPreview(previewResult.path);
+  if (!uploaded.ok) {
+    checkpoint = markFailed(checkpoint, `preview capture succeeded but upload failed: ${uploaded.reason}`, deps.now());
     return finish({
       sourceProjectSha256: workingCopy.sourceProjectSha256,
       workingProjectPath: workingCopy.workingProjectPath,

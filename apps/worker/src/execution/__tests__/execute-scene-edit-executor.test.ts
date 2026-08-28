@@ -113,7 +113,7 @@ describe("executeSceneEdit", () => {
     const workingProjectPath = workingCopyPathModule.sessionWorkingCopyPath(workRoot, EXECUTION_SESSION_ID);
 
     const result = await executeSceneEdit(
-      { workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date("2026-01-01T00:00:00.000Z") },
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date("2026-01-01T00:00:00.000Z") },
       request
     );
 
@@ -139,7 +139,7 @@ describe("executeSceneEdit", () => {
 
     const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: "f".repeat(64) });
 
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
 
     expect(result.failureReason).toContain("working copy could not be prepared");
     expect(result.workingProjectPath).toBeNull();
@@ -157,7 +157,7 @@ describe("executeSceneEdit", () => {
     const preview = new FakePreviewCapture(REAL_PREVIEW);
 
     const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
 
     expect(result.failureReason).toContain("layer not found");
     expect(result.operationsCompleted).toEqual([]);
@@ -175,7 +175,7 @@ describe("executeSceneEdit", () => {
     );
     const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
     const firstResult = await executeSceneEdit(
-      { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       request
     );
     expect(firstResult.operationsCompleted).toEqual([0]);
@@ -185,7 +185,7 @@ describe("executeSceneEdit", () => {
     const secondBridge = new FakeAeEditBridge(alwaysSucceed);
     const secondPreview = new FakePreviewCapture(REAL_PREVIEW);
     const secondResult = await executeSceneEdit(
-      { workRoot, aeEditBridge: secondBridge, previewCapture: secondPreview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      { workRoot, aeEditBridge: secondBridge, previewCapture: secondPreview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       { ...request, checkpoint: firstResult.checkpoint }
     );
 
@@ -213,7 +213,7 @@ describe("executeSceneEdit", () => {
 
     const bridge = new FakeAeEditBridge(alwaysSucceed);
     const result = await executeSceneEdit(
-      { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       request
     );
 
@@ -230,12 +230,40 @@ describe("executeSceneEdit", () => {
     const preview = new FakePreviewCapture({ ok: false, reason: "captured preview file exists but is empty or not a regular file" });
     const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
 
     expect(result.operationsCompleted.sort()).toEqual([0, 1]); // all operations DID complete
     expect(result.previewFramePath).toBeNull();
     expect(result.failureReason).toContain("preview capture failed");
     expect(bridge.saveCalls).toBe(1); // save still happened before preview was attempted
+  });
+
+  it("multi-scene-accumulation section 3: a captured preview that fails to UPLOAD is never reported as an acceptable result - the bytes must actually reach the API, a local-only capture is not enough", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+
+    const bridge = new FakeAeEditBridge(alwaysSucceed);
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+    const result = await executeSceneEdit(
+      {
+        workRoot,
+        aeEditBridge: bridge,
+        previewCapture: preview,
+        uploadPreview: async () => ({ ok: false, reason: "network error reaching the API" }),
+        persistCheckpoint: async () => ({ ok: true as const }),
+        resolveOperation: defaultResolveOperation,
+        now: () => new Date()
+      },
+      request
+    );
+
+    expect(result.operationsCompleted.sort()).toEqual([0, 1]); // all operations DID complete and save happened
+    expect(result.previewFramePath).toBeNull();
+    expect(result.failureReason).toContain("upload failed");
+    expect(result.failureReason).toContain("network error reaching the API");
+    expect(preview.calls).toBe(1); // capture itself succeeded - only the upload failed
   });
 
   it("a save failure is reported and never produces a preview", async () => {
@@ -246,7 +274,7 @@ describe("executeSceneEdit", () => {
     const preview = new FakePreviewCapture(REAL_PREVIEW);
     const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
-    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
+    const result = await executeSceneEdit({ workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() }, request);
 
     expect(result.failureReason).toContain("working copy save failed");
     expect(result.previewFramePath).toBeNull();
@@ -259,7 +287,7 @@ describe("executeSceneEdit", () => {
     const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
 
     await executeSceneEdit(
-      { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
       request
     );
 
@@ -281,7 +309,7 @@ describe("executeSceneEdit", () => {
       });
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
         request
       );
 
@@ -301,7 +329,7 @@ describe("executeSceneEdit", () => {
       const persistCheckpoint = vi.fn(async () => ({ ok: false as const, reason: "network error reaching the API" }));
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
         request
       );
 
@@ -341,7 +369,7 @@ describe("executeSceneEdit", () => {
         return { ok: false as const, reason: "process died before this checkpoint was confirmed durable" };
       });
       const firstResult = await executeSceneEdit(
-        { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: firstPersist, resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: firstBridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: firstPersist, resolveOperation: defaultResolveOperation, now: () => new Date() },
         request
       );
       expect(firstResult.failureReason).toContain("checkpoint persistence failed");
@@ -358,7 +386,7 @@ describe("executeSceneEdit", () => {
         {
           workRoot,
           aeEditBridge: secondBridge,
-          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }),
           persistCheckpoint: secondPersist,
           resolveOperation: defaultResolveOperation,
           now: () => new Date()
@@ -385,7 +413,7 @@ describe("executeSceneEdit", () => {
       const persistCheckpoint = vi.fn(async () => ({ ok: true as const }));
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint, resolveOperation: defaultResolveOperation, now: () => new Date() },
         request
       );
 
@@ -401,7 +429,7 @@ describe("executeSceneEdit", () => {
 
       const scene1Request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, scenePlanId: "scene-1" });
       const scene1Result = await executeSceneEdit(
-        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
         scene1Request
       );
       expect(scene1Result.failureReason).toBeNull();
@@ -419,7 +447,7 @@ describe("executeSceneEdit", () => {
       });
       const scene2Bridge = new FakeAeEditBridge(alwaysSucceed);
       const scene2Result = await executeSceneEdit(
-        { workRoot, aeEditBridge: scene2Bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: scene2Bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
         scene2Request
       );
 
@@ -439,7 +467,7 @@ describe("executeSceneEdit", () => {
       });
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
         request
       );
 
@@ -454,7 +482,7 @@ describe("executeSceneEdit", () => {
 
       const scene1Request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
       const scene1Result = await executeSceneEdit(
-        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
         scene1Request
       );
       expect(scene1Result.failureReason).toBeNull();
@@ -465,7 +493,7 @@ describe("executeSceneEdit", () => {
         expectedWorkingProjectSha256: "e".repeat(64) // disagrees with the real on-disk sha256
       });
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
         scene2Request
       );
 
@@ -478,7 +506,7 @@ describe("executeSceneEdit", () => {
       const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: "f".repeat(64) });
 
       const result = await executeSceneEdit(
-        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        { workRoot, aeEditBridge: new FakeAeEditBridge(alwaysSucceed), previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
         request
       );
 

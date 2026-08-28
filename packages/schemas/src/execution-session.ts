@@ -54,6 +54,11 @@ export const executionSessionDtoSchema = z
     /** Every scenePlanId whose EXECUTE_FRAME job has successfully completed against this session's cumulative working copy, in completion order. */
     completedScenePlanIds: z.array(z.string().min(1)),
     firstPreviewApproved: z.boolean(),
+    /** True once a real preview PNG has been captured+uploaded for this session - never a filesystem path (see get-preview-file.ts for the actual authenticated download). */
+    hasPreview: z.boolean(),
+    /** The scenePlanId whose completed edit produced the CURRENT preview - null until hasPreview is true. */
+    latestPreviewScenePlanId: z.string().min(1).nullable(),
+    latestPreviewCapturedAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })
@@ -70,3 +75,19 @@ export type ExecutionSessionResponse = z.infer<typeof executionSessionResponseSc
 /** GET .../execution-sessions/current - null when no session has ever been started for this project's current plan. */
 export const currentExecutionSessionResponseSchema = z.object({ session: executionSessionDtoSchema.nullable() }).strict();
 export type CurrentExecutionSessionResponse = z.infer<typeof currentExecutionSessionResponseSchema>;
+
+/**
+ * What POST /api/workers/:workerId/jobs/:jobId/preview returns on success
+ * (multi-scene-accumulation phase, section 3: viewable preview) - the
+ * worker's own confirmation that its captured preview PNG is now durably
+ * stored, byte-verified (sha256/byteSize are server-computed from the
+ * actual stored bytes, never echoed from the request). Mirrors
+ * renderArtifactUploadResponseSchema's own contract for the opposite
+ * (render, not preview) upload.
+ */
+export const previewUploadResponseSchema = z.object({
+  executionSessionId: z.string().uuid(),
+  byteSize: z.number().int().nonnegative(),
+  sha256: z.string()
+});
+export type PreviewUploadResponse = z.infer<typeof previewUploadResponseSchema>;
