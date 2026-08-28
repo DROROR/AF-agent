@@ -53,7 +53,9 @@ build). It adds:
   process ever crashes for any reason, Windows now restarts it
   automatically within about a minute. This update refreshes that
   automatic-recovery setting on your existing scheduled task even if it
-  was originally set up a while ago, before this setting existed.
+  was originally set up a while ago, before this setting existed - and
+  now safely recovers even if that existing task definition was itself
+  damaged or very old, rather than stopping the update partway through.
 
 This update installs the CODE for all of the above. None of it runs on
 its own - every one of these only ever runs when DYO explicitly dispatches
