@@ -329,18 +329,22 @@ export const sceneEditResultSchema = z.object({
   previewTimestampSeconds: z.number().nonnegative().nullable(),
   /**
    * Non-null only when this job's operations included a successfully
-   * completed BUILD_REELS_COMPOSITION (2026-08-29 closure requirement,
-   * section 1) - the new composition's real, worker-verified identity, so
-   * a human can find and configure it for RENDER REELS without any DB
-   * access. `manifestCompositionId` is deliberately absent here: the
-   * worker never invents a canonical manifest identity (that is the API's
-   * concern, if/when this is wired into the project's own manifest - see
-   * this field's own follow-up note in resolve-execute-frame-dispatch.ts).
+   * completed BUILD_REELS_COMPOSITION (2026-08-29 closure requirement) -
+   * the new composition's real, worker-verified identity (read back from
+   * the actual AE CompItem, never assumed), so the API can safely register
+   * it as an additive derived composition on the project's manifest (see
+   * register-reels-composition.ts) without any DB/curl access.
+   * `manifestCompositionId` is deliberately absent here: the worker never
+   * invents a canonical manifest identity - that is the API's own concern.
    */
   reelsCompositionBuilt: z
     .object({
       aeProjectItemIndex: z.number().int().positive(),
-      compositionName: z.string().min(1)
+      compositionName: z.string().min(1),
+      widthPx: z.number().int().positive(),
+      heightPx: z.number().int().positive(),
+      durationSeconds: z.number().nonnegative(),
+      frameRate: z.number().positive()
     })
     .nullable()
     .default(null),

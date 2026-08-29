@@ -265,10 +265,14 @@ describe("BUILD_REELS_COMPOSITION (native Reels, 2026-08-29 closure requirement)
     expect(script.trim().endsWith("return __result;")).toBe(true);
   });
 
-  it("reports the new composition's real identity on success, never a fabricated/guessed index", () => {
+  it("reports the new composition's real identity AND dimensions/duration/frameRate read back from the real CompItem, never fabricated/guessed", () => {
     const script = buildOperationScript(5, "Scene 01", op());
     expect(script).toContain("reelsAeProjectItemIndex: __newIndex");
     expect(script).toContain("reelsCompositionName: __newComp.name");
+    expect(script).toContain("reelsWidthPx: __newComp.width");
+    expect(script).toContain("reelsHeightPx: __newComp.height");
+    expect(script).toContain("reelsDurationSeconds: __newComp.duration");
+    expect(script).toContain("reelsFrameRate: __newComp.frameRate");
   });
 
   it("is deterministic - the same operation always produces byte-identical JSX", () => {

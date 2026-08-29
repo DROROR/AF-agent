@@ -167,9 +167,10 @@ destructive 1080x1920 duplicate composition (never a crop) as the last
 step of that scene's job, repositioning only layers with no existing
 keyframe animation on position/scale (a layer that already has real
 animation there is left untouched, with a clear typed failure, rather than
-risk destroying it). See `docs/ACCEPTANCE.md`'s Outputs section for the
-one remaining integration step before this is selectable from the Render
-Settings dropdown.
+risk destroying it). The new composition is then automatically registered
+on the project, so it appears in the Render Settings dropdown right away —
+no manual step, no DB/curl access needed. Configure and dispatch RENDER
+REELS exactly the same way as Landscape.
 
 ## Backup / recovery notes
 

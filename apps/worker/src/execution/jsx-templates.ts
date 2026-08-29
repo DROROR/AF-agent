@@ -348,7 +348,14 @@ function buildBuildReelsCompositionScript(
         }
         __result = JSON.stringify({
           ok: true,
-          resultingValue: { reelsAeProjectItemIndex: __newIndex, reelsCompositionName: __newComp.name }
+          resultingValue: {
+            reelsAeProjectItemIndex: __newIndex,
+            reelsCompositionName: __newComp.name,
+            reelsWidthPx: __newComp.width,
+            reelsHeightPx: __newComp.height,
+            reelsDurationSeconds: __newComp.duration,
+            reelsFrameRate: __newComp.frameRate
+          }
         });
       }
     }

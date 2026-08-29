@@ -131,6 +131,82 @@ describe("executeSceneEdit", () => {
     expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
   });
 
+  it("captures reelsCompositionBuilt from a successful BUILD_REELS_COMPOSITION operation's own resultingValue - never fabricated", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const reelsOp: SceneEditOperationIntent = {
+      type: "BUILD_REELS_COMPOSITION",
+      reelsCompositionName: "Scene 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }]
+    };
+    const bridge = new FakeAeEditBridge((operation) => ({
+      ok: true,
+      operationType: operation.type,
+      previousValue: null,
+      resultingValue:
+        operation.type === "BUILD_REELS_COMPOSITION"
+          ? { reelsAeProjectItemIndex: 9, reelsCompositionName: "Scene 01 - Reels", reelsWidthPx: 1080, reelsHeightPx: 1920, reelsDurationSeconds: 5, reelsFrameRate: 30 }
+          : null
+    }));
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [reelsOp] });
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      request
+    );
+
+    expect(result.failureReason).toBeNull();
+    expect(result.reelsCompositionBuilt).toEqual({
+      aeProjectItemIndex: 9,
+      compositionName: "Scene 01 - Reels",
+      widthPx: 1080,
+      heightPx: 1920,
+      durationSeconds: 5,
+      frameRate: 30
+    });
+  });
+
+  it("leaves reelsCompositionBuilt null for an ordinary run with no BUILD_REELS_COMPOSITION operation", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const bridge = new FakeAeEditBridge(alwaysSucceed);
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      request
+    );
+
+    expect(result.reelsCompositionBuilt).toBeNull();
+  });
+
+  it("does not fabricate reelsCompositionBuilt from a malformed/incomplete resultingValue", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const reelsOp: SceneEditOperationIntent = {
+      type: "BUILD_REELS_COMPOSITION",
+      reelsCompositionName: "Scene 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }]
+    };
+    const bridge = new FakeAeEditBridge(() => ({
+      ok: true,
+      operationType: "BUILD_REELS_COMPOSITION",
+      previousValue: null,
+      resultingValue: { reelsAeProjectItemIndex: 9 } // missing every other required field
+    }));
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [reelsOp] });
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      request
+    );
+
+    expect(result.reelsCompositionBuilt).toBeNull();
+  });
+
   it("fails closed when the working copy cannot be prepared (source sha mismatch) - never touches the bridge at all", async () => {
     const { sourcePath, root } = makeSourceProject();
     const workRoot = join(root, "work-root");

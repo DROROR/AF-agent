@@ -258,13 +258,22 @@ Reels must be a native 1080x1920 composition. Reposition real phone/text/logo/ba
 > human-approved coordinates persisted on the plan's own `reelsLayout`
 > (`packages/schemas/src/execution-plan.ts`) - refusing (typed failure) to
 > touch any layer whose position/scale already carries real keyframe
-> animation, so existing animation is never silently destroyed. Fully
-> tested against fakes; never yet run against real AE 2026 (no client
-> hardware access this session). **One real gap remains**: once built, the
-> new composition is not yet automatically added to the project's own
-> manifest, so today it cannot be selected from the existing Render
-> Settings dropdown (which only lists manifest-known compositions) without
-> a small follow-up - see this file's own note in `docs/ACCEPTANCE.md`.
+> animation, so existing animation is never silently destroyed. The built
+> composition is then registered as an additive derived entry on the
+> project's own manifest (`apps/api/src/application/job/register-reels-composition.ts`,
+> a job-report side effect, same pattern as the render-artifact/scene-
+> evidence recorders) - immediately selectable from the EXISTING Render
+> Settings dropdown and resolvable by RENDER REELS through the EXISTING,
+> unmodified render-dispatch pipeline (`set-render-output-config.ts` only
+> ever accepts a `manifestCompositionId` already present in the manifest -
+> never a raw index/name from the browser). Registration fails closed
+> (never registers) if the plan/session/working-copy-SHA has moved on
+> since the scene was dispatched, and is idempotent (a deterministic,
+> project+scene-keyed composition id - a retry never creates a duplicate
+> entry). Fully tested against fakes; never yet run against real AE 2026
+> (no client hardware access this session) - this is now the ONLY
+> remaining gap for native Reels, and it is a hardware-proof gap, not a
+> code gap.
 
 ## 11. Initial Scaling/Fallback
 

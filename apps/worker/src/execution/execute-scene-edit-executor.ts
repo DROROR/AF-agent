@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult, WorkingCopyFailureCode } from "@dyo/schemas";
 import { prepareSessionWorkingCopy, type WorkingCopyFailureReason } from "../workspace/working-copy.js";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
@@ -6,6 +7,16 @@ import type { AeEditBridge } from "./ae-edit-bridge.js";
 import type { PreviewCapture } from "./preview-capture.js";
 import type { UploadPreviewResult } from "./upload-preview.js";
 import type { ResolveSceneEditOperationResult } from "./resolve-scene-edit-operation.js";
+
+/** What jsx-templates.ts's BUILD_REELS_COMPOSITION script's own resultingValue actually contains - parsed defensively, never trusted blindly. */
+const reelsCompositionBuiltResultSchema = z.object({
+  reelsAeProjectItemIndex: z.number().int().positive(),
+  reelsCompositionName: z.string().min(1),
+  reelsWidthPx: z.number().int().positive(),
+  reelsHeightPx: z.number().int().positive(),
+  reelsDurationSeconds: z.number().nonnegative(),
+  reelsFrameRate: z.number().positive()
+});
 
 /**
  * The one fixed frame this project's own "first-frame execution" workflow
@@ -189,20 +200,17 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     if (operation.type === "BUILD_REELS_COMPOSITION") {
       // outcome.resultingValue is `unknown` at this generic layer (every
       // operation shares OperationExecutionSuccess's own shape) - parsed
-      // defensively, never trusted blindly, matching this file's existing
-      // "typed failure over silent guess" convention.
-      const resultingValue = outcome.resultingValue;
-      if (
-        resultingValue &&
-        typeof resultingValue === "object" &&
-        "reelsAeProjectItemIndex" in resultingValue &&
-        "reelsCompositionName" in resultingValue &&
-        typeof (resultingValue as { reelsAeProjectItemIndex: unknown }).reelsAeProjectItemIndex === "number" &&
-        typeof (resultingValue as { reelsCompositionName: unknown }).reelsCompositionName === "string"
-      ) {
+      // defensively via a strict schema, never trusted blindly, matching
+      // this file's existing "typed failure over silent guess" convention.
+      const parsedResultingValue = reelsCompositionBuiltResultSchema.safeParse(outcome.resultingValue);
+      if (parsedResultingValue.success) {
         reelsCompositionBuilt = {
-          aeProjectItemIndex: (resultingValue as { reelsAeProjectItemIndex: number }).reelsAeProjectItemIndex,
-          compositionName: (resultingValue as { reelsCompositionName: string }).reelsCompositionName
+          aeProjectItemIndex: parsedResultingValue.data.reelsAeProjectItemIndex,
+          compositionName: parsedResultingValue.data.reelsCompositionName,
+          widthPx: parsedResultingValue.data.reelsWidthPx,
+          heightPx: parsedResultingValue.data.reelsHeightPx,
+          durationSeconds: parsedResultingValue.data.reelsDurationSeconds,
+          frameRate: parsedResultingValue.data.reelsFrameRate
         };
       }
     }

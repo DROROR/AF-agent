@@ -23,6 +23,7 @@ import { reportJobCheckpoint } from "../application/job/report-job-checkpoint.js
 import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene-evidence.js";
 import { recordRenderArtifactIfApplicable } from "../application/job/record-render-artifact.js";
 import { recordExecuteFrameResultIfApplicable } from "../application/job/record-execute-frame-result.js";
+import { registerReelsCompositionIfApplicable } from "../application/job/register-reels-composition.js";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
 
@@ -179,6 +180,20 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     // Same "best-effort side effect" contract - see record-execute-frame-result.ts's own doc comment.
     await recordExecuteFrameResultIfApplicable(
       { executionSessionRepository: deps.executionSessionRepository, executionPlanRepository: deps.executionPlanRepository, now },
+      dto
+    );
+    // Runs AFTER recordExecuteFrameResultIfApplicable above - by the time
+    // this reads the session, it already reflects this same job's own
+    // completion (see register-reels-composition.ts's own doc comment).
+    // Same "best-effort side effect, never a competing source of truth"
+    // contract as every other record-*-if-applicable call here.
+    await registerReelsCompositionIfApplicable(
+      {
+        executionSessionRepository: deps.executionSessionRepository,
+        executionPlanRepository: deps.executionPlanRepository,
+        projectRepository: deps.projectRepository,
+        now
+      },
       dto
     );
     reply.send(dto);
