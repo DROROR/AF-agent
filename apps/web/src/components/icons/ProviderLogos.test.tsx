@@ -19,9 +19,18 @@ describe("ProviderLogos", () => {
     expect(new Set([openaiPath, claudePath, geminiPath]).size).toBe(3);
   });
 
-  it("uses currentColor, not a hardcoded brand color - adapts to this app's own dark/light theme like every other icon", () => {
-    const { container } = render(<OpenAiLogo />);
-    expect(container.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
+  it("uses each provider's own REAL brand color, never currentColor/theme-adapted - shown exactly as the brand specifies, regardless of dark/light mode", () => {
+    const { container: openai } = render(<OpenAiLogo />);
+    const { container: claude } = render(<ClaudeLogo />);
+    const { container: gemini } = render(<GeminiLogo />);
+
+    expect(openai.querySelector("svg")?.getAttribute("fill")).toBe("#000000");
+    expect(claude.querySelector("svg")?.getAttribute("fill")).toBe("#D97757");
+    // Gemini has no single flat fill - it's a blue base plus green/red/yellow
+    // gradient highlights, never a flat/monochrome recoloring.
+    const geminiPaths = gemini.querySelectorAll("path");
+    expect(geminiPaths[0]?.getAttribute("fill")).toBe("#3186FF");
+    expect(gemini.querySelectorAll("linearGradient")).toHaveLength(3);
   });
 
   it("defaults to size 22 (matching the row icons it replaces), and honors an explicit size override", () => {
