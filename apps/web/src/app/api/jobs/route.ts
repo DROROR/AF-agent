@@ -12,3 +12,12 @@ export async function POST(request: Request): Promise<Response> {
   const body: unknown = await request.json();
   return proxyToApi("/api/jobs", { method: "POST", body });
 }
+
+/**
+ * GET /api/jobs - the signed-in dashboard user's own job dispatch history
+ * (see list-jobs-for-user.ts). No query params accepted from the browser -
+ * ownership scoping happens entirely server-side from the session.
+ */
+export async function GET(): Promise<Response> {
+  return proxyToApi("/api/jobs", { method: "GET" });
+}

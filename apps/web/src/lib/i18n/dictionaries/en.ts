@@ -191,7 +191,7 @@ export const en = {
   },
   jobs: {
     title: "Jobs / Queue",
-    description: "Jobs currently claimed by a worker, plus the full queue history once available.",
+    description: "Jobs currently claimed by a worker, plus your own full dispatch history.",
     unavailableTitle: "Jobs unavailable",
     currentlyActive: "Currently active",
     workerDataUnavailableTitle: "Worker data unavailable",
@@ -201,9 +201,23 @@ export const en = {
     tableCaption: "Currently claimed jobs",
     jobIdColumn: "Job ID",
     workerColumn: "Worker",
-    pendingTitle: "Full queue history is not available yet",
-    pendingDescription:
-      "The API supports a worker claiming and reporting its own job, but there is no GET endpoint yet to list job operation, status, timestamps, or errors across the queue. This section will show that once such an endpoint exists (see docs/JOB-DISPATCH.md)."
+    historyTitle: "Job history",
+    historyDescription: "Every job you have dispatched, newest first - completed, failed, and in progress.",
+    historyTableCaption: "Job dispatch history",
+    historyLoading: "Loading job history…",
+    historyUnavailableTitle: "Job history unavailable",
+    historyEmptyTitle: "No jobs dispatched yet",
+    historyEmptyDescription: "Jobs you dispatch from anywhere in the dashboard will appear here.",
+    operationColumn: "Operation",
+    statusColumn: "Status",
+    projectColumn: "Project",
+    sessionColumn: "Execution session",
+    createdColumn: "Created",
+    completedColumn: "Completed",
+    reasonColumn: "Reason",
+    noProject: "—",
+    noSession: "—",
+    noReason: "—"
   },
   workers: {
     title: "Workers",

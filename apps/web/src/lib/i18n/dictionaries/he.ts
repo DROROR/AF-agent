@@ -185,7 +185,7 @@ export const he: Dictionary = {
   },
   jobs: {
     title: "משימות / תור",
-    description: "משימות שנתפסות כרגע על ידי עובד, וכן היסטוריית התור המלאה כאשר תהיה זמינה.",
+    description: "משימות שנתפסות כרגע על ידי עובד, וכן היסטוריית השיגורים המלאה שלך.",
     unavailableTitle: "המשימות אינן זמינות",
     currentlyActive: "פעיל כרגע",
     workerDataUnavailableTitle: "נתוני העובד אינם זמינים",
@@ -195,9 +195,23 @@ export const he: Dictionary = {
     tableCaption: "משימות הנתפסות כעת",
     jobIdColumn: "מזהה משימה",
     workerColumn: "עובד",
-    pendingTitle: "היסטוריית התור המלאה אינה זמינה עדיין",
-    pendingDescription:
-      "ה-API תומך בעובד שתופס ומדווח על המשימה שלו, אך אין עדיין נקודת קצה מסוג GET לרשימת פעולת המשימה, הסטטוס, חותמות הזמן או השגיאות לאורך התור. חלק זה יציג זאת לאחר שנקודת קצה כזו תהיה קיימת (ראו docs/JOB-DISPATCH.md)."
+    historyTitle: "היסטוריית משימות",
+    historyDescription: "כל משימה ששיגרת, מהחדשה לישנה - הושלמה, נכשלה או בביצוע.",
+    historyTableCaption: "היסטוריית שיגור משימות",
+    historyLoading: "טוען היסטוריית משימות…",
+    historyUnavailableTitle: "היסטוריית המשימות אינה זמינה",
+    historyEmptyTitle: "טרם שוגרו משימות",
+    historyEmptyDescription: "משימות שתשגר מכל מקום בלוח הבקרה יופיעו כאן.",
+    operationColumn: "פעולה",
+    statusColumn: "סטטוס",
+    projectColumn: "פרויקט",
+    sessionColumn: "מושב ביצוע",
+    createdColumn: "נוצר",
+    completedColumn: "הושלם",
+    reasonColumn: "סיבה",
+    noProject: "—",
+    noSession: "—",
+    noReason: "—"
   },
   workers: {
     title: "עובדים",

@@ -17,6 +17,7 @@ import { requireSessionUser } from "../application/auth/require-session-user.js"
 import { claimNextJob } from "../application/job/claim-next-job.js";
 import { dispatchJob } from "../application/job/dispatch-job.js";
 import { getJobForUser } from "../application/job/get-job-for-user.js";
+import { listJobsForUser } from "../application/job/list-jobs-for-user.js";
 import { reportJobStatus } from "../application/job/report-job-status.js";
 import { reportJobCheckpoint } from "../application/job/report-job-checkpoint.js";
 import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene-evidence.js";
@@ -109,6 +110,23 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     const { jobId } = jobIdParamsSchema.parse(request.params);
     const job = await getJobForUser({ jobRepository: deps.jobRepository }, user.id, jobId);
     reply.send({ job });
+  });
+
+  /**
+   * "Job history + errors" (2026-08-29 closure requirement): the calling
+   * user's own dispatch history across every project, newest first, so a
+   * failed job's status/error/timestamps can always be understood from the
+   * dashboard alone - never DB/curl access. Same createdByUserId ownership
+   * anchor as GET /api/jobs/:jobId above; never accepts a caller-supplied
+   * userId.
+   */
+  app.get("/api/jobs", async (request, reply) => {
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
+    const result = await listJobsForUser(
+      { jobRepository: deps.jobRepository, workerRepository: deps.workerRepository, projectRepository: deps.projectRepository },
+      user.id
+    );
+    reply.send(result);
   });
 
   app.post("/api/workers/:workerId/jobs/claim", async (request, reply) => {

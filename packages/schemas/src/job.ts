@@ -134,3 +134,39 @@ export const reportJobCheckpointRequestSchema = z.object({
   checkpoint: z.unknown()
 });
 export type ReportJobCheckpointRequest = z.infer<typeof reportJobCheckpointRequestSchema>;
+
+/**
+ * One row of a dashboard user's own job history (GET /api/jobs) - a
+ * deliberately DIFFERENT, slimmer shape than jobDtoSchema: this is a
+ * dashboard-facing history/audit view (job history + errors, 2026-08-29
+ * closure requirement - "no DB/curl access should ever be required to
+ * understand what happened to a past job"), so it resolves workerId/
+ * projectId into human-readable names server-side (the browser never has
+ * to separately fetch every worker/project just to label one history row)
+ * and omits payload/result (large and operation-specific) in favor of the
+ * fields this view actually needs. `error` reuses jobErrorSchema - already
+ * sanitized by construction (a typed {code, message} pair, never a raw
+ * stack trace or secret - see docs/engineering/SECURITY.md).
+ */
+export const jobHistoryEntryDtoSchema = z.object({
+  jobId: z.string().uuid(),
+  operation: workerCapabilitySchema,
+  status: jobStatusSchema,
+  workerId: z.string().uuid(),
+  workerName: z.string().nullable(),
+  projectId: z.string().uuid().nullable(),
+  projectName: z.string().nullable(),
+  /** EXECUTE_FRAME/RENDER jobs only - null for every operation whose payload carries no executionSessionId. */
+  executionSessionId: z.string().uuid().nullable(),
+  error: jobErrorSchema.nullable(),
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+  updatedAt: z.string().datetime()
+});
+export type JobHistoryEntryDto = z.infer<typeof jobHistoryEntryDtoSchema>;
+
+/** GET /api/jobs (dashboard session) - the calling user's own dispatch history across every project, newest first, bounded to a fixed count server-side (see list-jobs-for-user.ts). Never another user's jobs, and never filtered by a caller-supplied userId. */
+export const listJobsResponseSchema = z.object({
+  jobs: z.array(jobHistoryEntryDtoSchema)
+});
+export type ListJobsResponse = z.infer<typeof listJobsResponseSchema>;

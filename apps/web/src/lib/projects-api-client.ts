@@ -30,6 +30,7 @@ import {
   listRenderArtifactsResponseSchema,
   dispatchJobResponseSchema,
   getJobResponseSchema,
+  listJobsResponseSchema,
   executionSessionResponseSchema,
   currentExecutionSessionResponseSchema,
   type RenderArtifactDto,
@@ -38,7 +39,8 @@ import {
   type DispatchJobRequest,
   type DispatchJobResponse,
   type ExecutionSessionDto,
-  type JobDto
+  type JobDto,
+  type ListJobsResponse
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -449,6 +451,25 @@ export async function fetchJobStatus(jobId: string): Promise<ApiResult<JobDto>> 
     return { ok: false, status, code: null, message: "Response did not match the expected job-status contract" };
   }
   return { ok: true, data: parsed.data.job };
+}
+
+/**
+ * "Job history + errors" (2026-08-29 closure requirement) - the signed-in
+ * dashboard user's own full job dispatch history across every project,
+ * newest first, with worker/project names and typed errors already
+ * resolved server-side (see list-jobs-for-user.ts) - no DB/curl access is
+ * ever needed to understand what happened to a past job.
+ */
+export async function fetchJobHistory(): Promise<ApiResult<ListJobsResponse>> {
+  const { status, json } = await request(`/api/jobs`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = listJobsResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected job-history contract" };
+  }
+  return { ok: true, data: parsed.data };
 }
 
 /**
