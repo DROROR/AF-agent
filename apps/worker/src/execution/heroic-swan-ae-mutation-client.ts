@@ -2,6 +2,7 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { FixedJsxScript } from "./jsx-templates.js";
+import { describeMcpFailure } from "./classify-mcp-failure.js";
 
 /**
  * The ONE and ONLY write path from this worker into a live AE project.
@@ -126,7 +127,11 @@ export class HeroicSwanAeMutationClient {
       }
       return { ok: true, content: result.content };
     } catch (error) {
-      return { ok: false, error: { code: "TRANSPORT_ERROR", message: error instanceof Error ? error.message : String(error) } };
+      // describeMcpFailure classifies a genuine request timeout as
+      // AE_UNRESPONSIVE/BRIDGE_TIMEOUT (the truthful, checkable equivalent
+      // of a suspected stuck AE modal - see that function's own doc
+      // comment) rather than an undifferentiated transport error.
+      return { ok: false, error: { code: "TRANSPORT_ERROR", message: describeMcpFailure(error) } };
     }
   }
 }

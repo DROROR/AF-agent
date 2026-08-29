@@ -3,6 +3,7 @@ import type { SceneEditOperation, SceneEditOperationType } from "@dyo/schemas";
 import { parseJsonTextContent } from "../inspection/parse-mcp-shapes.js";
 import { buildOperationScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
 import { HeroicSwanAeMutationClient, type MutationCallResult } from "./heroic-swan-ae-mutation-client.js";
+import { describeMcpFailure } from "./classify-mcp-failure.js";
 
 /** The minimal shape HeroicSwanAeEditBridge needs from a mutation client - HeroicSwanAeMutationClient's real implementation satisfies this; tests inject a fake one instead of spawning a real ae-mcp process. */
 export interface AeMutationClient {
@@ -125,7 +126,11 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
       await client.connect();
     } catch (error) {
       await client.close();
-      return { ok: false, failureReason: `could not connect to ae-mcp: ${error instanceof Error ? error.message : String(error)}` };
+      // A connect-time timeout is classified the same honest way as an
+      // in-call timeout (see classify-mcp-failure.ts) - AE/ae-mcp not even
+      // accepting a new connection within the timeout is the same
+      // "unresponsive" signal, just observed earlier in the lifecycle.
+      return { ok: false, failureReason: `could not connect to ae-mcp: ${describeMcpFailure(error)}` };
     }
 
     try {
