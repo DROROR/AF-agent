@@ -1,8 +1,8 @@
 "use client";
 
-import { Bot } from "lucide-react";
 import { useEffect, useState, type ReactElement } from "react";
 import { ANTHROPIC_MODELS, DEFAULT_ANTHROPIC_MODEL, type AiProviderStatus, type AnthropicModel } from "@dyo/schemas";
+import { ClaudeLogo, GeminiLogo, OpenAiLogo } from "./icons/ProviderLogos";
 import { Card, CardHeader } from "./ui/Card";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
@@ -125,7 +125,7 @@ export function AiProviderSettingsCard(): ReactElement {
 
           <div className="provider-row">
             <span className="provider-row__icon">
-              <Bot aria-hidden="true" size={22} />
+              <ClaudeLogo aria-hidden="true" size={22} />
             </span>
             <div className="provider-row__info">
               <p className="provider-row__name">{t.settings.aiProvider.anthropicName}</p>
@@ -202,7 +202,7 @@ export function AiProviderSettingsCard(): ReactElement {
 
           <div className="provider-row provider-row--disabled">
             <span className="provider-row__icon">
-              <Bot aria-hidden="true" size={22} />
+              <OpenAiLogo aria-hidden="true" size={22} />
             </span>
             <div className="provider-row__info">
               <p className="provider-row__name">{t.settings.aiProvider.comingSoonName("OpenAI")}</p>
@@ -210,7 +210,7 @@ export function AiProviderSettingsCard(): ReactElement {
           </div>
           <div className="provider-row provider-row--disabled">
             <span className="provider-row__icon">
-              <Bot aria-hidden="true" size={22} />
+              <GeminiLogo aria-hidden="true" size={22} />
             </span>
             <div className="provider-row__info">
               <p className="provider-row__name">{t.settings.aiProvider.comingSoonName("Google Gemini")}</p>
