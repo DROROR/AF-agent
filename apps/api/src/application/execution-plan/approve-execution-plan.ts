@@ -9,11 +9,15 @@ import {
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
 import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
+import { validateBrandRules, type BrandRulesConfig } from "../../domain/brand-rules/validate-brand-rules.js";
+import { loadBrandRulesConfig } from "../../domain/brand-rules/brand-rules-config.js";
 
 export interface ApproveExecutionPlanDeps {
   executionPlanRepository: ExecutionPlanRepository;
   projectRepository: ProjectRepository;
   now: () => Date;
+  /** Injectable for tests - defaults to reading the real dyo-brand-rules.yaml. */
+  brandRulesConfig?: BrandRulesConfig;
 }
 
 /**
@@ -65,6 +69,19 @@ export async function approveExecutionPlan(
   if (!readiness.ready) {
     throw new PreconditionNotMetError(
       `Plan is not ready for approval: ${readiness.unresolvedSceneCount} scene(s) marked for use still have an unresolved reason`
+    );
+  }
+
+  // Permanent DYO brand rules (CLAUDE.md) - a hard gate, not merely a
+  // disabled UI button, so required brand elements can never silently
+  // disappear from an approved plan. See dyo-brand-rules.yaml and
+  // validate-brand-rules.ts's own doc comments for exactly what is (and,
+  // for the still-unconfigured DYO blue value, is deliberately not yet)
+  // enforced here.
+  const brandRules = validateBrandRules(current, deps.brandRulesConfig ?? loadBrandRulesConfig());
+  if (!brandRules.ok) {
+    throw new PreconditionNotMetError(
+      `Plan does not satisfy the required DYO brand rules: ${brandRules.violations.map((violation) => violation.message).join(" ")}`
     );
   }
 

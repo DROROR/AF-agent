@@ -84,6 +84,12 @@ async function setup(initialNow: Date) {
       ASSET_MAX_UPLOAD_BYTES: 10_000_000,
       RENDER_ARTIFACT_MAX_UPLOAD_BYTES: 2_000_000_000
     },
+    // This file tests plan revision/status-transition/worker-dispatch
+    // mechanics, not brand-rule content - fixtures below deliberately don't
+    // carry a logo/Hebrew-text mapping. Brand-rule enforcement itself is
+    // covered by validate-brand-rules.test.ts and
+    // approve-execution-plan-brand-rules.test.ts.
+    brandRulesConfig: { requireLogoPresence: false, requiredHebrewText: "", dyoBlueHex: null, rtlPreservedByConstruction: true },
     workerRepository: new DrizzleWorkerRepository(db),
     jobRepository: new DrizzleJobRepository(db),
     userRepository: new DrizzleUserRepository(db),

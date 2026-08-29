@@ -20,10 +20,13 @@ import { updateExecutionPlan } from "../update-execution-plan.js";
 import { approveExecutionPlan } from "../approve-execution-plan.js";
 import { rejectExecutionPlan } from "../reject-execution-plan.js";
 import { reopenExecutionPlan } from "../reopen-execution-plan.js";
+import type { BrandRulesConfig } from "../../../domain/brand-rules/validate-brand-rules.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const fixedNow = () => NOW;
 const USER_ID = "11111111-1111-1111-1111-111111111111";
+/** This file tests revision/staleness/concurrency behavior, not brand-rule content - fixtures below deliberately don't carry a logo/Hebrew-text mapping, so every rule here is disabled. Brand-rule enforcement itself is covered by validate-brand-rules.test.ts and approve-execution-plan-brand-rules.test.ts. */
+const PERMISSIVE_BRAND_RULES: BrandRulesConfig = { requireLogoPresence: false, requiredHebrewText: "", dyoBlueHex: null, rtlPreservedByConstruction: true };
 
 function manifest(sha256 = "a".repeat(64)): TemplateManifest {
   return {
@@ -207,7 +210,7 @@ describe("execution plan lifecycle", () => {
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     const approved = await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow },
+      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 1 }
@@ -226,7 +229,7 @@ describe("execution plan lifecycle", () => {
     await projectRepository.updateManifest(project.projectId, manifest("b".repeat(64)), NOW);
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
     ).rejects.toThrow(SourceShaMismatchError);
   });
 
@@ -234,7 +237,7 @@ describe("execution plan lifecycle", () => {
     const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = initial.plan.scenePlans[0]?.id as string;
-    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 });
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 });
 
     const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
@@ -264,7 +267,7 @@ describe("execution plan lifecycle", () => {
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 2 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 })
     ).rejects.toThrow(StaleExecutionPlanRevisionError);
     await expect(
       rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 2 })
@@ -279,7 +282,7 @@ describe("execution plan lifecycle", () => {
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     const attempt = approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow },
+      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 1 }
@@ -306,7 +309,7 @@ describe("execution plan lifecycle", () => {
     expect(updated.plan.revision).toBe(2);
 
     const approved = await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow },
+      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 2 }
@@ -317,10 +320,10 @@ describe("execution plan lifecycle", () => {
   it("refuses to re-approve a plan that is already APPROVED (plan not in an eligible state)", async () => {
     const { projectRepository, executionPlanRepository, project } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
-    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 });
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 });
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
     ).rejects.toThrow(PreconditionNotMetError);
   });
 
@@ -330,7 +333,7 @@ describe("execution plan lifecycle", () => {
     await rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 1 });
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
     ).rejects.toThrow(PreconditionNotMetError);
   });
 
@@ -343,7 +346,7 @@ describe("execution plan lifecycle", () => {
       operations: [{ type: "SET_INSTRUCTIONS", scenePlanId: sceneId, instructions: "revision 1 note" }]
     });
 
-    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 2 });
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 });
 
     const revisions = await executionPlanRepository.findAllByProjectId(project.projectId);
     const revisionOne = revisions.find((r) => r.revision === 1);

@@ -31,6 +31,7 @@ import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-downloa
 import { registerPreviewUploadRoutes } from "./routes/preview-upload.js";
 import { registerExecutionSessionRoutes } from "./routes/execution-sessions.js";
 import { registerUserAiProviderRoutes } from "./routes/user-ai-provider.js";
+import type { BrandRulesConfig } from "./domain/brand-rules/validate-brand-rules.js";
 
 export interface AppDependencies {
   env: Pick<
@@ -59,6 +60,8 @@ export interface AppDependencies {
   userAiProviderRepository: UserAiProviderRepository;
   checkDatabaseHealth: () => Promise<boolean>;
   now?: () => Date;
+  /** Injectable for tests - defaults to reading the real repo-root dyo-brand-rules.yaml (see approve-execution-plan.ts). */
+  brandRulesConfig?: BrandRulesConfig;
 }
 
 export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> {
@@ -164,7 +167,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     assetRepository: deps.assetRepository,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
-    ...(deps.now ? { now: deps.now } : {})
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.brandRulesConfig ? { brandRulesConfig: deps.brandRulesConfig } : {})
   });
   registerAssetRoutes(app, {
     assetRepository: deps.assetRepository,

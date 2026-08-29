@@ -9,10 +9,13 @@ import { createExecutionPlan } from "../create-execution-plan.js";
 import { updateExecutionPlan } from "../update-execution-plan.js";
 import { approveExecutionPlan } from "../approve-execution-plan.js";
 import { listExecutionPlanRevisions } from "../list-execution-plan-revisions.js";
+import type { BrandRulesConfig } from "../../../domain/brand-rules/validate-brand-rules.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const fixedNow = () => NOW;
 const USER_ID = "11111111-1111-1111-1111-111111111111";
+/** This file tests revision listing, not brand-rule content - see execution-plan-lifecycle.test.ts's identical constant for why. */
+const PERMISSIVE_BRAND_RULES: BrandRulesConfig = { requireLogoPresence: false, requiredHebrewText: "", dyoBlueHex: null, rtlPreservedByConstruction: true };
 
 function manifest(): TemplateManifest {
   return {
@@ -110,7 +113,7 @@ describe("listExecutionPlanRevisions", () => {
     const { projectRepository, executionPlanRepository, project } = await setup();
     const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow },
+      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: created.plan.revision }

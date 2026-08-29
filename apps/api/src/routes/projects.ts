@@ -29,6 +29,7 @@ import { approveExecutionPlan } from "../application/execution-plan/approve-exec
 import { rejectExecutionPlan } from "../application/execution-plan/reject-execution-plan.js";
 import { reopenExecutionPlan } from "../application/execution-plan/reopen-execution-plan.js";
 import { setRenderOutputConfig } from "../application/execution-plan/set-render-output-config.js";
+import type { BrandRulesConfig } from "../domain/brand-rules/validate-brand-rules.js";
 
 export interface ProjectsRouteDeps {
   projectRepository: ProjectRepository;
@@ -37,6 +38,8 @@ export interface ProjectsRouteDeps {
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   now?: () => Date;
+  /** Injectable for tests - defaults to reading the real dyo-brand-rules.yaml (see approve-execution-plan.ts). */
+  brandRulesConfig?: BrandRulesConfig;
 }
 
 const projectIdParamsSchema = z.object({ projectId: z.string().uuid() });
@@ -131,7 +134,12 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const body = approveExecutionPlanRequestSchema.parse(request.body);
     const result = await approveExecutionPlan(
-      { executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository, now },
+      {
+        executionPlanRepository: deps.executionPlanRepository,
+        projectRepository: deps.projectRepository,
+        now,
+        ...(deps.brandRulesConfig ? { brandRulesConfig: deps.brandRulesConfig } : {})
+      },
       projectId,
       user.id,
       body

@@ -1,0 +1,45 @@
+# DYO permanent brand rules - CLAUDE.md "Permanent DYO Brand Rules".
+#
+# This is the single, reusable, human-editable source of truth for the
+# brand rules every generated video must satisfy. It is read at runtime by
+# apps/api/src/domain/brand-rules/validate-brand-rules.ts and enforced as a
+# hard gate before a plan can move from DRAFT to APPROVED - see
+# apps/api/src/application/execution-plan/approve-execution-plan.ts.
+# Editing this file changes validation behavior for every future approval;
+# it never retroactively touches an already-approved plan.
+
+# Every approved plan's active (use: true) scenes must include at least one
+# mapping whose selected asset is classified as the manifest's "logo"
+# placeholder type. Covers CLAUDE.md's "Client/company logo must appear at
+# least once in every video."
+requireLogoPresence: true
+
+# Every approved plan's active scenes must include this exact text,
+# verbatim, on at least one mapping. Covers CLAUDE.md's "Every video must
+# include Hebrew text: מבית DYO App (By DYO App)."
+requiredHebrewText: "מבית DYO App"
+
+# The official DYO blue, as a canonical #RRGGBB hex value - covers
+# CLAUDE.md's "DYO App branding must always use the official DYO blue
+# supplied in configuration." Deliberately left null: as of 2026-08-29 the
+# client has not yet supplied this exact value, and CLAUDE.md/the 2026-08-29
+# closure audit both explicitly forbid inventing or guessing a brand color.
+# While this stays null, plan approval does NOT block on this rule -
+# validate-brand-rules.ts instead returns an explicit, dashboard-visible
+# warning ("DYO blue is not yet configured - this rule is not being
+# enforced") rather than either (a) silently treating the rule as satisfied
+# or (b) freezing every project's approval over a value nobody has supplied
+# yet. Set the real hex value below to activate full enforcement - no code
+# change is required.
+dyoBlueHex: null
+
+# RTL (right-to-left) text direction is preserved BY CONSTRUCTION, not by a
+# separate runtime check: apps/worker/src/execution/jsx-templates.ts's
+# SET_TEXT operation clones the target layer's existing TextDocument
+# (sourceText.value) and mutates ONLY its `.text` property before writing
+# the whole object back via setValue() - every other TextDocument property
+# (direction, justification, font, paragraph settings) is carried over
+# unchanged for every substitution, Hebrew or not. There is nothing for a
+# plan-approval check to verify here; this flag exists so the guarantee is
+# documented and never silently lost in a future refactor.
+rtlPreservedByConstruction: true
