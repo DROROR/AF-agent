@@ -42,6 +42,7 @@ function scene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
     unresolvedReasons: [],
     evidence: [],
     mappings: [mapping()],
+    reelsLayout: null,
     createdAt: "2026-08-25T00:00:00.000Z",
     updatedAt: "2026-08-25T00:00:00.000Z",
     ...overrides
@@ -96,6 +97,84 @@ function baseInput(overrides: Partial<Parameters<typeof validateSceneEditPrecond
 describe("validateSceneEditPreconditions", () => {
   it("accepts a fully valid, approved, resolved request", () => {
     expect(validateSceneEditPreconditions(baseInput())).toEqual({ ok: true });
+  });
+
+  it("accepts a BUILD_REELS_COMPOSITION operation that matches the scene's own approved reelsLayout exactly", () => {
+    const reelsLayout = {
+      reelsCompositionName: "Text 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+      configuredAt: "2026-08-29T00:00:00.000Z"
+    };
+    const result = validateSceneEditPreconditions(
+      baseInput({
+        currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
+        request: request({
+          operations: [
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "BUILD_REELS_COMPOSITION", reelsCompositionName: reelsLayout.reelsCompositionName, layerTransforms: reelsLayout.layerTransforms }
+          ]
+        })
+      })
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("rejects BUILD_REELS_COMPOSITION when the scene has no approved reelsLayout at all", () => {
+    const result = validateSceneEditPreconditions(
+      baseInput({
+        request: request({
+          operations: [
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "BUILD_REELS_COMPOSITION", reelsCompositionName: "Sneaky Reels", layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }] }
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects BUILD_REELS_COMPOSITION whose reelsCompositionName does not match the scene's approved reelsLayout - never a value smuggled in at dispatch time", () => {
+    const reelsLayout = {
+      reelsCompositionName: "Text 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+      configuredAt: "2026-08-29T00:00:00.000Z"
+    };
+    const result = validateSceneEditPreconditions(
+      baseInput({
+        currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
+        request: request({
+          operations: [
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "BUILD_REELS_COMPOSITION", reelsCompositionName: "A Different Name", layerTransforms: reelsLayout.layerTransforms }
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects BUILD_REELS_COMPOSITION whose layerTransforms do not match the scene's approved reelsLayout", () => {
+    const reelsLayout = {
+      reelsCompositionName: "Text 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+      configuredAt: "2026-08-29T00:00:00.000Z"
+    };
+    const result = validateSceneEditPreconditions(
+      baseInput({
+        currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
+        request: request({
+          operations: [
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            {
+              type: "BUILD_REELS_COMPOSITION",
+              reelsCompositionName: reelsLayout.reelsCompositionName,
+              layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 0, positionY: 0, scalePercent: 100 }]
+            }
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
   });
 
   it("rejects when the scene is not APPROVED", () => {

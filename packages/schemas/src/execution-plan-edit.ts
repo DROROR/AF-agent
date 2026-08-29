@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { placeholderTypeSchema } from "./template-manifest.js";
+import { layerTransformSchema } from "./execute-scene-edit.js";
 
 /**
  * Strict, allowlisted execution-plan edit operations - deliberately never
@@ -37,7 +38,9 @@ export const EXECUTION_PLAN_EDIT_OPERATION_TYPES = [
   "SET_LAYER_DURATION",
   "CLEAR_LAYER_DURATION",
   "APPROVE_SCENE",
-  "REJECT_SCENE"
+  "REJECT_SCENE",
+  "SET_REELS_LAYOUT",
+  "CLEAR_REELS_LAYOUT"
 ] as const;
 export type ExecutionPlanEditOperationType = (typeof EXECUTION_PLAN_EDIT_OPERATION_TYPES)[number];
 
@@ -201,6 +204,17 @@ const rejectSceneSchema = z
   })
   .strict();
 
+/** Sets this scene's own reelsLayout (execution-plan.ts) - the human-approval gate for native Reels output (2026-08-29 closure requirement, section 1). Browser sends only the approved layout intent; the server never invents/adjusts these values. */
+const setReelsLayoutSchema = z
+  .object({
+    type: z.literal("SET_REELS_LAYOUT"),
+    scenePlanId: z.string().min(1),
+    reelsCompositionName: z.string().min(1),
+    layerTransforms: z.array(layerTransformSchema).min(1)
+  })
+  .strict();
+const clearReelsLayoutSchema = z.object({ type: z.literal("CLEAR_REELS_LAYOUT"), scenePlanId: z.string().min(1) }).strict();
+
 export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   includeSceneSchema,
   excludeSceneSchema,
@@ -224,7 +238,9 @@ export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   setLayerDurationSchema,
   clearLayerDurationSchema,
   approveSceneSchema,
-  rejectSceneSchema
+  rejectSceneSchema,
+  setReelsLayoutSchema,
+  clearReelsLayoutSchema
 ]);
 export type ExecutionPlanEditOperation = z.infer<typeof executionPlanEditOperationSchema>;
 

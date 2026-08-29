@@ -272,6 +272,23 @@ export function applyExecutionPlanEdit(
         })
       };
 
+    case "SET_REELS_LAYOUT":
+      return {
+        ok: true,
+        scenePlans: replaceScene(plans, sceneIndex, {
+          ...scene,
+          reelsLayout: {
+            reelsCompositionName: operation.reelsCompositionName,
+            layerTransforms: operation.layerTransforms,
+            configuredAt: timestamp
+          },
+          updatedAt: timestamp
+        })
+      };
+
+    case "CLEAR_REELS_LAYOUT":
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, reelsLayout: null, updatedAt: timestamp }) };
+
     default: {
       const _exhaustive: never = operation;
       throw new Error(`Unhandled execution plan edit operation: ${JSON.stringify(_exhaustive)}`);

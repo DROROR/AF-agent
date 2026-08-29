@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { placeholderTypeSchema } from "./template-manifest.js";
+import { layerTransformSchema } from "./execute-scene-edit.js";
 
 /**
  * execution-plan.json domain model - see docs/SCHEMAS.md's illustrative
@@ -103,6 +104,26 @@ export const placeholderMappingSchema = z.object({
 export type PlaceholderMapping = z.infer<typeof placeholderMappingSchema>;
 
 /**
+ * A scene's own approved, persisted intent for building its native
+ * 1080x1920 Reels composition (2026-08-29 closure requirement, section 1) -
+ * set/cleared only via the SET_REELS_LAYOUT/CLEAR_REELS_LAYOUT execution-
+ * plan-edit operations (execution-plan-edit.ts), the same human-approval
+ * gate every other scene-content change already goes through. Independent
+ * of `mappings` below: a layer being repositioned for the Reels frame
+ * (e.g. a decorative background element) need not correspond to any
+ * detected placeholder at all. Turned into a real BUILD_REELS_COMPOSITION
+ * worker operation by resolve-execute-frame-dispatch.ts only once this is
+ * non-null - a scene with no reelsLayout configured produces landscape
+ * output only, exactly as before this feature existed (fully additive).
+ */
+export const reelsLayoutSchema = z.object({
+  reelsCompositionName: z.string().min(1),
+  layerTransforms: z.array(layerTransformSchema).min(1),
+  configuredAt: z.string().datetime()
+});
+export type ReelsLayout = z.infer<typeof reelsLayoutSchema>;
+
+/**
  * One per manifest composition, ALWAYS - including the 20-of-45-style
  * compositions with no detected placeholder detail at all (mappings: []).
  * Never removed just because ae_get_composition lacked layer detail.
@@ -126,6 +147,8 @@ export const scenePlanEntrySchema = z.object({
   /** General supporting evidence for this row as a whole (e.g. manifest facts carried over) - distinct from each mapping's own placeholderClassification.evidence. */
   evidence: z.array(z.string().min(1)),
   mappings: z.array(placeholderMappingSchema),
+  /** Null until a human configures it (SET_REELS_LAYOUT) - see reelsLayoutSchema's own doc comment above. Defaults to null so a plan revision persisted before this field existed still parses cleanly. */
+  reelsLayout: reelsLayoutSchema.nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

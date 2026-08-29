@@ -41,6 +41,7 @@ function scene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
     unresolvedReasons: [],
     evidence: [],
     mappings: [],
+    reelsLayout: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides

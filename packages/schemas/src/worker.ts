@@ -22,22 +22,49 @@ export const mcpStatusSchema = z.enum(MCP_STATUSES);
  * Allowlisted operations a worker may claim - see docs/MASTER_PLAN.md
  * section 6. This is the single source of truth; nothing else should
  * redeclare this list.
+ *
+ * PLANNED VS. DISPATCHABLE (2026-08-29 closure audit): only 6 of these 14
+ * names have a real execution handler and are ever actually dispatched
+ * today - see apps/worker/src/domain/operation-allowlist.ts's own
+ * `CURRENT_WORKER_CAPABILITIES` (CHECK_HEALTH, INSPECT_TEMPLATE,
+ * INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME,
+ * RENDER) and apps/api/src/application/job/dispatch-job.ts (which only
+ * builds a real payload for EXECUTE_FRAME/RENDER/INSPECT_SCENE_EVIDENCE
+ * beyond the payload-passthrough operations). The remaining 8 names below
+ * are RESERVED/PLANNED ONLY - dispatching one always fails
+ * UNSUPPORTED_OPERATION (job-dispatcher.ts's own `default` case). They are
+ * kept declared here (never removed - that would be a breaking schema
+ * change) because their intended functionality was folded into the 6 real
+ * operations instead of becoming separate dispatch steps: branding
+ * (SET_BRAND_COLOR) and native-Reels-composition-building
+ * (BUILD_REELS_COMPOSITION) are both EXECUTE_FRAME operation TYPES (see
+ * execute-scene-edit.ts), not their own job operations; RESUME_JOB was
+ * superseded by true checkpoint-carrying resume on the existing
+ * EXECUTE_FRAME/RENDER dispatch path (resolve-resume-checkpoint.ts).
  */
 export const WORKER_CAPABILITIES = [
   "CHECK_HEALTH",
   "INSPECT_TEMPLATE",
   "INSPECT_SCENE_EVIDENCE",
+  /** Reserved/planned only - see this const's own doc comment above. */
   "VALIDATE_PLAN",
+  /** Reserved/planned only - see this const's own doc comment above. */
   "PREPARE_PROJECT",
   "EXECUTE_FRAME",
+  /** Reserved/planned only - folded into EXECUTE_FRAME's own SET_BRAND_COLOR operation instead. */
   "APPLY_BRANDING",
+  /** Reserved/planned only - see this const's own doc comment above. */
   "CREATE_PREVIEW",
+  /** Reserved/planned only - see this const's own doc comment above. */
   "CREATE_HORIZONTAL",
+  /** Reserved/planned only - folded into EXECUTE_FRAME's own BUILD_REELS_COMPOSITION operation instead. */
   "CREATE_REELS",
+  /** Reserved/planned only - see this const's own doc comment above. */
   "PREPARE_RENDER",
   "RENDER",
   /** Read-only, preparing for final Windows Worker verification - see inspect-render-capabilities.ts's own doc comment. Never mutates, never saves, never contacts the client. */
   "INSPECT_RENDER_CAPABILITIES",
+  /** Reserved/planned only - superseded by true checkpoint-carrying resume (resolve-resume-checkpoint.ts) on the existing dispatch path. */
   "RESUME_JOB"
 ] as const;
 export type WorkerCapability = (typeof WORKER_CAPABILITIES)[number];

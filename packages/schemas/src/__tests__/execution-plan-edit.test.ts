@@ -28,7 +28,14 @@ const VALID_OPERATIONS: ExecutionPlanEditOperation[] = [
   { type: "SET_LAYER_DURATION", scenePlanId: "s1", mappingId: "m1", layerDurationSeconds: 4 },
   { type: "CLEAR_LAYER_DURATION", scenePlanId: "s1", mappingId: "m1" },
   { type: "APPROVE_SCENE", scenePlanId: "s1" },
-  { type: "REJECT_SCENE", scenePlanId: "s1", reason: "wrong asset" }
+  { type: "REJECT_SCENE", scenePlanId: "s1", reason: "wrong asset" },
+  {
+    type: "SET_REELS_LAYOUT",
+    scenePlanId: "s1",
+    reelsCompositionName: "Scene A - Reels",
+    layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }]
+  },
+  { type: "CLEAR_REELS_LAYOUT", scenePlanId: "s1" }
 ];
 
 describe("executionPlanEditOperationSchema", () => {

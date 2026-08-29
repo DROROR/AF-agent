@@ -42,6 +42,7 @@ function scene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
     unresolvedReasons: [],
     evidence: [],
     mappings: [mapping()],
+    reelsLayout: null,
     createdAt: "2026-08-25T00:00:00.000Z",
     updatedAt: "2026-08-25T00:00:00.000Z",
     ...overrides
@@ -162,6 +163,27 @@ describe("applyExecutionPlanEdit", () => {
     const result = applyExecutionPlanEdit([scene({ notes: "existing note" })], { type: "REJECT_SCENE", scenePlanId: "scene-1", reason: "wrong asset" }, fixedNow);
     expect(result.ok && result.scenePlans[0]?.approvalState).toBe("REJECTED");
     expect(result.ok && result.scenePlans[0]?.notes).toBe("existing note\nwrong asset");
+  });
+
+  it("SET_REELS_LAYOUT sets the scene's own reelsLayout from the browser's approved intent, unchanged", () => {
+    const layerTransforms = [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }];
+    const result = applyExecutionPlanEdit(
+      [scene()],
+      { type: "SET_REELS_LAYOUT", scenePlanId: "scene-1", reelsCompositionName: "Scene A - Reels", layerTransforms },
+      fixedNow
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scenePlans[0]?.reelsLayout).toEqual({ reelsCompositionName: "Scene A - Reels", layerTransforms, configuredAt: NOW.toISOString() });
+  });
+
+  it("CLEAR_REELS_LAYOUT resets the scene's own reelsLayout to null", () => {
+    const layerTransforms = [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }];
+    const withLayout = scene({ reelsLayout: { reelsCompositionName: "Scene A - Reels", layerTransforms, configuredAt: NOW.toISOString() } });
+    const result = applyExecutionPlanEdit([withLayout], { type: "CLEAR_REELS_LAYOUT", scenePlanId: "scene-1" }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scenePlans[0]?.reelsLayout).toBeNull();
   });
 
   it("never mutates the input array/objects - returns a new structure", () => {

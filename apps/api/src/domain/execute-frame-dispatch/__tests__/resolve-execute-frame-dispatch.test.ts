@@ -130,6 +130,7 @@ function validScene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
     unresolvedReasons: [],
     evidence: [],
     mappings: [textMapping()],
+    reelsLayout: null,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     ...overrides
@@ -223,6 +224,33 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
     expect(result.payload.executionSessionId).toBe(SESSION_ID);
     expect(result.payload.expectedWorkingProjectSha256).toBeNull();
+  });
+
+  it("appends BUILD_REELS_COMPOSITION as the LAST operation when the scene has an approved reelsLayout - 2026-08-29 closure requirement", () => {
+    const reelsLayout = {
+      reelsCompositionName: "Scene 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+      configuredAt: "2026-08-29T00:00:00.000Z"
+    };
+    const result = resolveExecuteFrameDispatch(baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ reelsLayout })] }) }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations.at(-1)).toEqual({
+      type: "BUILD_REELS_COMPOSITION",
+      reelsCompositionName: "Scene 01 - Reels",
+      layerTransforms: reelsLayout.layerTransforms
+    });
+    // Content operations still come first - the duplicate is built from
+    // the already-edited landscape composition, never from stale template
+    // placeholder content.
+    expect(result.payload.operations[0]).toEqual({ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" });
+  });
+
+  it("never appends BUILD_REELS_COMPOSITION when the scene has no reelsLayout configured - fully additive, landscape-only by default", () => {
+    const result = resolveExecuteFrameDispatch(baseInput());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations.some((operation) => operation.type === "BUILD_REELS_COMPOSITION")).toBe(false);
   });
 
   it("carries the session's own latestWorkingProjectSha256 as expectedWorkingProjectSha256 for a session's SECOND scene job", () => {

@@ -48,6 +48,7 @@ function validScene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
     unresolvedReasons: [],
     evidence: [],
     mappings: [validMapping()],
+    reelsLayout: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides
@@ -138,6 +139,34 @@ describe("executionPlanSchema", () => {
 
   it("allows a scene with zero mappings (composition-level-only entry) - never forced to have at least one", () => {
     expect(() => scenePlanEntrySchema.parse(validScene({ mappings: [] }))).not.toThrow();
+  });
+
+  it("reelsLayout defaults to null when absent - a plan revision persisted before this field existed still parses cleanly", () => {
+    const legacyScene: Record<string, unknown> = validScene();
+    delete legacyScene.reelsLayout;
+    const parsed = scenePlanEntrySchema.parse(legacyScene);
+    expect(parsed.reelsLayout).toBeNull();
+  });
+
+  it("accepts a fully-configured reelsLayout - the human-approved native Reels intent (2026-08-29 closure requirement)", () => {
+    const parsed = scenePlanEntrySchema.parse(
+      validScene({
+        reelsLayout: {
+          reelsCompositionName: "Scene A - Reels",
+          layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+          configuredAt: "2026-08-29T00:00:00.000Z"
+        }
+      })
+    );
+    expect(parsed.reelsLayout?.reelsCompositionName).toBe("Scene A - Reels");
+  });
+
+  it("rejects a reelsLayout with zero layerTransforms - never a no-op reels build", () => {
+    expect(() =>
+      scenePlanEntrySchema.parse(
+        validScene({ reelsLayout: { reelsCompositionName: "Reels", layerTransforms: [], configuredAt: "2026-08-29T00:00:00.000Z" } })
+      )
+    ).toThrow();
   });
 
   it("rejects an unrecognized plan status", () => {

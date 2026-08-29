@@ -28,18 +28,40 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
 }
 
 describe("sceneEditOperationSchema", () => {
-  it("accepts each of the six allowlisted operation types", () => {
+  it("accepts each of the seven allowlisted operation types", () => {
     const ops = [
       { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" },
       { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/assets/clip.mp4" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: false },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 2.5 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 4 },
-      { type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "#1A2B3C" }
+      { type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "#1A2B3C" },
+      {
+        type: "BUILD_REELS_COMPOSITION",
+        reelsCompositionName: "Scene 01 - Reels",
+        layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }]
+      }
     ];
     for (const op of ops) {
       expect(() => sceneEditOperationSchema.parse(op)).not.toThrow();
     }
+  });
+
+  it("BUILD_REELS_COMPOSITION rejects an empty layerTransforms array - never a no-op reels build", () => {
+    expect(() =>
+      sceneEditOperationSchema.parse({ type: "BUILD_REELS_COMPOSITION", reelsCompositionName: "Reels", layerTransforms: [] })
+    ).toThrow();
+  });
+
+  it("BUILD_REELS_COMPOSITION rejects a generic/arbitrary extra field - never a generic transform API", () => {
+    expect(() =>
+      sceneEditOperationSchema.parse({
+        type: "BUILD_REELS_COMPOSITION",
+        reelsCompositionName: "Reels",
+        layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }],
+        arbitraryPropertyPath: "ADBE Transform Group"
+      })
+    ).toThrow();
   });
 
   it("rejects an arbitrary JSX/ExtendScript operation - no such operation type exists", () => {

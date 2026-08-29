@@ -81,6 +81,10 @@ function toWorkingCopyFailureCode(reason: WorkingCopyFailureReason): WorkingCopy
 export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: ExecuteSceneEditRequest): Promise<SceneEditResult> {
   const startedAt = deps.now().toISOString();
   let checkpoint: SceneEditCheckpoint = request.checkpoint ?? EMPTY_SCENE_EDIT_CHECKPOINT;
+  // Set only if a BUILD_REELS_COMPOSITION operation completes successfully
+  // in this attempt - see jsx-templates.ts's own resultingValue shape for
+  // that operation.
+  let reelsCompositionBuilt: SceneEditResult["reelsCompositionBuilt"] = null;
 
   function finish(params: {
     sourceProjectSha256: string;
@@ -102,6 +106,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       checkpoint,
       previewFramePath: params.previewFramePath,
       previewTimestampSeconds: params.previewTimestampSeconds,
+      reelsCompositionBuilt,
       failureReason: checkpoint.failureReason,
       startedAt,
       completedAt: deps.now().toISOString()
@@ -180,6 +185,27 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     // `outcome.ok` above already IS that verification (the AE-side script
     // itself only ever reports ok:true after its mutation actually ran).
     checkpoint = markOperationCompleted(checkpoint, pendingIndex, deps.now());
+
+    if (operation.type === "BUILD_REELS_COMPOSITION") {
+      // outcome.resultingValue is `unknown` at this generic layer (every
+      // operation shares OperationExecutionSuccess's own shape) - parsed
+      // defensively, never trusted blindly, matching this file's existing
+      // "typed failure over silent guess" convention.
+      const resultingValue = outcome.resultingValue;
+      if (
+        resultingValue &&
+        typeof resultingValue === "object" &&
+        "reelsAeProjectItemIndex" in resultingValue &&
+        "reelsCompositionName" in resultingValue &&
+        typeof (resultingValue as { reelsAeProjectItemIndex: unknown }).reelsAeProjectItemIndex === "number" &&
+        typeof (resultingValue as { reelsCompositionName: unknown }).reelsCompositionName === "string"
+      ) {
+        reelsCompositionBuilt = {
+          aeProjectItemIndex: (resultingValue as { reelsAeProjectItemIndex: number }).reelsAeProjectItemIndex,
+          compositionName: (resultingValue as { reelsCompositionName: string }).reelsCompositionName
+        };
+      }
+    }
 
     // Durably persist BEFORE continuing to the next operation - a worker
     // crash between this line and the job's own final report must not

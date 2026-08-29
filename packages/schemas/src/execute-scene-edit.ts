@@ -26,7 +26,8 @@ export const SCENE_EDIT_OPERATION_TYPES = [
   "SET_LAYER_VISIBILITY",
   "SET_TIME_REMAP_FREEZE",
   "SET_DURATION",
-  "SET_BRAND_COLOR"
+  "SET_BRAND_COLOR",
+  "BUILD_REELS_COMPOSITION"
 ] as const;
 export type SceneEditOperationType = (typeof SCENE_EDIT_OPERATION_TYPES)[number];
 
@@ -91,13 +92,68 @@ const setBrandColorOperationSchema = z
   })
   .strict();
 
+/**
+ * ONE layer's explicit, human-reviewed reposition/scale target within the
+ * new Reels composition BUILD_REELS_COMPOSITION creates (2026-08-29
+ * closure requirement, section 1: "layout values must come from
+ * human-reviewed persisted intent... no AI guessing coordinates at
+ * execution time"). `positionX`/`positionY` are native AE pixel
+ * coordinates within the fixed 1080x1920 Reels frame; `scalePercent` is
+ * AE's own native uniform Transform > Scale percentage (100 = unchanged).
+ * Every value here is a plain, already-approved number from the execution
+ * plan's own persisted reelsLayout (execution-plan.ts) - never computed or
+ * guessed by this worker at execution time.
+ */
+export const layerTransformSchema = z
+  .object({
+    layerIndex: z.number().int().positive(),
+    manifestPlaceholderId: z.string().min(1).nullable(),
+    positionX: z.number(),
+    positionY: z.number(),
+    scalePercent: z.number().positive()
+  })
+  .strict();
+export type LayerTransform = z.infer<typeof layerTransformSchema>;
+
+/**
+ * Builds the native 1080x1920 Reels composition for THIS scene (client
+ * closure requirement, section 1) - a comp-level operation (no single
+ * `layerIndex`/`manifestPlaceholderId` of its own, unlike every other
+ * operation above), always the LAST operation in a scene's own operations
+ * array so it duplicates the scene's landscape composition AFTER that same
+ * job's own content operations (SET_TEXT/MAP_FOOTAGE/etc.) have already
+ * been applied to it - the duplicate therefore carries the real, approved
+ * content, not template placeholder text. Never a crop: the worker-side
+ * JSX (jsx-templates.ts) uses AE's native CompItem.duplicate() (which
+ * copies every layer, effect, and keyframe verbatim), resizes ONLY the
+ * duplicate to the fixed 1080x1920 frame, then repositions/rescales each
+ * named layer to its own explicit `layerTransforms` target - the original
+ * landscape composition is never touched. If a target layer's position or
+ * scale already carries real keyframe animation, that layer's transform is
+ * refused with a typed failure rather than silently destroying the
+ * animation (CLAUDE.md/closure requirement: "preserve original template
+ * animation/structure"). If a composition named `reelsCompositionName`
+ * already exists (a prior run of this same scene), it is removed first so
+ * re-execution never accumulates stale duplicate compositions.
+ */
+const buildReelsCompositionOperationSchema = z
+  .object({
+    type: z.literal("BUILD_REELS_COMPOSITION"),
+    /** Human-chosen, explicit, persisted name for the new duplicate composition - never auto-generated or guessed. */
+    reelsCompositionName: z.string().min(1),
+    layerTransforms: z.array(layerTransformSchema).min(1)
+  })
+  .strict();
+export type BuildReelsCompositionOperation = z.infer<typeof buildReelsCompositionOperationSchema>;
+
 export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setTextOperationSchema,
   mapFootageOperationSchema,
   setLayerVisibilityOperationSchema,
   setTimeRemapFreezeOperationSchema,
   setDurationOperationSchema,
-  setBrandColorOperationSchema
+  setBrandColorOperationSchema,
+  buildReelsCompositionOperationSchema
 ]);
 export type SceneEditOperation = z.infer<typeof sceneEditOperationSchema>;
 
@@ -145,7 +201,8 @@ export const sceneEditOperationIntentSchema = z.discriminatedUnion("type", [
   setLayerVisibilityOperationSchema,
   setTimeRemapFreezeOperationSchema,
   setDurationOperationSchema,
-  setBrandColorOperationSchema
+  setBrandColorOperationSchema,
+  buildReelsCompositionOperationSchema
 ]);
 export type SceneEditOperationIntent = z.infer<typeof sceneEditOperationIntentSchema>;
 
@@ -270,6 +327,23 @@ export const sceneEditResultSchema = z.object({
   checkpoint: sceneEditCheckpointSchema,
   previewFramePath: z.string().min(1).nullable(),
   previewTimestampSeconds: z.number().nonnegative().nullable(),
+  /**
+   * Non-null only when this job's operations included a successfully
+   * completed BUILD_REELS_COMPOSITION (2026-08-29 closure requirement,
+   * section 1) - the new composition's real, worker-verified identity, so
+   * a human can find and configure it for RENDER REELS without any DB
+   * access. `manifestCompositionId` is deliberately absent here: the
+   * worker never invents a canonical manifest identity (that is the API's
+   * concern, if/when this is wired into the project's own manifest - see
+   * this field's own follow-up note in resolve-execute-frame-dispatch.ts).
+   */
+  reelsCompositionBuilt: z
+    .object({
+      aeProjectItemIndex: z.number().int().positive(),
+      compositionName: z.string().min(1)
+    })
+    .nullable()
+    .default(null),
   failureReason: z.string().nullable(),
   startedAt: z.string().datetime(),
   completedAt: z.string().datetime()

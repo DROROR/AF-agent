@@ -239,6 +239,131 @@ function buildSetBrandColorScript(aeProjectItemIndex: number, compositionName: s
   return withTargets(wrapScript("SET_BRAND_COLOR", body), aeProjectItemIndex, compositionName, op.layerIndex) as FixedJsxScript;
 }
 
+/**
+ * Builds the native 1080x1920 Reels composition for one scene (2026-08-29
+ * closure requirement, section 1) - a comp-level operation, so it does NOT
+ * use `wrapScript`'s per-layer-target boilerplate (there is no single
+ * target layer). Every step is deterministic and every interpolated value
+ * is JSON.stringify'd exactly like every other builder in this file - see
+ * this file's own module doc comment.
+ *
+ * Safety guarantees, all enforced worker-side, never trusted from the
+ * caller:
+ *   - resolves and name-verifies the SOURCE (landscape) composition first,
+ *     identically to wrapScript's own convention, before touching anything,
+ *   - never mutates the source composition - CompItem.duplicate() is
+ *     AE's own non-destructive copy, so the original is untouched,
+ *   - if a composition already exists with the requested
+ *     reelsCompositionName (a prior run of this same scene), it is removed
+ *     FIRST so re-execution never accumulates stale duplicate compositions,
+ *   - resizes ONLY the duplicate to the fixed 1080x1920 frame (never a
+ *     caller-supplied dimension - "no arbitrary transform API"),
+ *   - for each layerTransforms entry, refuses (typed failure, no silent
+ *     overwrite) to touch a layer whose position OR scale property already
+ *     carries real keyframes - CLAUDE.md's "preserve original template
+ *     animation/structure" - rather than destroying that animation,
+ *   - rolls back (removes the half-built duplicate) if any transform
+ *     fails partway through, so a failed attempt never leaves a
+ *     partially-repositioned Reels composition behind.
+ */
+function buildBuildReelsCompositionScript(
+  aeProjectItemIndex: number,
+  compositionName: string,
+  op: Extract<SceneEditOperation, { type: "BUILD_REELS_COMPOSITION" }>
+): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const reelsNameLiteral = JSON.stringify(op.reelsCompositionName);
+  const transformsLiteral = JSON.stringify(op.layerTransforms.map((t) => ({ layerIndex: t.layerIndex, positionX: t.positionX, positionY: t.positionY, scalePercent: t.scalePercent })));
+
+  const script = `app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: BUILD_REELS_COMPOSITION")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to mutate the wrong composition"
+      });
+    } else {
+      var __existingIndex = null;
+      for (var __i = 1; __i <= app.project.numItems; __i++) {
+        var __candidate = app.project.item(__i);
+        if (__candidate instanceof CompItem && __candidate.name === ${reelsNameLiteral}) {
+          __existingIndex = __i;
+          break;
+        }
+      }
+      if (__existingIndex !== null) {
+        app.project.item(__existingIndex).remove();
+      }
+
+      var __newComp = __comp.duplicate();
+      __newComp.name = ${reelsNameLiteral};
+      __newComp.width = 1080;
+      __newComp.height = 1920;
+
+      var __transformFailure = null;
+      var __transforms = ${transformsLiteral};
+      for (var __t = 0; __t < __transforms.length; __t++) {
+        var __tx = __transforms[__t];
+        var __targetLayer = null;
+        try {
+          __targetLayer = __newComp.layer(__tx.layerIndex);
+        } catch (__layerLookupError) {
+          __targetLayer = null;
+        }
+        if (__targetLayer === null) {
+          __transformFailure = "layer index " + __tx.layerIndex + " was not found in the new Reels composition";
+          break;
+        }
+        if (__targetLayer.transform.position.numKeys > 0 || __targetLayer.transform.scale.numKeys > 0) {
+          __transformFailure = "layer index " + __tx.layerIndex + " has existing keyframe animation on position/scale - refusing to overwrite it and destroy that animation";
+          break;
+        }
+        __targetLayer.transform.position.setValue([__tx.positionX, __tx.positionY]);
+        __targetLayer.transform.scale.setValue([__tx.scalePercent, __tx.scalePercent]);
+      }
+
+      if (__transformFailure !== null) {
+        __newComp.remove();
+        __result = JSON.stringify({ ok: false, failureReason: __transformFailure });
+      } else {
+        var __newIndex = null;
+        for (var __j = 1; __j <= app.project.numItems; __j++) {
+          if (app.project.item(__j) === __newComp) {
+            __newIndex = __j;
+            break;
+          }
+        }
+        __result = JSON.stringify({
+          ok: true,
+          resultingValue: { reelsAeProjectItemIndex: __newIndex, reelsCompositionName: __newComp.name }
+        });
+      }
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
 /** #RRGGBB (already validated by setBrandColorOperationSchema's regex) -> [r,g,b] in AE's native 0..1 float range. */
 function hexToUnitRgb(colorHex: string): [number, number, number] {
   const r = parseInt(colorHex.slice(1, 3), 16) / 255;
@@ -371,6 +496,8 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildSetDurationScript(aeProjectItemIndex, compositionName, operation);
     case "SET_BRAND_COLOR":
       return buildSetBrandColorScript(aeProjectItemIndex, compositionName, operation);
+    case "BUILD_REELS_COMPOSITION":
+      return buildBuildReelsCompositionScript(aeProjectItemIndex, compositionName, operation);
     default: {
       const exhaustive: never = operation;
       throw new Error(`Unhandled scene edit operation type: ${JSON.stringify(exhaustive)}`);

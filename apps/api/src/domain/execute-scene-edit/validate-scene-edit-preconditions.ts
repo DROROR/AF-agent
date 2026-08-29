@@ -91,6 +91,23 @@ export function validateSceneEditPreconditions(input: ValidateSceneEditPrecondit
   // its own value must match what is actually recorded there, never a
   // fresh/different value smuggled in at dispatch time.
   for (const operation of request.operations) {
+    if (operation.type === "BUILD_REELS_COMPOSITION") {
+      // Comp-level, not tied to one manifestPlaceholderId - verified
+      // against the scene's own reelsLayout (execution-plan.ts) instead of
+      // a single mapping, the same "derived only from the approved plan"
+      // invariant applied to this operation's own approved data.
+      if (!scene.reelsLayout) {
+        return { ok: false, reason: `Operation BUILD_REELS_COMPOSITION was requested but scene "${request.scenePlanId}" has no approved reelsLayout` };
+      }
+      if (scene.reelsLayout.reelsCompositionName !== operation.reelsCompositionName) {
+        return { ok: false, reason: `BUILD_REELS_COMPOSITION's reelsCompositionName does not match the scene's approved reelsLayout` };
+      }
+      if (JSON.stringify(scene.reelsLayout.layerTransforms) !== JSON.stringify(operation.layerTransforms)) {
+        return { ok: false, reason: `BUILD_REELS_COMPOSITION's layerTransforms do not match the scene's approved reelsLayout` };
+      }
+      continue;
+    }
+
     const mapping = scene.mappings.find((m) => m.manifestPlaceholderId === operation.manifestPlaceholderId);
     if (!mapping) {
       return {

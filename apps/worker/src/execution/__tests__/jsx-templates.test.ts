@@ -192,3 +192,86 @@ describe("buildInspectRenderCapabilitiesScript", () => {
     expect(buildInspectRenderCapabilitiesScript()).toBe(buildInspectRenderCapabilitiesScript());
   });
 });
+
+describe("BUILD_REELS_COMPOSITION (native Reels, 2026-08-29 closure requirement)", () => {
+  function op(overrides: Partial<Extract<SceneEditOperation, { type: "BUILD_REELS_COMPOSITION" }>> = {}): SceneEditOperation {
+    return {
+      type: "BUILD_REELS_COMPOSITION",
+      reelsCompositionName: "Scene 01 - Reels",
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+      ...overrides
+    };
+  }
+
+  it("resolves and name-verifies the SOURCE composition before touching anything, the same as every other operation", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).toContain("app.project.item(5)");
+    expect(script).toContain("__comp.name !== " + JSON.stringify("Scene 01"));
+    expect(script).toContain("refusing to mutate the wrong composition");
+  });
+
+  it("uses AE's native, non-destructive CompItem.duplicate() - never deletes/replaces the source composition itself", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).toContain("__comp.duplicate()");
+    expect(script).not.toMatch(/__comp\.remove\(\)/);
+  });
+
+  it("removes any PRIOR composition with the same reelsCompositionName first, so re-execution never accumulates duplicates", () => {
+    const script = buildOperationScript(5, "Scene 01", op({ reelsCompositionName: "Reels Take 2" }));
+    expect(script).toContain(JSON.stringify("Reels Take 2"));
+    expect(script).toContain("__existingIndex !== null");
+    expect(script).toContain("app.project.item(__existingIndex).remove()");
+  });
+
+  it("resizes ONLY the new duplicate to the fixed 1080x1920 frame - never a caller-supplied dimension", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).toContain("__newComp.width = 1080");
+    expect(script).toContain("__newComp.height = 1920");
+  });
+
+  it("refuses (typed failure) to reposition a layer whose position or scale already has real keyframes - never silently destroys existing animation", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).toContain("__targetLayer.transform.position.numKeys > 0");
+    expect(script).toContain("__targetLayer.transform.scale.numKeys > 0");
+    expect(script).toContain("refusing to overwrite it and destroy that animation");
+  });
+
+  it("rolls back (removes the half-built duplicate) if any layer transform fails partway through", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    const failureAssignIndex = script.indexOf("__transformFailure = \"layer index \"");
+    const rollbackIndex = script.indexOf("__newComp.remove();");
+    expect(failureAssignIndex).toBeGreaterThan(-1);
+    expect(rollbackIndex).toBeGreaterThan(failureAssignIndex);
+  });
+
+  it("applies explicit, human-supplied position/scale values only - never computes or guesses a coordinate", () => {
+    const script = buildOperationScript(5, "Scene 01", op({ layerTransforms: [{ layerIndex: 3, manifestPlaceholderId: null, positionX: 100, positionY: 200, scalePercent: 75 }] }));
+    expect(script).toContain(JSON.stringify([{ layerIndex: 3, positionX: 100, positionY: 200, scalePercent: 75 }]));
+    expect(script).toContain("__targetLayer.transform.position.setValue([__tx.positionX, __tx.positionY])");
+    expect(script).toContain("__targetLayer.transform.scale.setValue([__tx.scalePercent, __tx.scalePercent])");
+  });
+
+  it("wraps in beginUndoGroup/try/finally/endUndoGroup like every other script", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).toContain("app.beginUndoGroup(");
+    expect(script).toContain("app.endUndoGroup();");
+    expect(script).toContain("try {");
+    expect(script).toContain("finally {");
+  });
+
+  it("is a bare function BODY, never a self-invoking expression", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).not.toMatch(/^\s*\(function\s*\(/);
+    expect(script.trim().endsWith("return __result;")).toBe(true);
+  });
+
+  it("reports the new composition's real identity on success, never a fabricated/guessed index", () => {
+    const script = buildOperationScript(5, "Scene 01", op());
+    expect(script).toContain("reelsAeProjectItemIndex: __newIndex");
+    expect(script).toContain("reelsCompositionName: __newComp.name");
+  });
+
+  it("is deterministic - the same operation always produces byte-identical JSX", () => {
+    expect(buildOperationScript(5, "Scene 01", op())).toBe(buildOperationScript(5, "Scene 01", op()));
+  });
+});

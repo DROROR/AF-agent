@@ -80,6 +80,9 @@ export function buildScenePlans(manifest: TemplateManifest, now: () => Date = ()
       unresolvedReasons,
       evidence: [],
       mappings,
+      // No Reels layout is ever inferred from the manifest - a human
+      // configures it explicitly (SET_REELS_LAYOUT) once ready.
+      reelsLayout: null,
       createdAt: timestamp,
       updatedAt: timestamp
     };

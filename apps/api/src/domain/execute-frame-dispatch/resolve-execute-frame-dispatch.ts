@@ -281,6 +281,22 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     return { ok: false, reason: `Scene "${scenePlanId}" has no resolvable operations (no mapping with a manifest-linked placeholder and a set value)` };
   }
 
+  // Native Reels composition (2026-08-29 closure requirement, section 1) -
+  // ALWAYS the LAST operation for this scene, so it duplicates the
+  // landscape composition only AFTER this same job's own content
+  // operations above have already been applied to it - the duplicate
+  // therefore carries the real, approved content, never template
+  // placeholder text. A scene with no reelsLayout configured is completely
+  // unaffected (landscape-only output, exactly as before this feature
+  // existed).
+  if (scene.reelsLayout) {
+    operations.push({
+      type: "BUILD_REELS_COMPOSITION",
+      reelsCompositionName: scene.reelsLayout.reelsCompositionName,
+      layerTransforms: scene.reelsLayout.layerTransforms
+    });
+  }
+
   if (!worker) {
     return { ok: false, reason: "Worker has never reported in" };
   }
