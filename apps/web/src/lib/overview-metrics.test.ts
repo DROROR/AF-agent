@@ -10,6 +10,8 @@ function worker(overrides: Partial<WorkerDto> = {}): WorkerDto {
     lastHeartbeatAt: null,
     aeStatus: "UNKNOWN",
     mcpStatus: "UNKNOWN",
+    aeAvailability: "UNAVAILABLE",
+    mcpAvailability: "UNAVAILABLE",
     aeVersion: null,
     capabilities: [],
     maxConcurrency: 1,
@@ -23,14 +25,30 @@ function worker(overrides: Partial<WorkerDto> = {}): WorkerDto {
 describe("computeOverviewMetrics", () => {
   it("counts online/AE-online/MCP-online independently across workers", () => {
     const metrics = computeOverviewMetrics([
-      worker({ workerId: "1", status: "ONLINE", aeStatus: "ONLINE", mcpStatus: "OFFLINE" }),
-      worker({ workerId: "2", status: "ONLINE", aeStatus: "OFFLINE", mcpStatus: "ONLINE" }),
-      worker({ workerId: "3", status: "OFFLINE", aeStatus: "UNKNOWN", mcpStatus: "UNKNOWN" })
+      worker({ workerId: "1", status: "ONLINE", aeStatus: "ONLINE", mcpStatus: "OFFLINE", aeAvailability: "ONLINE", mcpAvailability: "OFFLINE" }),
+      worker({ workerId: "2", status: "ONLINE", aeStatus: "OFFLINE", mcpStatus: "ONLINE", aeAvailability: "OFFLINE", mcpAvailability: "ONLINE" }),
+      worker({ workerId: "3", status: "OFFLINE", aeStatus: "UNKNOWN", mcpStatus: "UNKNOWN", aeAvailability: "UNAVAILABLE", mcpAvailability: "UNAVAILABLE" })
     ]);
     expect(metrics.workersOnline).toBe(2);
     expect(metrics.workersTotal).toBe(3);
     expect(metrics.aeOnline).toBe(1);
     expect(metrics.mcpOnline).toBe(1);
+  });
+
+  it("never counts a worker's last-known-Online AE/MCP telemetry once the worker itself is offline (stale-green regression)", () => {
+    const metrics = computeOverviewMetrics([
+      worker({
+        workerId: "1",
+        status: "OFFLINE",
+        aeStatus: "ONLINE",
+        mcpStatus: "ONLINE",
+        aeAvailability: "UNAVAILABLE",
+        mcpAvailability: "UNAVAILABLE"
+      })
+    ]);
+    expect(metrics.workersOnline).toBe(0);
+    expect(metrics.aeOnline).toBe(0);
+    expect(metrics.mcpOnline).toBe(0);
   });
 
   it("returns zeroed metrics and no heartbeat for an empty worker list, never fabricating a value", () => {

@@ -21,6 +21,8 @@ function worker(overrides: Record<string, unknown> = {}) {
     lastHeartbeatAt: new Date().toISOString(),
     aeStatus: "ONLINE",
     mcpStatus: "ONLINE",
+    aeAvailability: "ONLINE",
+    mcpAvailability: "ONLINE",
     aeVersion: "26.0",
     capabilities: ["INSPECT_TEMPLATE"],
     maxConcurrency: 1,
@@ -107,7 +109,10 @@ describe("NewProjectWizard", () => {
 
   it("does not enable inspection for a worker missing AE/MCP preconditions, even though it reports the capability", async () => {
     stubFetchByUrl({
-      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker({ aeStatus: "OFFLINE" })] } }
+      "/api/dashboard/status": {
+        status: 200,
+        body: { api: "ok", database: "ok", workers: [worker({ aeStatus: "OFFLINE", aeAvailability: "OFFLINE" })] }
+      }
     });
     renderWizard();
     await goToTemplateStep();

@@ -13,6 +13,12 @@ export interface WorkerDetailDrawerProps {
 export function WorkerDetailDrawer({ worker, onClose }: WorkerDetailDrawerProps): ReactElement {
   const { t, locale } = useLocale();
 
+  const workerOffline = worker !== null && worker.status !== "ONLINE";
+  // The last real heartbeat carrying this telemetry - never `updatedAt`,
+  // which the offline-sweep also bumps (that would make "last known" look
+  // freshER than the telemetry actually is).
+  const lastKnownAt = worker?.lastHeartbeatAt ? formatRelativeTime(new Date(worker.lastHeartbeatAt), new Date(), locale) : null;
+
   return (
     <Dialog open={worker !== null} onClose={onClose} title={worker?.name ?? t.workerDetail.fallbackTitle} variant="drawer">
       {worker ? (
@@ -23,22 +29,32 @@ export function WorkerDetailDrawer({ worker, onClose }: WorkerDetailDrawerProps)
               <code>{worker.workerId}</code>
             </dd>
           </div>
+          {/* Worker -> After Effects / ae-mcp bridge: grouped and indented so
+              the dependency is visually obvious (AE/MCP can never be more
+              current than the Worker's own connectivity). */}
           <div className="detail-list__row">
             <dt className="detail-list__label">{t.workerDetail.status}</dt>
             <dd className="detail-list__value">
               <StatusBadge status={worker.status} />
             </dd>
           </div>
-          <div className="detail-list__row">
+          {workerOffline ? <p className="field__hint">{t.workerDetail.offlineNotice}</p> : null}
+          <div className="detail-list__row detail-list__row--nested">
             <dt className="detail-list__label">{t.workerDetail.afterEffects}</dt>
             <dd className="detail-list__value">
-              <StatusBadge status={worker.aeStatus} />
+              <StatusBadge status={worker.aeAvailability} />
+              {workerOffline && worker.aeStatus !== "UNKNOWN" && lastKnownAt ? (
+                <p className="field__hint">{t.workerDetail.lastKnown(t.status[worker.aeStatus], lastKnownAt)}</p>
+              ) : null}
             </dd>
           </div>
-          <div className="detail-list__row">
+          <div className="detail-list__row detail-list__row--nested">
             <dt className="detail-list__label">{t.workerDetail.mcp}</dt>
             <dd className="detail-list__value">
-              <StatusBadge status={worker.mcpStatus} />
+              <StatusBadge status={worker.mcpAvailability} />
+              {workerOffline && worker.mcpStatus !== "UNKNOWN" && lastKnownAt ? (
+                <p className="field__hint">{t.workerDetail.lastKnown(t.status[worker.mcpStatus], lastKnownAt)}</p>
+              ) : null}
             </dd>
           </div>
           <div className="detail-list__row">

@@ -158,6 +158,7 @@ function VariantConfigCard({
   const renderWorker = session ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === session.assignedWorkerId) ?? null : null;
   const renderWorkerOnline = renderWorker !== null && renderWorker.status === "ONLINE" && renderWorker.currentJobId === null;
   const canRender = currentConfig !== null && !isStale && renderReady && renderWorkerOnline;
+  const isKnownWorkerOffline = renderWorker !== null && renderWorker.status !== "ONLINE";
 
   async function handleSave(): Promise<void> {
     setIsSaving(true);
@@ -283,7 +284,11 @@ function VariantConfigCard({
           {currentConfig && !isStale && !renderReady ? (
             <EmptyState title={t.projectWorkspace.renderSettings.sessionNotReadyTitle} description={t.projectWorkspace.renderSettings.sessionNotReadyDescription} />
           ) : currentConfig && !isStale && renderReady && !renderWorkerOnline ? (
-            <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
+            isKnownWorkerOffline ? (
+              <EmptyState title={t.jobDispatch.workerOfflineTitle} description={t.jobDispatch.workerOfflineDescription} />
+            ) : (
+              <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
+            )
           ) : null}
           {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
           {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}

@@ -17,6 +17,8 @@ function worker(overrides: Partial<WorkerDto> = {}): WorkerDto {
     lastHeartbeatAt: "2026-01-01T00:00:02.000Z",
     aeStatus: "ONLINE",
     mcpStatus: "UNKNOWN",
+    aeAvailability: "ONLINE",
+    mcpAvailability: "UNKNOWN",
     aeVersion: "2026",
     capabilities: ["CHECK_HEALTH"],
     maxConcurrency: 1,
@@ -93,5 +95,53 @@ describe("WorkerTable", () => {
     renderWithLocale(<WorkerTable workers={[worker({ aeVersion: null, currentJobId: null, capabilities: [] })]} now={now} />);
     const dashes = screen.getAllByText("—");
     expect(dashes.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("never shows AE/MCP as Online once the Worker itself is offline, even when the last-reported telemetry was Online (stale-green regression)", () => {
+    renderWithLocale(
+      <WorkerTable
+        workers={[
+          worker({
+            status: "OFFLINE",
+            aeStatus: "ONLINE",
+            mcpStatus: "ONLINE",
+            aeAvailability: "UNAVAILABLE",
+            mcpAvailability: "UNAVAILABLE"
+          })
+        ]}
+        now={now}
+      />
+    );
+
+    // The overall Worker status still renders its own real "Offline".
+    expect(screen.getByText("Offline")).toBeTruthy();
+    // Both AE and MCP render "Unavailable" - never the stale "Online" that
+    // aeStatus/mcpStatus still carry.
+    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+    expect(screen.queryByText("Online")).toBeNull();
+  });
+
+  it("surfaces the last-reported telemetry only as secondary metadata (a title attribute), never as the primary badge", () => {
+    renderWithLocale(
+      <WorkerTable
+        workers={[
+          worker({
+            status: "OFFLINE",
+            aeStatus: "ONLINE",
+            mcpStatus: "ONLINE",
+            aeAvailability: "UNAVAILABLE",
+            mcpAvailability: "UNAVAILABLE",
+            lastHeartbeatAt: "2026-01-01T00:00:00.000Z"
+          })
+        ]}
+        now={now}
+      />
+    );
+
+    const cells = screen.getAllByText("Unavailable").map((el) => el.closest("td"));
+    for (const cell of cells) {
+      expect(cell?.getAttribute("title")).toContain("Online");
+      expect(cell?.getAttribute("title")).toContain("10 seconds ago");
+    }
   });
 });

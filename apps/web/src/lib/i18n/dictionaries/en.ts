@@ -58,7 +58,8 @@ export const en = {
     OK: "OK",
     OFFLINE: "Offline",
     ERROR: "Error",
-    UNKNOWN: "Unknown"
+    UNKNOWN: "Unknown",
+    UNAVAILABLE: "Unavailable"
   },
   auth: {
     login: {
@@ -244,14 +245,16 @@ export const en = {
     workerId: "Worker ID",
     status: "Status",
     afterEffects: "After Effects",
-    mcp: "MCP",
+    mcp: "ae-mcp bridge",
     aeVersion: "AE version",
     maxConcurrency: "Max concurrency",
     currentJob: "Current job",
     capabilities: "Capabilities",
     lastHeartbeat: "Last heartbeat",
     registered: "Registered",
-    lastUpdated: "Last updated"
+    lastUpdated: "Last updated",
+    offlineNotice: "Worker is offline — current status cannot be verified.",
+    lastKnown: (label: string, relativeTime: string): string => `Last known: ${label} · ${relativeTime}`
   },
   approvals: {
     title: "Approvals",
@@ -398,6 +401,8 @@ export const en = {
   jobDispatch: {
     noWorkerTitle: "No worker available",
     noWorkerDescription: "No ONLINE worker currently reports this capability and is idle - it may be offline, busy with another job, or not yet updated to a build that supports this.",
+    workerOfflineTitle: "Worker is offline",
+    workerOfflineDescription: "Worker is offline. Reconnect the Worker to inspect, edit, preview, or render.",
     dispatching: "Dispatching…",
     queuedTitle: "Job queued",
     queuedDescription: (jobId: string): string => `Job ${jobId} was queued for the worker. It will run once claimed - this page does not yet show live progress.`,

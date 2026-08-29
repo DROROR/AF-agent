@@ -52,7 +52,8 @@ export const he: Dictionary = {
     OK: "תקין",
     OFFLINE: "לא מקוון",
     ERROR: "שגיאה",
-    UNKNOWN: "לא ידוע"
+    UNKNOWN: "לא ידוע",
+    UNAVAILABLE: "לא זמין"
   },
   auth: {
     login: {
@@ -238,14 +239,16 @@ export const he: Dictionary = {
     workerId: "מזהה עובד",
     status: "סטטוס",
     afterEffects: "After Effects",
-    mcp: "MCP",
+    mcp: "גשר ae-mcp",
     aeVersion: "גרסת AE",
     maxConcurrency: "מקביליות מקסימלית",
     currentJob: "משימה נוכחית",
     capabilities: "יכולות",
     lastHeartbeat: "פעימת לב אחרונה",
     registered: "נרשם",
-    lastUpdated: "עודכן לאחרונה"
+    lastUpdated: "עודכן לאחרונה",
+    offlineNotice: "העובד לא מקוון — לא ניתן לאמת את הסטטוס הנוכחי.",
+    lastKnown: (label, relativeTime) => `ידוע לאחרונה: ${label} · ${relativeTime}`
   },
   approvals: {
     title: "אישורים",
@@ -391,6 +394,8 @@ export const he: Dictionary = {
   jobDispatch: {
     noWorkerTitle: "אין וורקר זמין",
     noWorkerDescription: "אף וורקר במצב ONLINE לא מדווח כרגע על היכולת הזו כפנוי - ייתכן שהוא לא מחובר, עסוק במשימה אחרת, או שטרם עודכן לגרסה התומכת בכך.",
+    workerOfflineTitle: "העובד לא מקוון",
+    workerOfflineDescription: "העובד לא מקוון. חברו מחדש את העובד כדי לבדוק, לערוך, לתצוגה מקדימה או לרינדור.",
     dispatching: "שולח…",
     queuedTitle: "המשימה נכנסה לתור",
     queuedDescription: (jobId) => `המשימה ${jobId} נכנסה לתור עבור הוורקר. היא תרוץ לאחר שתילקח - עמוד זה עדיין לא מציג התקדמות בזמן אמת.`,

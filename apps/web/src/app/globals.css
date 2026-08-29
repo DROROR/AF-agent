@@ -1355,6 +1355,14 @@ thead th {
   text-align: end;
 }
 
+/* Visually groups a dependent row under the one above it (e.g. After
+   Effects/ae-mcp bridge under Worker) so the dependency reads as obvious,
+   without a heavier redesign of the list itself. */
+.detail-list__row--nested {
+  padding-inline-start: var(--space-4);
+  border-inline-start: 2px solid var(--color-border);
+}
+
 /* ==========================================================================
    Misc layout utilities
    ========================================================================== */

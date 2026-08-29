@@ -23,6 +23,8 @@ function workerWithCapabilities(capabilities: string[]) {
     lastHeartbeatAt: new Date().toISOString(),
     aeStatus: "ONLINE",
     mcpStatus: "ONLINE",
+    aeAvailability: "ONLINE",
+    mcpAvailability: "ONLINE",
     aeVersion: "26.0",
     capabilities,
     maxConcurrency: 1,

@@ -8,6 +8,8 @@ const validWorkerDto = {
   lastHeartbeatAt: new Date().toISOString(),
   aeStatus: "ONLINE",
   mcpStatus: "UNKNOWN",
+  aeAvailability: "ONLINE",
+  mcpAvailability: "UNKNOWN",
   aeVersion: "2026",
   capabilities: ["CHECK_HEALTH"],
   maxConcurrency: 1,

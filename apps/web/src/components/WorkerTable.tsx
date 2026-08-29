@@ -1,10 +1,34 @@
-import type { WorkerDto } from "@dyo/schemas";
+import type { AeStatus, McpStatus, WorkerDto, WorkerStatus } from "@dyo/schemas";
 import type { ReactElement } from "react";
+import type { Dictionary } from "../lib/i18n/dictionaries";
+import type { Locale } from "../lib/i18n/locale";
 import { formatRelativeTime } from "../lib/relative-time";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { useLocale } from "./LocaleProvider";
 import { StatusBadge } from "./StatusBadge";
+
+/**
+ * Secondary-only metadata (never the primary badge - see StatusBadge's own
+ * aeAvailability/mcpAvailability usage above) surfacing what AE/MCP last
+ * reported while the Worker itself was still online, so it's never
+ * confused with current truth. Omitted entirely once there is nothing
+ * meaningful to show (the Worker is online, or it never reported anything
+ * but UNKNOWN, or it has never had a heartbeat at all).
+ */
+function lastKnownTitle(
+  workerStatus: WorkerStatus,
+  reported: AeStatus | McpStatus,
+  lastHeartbeatAt: string | null,
+  now: Date,
+  locale: Locale,
+  t: Dictionary
+): string | undefined {
+  if (workerStatus === "ONLINE" || reported === "UNKNOWN" || !lastHeartbeatAt) {
+    return undefined;
+  }
+  return t.workerDetail.lastKnown(t.status[reported], formatRelativeTime(new Date(lastHeartbeatAt), now, locale));
+}
 
 export interface WorkerTableProps {
   /** null means the worker list could not be fetched/parsed - distinct from an empty (but valid) list. */
@@ -64,11 +88,11 @@ export function WorkerTable({ workers, now = new Date(), onSelectWorker }: Worke
               <td>
                 <StatusBadge status={worker.status} />
               </td>
-              <td>
-                <StatusBadge status={worker.aeStatus} />
+              <td title={lastKnownTitle(worker.status, worker.aeStatus, worker.lastHeartbeatAt, now, locale, t)}>
+                <StatusBadge status={worker.aeAvailability} />
               </td>
-              <td>
-                <StatusBadge status={worker.mcpStatus} />
+              <td title={lastKnownTitle(worker.status, worker.mcpStatus, worker.lastHeartbeatAt, now, locale, t)}>
+                <StatusBadge status={worker.mcpAvailability} />
               </td>
               <td>{worker.aeVersion ?? "—"}</td>
               <td>{worker.maxConcurrency}</td>

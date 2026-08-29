@@ -1,5 +1,6 @@
 import type { WorkerDto } from "@dyo/schemas";
 import type { Worker } from "../../domain/worker/types.js";
+import { deriveTelemetryAvailability } from "../../domain/worker/derive-telemetry-availability.js";
 
 /** Translates the internal domain entity into the versioned public contract. tokenHash never leaves this boundary. */
 export function toWorkerDto(worker: Worker): WorkerDto {
@@ -10,6 +11,8 @@ export function toWorkerDto(worker: Worker): WorkerDto {
     lastHeartbeatAt: worker.lastHeartbeatAt ? worker.lastHeartbeatAt.toISOString() : null,
     aeStatus: worker.aeStatus,
     mcpStatus: worker.mcpStatus,
+    aeAvailability: deriveTelemetryAvailability(worker.status, worker.aeStatus),
+    mcpAvailability: deriveTelemetryAvailability(worker.status, worker.mcpStatus),
     aeVersion: worker.aeVersion,
     capabilities: worker.capabilities,
     maxConcurrency: worker.maxConcurrency,

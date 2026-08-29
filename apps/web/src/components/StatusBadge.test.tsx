@@ -35,6 +35,13 @@ describe("StatusBadge", () => {
     expect(screen.getByText("Error").className).toContain("status-badge--negative");
   });
 
+  it("renders UNAVAILABLE as a neutral-tone badge, never green/positive", () => {
+    renderWithLocale(<StatusBadge status="UNAVAILABLE" />);
+    const badge = screen.getByText("Unavailable");
+    expect(badge.className).toContain("status-badge--neutral");
+    expect(badge.className).not.toContain("positive");
+  });
+
   it("renders the Hebrew label when the active locale is he (translation rendering)", () => {
     renderWithLocale(<StatusBadge status="ONLINE" />, { locale: "he" });
     const badge = screen.getByText("מקוון");

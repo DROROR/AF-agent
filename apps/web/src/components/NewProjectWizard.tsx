@@ -57,7 +57,11 @@ export function NewProjectWizard(): ReactElement {
 
   const eligibleWorkers = (dashboardStatus?.workers ?? []).filter((w) => w.capabilities.includes("INSPECT_TEMPLATE"));
   const selectedWorker = eligibleWorkers.find((w) => w.workerId === workerId) ?? null;
-  const workerReady = selectedWorker !== null && selectedWorker.status === "ONLINE" && selectedWorker.aeStatus === "ONLINE" && selectedWorker.mcpStatus === "ONLINE";
+  const workerReady =
+    selectedWorker !== null &&
+    selectedWorker.status === "ONLINE" &&
+    selectedWorker.aeAvailability === "ONLINE" &&
+    selectedWorker.mcpAvailability === "ONLINE";
   const canInspect = name.trim() !== "" && workerReady && templateId.trim() !== "" && sourceProjectPath.trim() !== "" && !isDispatching && (job === null || job.status === "FAILED");
 
   // Polls the real job while non-terminal - stops itself once
@@ -200,13 +204,13 @@ export function NewProjectWizard(): ReactElement {
                     <div className="detail-list__row">
                       <dt className="detail-list__label">{t.projectsNew.template.aeStatusLabel}</dt>
                       <dd className="detail-list__value">
-                        <StatusBadge status={selectedWorker.aeStatus} />
+                        <StatusBadge status={selectedWorker.aeAvailability} />
                       </dd>
                     </div>
                     <div className="detail-list__row">
                       <dt className="detail-list__label">{t.projectsNew.template.mcpStatusLabel}</dt>
                       <dd className="detail-list__value">
-                        <StatusBadge status={selectedWorker.mcpStatus} />
+                        <StatusBadge status={selectedWorker.mcpAvailability} />
                       </dd>
                     </div>
                   </dl>

@@ -37,6 +37,8 @@ describe("OverviewPage", () => {
             lastHeartbeatAt: new Date().toISOString(),
             aeStatus: "ONLINE",
             mcpStatus: "ONLINE",
+            aeAvailability: "ONLINE",
+            mcpAvailability: "ONLINE",
             aeVersion: "2026",
             capabilities: ["CHECK_HEALTH"],
             maxConcurrency: 1,

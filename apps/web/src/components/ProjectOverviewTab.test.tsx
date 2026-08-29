@@ -161,6 +161,8 @@ describe("ProjectOverviewTab", () => {
               lastHeartbeatAt: new Date().toISOString(),
               aeStatus: "ONLINE",
               mcpStatus: "ONLINE",
+              aeAvailability: "ONLINE",
+              mcpAvailability: "ONLINE",
               aeVersion: "26.0",
               capabilities: ["EXECUTE_FRAME"],
               maxConcurrency: 1,

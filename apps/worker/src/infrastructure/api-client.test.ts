@@ -80,6 +80,8 @@ describe("ApiClient.sendHeartbeat", () => {
       lastHeartbeatAt: new Date().toISOString(),
       aeStatus: "UNKNOWN" as const,
       mcpStatus: "UNKNOWN" as const,
+      aeAvailability: "UNKNOWN" as const,
+      mcpAvailability: "UNKNOWN" as const,
       aeVersion: null,
       capabilities: ["CHECK_HEALTH"] as const,
       maxConcurrency: 1,

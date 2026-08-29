@@ -19,6 +19,21 @@ export type McpStatus = (typeof MCP_STATUSES)[number];
 export const mcpStatusSchema = z.enum(MCP_STATUSES);
 
 /**
+ * What the dashboard should show RIGHT NOW for AE/the ae-mcp bridge -
+ * distinct from AeStatus/McpStatus, which are the raw value the Worker
+ * itself last reported. AE/MCP status is only ever reported BY the Worker
+ * on its own heartbeat, so it can never be more current than the Worker's
+ * own connectivity: when the Worker is not ONLINE, any previously-reported
+ * AE/MCP value is stale telemetry, not current truth, and must display as
+ * UNAVAILABLE - never as a lingering ONLINE. See
+ * apps/api/src/domain/worker/derive-telemetry-availability.ts, the single
+ * place this is computed.
+ */
+export const TELEMETRY_AVAILABILITY_STATUSES = [...AE_STATUSES, "UNAVAILABLE"] as const;
+export type TelemetryAvailabilityStatus = (typeof TELEMETRY_AVAILABILITY_STATUSES)[number];
+export const telemetryAvailabilityStatusSchema = z.enum(TELEMETRY_AVAILABILITY_STATUSES);
+
+/**
  * Allowlisted operations a worker may claim - see docs/MASTER_PLAN.md
  * section 6. This is the single source of truth; nothing else should
  * redeclare this list.
@@ -98,8 +113,14 @@ export const workerDtoSchema = z.object({
   name: z.string(),
   status: workerStatusSchema,
   lastHeartbeatAt: z.string().datetime().nullable(),
+  /** Raw last-reported value from the Worker's own heartbeat - may be stale once `status` is OFFLINE. Kept for "last known" secondary display; never use this alone to decide what's true right now, use aeAvailability instead. */
   aeStatus: aeStatusSchema,
+  /** Raw last-reported value - see aeStatus's own doc comment; use mcpAvailability for current truth. */
   mcpStatus: mcpStatusSchema,
+  /** Current, Worker-connectivity-gated AE availability - UNAVAILABLE whenever status !== "ONLINE", regardless of what aeStatus last said. This is what the dashboard should render as the primary badge. */
+  aeAvailability: telemetryAvailabilityStatusSchema,
+  /** Current, Worker-connectivity-gated MCP/ae-mcp-bridge availability - see aeAvailability's own doc comment. */
+  mcpAvailability: telemetryAvailabilityStatusSchema,
   aeVersion: z.string().nullable(),
   capabilities: z.array(workerCapabilitySchema),
   maxConcurrency: z.number().int().positive(),

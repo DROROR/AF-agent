@@ -26,8 +26,11 @@ export function computeOverviewMetrics(workers: WorkerDto[]): OverviewMetrics {
   return {
     workersOnline: workers.filter((w) => w.status === "ONLINE").length,
     workersTotal: workers.length,
-    aeOnline: workers.filter((w) => w.aeStatus === "ONLINE").length,
-    mcpOnline: workers.filter((w) => w.mcpStatus === "ONLINE").length,
+    // aeAvailability/mcpAvailability, never the raw aeStatus/mcpStatus - a
+    // Worker that has gone offline keeps its last-reported aeStatus/mcpStatus
+    // frozen at whatever it last said, which must not count as "online" here.
+    aeOnline: workers.filter((w) => w.aeAvailability === "ONLINE").length,
+    mcpOnline: workers.filter((w) => w.mcpAvailability === "ONLINE").length,
     activeJobs: workers
       .filter((w): w is WorkerDto & { currentJobId: string } => w.currentJobId !== null)
       .map((w) => ({ workerId: w.workerId, workerName: w.name, jobId: w.currentJobId })),

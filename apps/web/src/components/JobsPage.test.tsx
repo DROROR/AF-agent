@@ -30,6 +30,8 @@ describe("JobsPage", () => {
               lastHeartbeatAt: new Date().toISOString(),
               aeStatus: "ONLINE",
               mcpStatus: "ONLINE",
+              aeAvailability: "ONLINE",
+              mcpAvailability: "ONLINE",
               aeVersion: "2026",
               capabilities: ["EXECUTE_FRAME"],
               maxConcurrency: 1,

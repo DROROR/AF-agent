@@ -134,6 +134,11 @@ export function ProjectOverviewTab(): ReactElement | null {
     : findDispatchableWorker(dashboardStatus?.workers ?? null, "EXECUTE_FRAME");
   const workerReady = activeSession ? candidateWorker !== null && candidateWorker.status === "ONLINE" && candidateWorker.currentJobId === null : candidateWorker !== null;
   const canExecute = nextScenePlanId !== null && workerReady;
+  // A session pins a specific worker (worker affinity, section 8) - if that
+  // worker is offline this is a known, specific worker being unreachable,
+  // not "no worker was ever found" - a more honest, actionable message than
+  // the generic no-worker-available one.
+  const isKnownWorkerOffline = activeSession !== null && candidateWorker !== null && candidateWorker.status !== "ONLINE";
 
   async function handleExecuteNextScene(): Promise<void> {
     if (!nextScenePlanId || !candidateWorker) {
@@ -320,7 +325,11 @@ export function ProjectOverviewTab(): ReactElement | null {
         {requiredScenePlanIds.length === 0 ? (
           <EmptyState title={t.projectWorkspace.overview.noApprovedSceneTitle} description={t.projectWorkspace.overview.noApprovedSceneDescription} />
         ) : !workerReady && !allScenesComplete ? (
-          <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
+          isKnownWorkerOffline ? (
+            <EmptyState title={t.jobDispatch.workerOfflineTitle} description={t.jobDispatch.workerOfflineDescription} />
+          ) : (
+            <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
+          )
         ) : null}
         {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
         {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}

@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { useLocale } from "./LocaleProvider";
 
-export type BadgeStatus = "ONLINE" | "OFFLINE" | "UNKNOWN" | "OK" | "ERROR";
+export type BadgeStatus = "ONLINE" | "OFFLINE" | "UNKNOWN" | "OK" | "ERROR" | "UNAVAILABLE";
 
 export type Tone = "positive" | "negative" | "neutral" | "info";
 
@@ -15,13 +15,19 @@ export type Tone = "positive" | "negative" | "neutral" | "info";
  * than redeclaring it. The label itself is NOT part of this map - "Online"/
  * "Offline"/etc are user-facing text and come from the active locale's
  * dictionary (t.status), not a hardcoded English string - see StatusIndicator.tsx.
+ *
+ * UNAVAILABLE is also deliberately "neutral", not "negative" - it means a
+ * downstream signal (AE/ae-mcp bridge) cannot currently be verified because
+ * the Worker reporting it is itself offline, never that the signal is
+ * confirmed bad - see derive-telemetry-availability.ts on the API side.
  */
 export const STATUS_TONE: Record<BadgeStatus, Tone> = {
   ONLINE: "positive",
   OK: "positive",
   OFFLINE: "negative",
   ERROR: "negative",
-  UNKNOWN: "neutral"
+  UNKNOWN: "neutral",
+  UNAVAILABLE: "neutral"
 };
 
 export interface StatusBadgeProps {
