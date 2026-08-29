@@ -1,0 +1,16 @@
+{
+  "templateName": "",
+  "templateFilePath": "",
+  "runDate": "",
+  "originalAepSha256BeforeRun": "",
+  "originalAepSha256AfterRun": "",
+  "selectedScenesOnly": null,
+  "correctAssetsAndText": null,
+  "timestampAccuracyWithinOneFrame": null,
+  "realVisualPreviewReviewed": null,
+  "landscapeOutputProduced": null,
+  "reelsOutputProduced": null,
+  "reelsRepositionedNotCropped": null,
+  "interruptedJobRecoveryTested": null,
+  "notes": ""
+}

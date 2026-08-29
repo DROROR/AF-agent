@@ -1,0 +1,29 @@
+{
+  "id": "work-map-1",
+  "projectId": "22222222-2222-2222-2222-222222222222",
+  "revision": 1,
+  "entries": [
+    {
+      "id": "entry-1",
+      "sourceCompositionId": "comp-1",
+      "sourceReference": "Scene 01 - Hero headline",
+      "desiredAssetId": null,
+      "desiredText": "מבית DYO App",
+      "assetTimestampSeconds": null,
+      "desiredDurationSeconds": null,
+      "instructions": "Keep bold weight, do not resize the text box"
+    },
+    {
+      "id": "entry-2",
+      "sourceCompositionId": "comp-2",
+      "sourceReference": "Scene 02 - Phone screen recording",
+      "desiredAssetId": "44444444-4444-4444-4444-444444444444",
+      "desiredText": null,
+      "assetTimestampSeconds": 3.5,
+      "desiredDurationSeconds": 4,
+      "instructions": null
+    }
+  ],
+  "createdAt": "2026-08-29T00:00:00.000Z",
+  "updatedAt": "2026-08-29T00:00:00.000Z"
+}

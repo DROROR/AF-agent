@@ -1,0 +1,8 @@
+{
+  "operation": "INSPECT_TEMPLATE",
+  "workerId": "11111111-1111-1111-1111-111111111111",
+  "payload": {
+    "templateId": "white-app-promo-v1",
+    "sourceProjectPath": "C:\\DYO-Agent\\copies\\White App Promo (copy for inspection).aep"
+  }
+}
