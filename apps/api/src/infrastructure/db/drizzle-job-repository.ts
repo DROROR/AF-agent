@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { jobs, workers, type Database, type JobRow } from "@dyo/database";
 import { TERMINAL_JOB_STATUSES, type JobErrorCode, type JobStatus, type WorkerCapability } from "@dyo/schemas";
 import { isJobTerminal } from "../../domain/job/rules.js";
@@ -165,5 +165,34 @@ export class DrizzleJobRepository implements JobRepository {
           limit 1`
     );
     return result.rows.length > 0;
+  }
+
+  async findMostRecentForSessionKey(
+    operation: WorkerCapability,
+    executionSessionId: string,
+    key: "scenePlanId" | "variant",
+    value: string
+  ): Promise<Job | null> {
+    const [row] = await this.db
+      .select()
+      .from(jobs)
+      .where(
+        sql`${jobs.operation} = ${operation}
+            and ${jobs.payload} ->> 'executionSessionId' = ${executionSessionId}
+            and ${jobs.payload} ->> ${key} = ${value}`
+      )
+      .orderBy(desc(jobs.createdAt))
+      .limit(1);
+    return row ? toDomain(row) : null;
+  }
+
+  async listByCreatedByUserId(userId: string, limit: number): Promise<Job[]> {
+    const rows = await this.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.createdByUserId, userId))
+      .orderBy(desc(jobs.createdAt))
+      .limit(limit);
+    return rows.map(toDomain);
   }
 }

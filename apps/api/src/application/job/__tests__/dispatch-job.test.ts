@@ -442,6 +442,7 @@ function approvedTextScene() {
         updatedAt: FIXED_NOW.toISOString()
       }
     ],
+    reelsLayout: null,
     createdAt: FIXED_NOW.toISOString(),
     updatedAt: FIXED_NOW.toISOString()
   };
@@ -511,6 +512,103 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
     expect(payload.executionSessionId).toBe(session.id);
     expect(payload.expectedWorkingProjectSha256).toBeNull();
     expect(payload.checkpoint).toBeNull();
+  });
+
+  it("true resume: carries a prior FAILED attempt's own durable checkpoint into the fresh dispatch for the same scene, unchanged, so the worker skips already-completed operations", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "EXECUTE_FRAME");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    const session = await createSession(executionSessionRepository, project.projectId, workerId);
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const dispatchArgs = { operation: "EXECUTE_FRAME" as const, workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" };
+
+    const firstDispatch = await dispatchJob(commonDeps, dispatchArgs);
+
+    // Simulate a genuinely killed worker process: the job never reaches a
+    // final report, but its last durable mid-job checkpoint (see
+    // report-job-checkpoint.ts) recorded operation 0 as already completed
+    // before the worker died. A sweep/manual mark eventually fails the job.
+    const crashCheckpoint = { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: FIXED_NOW.toISOString(), failureReason: "worker process exited unexpectedly" };
+    await jobRepository.updateStatus(
+      firstDispatch.jobId,
+      workerId,
+      { expectedCurrentStatus: "QUEUED", status: "FAILED", checkpoint: crashCheckpoint, error: { code: "TRANSPORT_ERROR", message: "worker process exited unexpectedly" } },
+      FIXED_NOW
+    );
+
+    const resumedDispatch = await dispatchJob(commonDeps, dispatchArgs);
+
+    const resumedJob = await jobRepository.findById(resumedDispatch.jobId);
+    const resumedPayload = resumedJob?.payload as Record<string, unknown>;
+    expect(resumedPayload.checkpoint).toEqual(crashCheckpoint);
+    // Never re-copies from the original source and never changes the
+    // working-copy path derivation - same executionSessionId, same scene.
+    expect(resumedPayload.executionSessionId).toBe(session.id);
+    expect(resumedPayload.scenePlanId).toBe("scene-1");
+  });
+
+  it("true resume: does NOT reuse a checkpoint with zero completed operations - nothing meaningful to skip, so a fresh start (null) is used instead", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "EXECUTE_FRAME");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    const session = await createSession(executionSessionRepository, project.projectId, workerId);
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const dispatchArgs = { operation: "EXECUTE_FRAME" as const, workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" };
+
+    const firstDispatch = await dispatchJob(commonDeps, dispatchArgs);
+    await jobRepository.updateStatus(
+      firstDispatch.jobId,
+      workerId,
+      {
+        expectedCurrentStatus: "QUEUED",
+        status: "FAILED",
+        checkpoint: { completedOperationIndices: [], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: "failed before the first operation ever completed" },
+        error: { code: "TRANSPORT_ERROR", message: "failed before the first operation ever completed" }
+      },
+      FIXED_NOW
+    );
+
+    const resumedDispatch = await dispatchJob(commonDeps, dispatchArgs);
+    const resumedJob = await jobRepository.findById(resumedDispatch.jobId);
+    expect((resumedJob?.payload as Record<string, unknown>).checkpoint).toBeNull();
   });
 
   it("rejects with PreconditionNotMetError when the resolver itself refuses (e.g. no execution plan exists) - never queues a job anyway", async () => {
@@ -672,6 +770,66 @@ describe("dispatchJob - RENDER (safe dispatch)", () => {
     expect(payload.expectedWorkingProjectSha256).toBe("d".repeat(64));
     expect(payload.renderSettingsTemplateName).toBe("Best Settings");
     expect(payload.checkpoint).toBeNull();
+  });
+
+  it("true resume: carries a prior FAILED RENDER attempt's own durable checkpoint into the retry for the same variant, unchanged", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "RENDER");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    const plan = await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    await executionPlanRepository.updateRenderOutput(
+      plan.id,
+      "LANDSCAPE",
+      {
+        manifestCompositionId: "comp-1",
+        aeProjectItemIndex: 5,
+        compositionName: "Scene 01",
+        sourceProjectSha256: "a".repeat(64),
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Source",
+        configuredAt: FIXED_NOW.toISOString()
+      },
+      FIXED_NOW
+    );
+    const session = await readyToRenderSession(executionSessionRepository, project.projectId, workerId);
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const dispatchArgs = { operation: "RENDER" as const, workerId, projectId: project.projectId, executionSessionId: session.id, variant: "LANDSCAPE" as const };
+
+    const firstDispatch = await dispatchJob(commonDeps, dispatchArgs);
+    const crashCheckpoint = {
+      completedOperationIndices: [0, 1],
+      checkpointBeforeAt: null,
+      checkpointAfterAt: FIXED_NOW.toISOString(),
+      failureReason: "worker process exited during RUN_AERENDER"
+    };
+    await jobRepository.updateStatus(
+      firstDispatch.jobId,
+      workerId,
+      { expectedCurrentStatus: "QUEUED", status: "FAILED", checkpoint: crashCheckpoint, error: { code: "TRANSPORT_ERROR", message: "worker process exited during RUN_AERENDER" } },
+      FIXED_NOW
+    );
+
+    const resumedDispatch = await dispatchJob(commonDeps, dispatchArgs);
+    const resumedJob = await jobRepository.findById(resumedDispatch.jobId);
+    expect((resumedJob?.payload as Record<string, unknown>).checkpoint).toEqual(crashCheckpoint);
   });
 
   it("rejects with PreconditionNotMetError when no working copy has been produced yet - never queues a job anyway", async () => {

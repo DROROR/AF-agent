@@ -18,6 +18,7 @@ import { sweepStaleWorkers } from "../worker/sweep-stale-workers.js";
 import { resolveExecuteFrameDispatch } from "../../domain/execute-frame-dispatch/resolve-execute-frame-dispatch.js";
 import { resolveRenderDispatch } from "../../domain/render-dispatch/resolve-render-dispatch.js";
 import { createJob } from "./create-job.js";
+import { resolveExecuteFrameResumeCheckpoint, resolveRenderResumeCheckpoint } from "./resolve-resume-checkpoint.js";
 
 export interface DispatchJobDeps {
   jobRepository: JobRepository;
@@ -149,7 +150,13 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);
     }
-    payload = { ...resolved.payload, checkpoint: null };
+    // True interrupted-job resume (see resolve-resume-checkpoint.ts): if a
+    // prior FAILED attempt for this exact scene left a durable, verifiably-
+    // still-valid checkpoint, carry it forward so the worker skips whatever
+    // operations already completed rather than restarting the scene from
+    // operation 0. Fails closed to a fresh start (null) on any mismatch.
+    const resumeCheckpoint = await resolveExecuteFrameResumeCheckpoint(deps.jobRepository, resolved.payload);
+    payload = { ...resolved.payload, checkpoint: resumeCheckpoint };
   } else if (request.operation === "RENDER") {
     if (!project) {
       throw new ProjectNotFoundError(request.projectId);
@@ -171,7 +178,12 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);
     }
-    payload = { ...resolved.payload, checkpoint: null };
+    // Same true-resume behavior as EXECUTE_FRAME above, reusing RENDER's own
+    // fixed 4-stage checkpoint (VERIFY_WORKING_COPY/VERIFY_COMPOSITION/
+    // RUN_AERENDER/VALIDATE_ARTIFACT) rather than always restarting from the
+    // first stage.
+    const resumeCheckpoint = await resolveRenderResumeCheckpoint(deps.jobRepository, resolved.payload);
+    payload = { ...resolved.payload, checkpoint: resumeCheckpoint };
   } else if (request.operation === "INSPECT_SCENE_EVIDENCE") {
     projectId = request.projectId;
     payload = request.payload;

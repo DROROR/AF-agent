@@ -140,4 +140,33 @@ export class InMemoryJobRepository implements JobRepository {
       (job) => job.workerId === workerId && job.operation === operation && !isJobTerminal(job.status)
     );
   }
+
+  async findMostRecentForSessionKey(
+    operation: WorkerCapability,
+    executionSessionId: string,
+    key: "scenePlanId" | "variant",
+    value: string
+  ): Promise<Job | null> {
+    const matches = [...this.rows.values()]
+      .filter((job) => {
+        if (job.operation !== operation) {
+          return false;
+        }
+        const payload = job.payload;
+        if (!payload || typeof payload !== "object") {
+          return false;
+        }
+        const record = payload as Record<string, unknown>;
+        return record.executionSessionId === executionSessionId && record[key] === value;
+      })
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return matches[0] ?? null;
+  }
+
+  async listByCreatedByUserId(userId: string, limit: number): Promise<Job[]> {
+    return [...this.rows.values()]
+      .filter((job) => job.createdByUserId === userId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit);
+  }
 }

@@ -92,4 +92,23 @@ export interface JobRepository {
   countActiveForWorker(workerId: string): Promise<number>;
   /** True if this worker already has a non-terminal job (QUEUED or later, up to but excluding SUCCEEDED/FAILED/CANCELLED) for this exact operation - used by job dispatch to refuse a duplicate/double-submit dispatch of the same operation. */
   hasNonTerminalJobForOperation(workerId: string, operation: WorkerCapability): Promise<boolean>;
+  /**
+   * The most recently CREATED job for this exact (operation,
+   * executionSessionId, key/value) combination, across ANY status - used by
+   * job dispatch to find a prior attempt's own durable checkpoint so a
+   * genuine worker-crash resume can carry it forward (see
+   * resolve-resume-checkpoint.ts). `key` addresses the one JSON payload
+   * field that identifies "the same scene" (EXECUTE_FRAME's own
+   * scenePlanId) or "the same render target" (RENDER's own variant) - never
+   * a free-form JSON path. Returns null if no such job has ever been
+   * dispatched.
+   */
+  findMostRecentForSessionKey(
+    operation: WorkerCapability,
+    executionSessionId: string,
+    key: "scenePlanId" | "variant",
+    value: string
+  ): Promise<Job | null>;
+  /** This user's own full dispatch history, newest first, capped at `limit` - see list-jobs-for-user.ts ("job history + errors" closure requirement). Never another user's jobs. */
+  listByCreatedByUserId(userId: string, limit: number): Promise<Job[]>;
 }
