@@ -5,7 +5,8 @@ import type { AiSuggestionProvider } from "./ai-suggestion-provider.js";
 const TOOL_NAME = "propose_mapping_suggestions";
 const MAX_TOKENS = 8000;
 
-const PROPOSAL_INPUT_SCHEMA = {
+/** Exported only so tests can assert on the real JSON Schema this provider sends Anthropic, rather than duplicating its text - see anthropic-suggestion-provider.test.ts. */
+export const PROPOSAL_INPUT_SCHEMA = {
   type: "object",
   properties: {
     proposals: {
@@ -15,15 +16,38 @@ const PROPOSAL_INPUT_SCHEMA = {
         properties: {
           scenePlanId: { type: "string", minLength: 1 },
           mappingId: { type: ["string", "null"] },
+          // Anthropic's strict tool-schema validator (this tool is
+          // registered with strict: true) rejects the ordinary JSON-Schema
+          // "type: [X, 'null']" + "enum" combination for a nullable enum -
+          // proven in production (400 invalid_request_error: "Enum value
+          // 'image' does not match declared type ['string', 'null']"),
+          // even though every enum value is a plain string satisfying that
+          // type. anyOf (string-with-enum, or null) is the form its
+          // validator accepts instead. Every other field/value this
+          // produces or accepts is unchanged - still image/video/text/
+          // logo/phone_screen/color/unknown/null, only the JSON-Schema
+          // shape describing that set changed.
           suggestedClassification: {
-            type: ["string", "null"],
-            enum: ["image", "video", "text", "logo", "phone_screen", "color", "unknown", null]
+            anyOf: [
+              { type: "string", enum: ["image", "video", "text", "logo", "phone_screen", "color", "unknown"] },
+              { type: "null" }
+            ]
           },
           suggestedAssetId: { type: ["string", "null"] },
           suggestedText: { type: ["string", "null"] },
           suggestedAssetTimestamp: { type: ["number", "null"] },
           suggestedFinalDuration: { type: ["number", "null"] },
-          confidence: { type: "number", minimum: 0, maximum: 1 },
+          // Anthropic's strict tool-schema validator also rejects
+          // `minimum`/`maximum` on a `number` type ("For 'number' type,
+          // properties maximum, minimum are not supported") - found via
+          // the real Anthropic acceptance smoke test for this same fix.
+          // The [0,1] bound is still fully enforced independently at the
+          // domain layer (aiSuggestionProposalSchema.confidence in
+          // @dyo/schemas), which every provider's output already goes
+          // through before anything is persisted - dropping this hint
+          // only removes generation-time guidance to the model, never
+          // the actual accepted-value validation.
+          confidence: { type: "number" },
           reasoning: { type: ["string", "null"] },
           evidenceRefs: {
             type: "array",
