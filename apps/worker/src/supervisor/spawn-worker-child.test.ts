@@ -1,9 +1,9 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path, { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { spawnWorkerChild } from "./spawn-worker-child.js";
+import { buildWorkerChildArgs, spawnWorkerChild } from "./spawn-worker-child.js";
 
 let dir: string;
 
@@ -90,7 +90,7 @@ describe("spawnWorkerChild", () => {
     expect(exit.code).toBe(0);
   });
 
-  it("really passes --env-file=.env (proven by the child seeing a var only that file defines) and really resolves dist/index.js relative to installDir - the exact same invocation run-worker.bat always used, so existing process-matching regexes keep matching it", async () => {
+  it("really passes --env-file=.env (proven by the child seeing a var only that file defines), resolved relative to installDir via cwd", async () => {
     await writeFile(join(dir, ".env"), "DYO_SPAWN_TEST_MARKER=proof-env-file-was-loaded\n");
     await writeFile(
       join(dir, "dist", "index.js"),
@@ -103,5 +103,15 @@ describe("spawnWorkerChild", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(text()).toBe("proof-env-file-was-loaded");
+  });
+
+  it("buildWorkerChildArgs() uses path.join (platform-native separators), never a hand-written forward-slash literal - real production bug, 2026-08-30: a hand-written relative 'dist/index.js' (forward slash) started the worker fine, but DYO-Worker-Final-Update.ps1/DYO-Worker-Lifecycle-SelfTest.ps1's own process-matching regex required a literal backslash and never matched it, so a genuinely healthy, heartbeating worker was falsely reported as not running", () => {
+    const args = buildWorkerChildArgs();
+    expect(args).toEqual(["--env-file=.env", join("dist", "index.js")]);
+  });
+
+  it("buildWorkerChildArgs() is relative, never installDir-anchored - see this function's own CONFIRMED BUG note on why an install-directory-anchored matcher fails against run-worker.bat's always-relative invocation", () => {
+    const args = buildWorkerChildArgs();
+    expect(args.every((arg) => !path.isAbsolute(arg))).toBe(true);
   });
 });

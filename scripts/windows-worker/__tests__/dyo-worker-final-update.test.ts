@@ -68,6 +68,24 @@ describe("DYO-Worker-Final-Update.ps1 process matcher - reuses the confirmed-saf
   it("rejects an empty/null command line rather than throwing", () => {
     expect(isDyoWorkerCommandLine("")).toBe(false);
   });
+
+  it("also matches a forward-slash invocation - real production bug, 2026-08-30: the supervisor spawned the worker with a briefly-forward-slashed path, and this matcher (backslash-only at the time) never matched a genuinely running, ONLINE, heartbeating worker", () => {
+    expect(isDyoWorkerCommandLine("node --env-file=.env dist/index.js")).toBe(true);
+  });
+
+  it("matches the forward-slash form with node.exe's full resolved path prefixed too", () => {
+    expect(isDyoWorkerCommandLine('"C:\\Program Files\\nodejs\\node.exe" --env-file=.env dist/index.js')).toBe(true);
+  });
+
+  it("never matches the supervisor's own process (dist\\supervisor\\index.js), backslash or forward-slash - 'supervisor' breaks the required dist-then-index adjacency either way", () => {
+    expect(isDyoWorkerCommandLine("node dist\\supervisor\\index.js")).toBe(false);
+    expect(isDyoWorkerCommandLine("node dist/supervisor/index.js")).toBe(false);
+  });
+
+  it("never matches an ae-mcp-shaped command line - ae-mcp's own entry point is also literally dist/index.js (env.ts's own doc comment), but it is never invoked with --env-file=.env, so the combined pattern still excludes it", () => {
+    expect(isDyoWorkerCommandLine('node "C:\\Program Files\\ae-mcp\\dist\\index.js" serve')).toBe(false);
+    expect(isDyoWorkerCommandLine('node "C:\\Program Files\\ae-mcp\\dist\\index.js" health')).toBe(false);
+  });
 });
 
 describe("DYO-Worker-Final-Update.ps1 never registers a new worker identity", () => {
@@ -615,5 +633,43 @@ describe("DYO-Worker-Final-Update.ps1 replaces the visible run-worker.bat action
   it("Register-DyoWorkerTaskDefinition never falls back to running run-worker.bat directly as the task's own Action", () => {
     expect(updateScript).not.toMatch(/-Execute \$supervisorLauncher\b/);
     expect(updateScript).not.toMatch(/-Execute \$runWorkerBat\b/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 does not hard-fail on a PID-diff miss alone - real fix for the 2026-08-30 process-detection false negative", () => {
+  it("does not exit immediately when $started is false - it warns and continues to the log-content checks instead", () => {
+    const startedIdx = updateScript.indexOf("$pidConfirmed = $started");
+    expect(startedIdx).toBeGreaterThan(-1);
+    const block = updateScript.slice(startedIdx, startedIdx + 700);
+    expect(block).not.toMatch(/exit 1/);
+    expect(block).toMatch(/known possible process-matching gap/i);
+    // The very next real step must still be the startup-log-line wait -
+    // never an exit sitting between them.
+    const startupWaitIdx = updateScript.indexOf('$startupLogged = Wait-Until', startedIdx);
+    expect(startupWaitIdx).toBeGreaterThan(startedIdx);
+  });
+
+  it("still exits nonzero if the log-content checks ALSO fail to confirm a startup line - PID-diff failing does not silently become an automatic pass", () => {
+    const idx = updateScript.indexOf('if (-not $startupLogged) {');
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 500);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("still requires all six capabilities AND the exact expected commit even when PID was not confirmed - never a weaker bar", () => {
+    const capIdx = updateScript.indexOf("$expectedCapabilities = @(");
+    const commitIdx = updateScript.indexOf('$commitMatch = [regex]::Match');
+    expect(capIdx).toBeGreaterThan(-1);
+    expect(commitIdx).toBeGreaterThan(capIdx);
+    expect(updateScript.slice(capIdx, capIdx + 900)).toMatch(/exit 1/);
+    expect(updateScript.slice(commitIdx, commitIdx + 700)).toMatch(/exit 1/);
+  });
+
+  it("the final summary is honest about which confirmation actually happened (PID vs log-content only)", () => {
+    const idx = updateScript.indexOf("$processConfirmationSummary = if ($pidConfirmed)");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/confirmed by PID/);
+    expect(block).toMatch(/PID could not be independently confirmed/);
   });
 });

@@ -8,8 +8,53 @@ const deployDir = join(currentDir, "..", "..", "..", "deploy", "windows-worker")
 
 const selfTestScript = readFileSync(join(deployDir, "DYO-Worker-Lifecycle-SelfTest.ps1"), "utf8");
 const selfTestBat = readFileSync(join(deployDir, "DYO-Worker-Lifecycle-SelfTest.bat"), "utf8");
+const updateScript = readFileSync(join(deployDir, "DYO-Worker-Final-Update.ps1"), "utf8");
 
 const selfTestCodeBody = selfTestScript.slice(selfTestScript.indexOf("#>") + 2);
+
+/** Same extraction approach as dyo-worker-final-update.test.ts's own extractPattern - re-applies the script's real regex source as a real JS RegExp. */
+function extractPattern(script: string, varName: string): RegExp {
+  const match = new RegExp(`\\$${varName}\\s*=\\s*'([^']+)'`).exec(script);
+  if (!match?.[1]) {
+    throw new Error(`could not find $${varName} in the script`);
+  }
+  return new RegExp(match[1]);
+}
+
+function isDyoWorkerCommandLine(commandLine: string): boolean {
+  const entrypoint = extractPattern(selfTestScript, "WorkerEntrypointPattern");
+  const envArg = extractPattern(selfTestScript, "WorkerEnvArgPattern");
+  return entrypoint.test(commandLine) && envArg.test(commandLine);
+}
+
+describe("DYO-Worker-Lifecycle-SelfTest.ps1 process matcher - identical to DYO-Worker-Final-Update.ps1's own, never a diverged duplicate", () => {
+  it("uses the EXACT SAME pattern source as the updater - both scripts must move together, never silently diverge", () => {
+    const selfTestEntrypoint = extractPattern(selfTestScript, "WorkerEntrypointPattern").source;
+    const selfTestEnvArg = extractPattern(selfTestScript, "WorkerEnvArgPattern").source;
+    const updateEntrypoint = extractPattern(updateScript, "WorkerEntrypointPattern").source;
+    const updateEnvArg = extractPattern(updateScript, "WorkerEnvArgPattern").source;
+    expect(selfTestEntrypoint).toBe(updateEntrypoint);
+    expect(selfTestEnvArg).toBe(updateEnvArg);
+  });
+
+  it("matches both backslash and forward-slash forms of the real worker invocation - real production bug, 2026-08-30", () => {
+    expect(isDyoWorkerCommandLine("node --env-file=.env dist\\index.js")).toBe(true);
+    expect(isDyoWorkerCommandLine("node --env-file=.env dist/index.js")).toBe(true);
+  });
+
+  it("never matches the supervisor's own process, either separator style", () => {
+    expect(isDyoWorkerCommandLine("node dist\\supervisor\\index.js")).toBe(false);
+    expect(isDyoWorkerCommandLine("node dist/supervisor/index.js")).toBe(false);
+  });
+
+  it("never matches an ae-mcp-shaped command line (same entry-point name, no --env-file)", () => {
+    expect(isDyoWorkerCommandLine('node "C:\\Program Files\\ae-mcp\\dist\\index.js" serve')).toBe(false);
+  });
+
+  it("never matches an unrelated Node application, even one also using --env-file", () => {
+    expect(isDyoWorkerCommandLine("node --env-file=.env server.js")).toBe(false);
+  });
+});
 
 describe("DYO-Worker-Lifecycle-SelfTest.ps1 refuses to run destructively when a job might be active", () => {
   it("checks for an in-progress job BEFORE terminating anything", () => {

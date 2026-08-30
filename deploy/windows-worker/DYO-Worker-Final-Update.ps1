@@ -92,8 +92,15 @@
   verification below - never printed blindly:
     - the exact OLD worker process(es) are confirmed gone (by PID, not by
       an install-directory guess),
-    - a NEW worker process exists afterward, with a PID that was never one
-      of the old ones,
+    - a NEW worker process ideally exists afterward with a PID that was
+      never one of the old ones - PID-diff is the preferred, first-checked
+      signal, but a failed PID match no longer hard-fails the update on
+      its own (real incident, 2026-08-30: a process-matching regression
+      meant a genuinely healthy, ONLINE, heartbeating worker's PID was
+      never observed - see $WorkerEntrypointPattern below); the log-
+      content checks immediately below are independent, deeper proof and
+      are what a failed PID match falls through to instead of failing
+      outright,
     - a real new successful heartbeat appears in log content this script
       itself guarantees is fresh,
     - that same fresh content shows ALL SIX capabilities (CHECK_HEALTH,
@@ -160,12 +167,22 @@ $TaskName = "DYO Video Worker"
 $ExpectedCommit = "2661b285990f0d85f45f9b69fe54388a52fcadfc"
 
 # The worker's own fixed, real invocation signature - `node --env-file=.env
-# dist\index.js`, spawned by the supervisor (supervisor/spawn-worker-child.ts)
-# exactly as run-worker.bat always ran it - deliberately NOT the install
-# directory (see DYO-Worker-CheckHealth-Update.ps1's own CONFIRMED BUG
-# note). Never matches the supervisor's own process (dist\supervisor\
-# index.js - a different path, no "dist\index.js" substring in it).
-$WorkerEntrypointPattern = 'dist\\index\.js'
+# dist\index.js`, spawned by the supervisor (supervisor/spawn-worker-child.ts,
+# via path.join - always backslash on the real win32 target) exactly as
+# run-worker.bat always ran it - deliberately NOT the install directory
+# (see DYO-Worker-CheckHealth-Update.ps1's own CONFIRMED BUG note: run-
+# worker.bat's invocation is always relative, so an install-directory-
+# anchored matcher can never find it in the real CommandLine at all).
+# Tolerant of either path separator ([\\/]) as defense in depth - a real
+# client-machine bug (2026-08-30) had the worker running fine, ONLINE,
+# heartbeating, while this matcher (backslash-only at the time) silently
+# never matched it because the spawn call briefly used a forward slash;
+# fixed at the source (spawn-worker-child.ts), but this tolerance costs
+# nothing and guards against that exact class of regression recurring.
+# Never matches the supervisor's own process (dist\supervisor\index.js -
+# a different path, "supervisor\" breaks the required dist-then-index
+# adjacency regardless of which separator is used).
+$WorkerEntrypointPattern = 'dist[\\/]index\.js'
 $WorkerEnvArgPattern = '--env-file=\.env'
 
 # New program files this exact update introduces - verified present on
@@ -571,13 +588,30 @@ if (-not $started) {
     ($newPids | Where-Object { $oldPids -notcontains $_ }).Count -gt 0
   }
 }
-if (-not $started) {
-  Write-Host "[NEEDS ATTENTION] DYO Worker did not start a genuinely new process after restart."
-  Write-Host "Program files were updated, but the worker is not confirmed running on a new"
-  Write-Host "process. Please run DYO-Worker-Repair.bat, or contact DYO."
-  exit 1
+# A failed PID-diff check does NOT hard-fail the update on its own -
+# real client incident, 2026-08-30: a worker was genuinely running,
+# ONLINE, and heartbeating the whole time, but a process-matching
+# regression (fixed above/in spawn-worker-child.ts) meant this exact
+# check could never see it, so a perfectly healthy update was reported as
+# failed. PID-diff remains the FIRST and preferred signal (it is checked,
+# above, before anything else) - but the log-content checks immediately
+# below (a fresh startup line, all six capabilities, the exact expected
+# commit, and a heartbeat/retry) are independent, deeper ground truth:
+# if ALL of those also confirm success, that is not weaker evidence than
+# a PID match, it is stronger (it proves the exact right build is
+# running and actually communicating with DYO). Only if BOTH the PID
+# check AND those log-content checks fail is this treated as a real
+# failure - see the still-present exit 1 calls in each check below.
+$pidConfirmed = $started
+if (-not $pidConfirmed) {
+  Write-Host "[NEEDS ATTENTION] Could not confirm a new DYO Worker process by PID after restart."
+  Write-Host "Continuing to check the worker's own log content directly - a real, healthy,"
+  Write-Host "heartbeating worker with unconfirmed PID is a known possible process-matching gap,"
+  Write-Host "not necessarily a real failure. This will still stop below if the log itself does"
+  Write-Host "not show a genuine, correctly-built, connected worker."
+} else {
+  Write-CheckResult $true "A genuinely new DYO Worker process is running (PID differs from before)"
 }
-Write-CheckResult $true "A genuinely new DYO Worker process is running (PID differs from before)"
 
 # Capabilities/build-commit live in the process's own "worker starting" log
 # line (index.ts logs it BEFORE the heartbeat loop even starts) - checking
@@ -658,8 +692,9 @@ Write-Host "================================================"
 Write-Host "  Update complete"
 Write-Host "================================================"
 $heartbeatSummary = if ($heartbeatSucceeded) { "a real confirmed heartbeat" } else { "a genuine active retry attempt (not yet connected, but self-recovering - see logs\worker.log)" }
+$processConfirmationSummary = if ($pidConfirmed) { "a genuinely new process (confirmed by PID)" } else { "a genuinely running process (confirmed by its own fresh log content - PID could not be independently confirmed this time, see above)" }
 Write-Host "DYO Worker is running the complete AE execution and render delivery pipeline,"
-Write-Host "with a genuinely new process (confirmed by PID), $heartbeatSummary, the"
+Write-Host "with $processConfirmationSummary, $heartbeatSummary, the"
 Write-Host "exact expected final build commit, and every new program file verified present on"
 Write-Host "disk - using the same DYO Worker identity this computer already had. No new"
 Write-Host "registration was created. Automatic-recovery settings on the Scheduled Task were"

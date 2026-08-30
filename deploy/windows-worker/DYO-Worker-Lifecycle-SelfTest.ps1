@@ -60,7 +60,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $TaskName = "DYO Video Worker"
-$WorkerEntrypointPattern = 'dist\\index\.js'
+# Same pattern, same reasoning, as DYO-Worker-Final-Update.ps1's own
+# $WorkerEntrypointPattern - see its doc comment for the real 2026-08-30
+# process-detection false-negative this tolerance guards against.
+$WorkerEntrypointPattern = 'dist[\\/]index\.js'
 $WorkerEnvArgPattern = '--env-file=\.env'
 $logPath = Join-Path $InstallDir "logs\worker.log"
 $credentialsPath = Join-Path $WorkRoot "state\worker-credentials.json"
