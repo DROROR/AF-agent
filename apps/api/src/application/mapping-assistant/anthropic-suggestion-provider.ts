@@ -15,7 +15,14 @@ export const PROPOSAL_INPUT_SCHEMA = {
         type: "object",
         properties: {
           scenePlanId: { type: "string", minLength: 1 },
-          mappingId: { type: ["string", "null"] },
+          // Guidance only, never enforcement (Anthropic strict mode has no
+          // string-length keyword this codebase has proven it accepts,
+          // other than the pre-existing minLength above on scenePlanId) -
+          // the domain layer (aiSuggestionProposalSchema in @dyo/schemas)
+          // is what actually rejects an empty string; this description
+          // only steers the model away from producing one in the first
+          // place.
+          mappingId: { type: ["string", "null"], description: "Use null when there is no mapping id. Never an empty string." },
           // Anthropic's strict tool-schema validator (this tool is
           // registered with strict: true) rejects the ordinary JSON-Schema
           // "type: [X, 'null']" + "enum" combination for a nullable enum -
@@ -33,10 +40,16 @@ export const PROPOSAL_INPUT_SCHEMA = {
               { type: "null" }
             ]
           },
-          suggestedAssetId: { type: ["string", "null"] },
+          suggestedAssetId: { type: ["string", "null"], description: "Use null when no asset applies. Never an empty string." },
           suggestedText: { type: ["string", "null"] },
-          suggestedAssetTimestamp: { type: ["number", "null"] },
-          suggestedFinalDuration: { type: ["number", "null"] },
+          suggestedAssetTimestamp: {
+            type: ["number", "null"],
+            description: "Non-negative timestamp in seconds when provided; otherwise null."
+          },
+          suggestedFinalDuration: {
+            type: ["number", "null"],
+            description: "Positive number of seconds when provided; otherwise null."
+          },
           // Anthropic's strict tool-schema validator also rejects
           // `minimum`/`maximum` on a `number` type ("For 'number' type,
           // properties maximum, minimum are not supported") - found via
@@ -46,9 +59,11 @@ export const PROPOSAL_INPUT_SCHEMA = {
           // @dyo/schemas), which every provider's output already goes
           // through before anything is persisted - dropping this hint
           // only removes generation-time guidance to the model, never
-          // the actual accepted-value validation.
-          confidence: { type: "number" },
-          reasoning: { type: ["string", "null"] },
+          // the actual accepted-value validation. `description` is
+          // guidance only, same caveat as every other description added
+          // alongside it in this schema.
+          confidence: { type: "number", description: "Number from 0 through 1." },
+          reasoning: { type: ["string", "null"], description: "Use null if no rationale is given. Never an empty string." },
           evidenceRefs: {
             type: "array",
             minItems: 1,
@@ -138,11 +153,13 @@ export class AnthropicProviderError extends Error {
  * "Claude wrote JSON in a text block and we hoped it parses" path.
  *
  * `suggest()` returns the tool input as `unknown`, unvalidated by this
- * class itself - generate-mapping-suggestions.ts re-validates it against
- * the SAME aiSuggestionProposalBatchSchema (@dyo/schemas) every other
- * provider's output goes through (this class's own doc comment on
- * AiSuggestionProvider: "never trust a TS type alone across a real
- * process/network boundary"). A malformed or refused response throws
+ * class itself - generate-mapping-suggestions.ts re-validates each
+ * individual proposal against the SAME aiSuggestionProposalSchema
+ * (@dyo/schemas) every other provider's output goes through (this
+ * class's own doc comment on AiSuggestionProvider: "never trust a TS
+ * type alone across a real process/network boundary") - one malformed
+ * proposal is rejected on its own, never discarding its siblings. A
+ * refused response (or one with no tool_use block at all) throws
  * AnthropicProviderError - a real, honest failure, never a fabricated
  * empty success.
  */

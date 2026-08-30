@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { aiSuggestionProposalBatchSchema, type ListMappingSuggestionsResponse } from "@dyo/schemas";
-import { ExecutionPlanNotFoundError, ProjectNotFoundError } from "../../errors/app-error.js";
+import { aiSuggestionProposalSchema, type ListMappingSuggestionsResponse } from "@dyo/schemas";
+import { ExecutionPlanNotFoundError, NoUsableMappingSuggestionsError, ProjectNotFoundError } from "../../errors/app-error.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -14,6 +14,17 @@ import { matchDeterministic } from "../../domain/mapping-suggestion/deterministi
 import { SuggestionsNotConfiguredError, type AiSuggestionProvider } from "./ai-suggestion-provider.js";
 import { toMappingSuggestionDto } from "./mapping-suggestion-dto-mapper.js";
 
+/**
+ * Structural, pino/Fastify-compatible logging seam - deliberately not a
+ * hard dependency on Fastify's own logger type, since application-layer
+ * code in this codebase never otherwise depends on the web framework.
+ * Optional: when omitted, the funnel simply logs nothing (see
+ * routes/mapping-assistant.ts, which passes request.log here).
+ */
+export interface MappingSuggestionsFunnelLogger {
+  info(payload: Record<string, unknown>, message: string): void;
+}
+
 export interface GenerateMappingSuggestionsDeps {
   projectRepository: ProjectRepository;
   executionPlanRepository: ExecutionPlanRepository;
@@ -23,10 +34,20 @@ export interface GenerateMappingSuggestionsDeps {
   sceneEvidenceRepository: SceneEvidenceRepository;
   aiSuggestionProvider: AiSuggestionProvider;
   now: () => Date;
+  log?: MappingSuggestionsFunnelLogger;
 }
 
 function targetKey(bundle: MappingEvidenceBundle): string {
   return `${bundle.scenePlanId}::${bundle.mappingId ?? ""}`;
+}
+
+/** Never trusts the provider's own response shape - a non-array/non-object `proposals` degrades to an empty list here rather than throwing, so a malformed outer shape is just zero raw proposals to iterate, not a crash. */
+function extractRawProposals(raw: unknown): unknown[] {
+  const normalized = Array.isArray(raw) ? { proposals: raw } : raw;
+  if (typeof normalized === "object" && normalized !== null && "proposals" in normalized && Array.isArray((normalized as { proposals: unknown }).proposals)) {
+    return (normalized as { proposals: unknown[] }).proposals;
+  }
+  return [];
 }
 
 /**
@@ -40,6 +61,19 @@ function targetKey(bundle: MappingEvidenceBundle): string {
  * did not run this time - never surfaced as a request failure. A genuine
  * (not "not configured") provider error is NOT swallowed - it is a real
  * bug and propagates normally.
+ *
+ * Real production bug, 2026-08-30: a real Anthropic call could return a
+ * large batch of proposals where every single one failed a single
+ * whole-array Zod parse (aiSuggestionProposalSchema is .strict(), and
+ * z.array() fails the entire array on one bad item), silently discarding
+ * ALL of them - including otherwise-valid ones - with zero logging, while
+ * the route still returned 200. Each raw proposal is now validated
+ * (aiSuggestionProposalSchema.safeParse) and reference-checked (does it
+ * name a target this call actually asked about) INDIVIDUALLY: one bad
+ * proposal is rejected and counted, never taking down its siblings. A
+ * real batch that produced at least one raw proposal but ended with
+ * nothing usable now throws NoUsableMappingSuggestionsError (422) instead
+ * of silently returning an empty, 200 "success".
  */
 export async function generateMappingSuggestions(
   deps: GenerateMappingSuggestionsDeps,
@@ -80,10 +114,12 @@ export async function generateMappingSuggestions(
   const now = deps.now();
   const persisted: NewMappingSuggestion[] = [];
   const unresolvedBundles: MappingEvidenceBundle[] = [];
+  let deterministicProposalCount = 0;
 
   for (const bundle of bundles) {
     const match = matchDeterministic(bundle);
     if (match) {
+      deterministicProposalCount += 1;
       persisted.push({
         id: randomUUID(),
         projectId,
@@ -98,8 +134,17 @@ export async function generateMappingSuggestions(
   }
 
   const aiAvailable = deps.aiSuggestionProvider.isConfigured();
+  let providerDurationMs = 0;
+  let rawProposalCount = 0;
+  let domainValidProposalCount = 0;
+  let domainRejectedProposalCount = 0;
+  let referenceValidProposalCount = 0;
+  let referenceRejectedProposalCount = 0;
+  const rejectedIssues: Array<{ index: number; path: string; code: string }> = [];
+
   if (aiAvailable && unresolvedBundles.length > 0) {
     let raw: unknown;
+    const providerStart = Date.now();
     try {
       raw = await deps.aiSuggestionProvider.suggest(unresolvedBundles);
     } catch (error) {
@@ -109,39 +154,90 @@ export async function generateMappingSuggestions(
       } else {
         throw error;
       }
+    } finally {
+      providerDurationMs = Date.now() - providerStart;
     }
-    const parsed = aiSuggestionProposalBatchSchema.safeParse(Array.isArray(raw) ? { proposals: raw } : raw);
-    // A provider response that fails strict schema validation produces nothing usable this round - never partially trusted, never persisted (section 14: "malformed response rejected").
-    if (parsed.success) {
-      const byKey = new Map(unresolvedBundles.map((bundle) => [targetKey(bundle), bundle]));
-      for (const proposal of parsed.data.proposals) {
-        const bundle = byKey.get(`${proposal.scenePlanId}::${proposal.mappingId ?? ""}`);
-        if (!bundle) {
-          // The provider proposed a target this call never asked about - never trusted, silently skipped rather than persisted against an unrelated scene/mapping.
-          continue;
+
+    const rawProposals = extractRawProposals(raw);
+    rawProposalCount = rawProposals.length;
+    const byKey = new Map(unresolvedBundles.map((bundle) => [targetKey(bundle), bundle]));
+
+    rawProposals.forEach((rawProposal, index) => {
+      // Every raw proposal is validated INDIVIDUALLY - a single malformed
+      // item (out-of-range confidence, a zero/negative duration, an empty
+      // required id, ...) is rejected and counted, never discarding the
+      // rest of a real batch alongside it. Never coerced/repaired - a
+      // rejected proposal is simply not persisted, exactly as the model
+      // produced it or not at all.
+      const parsedProposal = aiSuggestionProposalSchema.safeParse(rawProposal);
+      if (!parsedProposal.success) {
+        domainRejectedProposalCount += 1;
+        for (const issue of parsedProposal.error.issues) {
+          rejectedIssues.push({ index, path: issue.path.join("."), code: issue.code });
         }
-        const assetIsReal = proposal.suggestedAssetId === null || assets.some((asset) => asset.id === proposal.suggestedAssetId);
-        persisted.push({
-          id: randomUUID(),
-          projectId,
-          scenePlanId: proposal.scenePlanId,
-          mappingId: proposal.mappingId,
-          source: "AI",
-          suggestedClassification: proposal.suggestedClassification,
-          // Never a fabricated/arbitrary/cross-project id - re-validated against this exact project's real Asset Catalog before ever being persisted (section 10).
-          suggestedAssetId: assetIsReal ? proposal.suggestedAssetId : null,
-          suggestedText: proposal.suggestedText,
-          suggestedAssetTimestamp: proposal.suggestedAssetTimestamp,
-          suggestedFinalDuration: proposal.suggestedFinalDuration,
-          confidence: proposal.confidence,
-          reasoning: proposal.reasoning,
-          evidenceRefs: proposal.evidenceRefs,
-          unresolvedReason: assetIsReal ? null : "The AI provider proposed an asset id that is not in this project's Asset Catalog - discarded",
-          requiresHumanReview: true,
-          conflictsWithWorkMap: bundle.workMapEntry !== null
-        });
+        return;
       }
-    }
+      domainValidProposalCount += 1;
+
+      const proposal = parsedProposal.data;
+      const bundle = byKey.get(`${proposal.scenePlanId}::${proposal.mappingId ?? ""}`);
+      if (!bundle) {
+        // The provider proposed a target this call never asked about - never trusted, silently skipped rather than persisted against an unrelated scene/mapping.
+        referenceRejectedProposalCount += 1;
+        return;
+      }
+      referenceValidProposalCount += 1;
+
+      const assetIsReal = proposal.suggestedAssetId === null || assets.some((asset) => asset.id === proposal.suggestedAssetId);
+      persisted.push({
+        id: randomUUID(),
+        projectId,
+        scenePlanId: proposal.scenePlanId,
+        mappingId: proposal.mappingId,
+        source: "AI",
+        suggestedClassification: proposal.suggestedClassification,
+        // Never a fabricated/arbitrary/cross-project id - re-validated against this exact project's real Asset Catalog before ever being persisted (section 10).
+        suggestedAssetId: assetIsReal ? proposal.suggestedAssetId : null,
+        suggestedText: proposal.suggestedText,
+        suggestedAssetTimestamp: proposal.suggestedAssetTimestamp,
+        suggestedFinalDuration: proposal.suggestedFinalDuration,
+        confidence: proposal.confidence,
+        reasoning: proposal.reasoning,
+        evidenceRefs: proposal.evidenceRefs,
+        unresolvedReason: assetIsReal ? null : "The AI provider proposed an asset id that is not in this project's Asset Catalog - discarded",
+        requiresHumanReview: true,
+        conflictsWithWorkMap: bundle.workMapEntry !== null
+      });
+    });
+  }
+
+  deps.log?.info(
+    {
+      projectId,
+      eligibleTargetCount: unresolvedBundles.length,
+      deterministicProposalCount,
+      providerDurationMs,
+      rawProposalCount,
+      domainValidProposalCount,
+      domainRejectedProposalCount,
+      referenceValidProposalCount,
+      referenceRejectedProposalCount,
+      finalPersistableCount: referenceValidProposalCount,
+      persistedCount: persisted.length,
+      // Capped defensively - never unbounded, even though a real batch is
+      // itself bounded (currently one call per generate request). Never
+      // the invalid raw value itself - path/code only.
+      rejectedIssues: rejectedIssues.slice(0, 50)
+    },
+    "mapping-suggestions generate: AI proposal funnel"
+  );
+
+  // Only a real batch that produced at least one raw proposal but ended
+  // with nothing usable counts as this failure - a provider that validly
+  // returns zero proposals (it genuinely had nothing to suggest) is a
+  // different, legitimate outcome and must not be treated as an error.
+  if (rawProposalCount > 0 && referenceValidProposalCount === 0) {
+    throw new NoUsableMappingSuggestionsError();
   }
 
   await Promise.all(persisted.map((row) => deps.mappingSuggestionRepository.upsertPending(row, now)));

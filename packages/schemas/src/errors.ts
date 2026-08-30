@@ -33,6 +33,8 @@ export const ERROR_CODES = [
   "WORKER_BUSY",
   /** A BYOK "Test Connection" / "Save & Connect" call to the named AI provider failed - bad key, unknown model, or the provider itself is unreachable. Never persisted. */
   "AI_PROVIDER_CONNECTION_FAILED",
+  /** A real AI mapping-suggestion attempt ran (a real provider call was made and returned real proposals) but every proposal was rejected by domain/reference validation, leaving nothing usable - never silently reported as an empty-but-successful generation (see generate-mapping-suggestions.ts). */
+  "NO_USABLE_SUGGESTIONS",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

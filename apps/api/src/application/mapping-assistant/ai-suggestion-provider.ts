@@ -11,9 +11,11 @@ import type { MappingEvidenceBundle } from "../../domain/mapping-evidence/types.
  * application code - section 5: "Provider input must be strict structured
  * data"); any real implementation is responsible for its own safe prompt
  * construction internally, entirely behind this interface, and must
- * return output that validates against aiSuggestionProposalBatchSchema
- * (@dyo/schemas) - a response that fails that validation is treated as a
- * failure, never partially trusted. A suggestion returned here can only
+ * return output whose individual proposals each validate against
+ * aiSuggestionProposalSchema (@dyo/schemas) - a proposal that fails that
+ * validation is rejected on its own, never partially trusted, and never
+ * takes down the rest of a real batch alongside it. A suggestion returned
+ * here can only
  * ever become a real mapping via the same typed MAP_ASSET/SET_TEXT/...
  * execution-plan edit operations a human uses, after an explicit human
  * Accept (see accept-mapping-suggestion.ts) - never a separate,
@@ -21,9 +23,10 @@ import type { MappingEvidenceBundle } from "../../domain/mapping-evidence/types.
  * shell, generate JSX, or select an asset from another project.
  *
  * Returns `unknown`, not a typed array - the caller (generate-mapping-
- * suggestions.ts) runtime-validates whatever comes back against
- * aiSuggestionProposalBatchSchema before trusting a single field of it.
- * A provider's own compile-time return type is never sufficient proof by
+ * suggestions.ts) runtime-validates each individual proposal against
+ * aiSuggestionProposalSchema before trusting a single field of it, so one
+ * malformed proposal never discards the rest of a real batch. A
+ * provider's own compile-time return type is never sufficient proof by
  * itself that a real implementation actually returned well-formed data
  * (same "never trust a TS type alone across a real process/network
  * boundary" rule this codebase already applies to job/worker results).

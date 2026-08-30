@@ -69,7 +69,8 @@ export function registerMappingAssistantRoutes(app: FastifyInstance, deps: Mappi
         mappingSuggestionRepository: deps.mappingSuggestionRepository,
         sceneEvidenceRepository: deps.sceneEvidenceRepository,
         aiSuggestionProvider,
-        now
+        now,
+        log: request.log
       },
       projectId
     );

@@ -69,13 +69,22 @@ describe("AnthropicSuggestionProvider - PROPOSAL_INPUT_SCHEMA (Anthropic strict-
     expect(stringBranch.enum).toEqual([...CLASSIFICATION_VALUES]);
   });
 
-  it("every other nullable field's plain type-array pattern is untouched - only suggestedClassification's invalid enum combination was fixed", () => {
-    expect(itemProps.mappingId).toEqual({ type: ["string", "null"] });
-    expect(itemProps.suggestedAssetId).toEqual({ type: ["string", "null"] });
+  it("every other nullable field's plain type-array pattern is untouched (description-only guidance added separately) - only suggestedClassification's invalid enum combination was fixed", () => {
+    expect(itemProps.mappingId).toMatchObject({ type: ["string", "null"] });
+    expect(itemProps.suggestedAssetId).toMatchObject({ type: ["string", "null"] });
     expect(itemProps.suggestedText).toEqual({ type: ["string", "null"] });
-    expect(itemProps.suggestedAssetTimestamp).toEqual({ type: ["number", "null"] });
-    expect(itemProps.suggestedFinalDuration).toEqual({ type: ["number", "null"] });
-    expect(itemProps.reasoning).toEqual({ type: ["string", "null"] });
+    expect(itemProps.suggestedAssetTimestamp).toMatchObject({ type: ["number", "null"] });
+    expect(itemProps.suggestedFinalDuration).toMatchObject({ type: ["number", "null"] });
+    expect(itemProps.reasoning).toMatchObject({ type: ["string", "null"] });
+  });
+
+  it("carries guidance-only `description` text (never an enforced constraint) steering the model away from the exact values that caused real domain-validation rejections - empty strings and out-of-range numbers", () => {
+    expect(itemProps.mappingId.description).toMatch(/never an empty string/i);
+    expect(itemProps.suggestedAssetId.description).toMatch(/never an empty string/i);
+    expect(itemProps.reasoning.description).toMatch(/never an empty string/i);
+    expect(itemProps.confidence.description).toMatch(/0 through 1/i);
+    expect(itemProps.suggestedFinalDuration.description).toMatch(/positive/i);
+    expect(itemProps.suggestedAssetTimestamp.description).toMatch(/non-negative/i);
   });
 
   it("no field anywhere in the tool schema combines an array `type` with `enum` - the exact invalid pattern that broke production", () => {
@@ -94,7 +103,9 @@ describe("AnthropicSuggestionProvider - PROPOSAL_INPUT_SCHEMA (Anthropic strict-
   });
 
   it("confidence no longer declares minimum/maximum - Anthropic's strict validator rejects those on a number type too", () => {
-    expect(itemProps.confidence).toEqual({ type: "number" });
+    expect(itemProps.confidence).not.toHaveProperty("minimum");
+    expect(itemProps.confidence).not.toHaveProperty("maximum");
+    expect(itemProps.confidence.type).toBe("number");
   });
 
   it("no `number`-typed field anywhere in the tool schema declares minimum/maximum - the second invalid pattern this fix found and removed", () => {

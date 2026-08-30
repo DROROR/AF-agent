@@ -29,6 +29,8 @@ function statusForCode(code: ErrorCode): number {
       return 415;
     case "RATE_LIMITED":
       return 429;
+    case "NO_USABLE_SUGGESTIONS":
+      return 422;
     case "INTERNAL_ERROR":
       return 500;
   }
@@ -303,5 +305,25 @@ export class AiProviderUnavailableError extends AppError {
   constructor(reason: string) {
     super("INTERNAL_ERROR", `AI provider is unavailable: ${reason}. Try reconnecting it in Settings.`);
     this.name = "AiProviderUnavailableError";
+  }
+}
+
+/**
+ * Real production bug, 2026-08-30: a real Anthropic call completed and
+ * returned real proposals, but every one of them was rejected by domain/
+ * reference validation (out-of-range confidence, an empty required id,
+ * a reference to a target never asked about, ...), leaving nothing to
+ * persist - generateMappingSuggestions used to silently return an empty
+ * suggestions list with a 200 in this case, indistinguishable from "AI
+ * genuinely had nothing to suggest." Thrown ONLY when the AI actually
+ * returned at least one raw proposal and none survived - never when the
+ * AI validly returns zero proposals (a legitimate, different outcome),
+ * and never when AI simply isn't configured (aiAvailable: false already
+ * covers that honestly).
+ */
+export class NoUsableMappingSuggestionsError extends AppError {
+  constructor() {
+    super("NO_USABLE_SUGGESTIONS", "AI returned no usable mapping suggestions. Please review the project inputs or try again.");
+    this.name = "NoUsableMappingSuggestionsError";
   }
 }
