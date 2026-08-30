@@ -10,6 +10,21 @@ import { templateManifestSchema } from "./template-manifest.js";
  * See docs/TEMPLATE-INSPECTOR.md.
  */
 
+/**
+ * Case-insensitive .aep suffix check - the one shared rule every layer
+ * (this request schema, the worker's own filesystem check in
+ * hash-source-project.ts, and the New Project wizard's own client-side
+ * "Inspect" gate) validates a candidate source project path against, so
+ * the three checks can never quietly drift out of sync with each other.
+ * Deliberately extension-only: a real file/directory check requires
+ * filesystem access, which only the worker has - see CLAUDE.md Safety
+ * Rule 8 and hash-source-project.ts's own stat()+isFile() check, which
+ * this does NOT replace.
+ */
+export function hasAepExtension(path: string): boolean {
+  return /\.aep$/i.test(path.trim());
+}
+
 export const inspectTemplateRequestSchema = z.object({
   templateId: z.string().min(1),
   /**
@@ -17,8 +32,15 @@ export const inspectTemplateRequestSchema = z.object({
    * Safety Rule 1 ("never overwrite the original .aep template") and the
    * Phase 5 first-real-test plan ("use a project copy for the first real
    * inspection, even though the inspector is intended to be read-only").
+   * Must end in .aep (case-insensitive) - a bare directory or a
+   * non-.aep file is rejected here rather than only discovered later by
+   * the worker's own filesystem check (real client bug, 2026-08-30: a
+   * directory-only path was accepted and silently produced a fallback
+   * "raw_capture" result instead of being rejected up front).
    */
-  sourceProjectPath: z.string().min(1)
+  sourceProjectPath: z.string().min(1, "Source project path is required").refine(hasAepExtension, {
+    message: "Source project path must be a file path ending in .aep"
+  })
 });
 export type InspectTemplateRequest = z.infer<typeof inspectTemplateRequestSchema>;
 
@@ -40,3 +62,70 @@ export const inspectTemplateResponseSchema = z.object({
   summary: inspectionSummarySchema
 });
 export type InspectTemplateResponse = z.infer<typeof inspectTemplateResponseSchema>;
+
+/**
+ * One real, allowlisted MCP tool call captured verbatim during inspection -
+ * mirrors apps/worker/src/inspection/template-inspector.ts's own
+ * RawToolCallCapture. `content` is intentionally `z.unknown()`: it is
+ * upstream's raw MCP response content, never assumed to contain any
+ * particular field by a consumer outside the worker itself.
+ */
+export const inspectionToolCallCaptureSchema = z.object({
+  tool: z.string(),
+  calledAt: z.string(),
+  ok: z.boolean(),
+  content: z.unknown().optional(),
+  truncated: z.boolean().optional(),
+  originalContentLength: z.number().optional(),
+  error: z.object({ code: z.string(), message: z.string() }).optional()
+});
+export type InspectionToolCallCapture = z.infer<typeof inspectionToolCallCaptureSchema>;
+
+/**
+ * Fallback INSPECT_TEMPLATE result for when a real TemplateManifest could
+ * not honestly be built - mirrors template-inspector.ts's own
+ * RawInspectionCapture. A job whose persisted `result` has this shape must
+ * NEVER be treated as a successful template inspection by any consumer
+ * (worker-side job-dispatcher.ts, or a dashboard client parsing a
+ * SUCCEEDED... in practice a FAILED job's `result`) - see
+ * inspectTemplateResultSchema below, the shared contract both sides parse
+ * against.
+ */
+export const rawInspectionCaptureSchema = z.object({
+  kind: z.literal("raw_capture"),
+  /** Stamped by job-dispatcher.ts, which owns job identity. */
+  workerId: z.string().optional(),
+  jobId: z.string().optional(),
+  capturedAt: z.string(),
+  toolCalls: z.array(inspectionToolCallCaptureSchema),
+  note: z.string()
+});
+export type RawInspectionCapture = z.infer<typeof rawInspectionCaptureSchema>;
+
+/**
+ * A finalized, schema-validated TemplateManifest result - mirrors
+ * template-inspector.ts's own ManifestInspectionResult. `response` is the
+ * exact same shape inspectTemplateResponseSchema validates.
+ */
+export const manifestInspectionResultSchema = z.object({
+  kind: z.literal("manifest"),
+  response: inspectTemplateResponseSchema,
+  diagnostics: z.array(inspectionToolCallCaptureSchema)
+});
+export type ManifestInspectionResult = z.infer<typeof manifestInspectionResultSchema>;
+
+/**
+ * The REAL persisted shape of a completed INSPECT_TEMPLATE job's `result`
+ * column - a discriminated union on `kind`, never the bare
+ * InspectTemplateResponse shape alone. Any consumer that reads
+ * job.result for INSPECT_TEMPLATE (the dashboard's New Project wizard
+ * included) must parse against THIS schema first and branch on `.kind` -
+ * parsing job.result directly against inspectTemplateResponseSchema will
+ * always fail, because `manifest`/`summary` live one level deeper, under
+ * `.response`, only when `kind === "manifest"`.
+ */
+export const inspectTemplateResultSchema = z.discriminatedUnion("kind", [
+  manifestInspectionResultSchema,
+  rawInspectionCaptureSchema
+]);
+export type InspectTemplateResult = z.infer<typeof inspectTemplateResultSchema>;

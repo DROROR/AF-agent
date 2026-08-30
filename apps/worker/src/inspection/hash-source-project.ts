@@ -12,7 +12,7 @@ export interface SourceProjectHash {
 export type HashSourceProjectResult = { ok: true; value: SourceProjectHash } | { ok: false; reason: string };
 
 /**
- * Hashes the real .aep file at `path` on the worker's own filesystem -
+ * Hashes the real file at `path` on the worker's own filesystem -
  * CLAUDE.md Safety Rule 8 ("hash source .aep files before processing and
  * verify originals remain unchanged"). Deliberately independent of
  * whatever ae-mcp's ae_get_project_info reports for the currently open AE
@@ -21,6 +21,13 @@ export type HashSourceProjectResult = { ok: true; value: SourceProjectHash } | {
  * one place a real, human-supplied file path (INSPECT_TEMPLATE's own
  * sourceProjectPath request field) gets verified to actually exist on
  * disk and hashed, never assumed or substituted with AE's self-report.
+ *
+ * Deliberately generic (never checks for a .aep extension itself): asset-
+ * cache.ts also reuses this exact function to hash downloaded MAP_FOOTAGE
+ * assets (images/video, never .aep) - see its own two call sites. A
+ * caller that specifically needs the source .aep to end in .aep (only
+ * heroic-swan-template-inspector.ts does) checks that itself, via
+ * @dyo/schemas' hasAepExtension, before ever calling this.
  */
 export async function hashSourceProject(path: string): Promise<HashSourceProjectResult> {
   try {

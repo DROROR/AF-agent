@@ -121,6 +121,51 @@ describe("NewProjectWizard", () => {
     expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("rejects a directory-only source path with no .aep filename - never enables Inspect Template (real production bug, 2026-08-30: C:\\DYO-Agent\\copy)", async () => {
+    stubFetchByUrl({ "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } } });
+    renderWizard();
+    await goToTemplateStep();
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
+    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+
+    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+      target: { value: "C:\\DYO-Agent\\copy" }
+    });
+
+    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("rejects a real file path whose extension is not .aep - never enables Inspect Template", async () => {
+    stubFetchByUrl({ "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } } });
+    renderWizard();
+    await goToTemplateStep();
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
+    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+
+    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+      target: { value: "C:\\DYO-Agent\\copy\\notes.txt" }
+    });
+
+    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("enables Inspect Template for a real, full .aep file path (case-insensitive extension)", async () => {
+    stubFetchByUrl({ "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } } });
+    renderWizard();
+    await goToTemplateStep();
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
+    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+
+    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+      target: { value: "C:\\DYO-Agent\\copy\\White App Promo.AEP" }
+    });
+
+    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+  });
+
   it("dispatches a real job, shows running progress, then the real completed result with source SHA - and lets the operator promote it into a real project", async () => {
     // Two real poll ticks (POLL_INTERVAL_MS=2000 in the component) happen
     // sequentially in this one test - real timers, not faked - so the
@@ -159,7 +204,10 @@ describe("NewProjectWizard", () => {
               operation: "INSPECT_TEMPLATE",
               status: "SUCCEEDED",
               payload: {},
-              result: { manifest: manifest(), summary: inspectionSummary() },
+              // The REAL persisted shape (job 7e6db3a6-9918-46ff-9b54-00731bb9ee0f) -
+              // a kind:"manifest" envelope wrapping {manifest, summary} under
+              // .response, never the bare {manifest, summary} shape alone.
+              result: { kind: "manifest", response: { manifest: manifest(), summary: inspectionSummary() }, diagnostics: [] },
               error: null,
               checkpoint: null,
               createdAt: new Date().toISOString(),
@@ -220,6 +268,59 @@ describe("NewProjectWizard", () => {
       expect(sentBody.manifest.sourceProject.sha256).toBe("a".repeat(64));
     });
   }, 15000);
+
+  it("never shows an inspection result or enables Create Project for a SUCCEEDED job whose persisted result is kind:'raw_capture', even defensively (job-dispatcher.ts now always reports raw_capture as FAILED, but the wizard must not trust an unexpected SUCCEEDED+raw_capture combination from a legacy job/older worker build either)", async () => {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } },
+      "/api/jobs/11111111-1111-1111-1111-111111111111": {
+        status: 200,
+        body: {
+          job: {
+            jobId: "11111111-1111-1111-1111-111111111111",
+            workerId: "44444444-4444-4444-4444-444444444444",
+            projectId: null,
+            operation: "INSPECT_TEMPLATE",
+            status: "SUCCEEDED",
+            payload: {},
+            result: { kind: "raw_capture", capturedAt: new Date().toISOString(), toolCalls: [], note: "could not build a manifest" },
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      },
+      "/api/jobs": {
+        status: 201,
+        body: {
+          jobId: "11111111-1111-1111-1111-111111111111",
+          workerId: "44444444-4444-4444-4444-444444444444",
+          operation: "INSPECT_TEMPLATE",
+          status: "QUEUED",
+          createdAt: new Date().toISOString()
+        }
+      }
+    });
+
+    renderWizard();
+    await goToTemplateStep();
+    await selectWorkerAndFillTemplateFields();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+
+    // Wait for the initial QUEUED render, then for the (real-timer) poll to
+    // land the terminal SUCCEEDED+raw_capture job and the queued message to
+    // disappear - only then is it meaningful to assert nothing further shows.
+    await waitFor(() => expect(screen.getByText("Queued on the Worker - waiting for it to pick this up.")).not.toBeNull());
+    await waitFor(() => expect(screen.queryByText("Queued on the Worker - waiting for it to pick this up.")).toBeNull(), {
+      timeout: 5000
+    });
+
+    expect(screen.queryByText("Inspection result")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create Project" })).toBeNull();
+  }, 10000);
 
   it("shows the real failure reason and offers to retry - never a generic dead end", async () => {
     stubFetchByUrl({

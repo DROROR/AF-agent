@@ -164,7 +164,8 @@ export const en = {
       templateIdPlaceholder: "e.g. white-app-promo-v1",
       sourceProjectPathLabel: "Source project path (on the Worker machine)",
       sourceProjectPathPlaceholder: "e.g. C:\\DYO-Agent\\copies\\template.aep",
-      sourceProjectPathHint: "Must point to a COPY of the .aep, never the original file - the Worker never overwrites the original.",
+      sourceProjectPathHint:
+        "Must be the full file path to a COPY of the .aep, never the original file or a folder - the path must end in .aep.",
       inspectAction: "Inspect Template",
       inspecting: "Dispatching…",
       statusQueued: "Queued on the Worker - waiting for it to pick this up.",

@@ -1,4 +1,4 @@
-import { templateManifestSchema, type InspectTemplateRequest, type TemplateManifest } from "@dyo/schemas";
+import { hasAepExtension, templateManifestSchema, type InspectTemplateRequest, type TemplateManifest } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type AllowedInspectionTool } from "./heroic-swan-mcp-client.js";
 import type {
   InspectTemplateResult,
@@ -139,6 +139,22 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         return rawCaptureFor(
           discovery,
           `${reason} - ae_get_composition was not attempted and no manifest was built; falling back to a raw capture.`
+        );
+      }
+
+      // The API's inspectTemplateRequestSchema already rejects a non-.aep
+      // sourceProjectPath before a job is ever created, so a request
+      // reaching here should always already end in .aep - this re-checks
+      // it anyway (defense in depth across the API/worker boundary, the
+      // same convention validateJobPayload's own re-validation already
+      // follows) rather than trusting that boundary alone. Deliberately
+      // NOT inside hashSourceProject itself: that function is generic and
+      // also reused by asset-cache.ts to hash non-.aep MAP_FOOTAGE assets.
+      if (!hasAepExtension(request.sourceProjectPath)) {
+        return rawCaptureFor(
+          discovery,
+          `sourceProjectPath (${request.sourceProjectPath}) does not end in .aep - ` +
+            "no manifest was attempted."
         );
       }
 

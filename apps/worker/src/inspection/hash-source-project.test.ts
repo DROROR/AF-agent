@@ -39,12 +39,25 @@ describe("hashSourceProject", () => {
     }
   });
 
-  it("fails when the path is a directory, not a regular file", async () => {
-    const result = await hashSourceProject(dir);
+  it("fails when the path is a directory, not a regular file (real client bug, 2026-08-30: a folder path with no filename) - regardless of what the directory happens to be named", async () => {
+    const dirNamedAep = join(dir, "looks-like-a-project.aep");
+    await mkdir(dirNamedAep);
+
+    const result = await hashSourceProject(dirNamedAep);
+
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toMatch(/not a regular file/);
     }
+  });
+
+  it("hashes a real file regardless of extension - this function is also reused by asset-cache.ts to hash non-.aep MAP_FOOTAGE assets, so it must never reject on extension alone (a .aep-specific check, if a caller needs one, is that caller's own responsibility - see heroic-swan-template-inspector.ts)", async () => {
+    const filePath = join(dir, "footage.mp4");
+    await writeFile(filePath, "not really video bytes, just needs to exist");
+
+    const result = await hashSourceProject(filePath);
+
+    expect(result.ok).toBe(true);
   });
 
   it("produces a different hash for different content at the same file name", async () => {

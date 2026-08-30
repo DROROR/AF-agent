@@ -125,32 +125,48 @@ describe("executeJob - INSPECT_TEMPLATE", () => {
     expect(inspect).not.toHaveBeenCalled();
   });
 
-  it("succeeds and returns the inspector's response when a real inspector is wired in", async () => {
-    const fakeResponse = { manifest: { schemaVersion: "1.0" }, summary: {} };
+  it("succeeds and returns the inspector's response when a real inspector produces a manifest-kind result", async () => {
+    const fakeResponse = { kind: "manifest" as const, response: { manifest: { schemaVersion: "1.0" }, summary: {} } };
     const inspect = vi.fn().mockResolvedValue(fakeResponse);
     const result = await executeJob(healthyDeps({ templateInspector: { inspect } }), baseJob());
     expect(result.status).toBe("SUCCEEDED");
     expect(result.result).toBe(fakeResponse);
   });
 
-  it("stamps workerId/jobId onto a raw_capture result before reporting it - the inspector itself is never handed job identity", async () => {
+  it("never stamps identity onto a manifest-kind result (only raw_capture results carry job/worker IDs)", async () => {
+    const manifestResult = { kind: "manifest" as const, response: { manifest: {}, summary: {} } };
+    const inspect = vi.fn().mockResolvedValue(manifestResult);
+    const result = await executeJob(healthyDeps({ templateInspector: { inspect } }), baseJob());
+    expect(result.status).toBe("SUCCEEDED");
+    expect(result.result).toBe(manifestResult);
+  });
+
+  it("FAILS with MANIFEST_NOT_BUILT (never SUCCEEDED) when the inspector returns a raw_capture - a real TemplateManifest could not be built (real production bug, 2026-08-30: a directory-only sourceProjectPath produced a raw_capture that was reported SUCCEEDED)", async () => {
     const rawCapture = { kind: "raw_capture" as const, capturedAt: "2026-08-25T00:00:00.000Z", toolCalls: [], note: "test" };
     const inspect = vi.fn().mockResolvedValue(rawCapture);
     const job = baseJob({ workerId: "33333333-3333-3333-3333-333333333333", jobId: "44444444-4444-4444-4444-444444444444" });
+
     const result = await executeJob(healthyDeps({ templateInspector: { inspect } }), job);
-    expect(result.status).toBe("SUCCEEDED");
+
+    expect(result.status).toBe("FAILED");
+    expect(result.error).toEqual({
+      code: "MANIFEST_NOT_BUILT",
+      message: "Template inspection could not produce a valid manifest."
+    });
+  });
+
+  it("still stamps workerId/jobId onto the raw_capture result even though it is now reported FAILED - diagnostics are preserved, never discarded, for troubleshooting", async () => {
+    const rawCapture = { kind: "raw_capture" as const, capturedAt: "2026-08-25T00:00:00.000Z", toolCalls: [{ tool: "ae_health", calledAt: "x", ok: true }], note: "test" };
+    const inspect = vi.fn().mockResolvedValue(rawCapture);
+    const job = baseJob({ workerId: "33333333-3333-3333-3333-333333333333", jobId: "44444444-4444-4444-4444-444444444444" });
+
+    const result = await executeJob(healthyDeps({ templateInspector: { inspect } }), job);
+
     expect(result.result).toEqual({
       ...rawCapture,
       workerId: "33333333-3333-3333-3333-333333333333",
       jobId: "44444444-4444-4444-4444-444444444444"
     });
-  });
-
-  it("never stamps identity onto a manifest-kind result (only raw_capture results carry job/worker IDs)", async () => {
-    const manifestResult = { kind: "manifest" as const, response: { manifest: {}, summary: {} } };
-    const inspect = vi.fn().mockResolvedValue(manifestResult);
-    const result = await executeJob(healthyDeps({ templateInspector: { inspect } }), baseJob());
-    expect(result.result).toBe(manifestResult);
   });
 });
 
@@ -189,7 +205,7 @@ describe("executeJob - INSPECT_TEMPLATE safety gate: AE and MCP must both be con
   });
 
   it("reaches the inspector when both aeStatus and mcpStatus are ONLINE", async () => {
-    const inspect = vi.fn().mockResolvedValue({ kind: "raw_capture", capturedAt: "x", toolCalls: [], note: "n" });
+    const inspect = vi.fn().mockResolvedValue({ kind: "manifest", response: { manifest: {}, summary: {} } });
     const result = await executeJob(
       healthyDeps({ templateInspector: { inspect }, getLatestHealth: () => ({ aeStatus: "ONLINE", mcpStatus: "ONLINE" }) }),
       baseJob()

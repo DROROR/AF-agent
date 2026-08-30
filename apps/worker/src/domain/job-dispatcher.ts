@@ -162,11 +162,23 @@ async function runInspectTemplate(deps: JobDispatcherDeps, job: JobDto): Promise
     // because it is generic across every operation's differently-shaped
     // schema.
     const response = await deps.templateInspector.inspect(payload as InspectTemplateRequest);
-    // job-dispatcher owns job identity - the inspector itself is not
-    // handed job/worker IDs, so a raw capture is stamped with them here,
-    // right before it becomes the job's reported result.
-    const stamped = response.kind === "raw_capture" ? { ...response, workerId: job.workerId, jobId: job.jobId } : response;
-    return { status: "SUCCEEDED", result: stamped };
+    if (response.kind === "raw_capture") {
+      // A RawInspectionCapture explicitly means a real TemplateManifest
+      // could not honestly be built (see template-inspector.ts's own doc
+      // comment on RawInspectionCapture) - it must never be reported as a
+      // successful template inspection, even though inspection itself ran
+      // to completion without throwing. job-dispatcher owns job identity -
+      // the inspector itself is not handed job/worker IDs, so the capture
+      // is stamped with them here, right before it becomes the job's
+      // reported (failed) result, preserved for troubleshooting.
+      const stamped = { ...response, workerId: job.workerId, jobId: job.jobId };
+      return {
+        status: "FAILED",
+        error: { code: "MANIFEST_NOT_BUILT", message: "Template inspection could not produce a valid manifest." },
+        result: stamped
+      };
+    }
+    return { status: "SUCCEEDED", result: response };
   } catch (cause) {
     // NotAvailableTemplateInspector (no longer used in the real worker
     // execution path - see index.ts) always throws here; a real

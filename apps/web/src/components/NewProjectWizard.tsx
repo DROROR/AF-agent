@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { inspectTemplateResponseSchema, type InspectTemplateResponse, type JobDto } from "@dyo/schemas";
+import { hasAepExtension, inspectTemplateResultSchema, type InspectTemplateResponse, type JobDto } from "@dyo/schemas";
 import { PageHeader } from "./ui/PageHeader";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -62,7 +62,13 @@ export function NewProjectWizard(): ReactElement {
     selectedWorker.status === "ONLINE" &&
     selectedWorker.aeAvailability === "ONLINE" &&
     selectedWorker.mcpAvailability === "ONLINE";
-  const canInspect = name.trim() !== "" && workerReady && templateId.trim() !== "" && sourceProjectPath.trim() !== "" && !isDispatching && (job === null || job.status === "FAILED");
+  const canInspect =
+    name.trim() !== "" &&
+    workerReady &&
+    templateId.trim() !== "" &&
+    hasAepExtension(sourceProjectPath) &&
+    !isDispatching &&
+    (job === null || job.status === "FAILED");
 
   // Polls the real job while non-terminal - stops itself once
   // SUCCEEDED/FAILED/CANCELLED, and never starts a second overlapping poll
@@ -123,8 +129,20 @@ export function NewProjectWizard(): ReactElement {
     });
   }
 
+  // The persisted INSPECT_TEMPLATE result is the full InspectTemplateResult
+  // union - { kind: "manifest", response: {manifest, summary}, diagnostics }
+  // or { kind: "raw_capture", ... } - never the bare {manifest, summary}
+  // shape alone. Parsing job.result directly against
+  // inspectTemplateResponseSchema (the old bug) always fails, even for a
+  // genuinely valid manifest, because manifest/summary live one level
+  // deeper, under .response. A job-dispatcher.ts fix means a real,
+  // SUCCEEDED INSPECT_TEMPLATE job's result.kind is always "manifest" going
+  // forward, but this still checks kind explicitly (never just casts)
+  // rather than assuming that invariant for any job already in the
+  // database or reported by an older worker build.
+  const parsedInspectionResult = job?.status === "SUCCEEDED" ? inspectTemplateResultSchema.safeParse(job.result) : null;
   const inspectionResult: InspectTemplateResponse | null =
-    job?.status === "SUCCEEDED" ? (inspectTemplateResponseSchema.safeParse(job.result).success ? inspectTemplateResponseSchema.parse(job.result) : null) : null;
+    parsedInspectionResult?.success && parsedInspectionResult.data.kind === "manifest" ? parsedInspectionResult.data.response : null;
 
   async function handleCreateProject(): Promise<void> {
     if (!inspectionResult) return;

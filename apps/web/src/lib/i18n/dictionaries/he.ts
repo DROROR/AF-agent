@@ -158,7 +158,8 @@ export const he: Dictionary = {
       templateIdPlaceholder: "לדוגמה: white-app-promo-v1",
       sourceProjectPathLabel: "נתיב פרויקט המקור (על מחשב העובד)",
       sourceProjectPathPlaceholder: "לדוגמה: C:\\DYO-Agent\\copies\\template.aep",
-      sourceProjectPathHint: "חייב להצביע על עותק של קובץ ה-.aep, לעולם לא הקובץ המקורי - העובד לעולם אינו דורס את המקור.",
+      sourceProjectPathHint:
+        "חייב להיות נתיב מלא לקובץ שהוא עותק של ה-.aep, לעולם לא הקובץ המקורי או תיקייה - הנתיב חייב להסתיים ב-.aep.",
       inspectAction: "בדיקת תבנית",
       inspecting: "שולח…",
       statusQueued: "בתור אצל העובד - ממתין שיאסוף את המשימה.",

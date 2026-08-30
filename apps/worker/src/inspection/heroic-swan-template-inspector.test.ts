@@ -329,6 +329,34 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     expect(result.toolCalls.every((c) => c.ok)).toBe(true);
   });
 
+  it("falls back to a raw capture (never even attempts to hash) when sourceProjectPath is a directory with no .aep filename - real production bug, 2026-08-30 (C:\\DYO-Agent\\copy accepted and reported SUCCEEDED)", async () => {
+    await writeRealShapeFakeServer(dir);
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+
+    const result = (await inspector.inspect({
+      templateId: "tmpl-1",
+      sourceProjectPath: dir
+    })) as RawInspectionCapture;
+
+    expect(result.kind).toBe("raw_capture");
+    expect(result.note).toMatch(/does not end in \.aep/);
+  });
+
+  it("falls back to a raw capture when sourceProjectPath is a real, existing file but not a .aep", async () => {
+    await writeRealShapeFakeServer(dir);
+    const notAnAep = join(dir, "notes.txt");
+    await writeFile(notAnAep, "not an aep");
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+
+    const result = (await inspector.inspect({
+      templateId: "tmpl-1",
+      sourceProjectPath: notAnAep
+    })) as RawInspectionCapture;
+
+    expect(result.kind).toBe("raw_capture");
+    expect(result.note).toMatch(/does not end in \.aep/);
+  });
+
   it("still builds a manifest when one composition's detail fetch fails, recording an honest unknownItems entry for it", async () => {
     await writeRealShapeFakeServer(dir, { compGetFailsForIndex: 3 });
     const sourceProjectPath = join(dir, "template-copy.aep");

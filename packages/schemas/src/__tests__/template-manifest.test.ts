@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION, templateManifestSchema, type TemplateManifest } from "../template-manifest.js";
-import { inspectTemplateRequestSchema, inspectTemplateResponseSchema } from "../inspect-template.js";
+import { hasAepExtension, inspectTemplateRequestSchema, inspectTemplateResponseSchema, inspectTemplateResultSchema } from "../inspect-template.js";
 
 function validManifest(): TemplateManifest {
   return {
@@ -116,11 +116,51 @@ describe("inspectTemplateRequestSchema", () => {
       inspectTemplateRequestSchema.parse({ templateId: "tmpl-1", sourceProjectPath: "" })
     ).toThrow();
   });
+
+  it("rejects a directory-only path with no filename/extension at all (real production bug, 2026-08-30: C:\\DYO-Agent\\copy was accepted and produced a false SUCCEEDED job)", () => {
+    expect(() =>
+      inspectTemplateRequestSchema.parse({ templateId: "tmpl-1", sourceProjectPath: "C:\\DYO-Agent\\copy" })
+    ).toThrow(/\.aep/);
+  });
+
+  it("rejects a real file path whose extension is not .aep", () => {
+    expect(() =>
+      inspectTemplateRequestSchema.parse({ templateId: "tmpl-1", sourceProjectPath: "C:\\DYO-Agent\\copy\\notes.txt" })
+    ).toThrow(/\.aep/);
+  });
+
+  it("accepts the exact real full path that produced the valid manifest job (7e6db3a6)", () => {
+    const result = inspectTemplateRequestSchema.parse({
+      templateId: "White App Promo",
+      sourceProjectPath: "C:\\DYO-Agent\\copy\\White App Promo.aep"
+    });
+    expect(result.sourceProjectPath).toBe("C:\\DYO-Agent\\copy\\White App Promo.aep");
+  });
+
+  it("accepts a case-insensitive .AEP extension", () => {
+    expect(() =>
+      inspectTemplateRequestSchema.parse({ templateId: "tmpl-1", sourceProjectPath: "C:\\copies\\template.AEP" })
+    ).not.toThrow();
+  });
+});
+
+describe("hasAepExtension", () => {
+  it("accepts .aep in any case", () => {
+    expect(hasAepExtension("C:\\a\\b.aep")).toBe(true);
+    expect(hasAepExtension("C:\\a\\b.AEP")).toBe(true);
+    expect(hasAepExtension("C:\\a\\b.AeP")).toBe(true);
+  });
+
+  it("rejects a directory path, an empty string, and a non-.aep extension", () => {
+    expect(hasAepExtension("C:\\DYO-Agent\\copy")).toBe(false);
+    expect(hasAepExtension("")).toBe(false);
+    expect(hasAepExtension("C:\\a\\b.txt")).toBe(false);
+  });
 });
 
 describe("inspectTemplateResponseSchema", () => {
-  it("accepts a manifest paired with a matching summary", () => {
-    const response = {
+  function validResponse() {
+    return {
       manifest: validManifest(),
       summary: {
         compositionCount: 1,
@@ -134,6 +174,36 @@ describe("inspectTemplateResponseSchema", () => {
         unknownItemCount: 0
       }
     };
-    expect(() => inspectTemplateResponseSchema.parse(response)).not.toThrow();
+  }
+
+  it("accepts a manifest paired with a matching summary", () => {
+    expect(() => inspectTemplateResponseSchema.parse(validResponse())).not.toThrow();
+  });
+
+  describe("inspectTemplateResultSchema - the REAL persisted job.result shape", () => {
+    it("accepts a kind:'manifest' envelope wrapping a valid response - the real shape a SUCCEEDED INSPECT_TEMPLATE job persists (job 7e6db3a6)", () => {
+      const persisted = { kind: "manifest" as const, response: validResponse(), diagnostics: [] };
+      const parsed = inspectTemplateResultSchema.parse(persisted);
+      expect(parsed.kind).toBe("manifest");
+      if (parsed.kind === "manifest") {
+        expect(parsed.response.summary.compositionCount).toBe(1);
+      }
+    });
+
+    it("accepts a kind:'raw_capture' envelope - the fallback shape a job-dispatcher.ts FAILED job persists for diagnostics", () => {
+      const persisted = {
+        kind: "raw_capture" as const,
+        workerId: "11111111-1111-1111-1111-111111111111",
+        jobId: "22222222-2222-2222-2222-222222222222",
+        capturedAt: new Date().toISOString(),
+        toolCalls: [{ tool: "ae_health", calledAt: new Date().toISOString(), ok: true }],
+        note: "could not hash the real source .aep"
+      };
+      expect(() => inspectTemplateResultSchema.parse(persisted)).not.toThrow();
+    });
+
+    it("rejects the bare {manifest, summary} shape with no `kind` discriminator - the exact old wizard bug (parsing job.result directly against inspectTemplateResponseSchema instead of unwrapping .response first)", () => {
+      expect(() => inspectTemplateResultSchema.parse(validResponse())).toThrow();
+    });
   });
 });

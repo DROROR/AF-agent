@@ -47,6 +47,17 @@ export const JOB_ERROR_CODES = [
    * exists at all) and TRANSPORT_ERROR (an attempt was made and failed).
    */
   "PRECONDITION_NOT_MET",
+  /**
+   * The worker ran INSPECT_TEMPLATE but could not honestly build a real
+   * TemplateManifest (e.g. sourceProjectPath did not resolve to a real,
+   * hashable .aep, or an ae-mcp discovery call failed/returned an
+   * unexpected shape) - see apps/worker/src/inspection/template-inspector.ts's
+   * RawInspectionCapture ("kind": "raw_capture"). Distinct from
+   * TRANSPORT_ERROR (a specific call failed to even complete) and
+   * INTERNAL_ERROR (unexpected): this means inspection ran to completion
+   * but produced no usable manifest, by design, rather than fabricating one.
+   */
+  "MANIFEST_NOT_BUILT",
   "INTERNAL_ERROR"
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
