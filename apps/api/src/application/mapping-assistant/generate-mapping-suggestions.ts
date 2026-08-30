@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { aiSuggestionProposalSchema, type ListMappingSuggestionsResponse } from "@dyo/schemas";
-import { ExecutionPlanNotFoundError, NoUsableMappingSuggestionsError, ProjectNotFoundError } from "../../errors/app-error.js";
+import { AiMappingBatchTruncatedError, ExecutionPlanNotFoundError, NoUsableMappingSuggestionsError, ProjectNotFoundError } from "../../errors/app-error.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -37,6 +37,26 @@ export interface GenerateMappingSuggestionsDeps {
   log?: MappingSuggestionsFunnelLogger;
 }
 
+/**
+ * Real production bug, 2026-08-30: a single Anthropic call for 106
+ * eligible targets in one project consumed its full MAX_TOKENS=8000
+ * output budget (proven: providerOutputTokens 8000, stop_reason
+ * "max_tokens") before completing a single valid proposal. Splitting
+ * unresolved targets into fixed-size batches keeps each individual
+ * provider call small enough to plausibly complete within MAX_TOKENS -
+ * MAX_TOKENS itself is unchanged.
+ */
+export const AI_MAPPING_BATCH_SIZE = 20;
+
+/**
+ * Bounded, not unbounded Promise.all() - avoids bursting many large
+ * Anthropic requests at once (rate-limit risk) while still keeping total
+ * wall-clock time reasonable for the existing 180s application/proxy
+ * timeout (a 106-target request now issues 6 batches of at most 20 at
+ * concurrency 2, rather than 6 fully sequential slow calls).
+ */
+export const AI_MAPPING_BATCH_CONCURRENCY = 2;
+
 function targetKey(bundle: MappingEvidenceBundle): string {
   return `${bundle.scenePlanId}::${bundle.mappingId ?? ""}`;
 }
@@ -50,42 +70,84 @@ function extractRawProposals(raw: unknown): unknown[] {
   return [];
 }
 
+/** Deterministic, order-preserving - chunk `i` always holds items `[i*size, (i+1)*size)` of the original array, never a random regrouping. */
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let start = 0; start < items.length; start += size) {
+    chunks.push(items.slice(start, start + size));
+  }
+  return chunks;
+}
+
+/**
+ * Runs `worker` over every item with at most `concurrency` calls active
+ * at once - never a single unbounded Promise.all() over the whole list.
+ * Results are returned in the SAME order as `items`, regardless of which
+ * one finishes first (each result is written to its own reserved slot,
+ * not appended in completion order). If any `worker` call throws, that
+ * rejection propagates immediately (the same way Promise.all's would) -
+ * other still-in-flight workers are not cancelled (no abort plumbing
+ * exists yet - see the existing, separately-tracked follow-up), but their
+ * results are simply never used, since the caller unwinds via the thrown
+ * error before ever reading this function's return value.
+ */
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function runNext(): Promise<void> {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex] as T, currentIndex);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => runNext()));
+  return results;
+}
+
 /**
  * Runs deterministic evidence matching over every currently-unresolved
  * mapping target (mapping-assistant phase section 4), then - only for
  * targets deterministic matching could not resolve - asks the configured
- * AI provider (section 5). Never sends work deterministic matching
- * already resolved to the AI provider. If the provider is not configured,
- * the system remains fully usable: deterministic suggestions are still
- * persisted and returned, `aiAvailable: false` tells the caller AI simply
- * did not run this time - never surfaced as a request failure. A genuine
- * (not "not configured") provider error is NOT swallowed - it is a real
- * bug and propagates normally.
+ * AI provider (section 5), in fixed-size batches (see AI_MAPPING_BATCH_SIZE)
+ * run at bounded concurrency (AI_MAPPING_BATCH_CONCURRENCY). Never sends
+ * work deterministic matching already resolved to the AI provider. If the
+ * provider is not configured, the system remains fully usable:
+ * deterministic suggestions are still persisted and returned,
+ * `aiAvailable: false` tells the caller AI simply did not run this time -
+ * never surfaced as a request failure. A genuine (not "not configured")
+ * provider error from any batch is NOT swallowed - it propagates and
+ * aborts the whole request before anything is persisted.
  *
  * Real production bug, 2026-08-30: a real Anthropic call could return a
  * large batch of proposals where every single one failed a single
  * whole-array Zod parse (aiSuggestionProposalSchema is .strict(), and
  * z.array() fails the entire array on one bad item), silently discarding
  * ALL of them - including otherwise-valid ones - with zero logging, while
- * the route still returned 200. Each raw proposal is now validated
+ * the route still returned 200. Each raw proposal (merged from every
+ * batch, in original target order) is validated
  * (aiSuggestionProposalSchema.safeParse) and reference-checked (does it
  * name a target this call actually asked about) INDIVIDUALLY: one bad
- * proposal is rejected and counted, never taking down its siblings. A
- * real batch that produced at least one raw proposal but ended with
- * nothing usable now throws NoUsableMappingSuggestionsError (422) instead
- * of silently returning an empty, 200 "success".
+ * proposal is rejected and counted, never taking down its siblings.
  *
- * Observability-only addition, 2026-08-30: a real ~62s Anthropic call for
- * a 106-target project returned rawProposalCount: 0 - a genuine, legitimate
- * empty result under the rule above, but with no way to tell a clean
- * "nothing to propose" apart from a MAX_TOKENS truncation before this.
- * The provider's own non-sensitive completion metadata (stop_reason,
- * input/output token counts - never the response content itself) is now
- * carried back and logged alongside the funnel, so the next real
- * occurrence answers that question without calling the provider again.
- * This does NOT change generation behavior, max_tokens, the tool schema,
- * or the empty-result rule above - it only makes the existing behavior
- * observable.
+ * Batching, 2026-08-30: proven root cause of the above - one oversized
+ * request (106 targets, MAX_TOKENS=8000) was truncated mid-generation
+ * (stop_reason: "max_tokens", providerOutputTokens: 8000), producing zero
+ * usable proposals with no way to tell that apart from a genuine "nothing
+ * to suggest" response. Each batch's own stop_reason is now checked
+ * separately - a truncated batch throws AiMappingBatchTruncatedError
+ * immediately (422), before anything is persisted, rather than silently
+ * contributing zero proposals to what looked like a normal empty result.
+ * Once no batch is truncated, a real request with eligible targets that
+ * still ends with nothing usable (whether AI returned literally nothing,
+ * or returned proposals that all failed domain/reference validation) now
+ * throws NoUsableMappingSuggestionsError (422) instead of a silent, empty
+ * 200 "success" - see that error class's own doc comment for why the
+ * earlier, narrower version of this rule no longer applies once batching
+ * removes the ambiguity that justified it.
  */
 export async function generateMappingSuggestions(
   deps: GenerateMappingSuggestionsDeps,
@@ -152,29 +214,63 @@ export async function generateMappingSuggestions(
   let domainRejectedProposalCount = 0;
   let referenceValidProposalCount = 0;
   let referenceRejectedProposalCount = 0;
+  let batchCount = 0;
   const rejectedIssues: Array<{ index: number; path: string; code: string }> = [];
 
-  let providerMetadata: AiSuggestionMetadata = { stopReason: null, inputTokens: null, outputTokens: null };
-
   if (aiAvailable && unresolvedBundles.length > 0) {
-    let rawProposalsValue: unknown;
-    const providerStart = Date.now();
-    try {
-      const result = await deps.aiSuggestionProvider.suggest(unresolvedBundles);
-      rawProposalsValue = result.proposals;
-      providerMetadata = result.metadata;
-    } catch (error) {
-      // isConfigured() said yes, so a SuggestionsNotConfiguredError here would mean the two drifted out of sync - still degrade honestly rather than fail the whole request, but any OTHER error is a real bug and propagates.
-      if (error instanceof SuggestionsNotConfiguredError) {
-        rawProposalsValue = { proposals: [] };
-      } else {
-        throw error;
-      }
-    } finally {
-      providerDurationMs = Date.now() - providerStart;
-    }
+    const batches = chunk(unresolvedBundles, AI_MAPPING_BATCH_SIZE);
+    batchCount = batches.length;
+    const phaseStart = Date.now();
 
-    const rawProposals = extractRawProposals(rawProposalsValue);
+    const batchRawProposals = await mapWithConcurrency(batches, AI_MAPPING_BATCH_CONCURRENCY, async (batch, batchIndex) => {
+      const batchStart = Date.now();
+      let rawProposalsValue: unknown;
+      let metadata: AiSuggestionMetadata = { stopReason: null, inputTokens: null, outputTokens: null };
+      try {
+        const result = await deps.aiSuggestionProvider.suggest(batch);
+        rawProposalsValue = result.proposals;
+        metadata = result.metadata;
+      } catch (error) {
+        // isConfigured() said yes, so a SuggestionsNotConfiguredError here would mean the two drifted out of sync - still degrade honestly rather than fail the whole request, but any OTHER error is a real bug and propagates (aborting all batches before anything is persisted).
+        if (error instanceof SuggestionsNotConfiguredError) {
+          rawProposalsValue = { proposals: [] };
+        } else {
+          throw error;
+        }
+      }
+
+      const batchRaw = extractRawProposals(rawProposalsValue);
+      const batchDurationMs = Date.now() - batchStart;
+
+      deps.log?.info(
+        {
+          projectId,
+          batchIndex,
+          targetCount: batch.length,
+          providerDurationMs: batchDurationMs,
+          providerStopReason: metadata.stopReason,
+          providerInputTokens: metadata.inputTokens,
+          providerOutputTokens: metadata.outputTokens,
+          rawProposalCount: batchRaw.length
+        },
+        "mapping-suggestions generate: AI batch"
+      );
+
+      // This batch's own output was cut off before completing - its JSON
+      // cannot be trusted even if extractRawProposals happened to find
+      // something parseable in it. Refuse the whole generation rather
+      // than silently persisting a partial/incomplete batch's proposals
+      // alongside good ones from other batches.
+      if (metadata.stopReason === "max_tokens") {
+        throw new AiMappingBatchTruncatedError();
+      }
+
+      return batchRaw;
+    });
+
+    providerDurationMs = Date.now() - phaseStart;
+
+    const rawProposals = batchRawProposals.flat();
     rawProposalCount = rawProposals.length;
     const byKey = new Map(unresolvedBundles.map((bundle) => [targetKey(bundle), bundle]));
 
@@ -232,10 +328,10 @@ export async function generateMappingSuggestions(
       projectId,
       eligibleTargetCount: unresolvedBundles.length,
       deterministicProposalCount,
+      batchSize: AI_MAPPING_BATCH_SIZE,
+      batchCount,
+      batchConcurrency: AI_MAPPING_BATCH_CONCURRENCY,
       providerDurationMs,
-      providerStopReason: providerMetadata.stopReason,
-      providerInputTokens: providerMetadata.inputTokens,
-      providerOutputTokens: providerMetadata.outputTokens,
       rawProposalCount,
       domainValidProposalCount,
       domainRejectedProposalCount,
@@ -244,18 +340,20 @@ export async function generateMappingSuggestions(
       finalPersistableCount: referenceValidProposalCount,
       persistedCount: persisted.length,
       // Capped defensively - never unbounded, even though a real batch is
-      // itself bounded (currently one call per generate request). Never
-      // the invalid raw value itself - path/code only.
+      // itself bounded. Never the invalid raw value itself - path/code only.
       rejectedIssues: rejectedIssues.slice(0, 50)
     },
     "mapping-suggestions generate: AI proposal funnel"
   );
 
-  // Only a real batch that produced at least one raw proposal but ended
-  // with nothing usable counts as this failure - a provider that validly
-  // returns zero proposals (it genuinely had nothing to suggest) is a
-  // different, legitimate outcome and must not be treated as an error.
-  if (rawProposalCount > 0 && referenceValidProposalCount === 0) {
+  // A real AI attempt (aiAvailable) over real eligible targets that ends
+  // with nothing usable - whether every batch validly returned zero
+  // proposals, or proposals came back but none survived domain/reference
+  // validation - must not silently look like a successful, useful
+  // generation. Never thrown when AI simply isn't configured (aiAvailable:
+  // false is its own, honest, non-error outcome) or when there were no
+  // eligible targets to begin with.
+  if (aiAvailable && unresolvedBundles.length > 0 && referenceValidProposalCount === 0) {
     throw new NoUsableMappingSuggestionsError();
   }
 

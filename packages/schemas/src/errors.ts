@@ -35,6 +35,8 @@ export const ERROR_CODES = [
   "AI_PROVIDER_CONNECTION_FAILED",
   /** A real AI mapping-suggestion attempt ran (a real provider call was made and returned real proposals) but every proposal was rejected by domain/reference validation, leaving nothing usable - never silently reported as an empty-but-successful generation (see generate-mapping-suggestions.ts). */
   "NO_USABLE_SUGGESTIONS",
+  /** One batch of a batched AI mapping-suggestion generation hit Anthropic's own MAX_TOKENS ceiling (stop_reason: "max_tokens") before completing - its output cannot be trusted, so the whole generation refuses rather than silently persisting an incomplete/partial batch's worth of suggestions. */
+  "AI_MAPPING_BATCH_TRUNCATED",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

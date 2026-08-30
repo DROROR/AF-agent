@@ -11,11 +11,16 @@ import { InMemoryWorkMapRepository } from "../../work-map/test-support/in-memory
 import { updateWorkMap } from "../../work-map/update-work-map.js";
 import { InMemoryMappingSuggestionRepository } from "../test-support/in-memory-mapping-suggestion-repository.js";
 import { InMemorySceneEvidenceRepository } from "../../job/test-support/in-memory-scene-evidence-repository.js";
-import { generateMappingSuggestions, type MappingSuggestionsFunnelLogger } from "../generate-mapping-suggestions.js";
+import {
+  AI_MAPPING_BATCH_CONCURRENCY,
+  AI_MAPPING_BATCH_SIZE,
+  generateMappingSuggestions,
+  type MappingSuggestionsFunnelLogger
+} from "../generate-mapping-suggestions.js";
 import type { AiSuggestionMetadata, AiSuggestionProvider, AiSuggestionResult } from "../ai-suggestion-provider.js";
 import { NotConfiguredAiSuggestionProvider } from "../ai-suggestion-provider.js";
 import type { MappingEvidenceBundle } from "../../../domain/mapping-evidence/types.js";
-import { NoUsableMappingSuggestionsError } from "../../../errors/app-error.js";
+import { AiMappingBatchTruncatedError, NoUsableMappingSuggestionsError } from "../../../errors/app-error.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const fixedNow = () => NOW;
@@ -130,6 +135,22 @@ function manifestWithPlaceholders(count: number): TemplateManifest {
         }))
       }
     ],
+    preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+    unknownItems: []
+  };
+}
+
+/** A composition with zero placeholders still gets exactly one scene-level bundle (mappingId: null) - see build-evidence-bundles.ts's own doc comment. To get genuinely ZERO eligible targets, the manifest must have zero scenes/compositions at all. */
+function manifestWithNoScenes(): TemplateManifest {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    templateId: "tmpl-empty",
+    templateName: "tmpl-empty",
+    sourceProject: { path: "/copies/test-empty.aep", name: "test-empty.aep", sha256: "c".repeat(64) },
+    afterEffects: { version: "26.3x87" },
+    generatedAt: NOW.toISOString(),
+    compositions: [],
+    scenes: [],
     preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
     unknownItems: []
   };
@@ -321,8 +342,15 @@ describe("generateMappingSuggestions", () => {
   });
 
   it("passes persisted scene evidence to the AI provider as FACT input, and reports the scene AVAILABLE, when it matches the plan's current source SHA", async () => {
-    const provider = new StubAiProvider({ proposals: [] });
-    const deps = await setup(provider);
+    const deps = await setup();
+    const plan = await deps.executionPlanRepository.findCurrentByProjectId(deps.project.projectId);
+    const scenePlanId = plan!.scenePlans[0]!.id;
+    const mappingId = plan!.scenePlans[0]!.mappings[0]!.id;
+    // A real, valid proposal for the one eligible target - AI validly
+    // returning zero proposals would now throw NoUsableMappingSuggestionsError
+    // (see section 7's rule), which is not what this test is about.
+    const provider = new StubAiProvider([baseProposal({ scenePlanId, mappingId })]);
+    deps.aiSuggestionProvider = provider;
     await deps.sceneEvidenceRepository.record(
       {
         id: "evidence-1",
@@ -345,8 +373,12 @@ describe("generateMappingSuggestions", () => {
   });
 
   it("never treats evidence captured against a different source SHA as current fact, and reports the scene STALE", async () => {
-    const provider = new StubAiProvider({ proposals: [] });
-    const deps = await setup(provider);
+    const deps = await setup();
+    const plan = await deps.executionPlanRepository.findCurrentByProjectId(deps.project.projectId);
+    const scenePlanId = plan!.scenePlans[0]!.id;
+    const mappingId = plan!.scenePlans[0]!.mappings[0]!.id;
+    const provider = new StubAiProvider([baseProposal({ scenePlanId, mappingId })]);
+    deps.aiSuggestionProvider = provider;
     await deps.sceneEvidenceRepository.record(
       {
         id: "evidence-stale",
@@ -380,6 +412,9 @@ class CapturingLogger implements MappingSuggestionsFunnelLogger {
   }
   funnelCall(): { payload: Record<string, unknown>; message: string } | undefined {
     return this.calls.find((call) => call.message === "mapping-suggestions generate: AI proposal funnel");
+  }
+  batchCalls(): Array<{ payload: Record<string, unknown>; message: string }> {
+    return this.calls.filter((call) => call.message === "mapping-suggestions generate: AI batch");
   }
 }
 
@@ -529,9 +564,9 @@ describe("generateMappingSuggestions - item-level validation, typed failure, and
     expect(funnel!.payload).toMatchObject({
       eligibleTargetCount: 3,
       deterministicProposalCount: 0,
-      providerStopReason: DEFAULT_STUB_METADATA.stopReason,
-      providerInputTokens: DEFAULT_STUB_METADATA.inputTokens,
-      providerOutputTokens: DEFAULT_STUB_METADATA.outputTokens,
+      batchSize: 20,
+      batchCount: 1,
+      batchConcurrency: 2,
       rawProposalCount: 3,
       domainValidProposalCount: 2,
       domainRejectedProposalCount: 1,
@@ -543,38 +578,49 @@ describe("generateMappingSuggestions - item-level validation, typed failure, and
     // Never the raw proposal content/reasoning/text - counts and issue path/code only.
     expect(JSON.stringify(funnel!.payload)).not.toContain("a real suggestion");
     expect(JSON.stringify(funnel!.payload)).not.toContain("a real reason");
+
+    // Per-batch log also carries the real stop_reason/token counts for this one batch.
+    const [batchLog] = logger.batchCalls();
+    expect(batchLog!.payload).toMatchObject({
+      batchIndex: 0,
+      targetCount: 3,
+      providerStopReason: DEFAULT_STUB_METADATA.stopReason,
+      providerInputTokens: DEFAULT_STUB_METADATA.inputTokens,
+      providerOutputTokens: DEFAULT_STUB_METADATA.outputTokens,
+      rawProposalCount: 3
+    });
   });
 
-  it("logs the real provider stop_reason and token counts distinctly from a different real call - real production bug, 2026-08-30: this is exactly what was missing to diagnose a 62s call that returned zero proposals", async () => {
+  it("real production bug, 2026-08-30, now caught at the source: a batch reporting stop_reason max_tokens throws a typed truncation error instead of silently completing with zero proposals - the per-batch log still records the real stop_reason/token counts internally", async () => {
     const deps = await setup(new NotConfiguredAiSuggestionProvider(), manifestWithPlaceholders(1));
-    // AI validly returns zero proposals for the one eligible target - no throw, per the existing empty-success rule.
     deps.aiSuggestionProvider = new StubAiProvider({ proposals: [] }, { stopReason: "max_tokens", inputTokens: 45000, outputTokens: 8000 });
     const logger = new CapturingLogger();
 
-    await generateMappingSuggestions({ ...deps, log: logger }, deps.project.projectId);
+    await expect(generateMappingSuggestions({ ...deps, log: logger }, deps.project.projectId)).rejects.toThrow(AiMappingBatchTruncatedError);
 
-    const funnel = logger.funnelCall();
-    expect(funnel!.payload).toMatchObject({
+    const [batchLog] = logger.batchCalls();
+    expect(batchLog).toBeDefined();
+    expect(batchLog!.payload).toMatchObject({
+      batchIndex: 0,
+      targetCount: 1,
       providerStopReason: "max_tokens",
       providerInputTokens: 45000,
       providerOutputTokens: 8000,
       rawProposalCount: 0
     });
+    // Nothing was persisted - the whole request refused before reaching persistence.
+    expect(await deps.mappingSuggestionRepository.listByProjectId(deps.project.projectId)).toEqual([]);
   });
 
-  it("logs null stop_reason/token fields (never fabricated) when AI is not configured - the provider is never even called", async () => {
+  it("issues zero batches (and logs zero batch entries) when AI is not configured - the provider is never even called", async () => {
     const deps = await setup(new NotConfiguredAiSuggestionProvider(), manifestWithPlaceholders(1));
     const logger = new CapturingLogger();
 
     await generateMappingSuggestions({ ...deps, log: logger }, deps.project.projectId);
 
+    expect(logger.batchCalls()).toEqual([]);
     const funnel = logger.funnelCall();
-    expect(funnel!.payload).toMatchObject({
-      providerStopReason: null,
-      providerInputTokens: null,
-      providerOutputTokens: null,
-      rawProposalCount: 0
-    });
+    expect(funnel!.payload).toMatchObject({ batchCount: 0, rawProposalCount: 0 });
   });
 
   it("never mutates/coerces the model's own values for a rejected proposal - it is simply absent from persistence, not repaired", async () => {
@@ -603,11 +649,11 @@ describe("generateMappingSuggestions - item-level validation, typed failure, and
     await expect(call.catch((error: unknown) => (error as { statusCode?: number }).statusCode)).resolves.toBe(422);
   });
 
-  it("a provider that validly returns zero proposals is a legitimate empty success, never the new typed error - eligible targets can be >0 with nothing to suggest", async () => {
+  it("real production bug, 2026-08-30, rule widened by batching: a real AI attempt that completes every batch normally (no truncation) but still returns zero proposals in total now surfaces the same typed error, not a legitimate empty success - the ambiguity that used to excuse this is gone once truncation is ruled out per-batch", async () => {
     const deps = await setup(new StubAiProvider({ proposals: [] }), manifestWithPlaceholders(2));
-    const result = await generateMappingSuggestions(deps, deps.project.projectId);
-    expect(result.suggestions).toEqual([]);
-    expect(result.aiAvailable).toBe(true);
+    const call = generateMappingSuggestions(deps, deps.project.projectId);
+    await expect(call).rejects.toThrow(NoUsableMappingSuggestionsError);
+    expect(await deps.mappingSuggestionRepository.listByProjectId(deps.project.projectId)).toEqual([]);
   });
 
   it("zero eligible targets (everything resolved deterministically) remains a normal success even with a real AI provider configured - AI is never even called", async () => {
@@ -631,5 +677,162 @@ describe("generateMappingSuggestions - item-level validation, typed failure, and
     const result = await generateMappingSuggestions(deps, deps.project.projectId);
     expect(result.suggestions).toHaveLength(1);
     expect(result.suggestions[0]?.source).toBe("DETERMINISTIC");
+  });
+});
+
+/** Tracks every real call the batching logic makes to the provider - bundles per call (for order/size assertions), and concurrent-call high-water mark (for the concurrency-bound assertion). A real (tiny) delay is used so overlapping calls genuinely overlap in test timing, rather than resolving synchronously in a way that could never reveal a concurrency bug. */
+class TrackingAiProvider implements AiSuggestionProvider {
+  calls: MappingEvidenceBundle[][] = [];
+  activeCount = 0;
+  maxActiveCount = 0;
+  constructor(private readonly resultFor: (bundles: MappingEvidenceBundle[], callIndex: number) => AiSuggestionResult = () => ({ proposals: [], metadata: DEFAULT_STUB_METADATA })) {}
+  isConfigured(): boolean {
+    return true;
+  }
+  async suggest(bundles: MappingEvidenceBundle[]): Promise<AiSuggestionResult> {
+    const callIndex = this.calls.length;
+    this.calls.push(bundles);
+    this.activeCount += 1;
+    this.maxActiveCount = Math.max(this.maxActiveCount, this.activeCount);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    this.activeCount -= 1;
+    return this.resultFor(bundles, callIndex);
+  }
+}
+
+/**
+ * Real production bug, 2026-08-30: one Anthropic call for 106 eligible
+ * targets consumed its full 8000-token output budget (proven:
+ * providerOutputTokens 8000, stop_reason "max_tokens") before completing
+ * a single valid proposal. These tests prove the fix: unresolved targets
+ * are split into fixed-size, order-preserving batches
+ * (AI_MAPPING_BATCH_SIZE) run at bounded concurrency
+ * (AI_MAPPING_BATCH_CONCURRENCY), never one unbounded request or one
+ * unbounded Promise.all() over every batch.
+ */
+describe("generateMappingSuggestions - target batching and bounded concurrency (real production bug, 2026-08-30)", () => {
+  it("AI_MAPPING_BATCH_SIZE is 20 and AI_MAPPING_BATCH_CONCURRENCY is 2 - the exact values proven safe against the real 106-target failure", () => {
+    expect(AI_MAPPING_BATCH_SIZE).toBe(20);
+    expect(AI_MAPPING_BATCH_CONCURRENCY).toBe(2);
+  });
+
+  it("0 eligible targets => 0 provider calls - the provider is never even invoked", async () => {
+    const provider = new TrackingAiProvider();
+    const deps = await setup(provider, manifestWithNoScenes());
+    await generateMappingSuggestions(deps, deps.project.projectId);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it.each([
+    [1, 1],
+    [20, 1],
+    [21, 2],
+    [40, 2],
+    [106, 6]
+  ])("%i eligible targets => %i batch(es)", async (targetCount, expectedBatchCount) => {
+    const provider = new TrackingAiProvider();
+    const deps = await setup(provider, manifestWithPlaceholders(targetCount));
+    // The provider validly returns zero proposals for every batch here -
+    // that alone now throws (see the "rule widened by batching" test
+    // above), but the batches still all ran by the time it does.
+    await expect(generateMappingSuggestions(deps, deps.project.projectId)).rejects.toThrow(NoUsableMappingSuggestionsError);
+    expect(provider.calls).toHaveLength(expectedBatchCount);
+  });
+
+  it("preserves original target order across batches - batch 0 gets the first 20 targets, batch 1 the next 20, and so on, never a random regrouping", async () => {
+    const provider = new TrackingAiProvider();
+    const deps = await setup(provider, manifestWithPlaceholders(40));
+    await expect(generateMappingSuggestions(deps, deps.project.projectId)).rejects.toThrow(NoUsableMappingSuggestionsError);
+
+    expect(provider.calls).toHaveLength(2);
+    expect(provider.calls[0]!.map((bundle) => bundle.manifestPlaceholderId)).toEqual(Array.from({ length: 20 }, (_, i) => `ph-${i}`));
+    expect(provider.calls[1]!.map((bundle) => bundle.manifestPlaceholderId)).toEqual(Array.from({ length: 20 }, (_, i) => `ph-${i + 20}`));
+  });
+
+  it("never runs more than AI_MAPPING_BATCH_CONCURRENCY provider calls at once, even with many batches in flight", async () => {
+    const provider = new TrackingAiProvider();
+    const deps = await setup(provider, manifestWithPlaceholders(106));
+    await expect(generateMappingSuggestions(deps, deps.project.projectId)).rejects.toThrow(NoUsableMappingSuggestionsError);
+
+    expect(provider.calls).toHaveLength(6);
+    expect(provider.maxActiveCount).toBeLessThanOrEqual(AI_MAPPING_BATCH_CONCURRENCY);
+    expect(provider.maxActiveCount).toBe(AI_MAPPING_BATCH_CONCURRENCY); // real concurrency was actually exercised, not accidentally serialized
+  });
+
+  it("merges valid proposals from every successful batch - a 21-target request (2 batches) persists suggestions sourced from both", async () => {
+    const provider = new TrackingAiProvider((bundles) => ({
+      proposals: bundles.map((bundle) => baseProposal({ scenePlanId: bundle.scenePlanId, mappingId: bundle.mappingId })),
+      metadata: DEFAULT_STUB_METADATA
+    }));
+    const deps = await setup(provider, manifestWithPlaceholders(21));
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    expect(provider.calls).toHaveLength(2);
+    expect(result.suggestions).toHaveLength(21);
+    expect(result.suggestions.every((suggestion) => suggestion.source === "AI")).toBe(true);
+  });
+
+  it("one invalid proposal in a merged multi-batch result rejects only itself - siblings from the same and other batches all survive", async () => {
+    const provider = new TrackingAiProvider((bundles, callIndex) =>
+      callIndex === 0
+        ? {
+            proposals: [
+              ...bundles.slice(0, -1).map((bundle) => baseProposal({ scenePlanId: bundle.scenePlanId, mappingId: bundle.mappingId })),
+              baseProposal({ scenePlanId: bundles[bundles.length - 1]!.scenePlanId, mappingId: bundles[bundles.length - 1]!.mappingId, confidence: 1.5 })
+            ],
+            metadata: DEFAULT_STUB_METADATA
+          }
+        : { proposals: bundles.map((bundle) => baseProposal({ scenePlanId: bundle.scenePlanId, mappingId: bundle.mappingId })), metadata: DEFAULT_STUB_METADATA }
+    );
+    const deps = await setup(provider, manifestWithPlaceholders(21));
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    // 20 in batch 0 (19 valid + 1 invalid) + 1 in batch 1 (valid) = 20 persisted.
+    expect(result.suggestions).toHaveLength(20);
+  });
+
+  it("one provider batch throwing aborts the whole request - no suggestions from any batch (including already-successful ones) are persisted", async () => {
+    const provider = new TrackingAiProvider((bundles, callIndex) => {
+      if (callIndex === 1) {
+        throw new Error("simulated real provider failure on the second batch");
+      }
+      return { proposals: bundles.map((bundle) => baseProposal({ scenePlanId: bundle.scenePlanId, mappingId: bundle.mappingId })), metadata: DEFAULT_STUB_METADATA };
+    });
+    const deps = await setup(provider, manifestWithPlaceholders(40));
+
+    await expect(generateMappingSuggestions(deps, deps.project.projectId)).rejects.toThrow("simulated real provider failure on the second batch");
+    expect(await deps.mappingSuggestionRepository.listByProjectId(deps.project.projectId)).toEqual([]);
+  });
+
+  it("funnel totals equal the sum of per-batch counts across all batches", async () => {
+    const provider = new TrackingAiProvider((bundles, callIndex) => ({
+      // Batch 0: all valid. Batch 1: all valid except the first one has an out-of-range confidence.
+      proposals: bundles.map((bundle, i) =>
+        baseProposal({ scenePlanId: bundle.scenePlanId, mappingId: bundle.mappingId, ...(callIndex === 1 && i === 0 ? { confidence: 9 } : {}) })
+      ),
+      metadata: DEFAULT_STUB_METADATA
+    }));
+    const deps = await setup(provider, manifestWithPlaceholders(40));
+    const logger = new CapturingLogger();
+
+    await generateMappingSuggestions({ ...deps, log: logger }, deps.project.projectId);
+
+    const batchLogs = logger.batchCalls();
+    expect(batchLogs).toHaveLength(2);
+    const sumRawFromBatches = batchLogs.reduce((total, call) => total + (call.payload.rawProposalCount as number), 0);
+
+    const funnel = logger.funnelCall();
+    expect(funnel!.payload.rawProposalCount).toBe(sumRawFromBatches);
+    expect(funnel!.payload).toMatchObject({
+      batchCount: 2,
+      rawProposalCount: 40,
+      domainValidProposalCount: 39,
+      domainRejectedProposalCount: 1,
+      referenceValidProposalCount: 39,
+      finalPersistableCount: 39,
+      persistedCount: 39
+    });
   });
 });

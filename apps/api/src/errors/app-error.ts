@@ -30,6 +30,7 @@ function statusForCode(code: ErrorCode): number {
     case "RATE_LIMITED":
       return 429;
     case "NO_USABLE_SUGGESTIONS":
+    case "AI_MAPPING_BATCH_TRUNCATED":
       return 422;
     case "INTERNAL_ERROR":
       return 500;
@@ -315,15 +316,47 @@ export class AiProviderUnavailableError extends AppError {
  * a reference to a target never asked about, ...), leaving nothing to
  * persist - generateMappingSuggestions used to silently return an empty
  * suggestions list with a 200 in this case, indistinguishable from "AI
- * genuinely had nothing to suggest." Thrown ONLY when the AI actually
- * returned at least one raw proposal and none survived - never when the
- * AI validly returns zero proposals (a legitimate, different outcome),
- * and never when AI simply isn't configured (aiAvailable: false already
- * covers that honestly).
+ * genuinely had nothing to suggest." Never thrown when AI simply isn't
+ * configured (aiAvailable: false already covers that honestly).
+ *
+ * Widened 2026-08-30 (batching): once generation is split into fixed-size
+ * batches (see generate-mapping-suggestions.ts's AI_MAPPING_BATCH_SIZE)
+ * and each batch's own stop_reason is checked for a MAX_TOKENS truncation
+ * separately (see AiMappingBatchTruncatedError below), a real request
+ * with eligible targets whose batches all completed normally yet
+ * produced zero raw proposals in total is no longer a plausible "AI
+ * genuinely had nothing to suggest" - the ambiguity that used to justify
+ * treating a clean empty response as a legitimate outcome is gone now
+ * that truncation is ruled out per-batch, so this also throws in that
+ * case (proven in production: a real 106-target request, providerOutputTokens
+ * exactly 8000, stop_reason "max_tokens").
  */
 export class NoUsableMappingSuggestionsError extends AppError {
   constructor() {
     super("NO_USABLE_SUGGESTIONS", "AI returned no usable mapping suggestions. Please review the project inputs or try again.");
     this.name = "NoUsableMappingSuggestionsError";
+  }
+}
+
+/**
+ * Real production bug, 2026-08-30: a real Anthropic call for 106 eligible
+ * targets in one request consumed its full 8000-token output budget
+ * (providerOutputTokens: 8000, stop_reason: "max_tokens") before
+ * completing a single valid proposal - proven directly from production
+ * funnel logs. Batching (AI_MAPPING_BATCH_SIZE, see generate-mapping-
+ * suggestions.ts) keeps each individual provider call small enough to
+ * plausibly complete, but a batch can still legitimately hit the ceiling
+ * (an unusually verbose model response, or a batch whose targets each
+ * need more structured output than typical) - when that happens, that
+ * batch's own output cannot be trusted (its JSON may be incomplete), so
+ * the whole generation refuses rather than silently persisting a partial/
+ * incomplete batch's proposals alongside good ones from other batches.
+ * Never exposes Anthropic's stop_reason or token counts to the browser -
+ * those are logged internally only (see the per-batch funnel log).
+ */
+export class AiMappingBatchTruncatedError extends AppError {
+  constructor() {
+    super("AI_MAPPING_BATCH_TRUNCATED", "AI could not complete part of the scene mapping. Please try again.");
+    this.name = "AiMappingBatchTruncatedError";
   }
 }
