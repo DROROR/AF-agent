@@ -167,7 +167,7 @@ describe("AnthropicSuggestionProvider.suggest() - real request shape sent to the
     expect(request.tools[0].input_schema).toEqual(PROPOSAL_INPUT_SCHEMA);
   });
 
-  it("still returns the tool_use input verbatim - the provider output contract is unchanged by this schema-shape fix", async () => {
+  it("still returns the tool_use input verbatim under .proposals - the provider output contract for proposals is unchanged by this schema-shape fix", async () => {
     const rawProposals = { proposals: [{ scenePlanId: "scene-1" }] };
     mockCreate.mockResolvedValueOnce({
       stop_reason: "tool_use",
@@ -176,6 +176,78 @@ describe("AnthropicSuggestionProvider.suggest() - real request shape sent to the
     const provider = new AnthropicSuggestionProvider("fake-api-key", "claude-sonnet-5");
     const result = await provider.suggest([bundleFixture()]);
 
-    expect(result).toEqual(rawProposals);
+    expect(result.proposals).toEqual(rawProposals);
+  });
+
+  it("still requests max_tokens: 8000 - observability-only additions never change generation behavior", async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", name: "propose_mapping_suggestions", input: { proposals: [] } }]
+    });
+    const provider = new AnthropicSuggestionProvider("fake-api-key", "claude-sonnet-5");
+    await provider.suggest([bundleFixture()]);
+
+    const [request] = mockCreate.mock.calls[0] as [{ max_tokens: number }];
+    expect(request.max_tokens).toBe(8000);
+  });
+});
+
+/**
+ * Real production bug, 2026-08-30: a real ~62s Anthropic call for a
+ * 106-target project returned zero raw proposals - a legitimate empty
+ * result under the existing rule, but with no way to tell a clean
+ * "nothing to propose" apart from a MAX_TOKENS truncation. These tests
+ * prove the provider now captures and returns that distinguishing
+ * metadata (stop_reason, input/output token counts) - never the response
+ * content itself - so the next real occurrence is diagnosable from logs
+ * alone, without calling Anthropic again.
+ */
+describe("AnthropicSuggestionProvider.suggest() - completion metadata (observability only, 2026-08-30)", () => {
+  it("captures the real stop_reason and input/output token counts from the response", async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 12345, output_tokens: 8000 },
+      content: [{ type: "tool_use", name: "propose_mapping_suggestions", input: { proposals: [] } }]
+    });
+    const provider = new AnthropicSuggestionProvider("fake-api-key", "claude-sonnet-5");
+    const result = await provider.suggest([bundleFixture()]);
+
+    expect(result.metadata).toEqual({ stopReason: "max_tokens", inputTokens: 12345, outputTokens: 8000 });
+  });
+
+  it("captures a genuine end_turn/tool_use stop_reason just as faithfully - never assumes or fabricates truncation", async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      usage: { input_tokens: 500, output_tokens: 300 },
+      content: [{ type: "tool_use", name: "propose_mapping_suggestions", input: { proposals: [] } }]
+    });
+    const provider = new AnthropicSuggestionProvider("fake-api-key", "claude-sonnet-5");
+    const result = await provider.suggest([bundleFixture()]);
+
+    expect(result.metadata.stopReason).toBe("tool_use");
+  });
+
+  it("handles a response with no usage field safely - token counts fall back to null, never thrown or fabricated", async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", name: "propose_mapping_suggestions", input: { proposals: [] } }]
+    });
+    const provider = new AnthropicSuggestionProvider("fake-api-key", "claude-sonnet-5");
+    const result = await provider.suggest([bundleFixture()]);
+
+    expect(result.metadata).toEqual({ stopReason: "tool_use", inputTokens: null, outputTokens: null });
+  });
+
+  it("never logs/exposes the raw response content or tool input as part of metadata - metadata is exactly {stopReason, inputTokens, outputTokens}, nothing else", async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      usage: { input_tokens: 1, output_tokens: 2 },
+      content: [{ type: "tool_use", name: "propose_mapping_suggestions", input: { proposals: [{ scenePlanId: "secret-scene" }] } }]
+    });
+    const provider = new AnthropicSuggestionProvider("fake-api-key", "claude-sonnet-5");
+    const result = await provider.suggest([bundleFixture()]);
+
+    expect(Object.keys(result.metadata).sort()).toEqual(["inputTokens", "outputTokens", "stopReason"]);
+    expect(JSON.stringify(result.metadata)).not.toContain("secret-scene");
   });
 });

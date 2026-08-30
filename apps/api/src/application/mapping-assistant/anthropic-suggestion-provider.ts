@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MappingEvidenceBundle } from "../../domain/mapping-evidence/types.js";
-import type { AiSuggestionProvider } from "./ai-suggestion-provider.js";
+import type { AiSuggestionMetadata, AiSuggestionProvider, AiSuggestionResult } from "./ai-suggestion-provider.js";
 
 const TOOL_NAME = "propose_mapping_suggestions";
 const MAX_TOKENS = 8000;
@@ -177,7 +177,7 @@ export class AnthropicSuggestionProvider implements AiSuggestionProvider {
     return true;
   }
 
-  async suggest(bundles: MappingEvidenceBundle[]): Promise<unknown> {
+  async suggest(bundles: MappingEvidenceBundle[]): Promise<AiSuggestionResult> {
     const userContent = JSON.stringify({ unresolvedTargets: bundles.map(summarizeBundle) });
 
     let response: Anthropic.Message;
@@ -207,11 +207,22 @@ export class AnthropicSuggestionProvider implements AiSuggestionProvider {
       throw new AnthropicProviderError("Anthropic declined to respond to this request (safety refusal)");
     }
 
+    // Non-sensitive completion metadata only - never the response content
+    // itself. Captured regardless of what follows, so a real caller can
+    // tell a genuine "nothing to propose" apart from a MAX_TOKENS
+    // truncation (see this call's own stop_reason) without ever needing
+    // to inspect the actual proposals/content to find out.
+    const metadata: AiSuggestionMetadata = {
+      stopReason: response.stop_reason,
+      inputTokens: response.usage?.input_tokens ?? null,
+      outputTokens: response.usage?.output_tokens ?? null
+    };
+
     const toolUse = response.content.find((block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME);
     if (!toolUse) {
       throw new AnthropicProviderError(`Anthropic did not return a ${TOOL_NAME} tool call (stop_reason: ${response.stop_reason})`);
     }
 
-    return toolUse.input;
+    return { proposals: toolUse.input, metadata };
   }
 }

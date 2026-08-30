@@ -11,7 +11,7 @@ import type { MappingEvidenceBundle } from "../../domain/mapping-evidence/types.
 import { buildEvidenceBundles } from "../../domain/mapping-evidence/build-evidence-bundles.js";
 import { buildSceneEvidenceAvailability } from "../../domain/mapping-evidence/scene-evidence-availability.js";
 import { matchDeterministic } from "../../domain/mapping-suggestion/deterministic-matcher.js";
-import { SuggestionsNotConfiguredError, type AiSuggestionProvider } from "./ai-suggestion-provider.js";
+import { SuggestionsNotConfiguredError, type AiSuggestionMetadata, type AiSuggestionProvider } from "./ai-suggestion-provider.js";
 import { toMappingSuggestionDto } from "./mapping-suggestion-dto-mapper.js";
 
 /**
@@ -74,6 +74,18 @@ function extractRawProposals(raw: unknown): unknown[] {
  * real batch that produced at least one raw proposal but ended with
  * nothing usable now throws NoUsableMappingSuggestionsError (422) instead
  * of silently returning an empty, 200 "success".
+ *
+ * Observability-only addition, 2026-08-30: a real ~62s Anthropic call for
+ * a 106-target project returned rawProposalCount: 0 - a genuine, legitimate
+ * empty result under the rule above, but with no way to tell a clean
+ * "nothing to propose" apart from a MAX_TOKENS truncation before this.
+ * The provider's own non-sensitive completion metadata (stop_reason,
+ * input/output token counts - never the response content itself) is now
+ * carried back and logged alongside the funnel, so the next real
+ * occurrence answers that question without calling the provider again.
+ * This does NOT change generation behavior, max_tokens, the tool schema,
+ * or the empty-result rule above - it only makes the existing behavior
+ * observable.
  */
 export async function generateMappingSuggestions(
   deps: GenerateMappingSuggestionsDeps,
@@ -142,15 +154,19 @@ export async function generateMappingSuggestions(
   let referenceRejectedProposalCount = 0;
   const rejectedIssues: Array<{ index: number; path: string; code: string }> = [];
 
+  let providerMetadata: AiSuggestionMetadata = { stopReason: null, inputTokens: null, outputTokens: null };
+
   if (aiAvailable && unresolvedBundles.length > 0) {
-    let raw: unknown;
+    let rawProposalsValue: unknown;
     const providerStart = Date.now();
     try {
-      raw = await deps.aiSuggestionProvider.suggest(unresolvedBundles);
+      const result = await deps.aiSuggestionProvider.suggest(unresolvedBundles);
+      rawProposalsValue = result.proposals;
+      providerMetadata = result.metadata;
     } catch (error) {
       // isConfigured() said yes, so a SuggestionsNotConfiguredError here would mean the two drifted out of sync - still degrade honestly rather than fail the whole request, but any OTHER error is a real bug and propagates.
       if (error instanceof SuggestionsNotConfiguredError) {
-        raw = { proposals: [] };
+        rawProposalsValue = { proposals: [] };
       } else {
         throw error;
       }
@@ -158,7 +174,7 @@ export async function generateMappingSuggestions(
       providerDurationMs = Date.now() - providerStart;
     }
 
-    const rawProposals = extractRawProposals(raw);
+    const rawProposals = extractRawProposals(rawProposalsValue);
     rawProposalCount = rawProposals.length;
     const byKey = new Map(unresolvedBundles.map((bundle) => [targetKey(bundle), bundle]));
 
@@ -217,6 +233,9 @@ export async function generateMappingSuggestions(
       eligibleTargetCount: unresolvedBundles.length,
       deterministicProposalCount,
       providerDurationMs,
+      providerStopReason: providerMetadata.stopReason,
+      providerInputTokens: providerMetadata.inputTokens,
+      providerOutputTokens: providerMetadata.outputTokens,
       rawProposalCount,
       domainValidProposalCount,
       domainRejectedProposalCount,

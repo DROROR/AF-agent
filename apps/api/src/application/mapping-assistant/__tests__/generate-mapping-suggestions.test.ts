@@ -12,7 +12,7 @@ import { updateWorkMap } from "../../work-map/update-work-map.js";
 import { InMemoryMappingSuggestionRepository } from "../test-support/in-memory-mapping-suggestion-repository.js";
 import { InMemorySceneEvidenceRepository } from "../../job/test-support/in-memory-scene-evidence-repository.js";
 import { generateMappingSuggestions, type MappingSuggestionsFunnelLogger } from "../generate-mapping-suggestions.js";
-import type { AiSuggestionProvider } from "../ai-suggestion-provider.js";
+import type { AiSuggestionMetadata, AiSuggestionProvider, AiSuggestionResult } from "../ai-suggestion-provider.js";
 import { NotConfiguredAiSuggestionProvider } from "../ai-suggestion-provider.js";
 import type { MappingEvidenceBundle } from "../../../domain/mapping-evidence/types.js";
 import { NoUsableMappingSuggestionsError } from "../../../errors/app-error.js";
@@ -63,15 +63,20 @@ function manifest(): TemplateManifest {
   };
 }
 
+const DEFAULT_STUB_METADATA: AiSuggestionMetadata = { stopReason: "tool_use", inputTokens: 500, outputTokens: 250 };
+
 class StubAiProvider implements AiSuggestionProvider {
   lastBundles: MappingEvidenceBundle[] = [];
-  constructor(private readonly result: unknown) {}
+  constructor(
+    private readonly result: unknown,
+    private readonly metadata: AiSuggestionMetadata = DEFAULT_STUB_METADATA
+  ) {}
   isConfigured(): boolean {
     return true;
   }
-  async suggest(bundles: MappingEvidenceBundle[]): Promise<unknown> {
+  async suggest(bundles: MappingEvidenceBundle[]): Promise<AiSuggestionResult> {
     this.lastBundles = bundles;
-    return this.result;
+    return { proposals: this.result, metadata: this.metadata };
   }
 }
 
@@ -524,6 +529,9 @@ describe("generateMappingSuggestions - item-level validation, typed failure, and
     expect(funnel!.payload).toMatchObject({
       eligibleTargetCount: 3,
       deterministicProposalCount: 0,
+      providerStopReason: DEFAULT_STUB_METADATA.stopReason,
+      providerInputTokens: DEFAULT_STUB_METADATA.inputTokens,
+      providerOutputTokens: DEFAULT_STUB_METADATA.outputTokens,
       rawProposalCount: 3,
       domainValidProposalCount: 2,
       domainRejectedProposalCount: 1,
@@ -531,6 +539,41 @@ describe("generateMappingSuggestions - item-level validation, typed failure, and
       referenceRejectedProposalCount: 1,
       finalPersistableCount: 1,
       persistedCount: 1
+    });
+    // Never the raw proposal content/reasoning/text - counts and issue path/code only.
+    expect(JSON.stringify(funnel!.payload)).not.toContain("a real suggestion");
+    expect(JSON.stringify(funnel!.payload)).not.toContain("a real reason");
+  });
+
+  it("logs the real provider stop_reason and token counts distinctly from a different real call - real production bug, 2026-08-30: this is exactly what was missing to diagnose a 62s call that returned zero proposals", async () => {
+    const deps = await setup(new NotConfiguredAiSuggestionProvider(), manifestWithPlaceholders(1));
+    // AI validly returns zero proposals for the one eligible target - no throw, per the existing empty-success rule.
+    deps.aiSuggestionProvider = new StubAiProvider({ proposals: [] }, { stopReason: "max_tokens", inputTokens: 45000, outputTokens: 8000 });
+    const logger = new CapturingLogger();
+
+    await generateMappingSuggestions({ ...deps, log: logger }, deps.project.projectId);
+
+    const funnel = logger.funnelCall();
+    expect(funnel!.payload).toMatchObject({
+      providerStopReason: "max_tokens",
+      providerInputTokens: 45000,
+      providerOutputTokens: 8000,
+      rawProposalCount: 0
+    });
+  });
+
+  it("logs null stop_reason/token fields (never fabricated) when AI is not configured - the provider is never even called", async () => {
+    const deps = await setup(new NotConfiguredAiSuggestionProvider(), manifestWithPlaceholders(1));
+    const logger = new CapturingLogger();
+
+    await generateMappingSuggestions({ ...deps, log: logger }, deps.project.projectId);
+
+    const funnel = logger.funnelCall();
+    expect(funnel!.payload).toMatchObject({
+      providerStopReason: null,
+      providerInputTokens: null,
+      providerOutputTokens: null,
+      rawProposalCount: 0
     });
   });
 
