@@ -57,6 +57,21 @@ const REQUEST_TIMEOUT_MS = 8_000;
  */
 export const ASSET_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
+/**
+ * Real production bug, 2026-08-30: two real generate-suggestions attempts
+ * for a project with an empty Work Map/scene evidence (so most/all scenes
+ * need real Anthropic help) never completed within the ordinary 8-second
+ * REQUEST_TIMEOUT_MS - confirmed via dyo-api's own logs (neither request
+ * ever logged completion or an error) and a ~9-minute DB poll showing
+ * zero suggestion rows persisted. A real multi-scene Anthropic batch
+ * completion routinely takes longer than 8 seconds, but is still bounded
+ * (never infinite) - 180 seconds, not the 10-minute upload value, since
+ * this is a single structured-output completion, not a large file
+ * transfer. Used ONLY for generateMappingSuggestions - every other call
+ * in this file keeps the normal REQUEST_TIMEOUT_MS.
+ */
+export const GENERATE_SUGGESTIONS_TIMEOUT_MS = 180_000;
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; code: string | null; message: string };
@@ -368,8 +383,15 @@ export async function updateWorkMap(
 
 /** Runs deterministic evidence matching (and the AI provider, if configured) over every currently-unresolved mapping and persists the results as PENDING suggestions - never mutates the execution plan itself. */
 export async function generateMappingSuggestions(projectId: string): Promise<ApiResult<ListMappingSuggestionsResponse>> {
-  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions/generate`, { method: "POST" });
+  const { status, json, timedOut } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/mapping-suggestions/generate`,
+    { method: "POST" },
+    GENERATE_SUGGESTIONS_TIMEOUT_MS
+  );
   if (status !== 200) {
+    if (timedOut) {
+      return { ok: false, status, code: null, message: "Mapping suggestions took too long to generate. Please try again." };
+    }
     return toErrorResult(status, json);
   }
   const parsed = listMappingSuggestionsResponseSchema.safeParse(json);

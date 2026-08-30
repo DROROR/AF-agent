@@ -80,6 +80,23 @@ describe("proxyToApi", () => {
     expect(delays).toContain(8_000);
     expect(delays).not.toContain(10 * 60 * 1000);
   });
+
+  it("still arms its abort timer at the normal 8 seconds when no timeoutMs override is given - every existing caller is unaffected by the new optional parameter", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    stubFetch(200, { ok: true });
+    await proxyToApi("/api/projects/x/execution-plan", { method: "PATCH", body: { baseRevision: 1, operations: [] } });
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(8_000);
+  });
+
+  it("real production bug, 2026-08-30: honors an explicit timeoutMs override for a real long-running call (mapping-suggestions/generate) instead of the normal 8 seconds", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    stubFetch(200, { suggestions: [], aiAvailable: true, sceneEvidenceAvailability: {} });
+    await proxyToApi("/api/projects/x/mapping-suggestions/generate", { method: "POST", timeoutMs: 180_000 });
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(180_000);
+    expect(delays).not.toContain(8_000);
+  });
 });
 
 describe("proxyMultipartUpload - upload-specific timeout (proven fix for real MP4 upload failures)", () => {

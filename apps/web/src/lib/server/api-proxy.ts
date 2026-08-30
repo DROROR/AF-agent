@@ -18,6 +18,13 @@ const ASSET_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 export interface ProxyOptions {
   method: "GET" | "PATCH" | "POST" | "PUT" | "DELETE";
   body?: unknown;
+  /**
+   * Overrides the default 8-second REQUEST_TIMEOUT_MS for this one call -
+   * see mapping-suggestions/generate/route.ts's own use of
+   * GENERATE_SUGGESTIONS_TIMEOUT_MS for a real example. Every existing
+   * caller that omits this keeps the normal 8-second timeout unchanged.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -44,7 +51,7 @@ export async function proxyToApi(path: string, options: ProxyOptions): Promise<N
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: options.method,

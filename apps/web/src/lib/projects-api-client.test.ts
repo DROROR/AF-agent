@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ASSET_UPLOAD_TIMEOUT_MS, createExecutionPlan, createProject, fetchProjectList, updateExecutionPlan, uploadAsset } from "./projects-api-client";
+import {
+  ASSET_UPLOAD_TIMEOUT_MS,
+  GENERATE_SUGGESTIONS_TIMEOUT_MS,
+  createExecutionPlan,
+  createProject,
+  fetchProjectList,
+  generateMappingSuggestions,
+  updateExecutionPlan,
+  uploadAsset
+} from "./projects-api-client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -176,6 +185,60 @@ describe("uploadAsset - upload-specific timeout (proven fix for real MP4 upload 
   it("a real non-timeout network failure during upload still uses the existing generic message (never misattributed as a timeout)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
     const result = await uploadAsset("11111111-1111-1111-1111-111111111111", videoFile());
+    expect(result).toEqual({
+      ok: false,
+      status: 0,
+      code: null,
+      message: "Could not reach the server. Please try again."
+    });
+  });
+});
+
+describe("generateMappingSuggestions - long-running-generation-specific timeout (proven fix for real 8-second aborts on a 45-scene project)", () => {
+  it("GENERATE_SUGGESTIONS_TIMEOUT_MS is a bounded 180 seconds, never infinite, and never reuses the 10-minute upload value", () => {
+    expect(GENERATE_SUGGESTIONS_TIMEOUT_MS).toBe(180_000);
+    expect(GENERATE_SUGGESTIONS_TIMEOUT_MS).not.toBe(ASSET_UPLOAD_TIMEOUT_MS);
+  });
+
+  it("arms its abort timer with the 180-second timeout, not the normal 8-second one", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    stubFetch(200, { suggestions: [], aiAvailable: true, sceneEvidenceAvailability: {} });
+    await generateMappingSuggestions("11111111-1111-1111-1111-111111111111");
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(GENERATE_SUGGESTIONS_TIMEOUT_MS);
+    expect(delays).not.toContain(8_000);
+  });
+
+  it("successful generation behavior is unchanged - a real 200 still returns the suggestions list", async () => {
+    stubFetch(200, { suggestions: [], aiAvailable: true, sceneEvidenceAvailability: {} });
+    const result = await generateMappingSuggestions("11111111-1111-1111-1111-111111111111");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.aiAvailable).toBe(true);
+    }
+  });
+
+  it("maps a real timeout (AbortError) to an actionable message, never the generic 'could not reach the server' one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => {
+        const error = new Error("This operation was aborted");
+        error.name = "AbortError";
+        return Promise.reject(error);
+      })
+    );
+    const result = await generateMappingSuggestions("11111111-1111-1111-1111-111111111111");
+    expect(result).toEqual({
+      ok: false,
+      status: 0,
+      code: null,
+      message: "Mapping suggestions took too long to generate. Please try again."
+    });
+  });
+
+  it("a real non-timeout network failure still uses the existing generic message (never misattributed as a timeout)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const result = await generateMappingSuggestions("11111111-1111-1111-1111-111111111111");
     expect(result).toEqual({
       ok: false,
       status: 0,
