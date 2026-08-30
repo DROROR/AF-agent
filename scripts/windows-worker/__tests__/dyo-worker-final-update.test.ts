@@ -103,13 +103,6 @@ describe("DYO-Worker-Final-Update.ps1 never registers a new worker identity", ()
     expect(block).toMatch(/exit 1/);
     expect(block).toMatch(/DYO-Worker-Setup\.bat/);
   });
-
-  it("STOPs with a clear message if the Scheduled Task does not exist, rather than silently creating one", () => {
-    const idx = updateScript.indexOf("if (-not $task)");
-    expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 300);
-    expect(block).toMatch(/exit 1/);
-  });
 });
 
 describe("DYO-Worker-Final-Update.ps1 never modifies .env, never touches ae-mcp/AE/aerender at all", () => {
@@ -408,6 +401,126 @@ describe("DYO-Worker-Final-Update.ps1 never leaves DYO Worker stopped just becau
     for (const call of startCalls) {
       expect(call).toMatch(/-ErrorAction SilentlyContinue/);
     }
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 auto-repairs a completely missing Scheduled Task (real client blocker, 2026-08-30)", () => {
+  it("existing healthy task: does not set $taskWasMissing and uses the normal refresh wording", () => {
+    const idx = updateScript.indexOf("$taskWasMissing = -not $task");
+    expect(idx).toBeGreaterThan(-1);
+    const sourceAppIdx = updateScript.indexOf('$sourceApp = Join-Path $PSScriptRoot "worker-app"', idx);
+    expect(sourceAppIdx).toBeGreaterThan(idx);
+    const block = updateScript.slice(idx, sourceAppIdx);
+    expect(block).toMatch(/if \(\$taskWasMissing\) \{/);
+    expect(block).toMatch(/Existing automatic-startup task found - its recovery settings will be refreshed below, same identity/);
+  });
+
+  it("task completely missing: no longer exits - proceeds into the rest of the script instead of stopping the whole update", () => {
+    const idx = updateScript.indexOf("$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue");
+    expect(idx).toBeGreaterThan(-1);
+    const sourceAppIdx = updateScript.indexOf('$sourceApp = Join-Path $PSScriptRoot "worker-app"', idx);
+    expect(sourceAppIdx).toBeGreaterThan(idx);
+    // Scoped to just the task-discovery block itself (up to the next,
+    // unrelated package-completeness checks) - the old behavior
+    // ("if (-not $task) { ... exit 1 }") must be gone from here.
+    const block = updateScript.slice(idx, sourceAppIdx);
+    expect(block).not.toMatch(/exit 1/);
+    expect(block).toMatch(/it will be recreated automatically below/);
+    expect(block).toMatch(/no repair package needed/);
+  });
+
+  it("does not require the client to run DYO-Worker-Repair.bat for a missing task anymore", () => {
+    const idx = updateScript.indexOf("$taskWasMissing = -not $task");
+    const sourceAppIdx = updateScript.indexOf('$sourceApp = Join-Path $PSScriptRoot "worker-app"', idx);
+    const block = updateScript.slice(idx, sourceAppIdx);
+    expect(block).not.toMatch(/DYO-Worker-Repair\.bat/);
+  });
+
+  it("credentials preserved: the worker-credentials.json presence check still runs before the task is even inspected - identity is decided first, independent of task state", () => {
+    const credIdx = updateScript.indexOf("$credentialsPath = Join-Path $WorkRoot");
+    const taskIdx = updateScript.indexOf("$task = Get-ScheduledTask -TaskName $TaskName");
+    expect(credIdx).toBeGreaterThan(-1);
+    expect(taskIdx).toBeGreaterThan(credIdx);
+  });
+
+  it("config preserved: the .env presence check also runs before the task is inspected, and .env is never written to as part of task recovery", () => {
+    const envIdx = updateScript.indexOf('$envPath = Join-Path $InstallDir ".env"');
+    const taskIdx = updateScript.indexOf("$task = Get-ScheduledTask -TaskName $TaskName");
+    expect(envIdx).toBeGreaterThan(-1);
+    expect(taskIdx).toBeGreaterThan(envIdx);
+    const recoveryIdx = updateScript.indexOf("function Set-DyoWorkerScheduledTaskRecovery");
+    const recoveryEndIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    const recoveryBlock = updateScript.slice(recoveryIdx, recoveryEndIdx);
+    expect(recoveryBlock).not.toMatch(/Set-Content|\.env/);
+  });
+
+  it("no registration call: recreating the missing task never calls registerWorker or references a registration secret", () => {
+    const idx = updateScript.indexOf("$taskWasMissing = -not $task");
+    const step2Idx = updateScript.indexOf("Step 2: stop DYO Worker safely", idx);
+    const block = updateScript.slice(idx, step2Idx);
+    expect(block).not.toMatch(/registerWorker/i);
+    expect(block).not.toMatch(/WORKER_REGISTRATION_SECRET/);
+    expect(block).not.toMatch(/Read-Host/);
+  });
+
+  it("reuses the SAME Set-DyoWorkerScheduledTaskRecovery/Register-DyoWorkerTaskDefinition implementation for the missing-task case - no divergent duplicate logic", () => {
+    const recoveryFnMatches = updateScript.match(/function Set-DyoWorkerScheduledTaskRecovery/g) ?? [];
+    const registerFnMatches = updateScript.match(/function Register-DyoWorkerTaskDefinition/g) ?? [];
+    const callSiteMatches = updateScript.match(/\$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery/g) ?? [];
+    expect(recoveryFnMatches.length).toBe(1);
+    expect(registerFnMatches.length).toBe(1);
+    // Exactly one call site handles BOTH the missing-task and the
+    // corrupted-task case - $taskWasMissing only changes messaging, never
+    // which function recreates the task.
+    expect(callSiteMatches.length).toBe(1);
+  });
+
+  it("recreated task has the correct recovery settings (RestartCount 999/1-minute interval, StartWhenAvailable, IgnoreNew, unlimited ExecutionTimeLimit, current-user AtLogon trigger)", () => {
+    const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 900);
+    expect(block).toMatch(/New-ScheduledTaskTrigger -AtLogOn -User "\$env:USERDOMAIN\\\$env:USERNAME"/);
+    expect(block).toMatch(/-RestartCount 999 -RestartInterval \(New-TimeSpan -Minutes 1\)/);
+    expect(block).toMatch(/-StartWhenAvailable/);
+    expect(block).toMatch(/-MultipleInstances IgnoreNew/);
+    expect(block).toMatch(/-ExecutionTimeLimit \(\[TimeSpan\]::Zero\)/);
+  });
+
+  it("fixes the real undefined-variable bug: $runWorkerBat is resolved from the just-updated install and verified to exist BEFORE Set-DyoWorkerScheduledTaskRecovery is ever called", () => {
+    const defIdx = updateScript.indexOf('$runWorkerBat = Join-Path $InstallDir "run-worker.bat"');
+    const callIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    expect(defIdx, "$runWorkerBat definition not found - Set-DyoWorkerScheduledTaskRecovery would be called with an undefined path").toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(defIdx);
+    const block = updateScript.slice(defIdx, defIdx + 400);
+    expect(block).toMatch(/if \(-not \(Test-Path \$runWorkerBat\)\)/);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("task gets started after update: Step 5's restart/PID verification is unconditional - it never checks $taskWasMissing, so a recreated task is started and verified exactly like a pre-existing one", () => {
+    const step5Idx = updateScript.indexOf("Step 5: restart DYO Worker");
+    expect(step5Idx).toBeGreaterThan(-1);
+    const step5Block = updateScript.slice(step5Idx);
+    expect(step5Block).not.toMatch(/taskWasMissing/);
+    expect(step5Block).toMatch(/Start-ScheduledTask -TaskName \$TaskName/);
+  });
+
+  it("failure path does not silently report success: if the missing task cannot be recreated after two attempts, it prints NEEDS ATTENTION with an actionable next step, and this happens BEFORE the unconditional restart attempt", () => {
+    const idx = updateScript.indexOf("} elseif ($taskWasMissing) {");
+    expect(idx, "missing-task failure branch not found").toBeGreaterThan(-1);
+    const step5Idx = updateScript.indexOf("Step 5: restart DYO Worker", idx);
+    const block = updateScript.slice(idx, step5Idx);
+    expect(block).toMatch(/NEEDS ATTENTION/);
+    expect(block).toMatch(/could not be recreated/);
+    expect(block).toMatch(/DYO-Worker-Repair\.bat/);
+    expect(block).not.toMatch(/exit 1/);
+    expect(block).not.toMatch(/\[OK\]/);
+  });
+
+  it("never leaves the Worker stopped just because a missing task could not be recreated - still falls through to the unconditional Step 5 restart attempt", () => {
+    const failIdx = updateScript.indexOf("} elseif ($taskWasMissing) {");
+    const step5Idx = updateScript.indexOf("Step 5: restart DYO Worker", failIdx);
+    expect(failIdx).toBeGreaterThan(-1);
+    expect(step5Idx).toBeGreaterThan(failIdx);
   });
 });
 

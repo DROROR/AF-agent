@@ -56,6 +56,12 @@ build). It adds:
   was originally set up a while ago, before this setting existed - and
   now safely recovers even if that existing task definition was itself
   damaged or very old, rather than stopping the update partway through.
+  If the "DYO Video Worker" automatic-startup task is missing entirely
+  (for example, removed by antivirus/cleanup software), this update now
+  recreates it automatically too - using your existing registration and
+  configuration, never asking for a registration code and never touching
+  your saved worker identity. You do not need to run a separate repair
+  package for this anymore.
 
 This update installs the CODE for all of the above. None of it runs on
 its own - every one of these only ever runs when DYO explicitly dispatches
@@ -100,3 +106,8 @@ rather than just assuming success. If any step could not be verified, it
 stops and tells you exactly which one, instead of printing "Update
 complete" anyway. Re-running the update is safe; contact DYO if the same
 step keeps failing.
+
+A missing automatic-startup task no longer stops the update - it is
+recreated automatically (see above). You will only be told to run
+DYO-Worker-Repair.bat if that automatic recreation itself could not be
+confirmed after two attempts, which this update will say explicitly.

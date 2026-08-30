@@ -39,17 +39,23 @@
   commit). DYO-Worker-MCP-Repair.ps1/DYO-Worker-Repair.ps1 remain separate,
   distinct repair tools this package does not replace.
 
-  This update also REFRESHES the existing "DYO Video Worker" Scheduled
-  Task's automatic-recovery settings (RestartCount/RestartInterval/
+  This update also REFRESHES the "DYO Video Worker" Scheduled Task's
+  automatic-recovery settings (RestartCount/RestartInterval/
   MultipleInstances/ExecutionTimeLimit/StartWhenAvailable), the same
   robust settings DYO-Worker-Setup.ps1/DYO-Worker-Repair.ps1 already apply
   on a fresh install/repair - a machine set up a while ago may be running
   an older, weaker version of these settings that this package now
-  corrects. This uses the SAME Action/Trigger/Principal (same run-worker.
-  bat path, same Windows user, same AtLogon trigger) - it never changes
-  WHO or WHAT the task runs as, only how reliably Windows recovers it
-  after an ordinary crash. WORKER_ID/WORKER_TOKEN are untouched (they live
-  in a separate, local credentials file, never in the task definition).
+  corrects. If the task itself is MISSING entirely (registration and
+  config are still valid, but the task was removed - by antivirus/cleanup
+  software or a manual mistake), this update RECREATES it automatically
+  using this computer's existing WORKER_ID/WORKER_TOKEN/config - it does
+  not ask the client to run a separate repair package for that. Either
+  way this uses the SAME Action/Trigger/Principal (same run-worker.bat
+  path, same Windows user, same AtLogon trigger) - it never changes WHO or
+  WHAT the task runs as, only how reliably Windows recovers it after an
+  ordinary crash, and it never re-registers. WORKER_ID/WORKER_TOKEN are
+  untouched (they live in a separate, local credentials file, never in
+  the task definition).
 
   This script itself never runs any of the above, never connects to ae-mcp,
   never opens or touches any After Effects project, and never invokes
@@ -226,12 +232,28 @@ if (-not (Test-Path $envPath)) {
 Write-CheckResult $true "Existing configuration found - it will not be changed"
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if (-not $task) {
-  Write-Host "[NEEDS ATTENTION] The `"$TaskName`" automatic-startup task was not found."
-  Write-Host "Please run DYO-Worker-Repair.bat (the full repair) instead, or contact DYO."
-  exit 1
+
+# A missing "DYO Video Worker" task (real client-machine case, 2026-08-30:
+# a valid registration and config existed, but the task itself was gone -
+# most likely removed by antivirus/cleanup software or a manual mistake,
+# not by anything this updater did) used to hard-STOP here and send the
+# client to a separate DYO-Worker-Repair.bat run. That is no longer
+# necessary: Set-DyoWorkerScheduledTaskRecovery below (Step 3b) already
+# knows how to create the task from scratch with the exact same hardened
+# recovery settings the full Repair installer uses, using this computer's
+# EXISTING registration/config - it never re-registers, never asks for a
+# code, and never touches the worker's saved identity/credentials.
+# $taskWasMissing only
+# changes the wording of the messages below; it does not change what gets
+# run - the same recovery function handles "missing" and "corrupted"
+# identically (Register-ScheduledTask with -Force creates a task that does
+# not exist yet just as well as it repairs one that does).
+$taskWasMissing = -not $task
+if ($taskWasMissing) {
+  Write-CheckResult $true "The `"$TaskName`" automatic-startup task was not found - it will be recreated automatically below, using this computer's existing registration and configuration (no repair package needed)"
+} else {
+  Write-CheckResult $true "Existing automatic-startup task found - its recovery settings will be refreshed below, same identity"
 }
-Write-CheckResult $true "Existing automatic-startup task found - its recovery settings will be refreshed below, same identity"
 
 $sourceApp = Join-Path $PSScriptRoot "worker-app"
 if (-not (Test-Path (Join-Path $sourceApp "dist\index.js"))) {
@@ -309,6 +331,18 @@ if ($npmExitCode -ne 0) {
   exit 1
 }
 Write-CheckResult $true "Runtime dependencies are up to date"
+
+# Points at the just-updated run-worker.bat (shipped inside worker-app/,
+# already copied into $InstallDir by Step 3 above) - same file
+# DYO-Worker-Setup.ps1/DYO-Worker-Repair.ps1 point the task at. Resolved
+# here, after the copy, so a fresh task recreated below (missing-task case)
+# points at the CURRENT install, not a stale or nonexistent path.
+$runWorkerBat = Join-Path $InstallDir "run-worker.bat"
+if (-not (Test-Path $runWorkerBat)) {
+  Write-Host "[NEEDS ATTENTION] run-worker.bat is missing from the installed files after the update."
+  Write-Host "Re-download the full DYO Worker FINAL update package and try again, or contact DYO."
+  exit 1
+}
 
 # ---- Step 3b: refresh the Scheduled Task's automatic-recovery settings ----
 #
@@ -405,8 +439,14 @@ function Set-DyoWorkerScheduledTaskRecovery {
 }
 
 $taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -RunWorkerBat $runWorkerBat -InstallDir $InstallDir
-if ($taskRefreshOk) {
+if ($taskRefreshOk -and $taskWasMissing) {
+  Write-CheckResult $true "Automatic-startup task recreated (same worker identity, hardened recovery settings - no repair package needed)"
+} elseif ($taskRefreshOk) {
   Write-CheckResult $true "Automatic-recovery settings refreshed (restarts automatically after a crash, no duplicate instances, same identity)"
+} elseif ($taskWasMissing) {
+  Write-Host "[NEEDS ATTENTION] The automatic-startup task was missing and could not be recreated after two attempts."
+  Write-Host "Still attempting to start DYO Worker directly below - if that also fails, please run"
+  Write-Host "DYO-Worker-Repair.bat (the full repair), or contact DYO."
 } else {
   Write-Host "[NEEDS ATTENTION] Could not confirm the Scheduled Task's recovery settings after two recovery attempts."
   Write-Host "Continuing anyway - this does not stop today's update. DYO Worker will still be"
