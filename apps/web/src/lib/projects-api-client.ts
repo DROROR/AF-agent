@@ -142,6 +142,29 @@ export async function fetchExecutionPlan(projectId: string): Promise<ApiResult<E
   return { ok: true, data: parsed.data };
 }
 
+/**
+ * POST /api/projects/:projectId/execution-plan - creates the initial
+ * DRAFT plan deterministically from the project's current manifest (no
+ * work-map/placeholder-quality precondition - see create-execution-
+ * plan.ts). 409s if a plan already exists for this project; the caller
+ * should use fetchExecutionPlan/GET instead in that case.
+ */
+export async function createExecutionPlan(projectId: string): Promise<ApiResult<ExecutionPlanResponse>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-plan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({})
+  });
+  if (status !== 201) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionPlanResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-plan contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 export async function fetchExecutionPlanRevisions(projectId: string): Promise<ApiResult<ListExecutionPlanRevisionsResponse>> {
   const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-plan/revisions`);
   if (status !== 200) {

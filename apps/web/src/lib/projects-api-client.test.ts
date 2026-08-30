@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createProject, fetchProjectList, updateExecutionPlan } from "./projects-api-client";
+import { createExecutionPlan, createProject, fetchProjectList, updateExecutionPlan } from "./projects-api-client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -44,6 +44,57 @@ describe("updateExecutionPlan", () => {
     stubFetch(409, { error: { code: "CONFLICT", message: "stale revision", requestId: "r1" } });
     const result = await updateExecutionPlan("project-1", 1, [{ type: "INCLUDE_SCENE", scenePlanId: "scene-1" }]);
     expect(result).toEqual({ ok: false, status: 409, code: "CONFLICT", message: "stale revision" });
+  });
+});
+
+describe("createExecutionPlan", () => {
+  function validPlanResponse() {
+    return {
+      plan: {
+        schemaVersion: "1.0",
+        id: "plan-1",
+        projectId: "project-1",
+        revision: 1,
+        status: "DRAFT",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        approvedAt: null,
+        approvedBy: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        scenePlans: [],
+        renderOutputs: { LANDSCAPE: null, REELS: null }
+      },
+      sceneTable: []
+    };
+  }
+
+  it("returns the real created (DRAFT) plan on a well-formed 201 response", async () => {
+    stubFetch(201, validPlanResponse());
+    const result = await createExecutionPlan("project-1");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.plan.status).toBe("DRAFT");
+      expect(result.data.plan.approvedAt).toBeNull();
+    }
+  });
+
+  it("never renders a malformed response as if it were a real created plan", async () => {
+    stubFetch(201, { nonsense: true });
+    const result = await createExecutionPlan("project-1");
+    expect(result.ok).toBe(false);
+  });
+
+  it("surfaces CONFLICT (a plan already exists) as a distinct, typed code", async () => {
+    stubFetch(409, { error: { code: "CONFLICT", message: "an execution plan already exists", requestId: "r1" } });
+    const result = await createExecutionPlan("project-1");
+    expect(result).toEqual({ ok: false, status: 409, code: "CONFLICT", message: "an execution plan already exists" });
+  });
+
+  it("degrades honestly (never throws) when the API is unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const result = await createExecutionPlan("project-1");
+    expect(result.ok).toBe(false);
   });
 });
 

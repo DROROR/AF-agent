@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ExecutionPlanEditOperation,
   ExecutionPlanResponse,
@@ -10,6 +10,7 @@ import type {
 } from "@dyo/schemas";
 import {
   approveExecutionPlan,
+  createExecutionPlan,
   fetchExecutionPlan,
   fetchProjectDetail,
   rejectExecutionPlan,
@@ -38,6 +39,14 @@ export interface ProjectWorkspaceState {
    */
   isStale: boolean;
   refetch: () => Promise<void>;
+  /**
+   * Creates the initial DRAFT plan for this project (POST .../execution-plan)
+   * - only meaningful while `plan` is null. Never applies Work Map rows and
+   * never approves the created plan; it only creates the same deterministic
+   * DRAFT create-execution-plan.ts always builds from the manifest, exactly
+   * as if the operator had called the API directly.
+   */
+  createPlan: () => Promise<MutationOutcome>;
   applyEdit: (operations: ExecutionPlanEditOperation[]) => Promise<MutationOutcome>;
   approve: () => Promise<MutationOutcome>;
   reject: () => Promise<MutationOutcome>;
@@ -99,6 +108,35 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     void load();
   }, [load]);
 
+  // A plain ref, not state: guards against a genuine double-click firing
+  // two real network requests before React has re-rendered the caller's
+  // own `disabled` state - checked and set synchronously, so a second
+  // call arriving before the first one's `await` even starts is refused
+  // immediately rather than racing on state that hasn't updated yet.
+  const isCreatingPlanRef = useRef(false);
+
+  const createPlan = useCallback(async (): Promise<MutationOutcome> => {
+    if (plan) {
+      return { ok: false, message: "This project already has an execution plan" };
+    }
+    if (isCreatingPlanRef.current) {
+      return { ok: false, message: "Already creating an execution plan" };
+    }
+    isCreatingPlanRef.current = true;
+    try {
+      const result = await createExecutionPlan(projectId);
+      if (result.ok) {
+        setPlan(result.data);
+        setError(null);
+        setIsStale(false);
+        return { ok: true };
+      }
+      return { ok: false, message: result.message };
+    } finally {
+      isCreatingPlanRef.current = false;
+    }
+  }, [plan, projectId]);
+
   const applyEdit = useCallback(
     async (operations: ExecutionPlanEditOperation[]): Promise<MutationOutcome> => {
       if (!plan) {
@@ -156,6 +194,7 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     error,
     isStale,
     refetch: load,
+    createPlan,
     applyEdit,
     approve: useCallback(() => runTransition(approveExecutionPlan), [runTransition]),
     reject: useCallback(() => runTransition(rejectExecutionPlan), [runTransition]),

@@ -20,3 +20,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ pr
   const body: unknown = await request.json();
   return proxyToApi(`/api/projects/${encodeURIComponent(projectId)}/execution-plan`, { method: "PATCH", body });
 }
+
+/**
+ * POST /api/projects/:projectId/execution-plan - creates the initial DRAFT
+ * plan deterministically from the project's current manifest. The real
+ * API is what enforces project ownership/existence and refuses (409) if a
+ * plan already exists - this route never re-implements those checks, it
+ * only forwards the request (and the real API's real status/body) verbatim,
+ * same as every other route in this file. The request body is always the
+ * schema's own empty object - createExecutionPlanRequestSchema takes no
+ * fields - so nothing from the browser is trusted here beyond the session
+ * cookie proxyToApi already forwards.
+ */
+export async function POST(_request: Request, { params }: { params: Promise<{ projectId: string }> }): Promise<Response> {
+  const { projectId } = await params;
+  return proxyToApi(`/api/projects/${encodeURIComponent(projectId)}/execution-plan`, { method: "POST", body: {} });
+}

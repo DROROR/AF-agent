@@ -431,7 +431,11 @@ export const en = {
     notFoundTitle: "Project not found",
     notFoundDescription: "This project does not exist, or you no longer have access to it.",
     noPlanTitle: "No execution plan yet",
-    noPlanDescription: "This project has not had an execution plan created for it yet.",
+    noPlanDescription:
+      "Create an execution plan from the inspected template before mapping assets, text, timing, and scene decisions.",
+    createPlanAction: "Create Execution Plan",
+    creatingPlan: "Creating…",
+    createPlanFailedTitle: "Could not create the execution plan",
     staleRevisionTitle: "This plan changed elsewhere",
     staleRevisionDescription: "Another edit was saved to a newer revision. Reload to see the latest plan before editing again.",
     reload: "Reload",
