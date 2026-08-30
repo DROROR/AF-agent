@@ -164,7 +164,7 @@ $TaskName = "DYO Video Worker"
 # package time) - verified below against the NEW process's own real
 # startup log line, not merely "some" commit marker, since this is meant
 # to be a specific, known-good final release.
-$ExpectedCommit = "2661b285990f0d85f45f9b69fe54388a52fcadfc"
+$ExpectedCommit = "d87f3b44b41a8a0910e2d8665050e4491421333f"
 
 # The worker's own fixed, real invocation signature - `node --env-file=.env
 # dist\index.js`, spawned by the supervisor (supervisor/spawn-worker-child.ts,
