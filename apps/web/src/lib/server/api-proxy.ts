@@ -5,6 +5,16 @@ import { SESSION_COOKIE_NAME } from "../auth/session-cookie";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 
+/**
+ * Real production bug, 2026-08-30: a real MP4 upload never reached
+ * dyo-api because this proxy's own AbortController aborted the request
+ * at the same 8-second REQUEST_TIMEOUT_MS used for ordinary JSON calls,
+ * well before a real video file could finish uploading. Used only by
+ * proxyMultipartUpload - proxyToApi and proxyBinaryDownload keep the
+ * normal 8-second timeout unchanged.
+ */
+const ASSET_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
 export interface ProxyOptions {
   method: "GET" | "PATCH" | "POST" | "PUT" | "DELETE";
   body?: unknown;
@@ -93,7 +103,7 @@ export async function proxyMultipartUpload(path: string, request: Request): Prom
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), ASSET_UPLOAD_TIMEOUT_MS);
   try {
     const body = await request.arrayBuffer();
     const response = await fetch(`${getApiBaseUrl()}${path}`, {

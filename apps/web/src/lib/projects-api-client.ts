@@ -45,14 +45,46 @@ import {
 
 const REQUEST_TIMEOUT_MS = 8_000;
 
+/**
+ * Real production bug, 2026-08-30: a real MP4 upload never reached
+ * dyo-api at all (confirmed via server-side log/DB/storage inspection -
+ * zero trace anywhere) because the SAME 8-second timeout meant for
+ * ordinary fast JSON calls was also applied to file uploads. A 2.5MB
+ * JPEG always finishes well inside 8 seconds; a real video file, on any
+ * real-world upload connection, routinely does not. This is a separate,
+ * bounded (never infinite) timeout used ONLY for uploadAsset - every
+ * other call in this file keeps the normal REQUEST_TIMEOUT_MS.
+ */
+export const ASSET_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
 export type ApiResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; code: string | null; message: string };
 
-/** status: 0 signals "request never reached the network" (timeout/offline) - distinct from any real HTTP status, and always handled as a failure by every caller below. Never throws - a network failure degrades to a typed result, same as fetchDashboardStatus's own safeFetch. */
-async function request(path: string, init?: RequestInit): Promise<{ status: number; json: unknown }> {
+/**
+ * status: 0 signals "request never reached the network" (timeout/offline)
+ * - distinct from any real HTTP status, and always handled as a failure
+ * by every caller below. Never throws - a network failure degrades to a
+ * typed result, same as fetchDashboardStatus's own safeFetch.
+ *
+ * `timeoutMs` defaults to the normal REQUEST_TIMEOUT_MS - only
+ * uploadAsset passes a longer, upload-specific value (ASSET_UPLOAD_
+ * TIMEOUT_MS); every other caller is unaffected. `timedOut` on the
+ * returned object is set only when THIS function's own AbortController
+ * is what ended the request (a real DOMException/Error named
+ * "AbortError") - never inferred for any other kind of network failure,
+ * so a caller that cares (uploadAsset) can show an honest, specific
+ * "timed out" message instead of the generic "could not reach the
+ * server" one, without this function guessing at a fetch failure it
+ * cannot actually distinguish (e.g. DNS failure, connection refused).
+ */
+async function request(
+  path: string,
+  init?: RequestInit,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
+): Promise<{ status: number; json: unknown; timedOut?: boolean }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(path, { cache: "no-store", signal: controller.signal, ...init });
     const text = await response.text();
@@ -65,8 +97,8 @@ async function request(path: string, init?: RequestInit): Promise<{ status: numb
       }
     }
     return { status: response.status, json };
-  } catch {
-    return { status: 0, json: null };
+  } catch (error) {
+    return { status: 0, json: null, timedOut: error instanceof Error && error.name === "AbortError" };
   } finally {
     clearTimeout(timeout);
   }
@@ -249,8 +281,15 @@ export async function uploadAsset(projectId: string, file: File, mediaKind?: Med
   if (mediaKind) {
     form.append("mediaKind", mediaKind);
   }
-  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/assets`, { method: "POST", body: form });
+  const { status, json, timedOut } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/assets`,
+    { method: "POST", body: form },
+    ASSET_UPLOAD_TIMEOUT_MS
+  );
   if (status !== 201) {
+    if (timedOut) {
+      return { ok: false, status, code: null, message: "Upload timed out before it completed. Please check your connection and try again." };
+    }
     return toErrorResult(status, json);
   }
   const parsed = assetResponseSchema.safeParse(json);

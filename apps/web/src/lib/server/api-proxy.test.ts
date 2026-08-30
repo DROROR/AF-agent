@@ -6,7 +6,7 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: getMockCookie })
 }));
 
-import { proxyToApi } from "./api-proxy";
+import { proxyBinaryDownload, proxyMultipartUpload, proxyToApi } from "./api-proxy";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -70,5 +70,82 @@ describe("proxyToApi", () => {
     expect(response.status).toBe(502);
     const body = await response.json();
     expect(body.error.code).toBe("UPSTREAM_UNAVAILABLE");
+  });
+
+  it("arms its abort timer at the normal 8 seconds, never the longer upload timeout", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    stubFetch(200, { ok: true });
+    await proxyToApi("/api/projects", { method: "GET" });
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(8_000);
+    expect(delays).not.toContain(10 * 60 * 1000);
+  });
+});
+
+describe("proxyMultipartUpload - upload-specific timeout (proven fix for real MP4 upload failures)", () => {
+  function multipartRequest(): Request {
+    return new Request("http://x/api/projects/x/assets", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=real-boundary" },
+      body: "real-file-bytes"
+    });
+  }
+
+  it("arms its abort timer at the longer (10 minute) upload timeout, not the normal 8 seconds", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    stubFetch(201, { asset: { id: "asset-1" } });
+    await proxyMultipartUpload("/api/projects/x/assets", multipartRequest());
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(10 * 60 * 1000);
+    expect(delays).not.toContain(8_000);
+  });
+
+  it("forwards the real multipart content-type (with boundary) and the raw body bytes verbatim - unchanged behavior", async () => {
+    const fetchMock = stubFetch(201, { asset: { id: "asset-1" } });
+    await proxyMultipartUpload("/api/projects/x/assets", multipartRequest());
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toMatchObject({ "content-type": "multipart/form-data; boundary=real-boundary" });
+  });
+
+  it("relays a real successful upload response verbatim - unchanged behavior", async () => {
+    stubFetch(201, { asset: { id: "asset-1", mediaKind: "VIDEO" } });
+    const response = await proxyMultipartUpload("/api/projects/x/assets", multipartRequest());
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.asset.mediaKind).toBe("VIDEO");
+  });
+
+  it("degrades to a 502 UPSTREAM_UNAVAILABLE, never an uncaught throw, when the upload times out or the API is unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("connection refused");
+      })
+    );
+    const response = await proxyMultipartUpload("/api/projects/x/assets", multipartRequest());
+    expect(response.status).toBe(502);
+    const body = await response.json();
+    expect(body.error.code).toBe("UPSTREAM_UNAVAILABLE");
+  });
+});
+
+describe("proxyBinaryDownload - unrelated to the upload timeout fix, unchanged", () => {
+  it("still arms its abort timer at the normal 8 seconds, never the upload timeout", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: (name: string) => (name === "content-type" ? "video/mp4" : null) },
+        arrayBuffer: async () => new ArrayBuffer(0),
+        text: async () => ""
+      }))
+    );
+    await proxyBinaryDownload("/api/projects/x/assets/y/file");
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(8_000);
+    expect(delays).not.toContain(10 * 60 * 1000);
   });
 });
