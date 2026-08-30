@@ -50,7 +50,8 @@ export interface WorkerEnv {
   heartbeatIntervalMs: number;
 }
 
-function defaultWorkRoot(): string {
+/** Exported so supervisor/index.ts can resolve the same WORK_ROOT default without needing the full worker env schema (DYO_API_URL etc. are not the supervisor's concern). */
+export function defaultWorkRoot(): string {
   return process.platform === "win32"
     ? DEFAULT_WORK_ROOT_WINDOWS
     : path.join(os.tmpdir(), "dyo-agent");

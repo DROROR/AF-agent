@@ -62,6 +62,21 @@ build). It adds:
   configuration, never asking for a registration code and never touching
   your saved worker identity. You do not need to run a separate repair
   package for this anymore.
+- REAL FIX for a confirmed production issue: DYO Worker used to run
+  directly under a visible console window. If that window was ever
+  closed, or Windows ended the session it was running in, the worker
+  could be killed with no restart at all - Windows' own recovery setting
+  above does not reliably cover that specific case, only an ordinary
+  crash. This update changes the automatic-startup task to run DYO Worker
+  through a small, hidden supervisor instead: there is no window to close
+  anymore, and the supervisor restarts the worker itself after any
+  ordinary/unexpected stop, independent of Windows' own recovery setting.
+  Same worker identity and configuration either way - this only changes
+  HOW reliably it recovers, never WHO or WHAT it is. A real Windows
+  log-off still makes After Effects/the worker unavailable (as it always
+  has - AE needs your desktop session) - the next time you log back in,
+  the supervisor and worker start automatically, same as before, with no
+  action needed from you.
 
 This update installs the CODE for all of the above. None of it runs on
 its own - every one of these only ever runs when DYO explicitly dispatches
@@ -111,3 +126,14 @@ A missing automatic-startup task no longer stops the update - it is
 recreated automatically (see above). You will only be told to run
 DYO-Worker-Repair.bat if that automatic recreation itself could not be
 confirmed after two attempts, which this update will say explicitly.
+
+OPTIONAL: PROVING SELF-HEALING WORKS ON YOUR MACHINE
+--------------------------------------------------------
+This package also includes DYO-Worker-Lifecycle-SelfTest.bat - an optional,
+real check you can run any time (only when no DYO job is currently in
+progress - it checks this itself and refuses to run destructively if one
+might be). It terminates only the current worker process (never After
+Effects, ae-mcp, or the Scheduled Task) and proves the hidden supervisor
+restarts it on its own, with a fresh heartbeat and the exact same worker
+identity - no reboot, no Repair.bat, no re-running this updater. Safe to
+skip; DYO Worker is already running normally either way.

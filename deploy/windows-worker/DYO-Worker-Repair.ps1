@@ -286,13 +286,21 @@ if ($existingTask) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-$runWorkerBat = Join-Path $InstallDir "run-worker.bat"
-if (-not (Test-Path $runWorkerBat)) {
-  Write-Host "[NEEDS ATTENTION] run-worker.bat is missing from the installed files."
+# Points at the HIDDEN supervisor launcher, never at run-worker.bat
+# directly - real production bug (2026-08-30): a visible, session-attached
+# console window running the worker directly let an external
+# console-control event (or simply the window being closed) kill it with
+# NTSTATUS 0xC000013A and no restart. See DYO-Worker-Setup.ps1's own
+# comment on this same change for the full explanation.
+$supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"
+if (-not (Test-Path $supervisorLauncher)) {
+  Write-Host "[NEEDS ATTENTION] run-worker-supervisor.ps1 is missing from the installed files."
   Write-Host "Re-download the full DYO Worker repair package and try again."
   exit 1
 }
-$action = New-ScheduledTaskAction -Execute $runWorkerBat -WorkingDirectory $InstallDir
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+  -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$supervisorLauncher`"" `
+  -WorkingDirectory $InstallDir
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet `

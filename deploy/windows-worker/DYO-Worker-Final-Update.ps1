@@ -50,12 +50,40 @@
   software or a manual mistake), this update RECREATES it automatically
   using this computer's existing WORKER_ID/WORKER_TOKEN/config - it does
   not ask the client to run a separate repair package for that. Either
-  way this uses the SAME Action/Trigger/Principal (same run-worker.bat
-  path, same Windows user, same AtLogon trigger) - it never changes WHO or
-  WHAT the task runs as, only how reliably Windows recovers it after an
-  ordinary crash, and it never re-registers. WORKER_ID/WORKER_TOKEN are
-  untouched (they live in a separate, local credentials file, never in
-  the task definition).
+  way this uses the SAME Action/Trigger/Principal (same Windows user,
+  same AtLogon trigger) - it never changes WHO the task runs as, only how
+  reliably Windows recovers it after an ordinary crash, and it never
+  re-registers. WORKER_ID/WORKER_TOKEN are untouched (they live in a
+  separate, local credentials file, never in the task definition).
+
+  REAL PRODUCTION INCIDENT (2026-08-30): a healthy worker - real ONLINE
+  heartbeats, a real job completed, AE/MCP both ONLINE - simply stopped,
+  with the Scheduled Task left at State "Ready" and LastTaskResult
+  0xC000013A (STATUS_CONTROL_C_EXIT: an unhandled Windows console-control
+  event - Ctrl+Break, the console window being closed, or the interactive
+  session ending). RestartCount/RestartInterval never fired, because that
+  policy does not reliably cover a Task-Scheduler/OS-initiated stop of a
+  session-attached console task, only the worker process failing on its
+  own. Root cause: the worker ran directly under a VISIBLE console window
+  in the user's own interactive session, with no handler for the signals
+  Windows actually delivers for those events (SIGBREAK/SIGHUP). Fixed by
+  changing the Task's Action to a small, HIDDEN supervisor (a
+  `powershell.exe -WindowStyle Hidden` launcher starting a Node
+  supervisor process - see run-worker-supervisor.ps1 and
+  apps/worker/src/supervisor/) that spawns the real worker as a hidden
+  (windowsHide:true, no console window at all - nothing to close) child
+  and restarts it automatically after any ordinary/unexpected exit, with
+  a short bounded backoff. This update refreshes the Action to point at
+  that supervisor instead of running the worker directly - Trigger/
+  Principal/Settings (AtLogOn, Interactive, RestartCount 999,
+  RestartInterval 1 minute, ExecutionTimeLimit unlimited, MultipleInstances
+  IgnoreNew) are UNCHANGED, so Task Scheduler's own recovery remains the
+  outer safety net protecting the supervisor itself. During this update,
+  state\maintenance.flag (under WorkRoot) is set before stopping DYO
+  Worker and cleared only once the refreshed task has been started again
+  - the supervisor checks this flag before every restart attempt, so an
+  ordinary ongoing crash-restart can never race this update's own file
+  replacement.
 
   This script itself never runs any of the above, never connects to ae-mcp,
   never opens or touches any After Effects project, and never invokes
@@ -131,9 +159,12 @@ $TaskName = "DYO Video Worker"
 # to be a specific, known-good final release.
 $ExpectedCommit = "ac3e5a8bd87d863cc625faf7a13d32235df4d168"
 
-# The worker's own fixed, real invocation signature (run-worker.bat:
-# `node --env-file=.env dist\index.js`) - deliberately NOT the install
-# directory (see DYO-Worker-CheckHealth-Update.ps1's own CONFIRMED BUG note).
+# The worker's own fixed, real invocation signature - `node --env-file=.env
+# dist\index.js`, spawned by the supervisor (supervisor/spawn-worker-child.ts)
+# exactly as run-worker.bat always ran it - deliberately NOT the install
+# directory (see DYO-Worker-CheckHealth-Update.ps1's own CONFIRMED BUG
+# note). Never matches the supervisor's own process (dist\supervisor\
+# index.js - a different path, no "dist\index.js" substring in it).
 $WorkerEntrypointPattern = 'dist\\index\.js'
 $WorkerEnvArgPattern = '--env-file=\.env'
 
@@ -152,6 +183,21 @@ $NewCapabilityFiles = @(
   "dist\execution\render\upload-render-artifact.js",
   "dist\workspace\working-copy.js"
 )
+
+# This exact update's own new files - the hidden supervisor (verified
+# present on disk both before AND after the copy, same convention as
+# $NewCapabilityFiles above).
+$NewSupervisorFiles = @(
+  "run-worker-supervisor.ps1",
+  "dist\supervisor\index.js"
+)
+
+# Set BEFORE stopping DYO Worker below, cleared only once the refreshed
+# task has been started again - the single authoritative "is maintenance
+# in progress" signal apps/worker/src/supervisor/maintenance-flag.ts
+# checks before every restart attempt. Never touches the worker's saved
+# identity/credentials - a plain marker file, nothing else.
+$MaintenanceFlagPath = Join-Path $WorkRoot "state\maintenance.flag"
 
 function Write-CheckResult {
   param([bool]$Ok, [string]$Label, [string]$Detail = "")
@@ -174,8 +220,10 @@ function Test-IsDyoWorkerCommandLine {
 
 # Real ground truth is "does a matching worker node.exe process actually
 # exist right now" - Task Scheduler only tracks the top-level process it
-# launched (run-worker.bat's cmd.exe host), not the node.exe child spawned
-# inside it, so the task's own reported State is never trusted alone.
+# launched (the hidden powershell.exe launcher, which starts a Node
+# supervisor, which spawns the actual worker as ITS OWN child), not the
+# worker process several levels down, so the task's own reported State is
+# never trusted alone.
 function Get-DyoWorkerProcesses {
   Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
     Where-Object { Test-IsDyoWorkerCommandLine -CommandLine $_.CommandLine }
@@ -261,18 +309,27 @@ if (-not (Test-Path (Join-Path $sourceApp "dist\index.js"))) {
   Write-Host "Re-download the full DYO Worker FINAL update package and try again."
   exit 1
 }
-foreach ($relativeFile in $NewCapabilityFiles) {
+foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles)) {
   if (-not (Test-Path (Join-Path $sourceApp $relativeFile))) {
     Write-Host "[NEEDS ATTENTION] Expected new program file is missing from this package: $relativeFile"
     Write-Host "Re-download the full DYO Worker FINAL update package and try again."
     exit 1
   }
 }
-Write-CheckResult $true "This package's own files are complete (execute-scene-edit/render/upload modules all present)"
+Write-CheckResult $true "This package's own files are complete (execute-scene-edit/render/upload/supervisor modules all present)"
 
 # ---- Step 2: stop DYO Worker safely, and PROVE it actually stopped ----
 Write-Host ""
 Write-Host "Stopping DYO Worker safely..."
+
+# Set BEFORE anything is stopped - see the maintenance-flag doc comment
+# above. Cleared only once the refreshed task has been started again
+# (Step 5) - if this update fails/exits partway through, a stale flag left
+# behind would wrongly stop the worker from ever self-healing again, so a
+# failure below is expected to be followed by contacting DYO to clear it
+# manually rather than assuming the worker will recover on its own.
+New-Item -ItemType Directory -Force -Path (Split-Path $MaintenanceFlagPath -Parent) | Out-Null
+Set-Content -Path $MaintenanceFlagPath -Value (Get-Date -Format "o") -Force
 
 $oldPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
 
@@ -311,14 +368,14 @@ Write-Host "Updating DYO Worker program files..."
 Copy-Item -Path (Join-Path $sourceApp "*") -Destination $InstallDir -Recurse -Force -Exclude ".env"
 Write-CheckResult $true "Updated DYO Worker program files"
 
-foreach ($relativeFile in $NewCapabilityFiles) {
+foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles)) {
   if (-not (Test-Path (Join-Path $InstallDir $relativeFile))) {
     Write-Host "[NEEDS ATTENTION] $relativeFile was not found on disk after the copy."
     Write-Host "The update did not complete correctly. Please re-run this update, or contact DYO."
     exit 1
   }
 }
-Write-CheckResult $true "Confirmed new render/execute-scene-edit/render-upload program files exist on disk"
+Write-CheckResult $true "Confirmed new render/execute-scene-edit/render-upload/supervisor program files exist on disk"
 
 Write-Host "Checking runtime dependencies (only needs internet access if something is missing)..."
 Push-Location $InstallDir
@@ -332,14 +389,16 @@ if ($npmExitCode -ne 0) {
 }
 Write-CheckResult $true "Runtime dependencies are up to date"
 
-# Points at the just-updated run-worker.bat (shipped inside worker-app/,
-# already copied into $InstallDir by Step 3 above) - same file
-# DYO-Worker-Setup.ps1/DYO-Worker-Repair.ps1 point the task at. Resolved
+# Points at the just-updated run-worker-supervisor.ps1 (shipped inside
+# worker-app/, already copied into $InstallDir by Step 3 above) - the same
+# HIDDEN supervisor launcher DYO-Worker-Setup.ps1/DYO-Worker-Repair.ps1
+# point the task at (never run-worker.bat directly - see this script's own
+# header comment on the real 2026-08-30 incident this fixes). Resolved
 # here, after the copy, so a fresh task recreated below (missing-task case)
 # points at the CURRENT install, not a stale or nonexistent path.
-$runWorkerBat = Join-Path $InstallDir "run-worker.bat"
-if (-not (Test-Path $runWorkerBat)) {
-  Write-Host "[NEEDS ATTENTION] run-worker.bat is missing from the installed files after the update."
+$supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"
+if (-not (Test-Path $supervisorLauncher)) {
+  Write-Host "[NEEDS ATTENTION] run-worker-supervisor.ps1 is missing from the installed files after the update."
   Write-Host "Re-download the full DYO Worker FINAL update package and try again, or contact DYO."
   exit 1
 }
@@ -386,8 +445,14 @@ function Test-DyoWorkerTaskActionHealthy {
 }
 
 function Register-DyoWorkerTaskDefinition {
-  param([string]$TaskName, [string]$RunWorkerBat, [string]$InstallDir, [switch]$Force)
-  $taskAction = New-ScheduledTaskAction -Execute $RunWorkerBat -WorkingDirectory $InstallDir
+  param([string]$TaskName, [string]$SupervisorLauncher, [string]$InstallDir, [switch]$Force)
+  # powershell.exe -WindowStyle Hidden, never run-worker.bat directly - see
+  # this script's own header comment on the real 2026-08-30 incident this
+  # fixes (a visible, session-attached console let an external
+  # console-control event kill the worker with no restart).
+  $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$SupervisorLauncher`"" `
+    -WorkingDirectory $InstallDir
   $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
   $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
   $taskSettings = New-ScheduledTaskSettingsSet `
@@ -414,14 +479,14 @@ function Set-DyoWorkerScheduledTaskRecovery {
   caller treats as "log a warning, continue anyway" (see this function's
   own call site's doc comment for why that is the correct behavior here).
   #>
-  param([string]$TaskName, [string]$RunWorkerBat, [string]$InstallDir)
+  param([string]$TaskName, [string]$SupervisorLauncher, [string]$InstallDir)
 
   # Attempt 1: -Force overwrites an existing task (including a legacy one
   # with a corrupted/null Execute path) in one atomic call - avoids ever
   # calling Unregister-ScheduledTask against a possibly-malformed legacy
   # task definition at all.
   try {
-    Register-DyoWorkerTaskDefinition -TaskName $TaskName -RunWorkerBat $RunWorkerBat -InstallDir $InstallDir -Force
+    Register-DyoWorkerTaskDefinition -TaskName $TaskName -SupervisorLauncher $SupervisorLauncher -InstallDir $InstallDir -Force
     if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
   } catch {}
 
@@ -431,14 +496,14 @@ function Set-DyoWorkerScheduledTaskRecovery {
   # recovery sequence DYO-Worker-Repair.ps1 already uses successfully.
   try {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    Register-DyoWorkerTaskDefinition -TaskName $TaskName -RunWorkerBat $RunWorkerBat -InstallDir $InstallDir
+    Register-DyoWorkerTaskDefinition -TaskName $TaskName -SupervisorLauncher $SupervisorLauncher -InstallDir $InstallDir
     if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
   } catch {}
 
   return $false
 }
 
-$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -RunWorkerBat $runWorkerBat -InstallDir $InstallDir
+$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -SupervisorLauncher $supervisorLauncher -InstallDir $InstallDir
 if ($taskRefreshOk -and $taskWasMissing) {
   Write-CheckResult $true "Automatic-startup task recreated (same worker identity, hardened recovery settings - no repair package needed)"
 } elseif ($taskRefreshOk) {
@@ -477,6 +542,12 @@ function Get-FreshLogContent {
 # ---- Step 5: restart DYO Worker, and PROVE the update actually took effect ----
 Write-Host ""
 Write-Host "Restarting DYO Worker with the updated program files..."
+
+# Cleared BEFORE starting the task - a freshly-started supervisor checks
+# this flag before its very first spawn attempt, so it must already be
+# gone by the time Start-ScheduledTask below runs, or the new supervisor
+# would wrongly refuse to start the worker at all.
+Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
 
 # -ErrorAction SilentlyContinue: if the Scheduled Task refresh above could
 # not be confirmed AND somehow left no task registered at all (the one

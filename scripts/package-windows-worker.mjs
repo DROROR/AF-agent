@@ -100,11 +100,24 @@ cpSync(
   path.join(WORKER_APP_DIR, "dist", "format-status.js")
 );
 
-// Logging wrapper the Scheduled Task actually invokes - see its own header
+// Manual-troubleshooting wrapper (double-click to run in the foreground) -
+// kept for that purpose, but no longer what the Scheduled Task itself
+// invokes (see run-worker-supervisor.ps1 below) - see its own header
 // comment for why this is a plain .bat rather than an inline cmd.exe /c string.
 cpSync(
   path.join(REPO_ROOT, "scripts", "windows-worker-run-wrapper.bat"),
   path.join(WORKER_APP_DIR, "run-worker.bat")
+);
+
+// The hidden supervisor launcher the Scheduled Task's Action now actually
+// invokes (via `powershell.exe -WindowStyle Hidden -File
+// run-worker-supervisor.ps1`) - see its own header comment. Fixes the real
+// production bug where a visible, session-attached console window let an
+// external console-control event (or the window simply being closed) kill
+// the worker with no restart.
+cpSync(
+  path.join(REPO_ROOT, "scripts", "windows-worker-supervisor-launcher.ps1"),
+  path.join(WORKER_APP_DIR, "run-worker-supervisor.ps1")
 );
 
 // Node-level env validator DYO-Worker-Setup.ps1 invokes via the real

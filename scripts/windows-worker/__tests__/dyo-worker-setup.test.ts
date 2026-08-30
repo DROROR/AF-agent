@@ -241,9 +241,11 @@ describe("first registration, manual start, and scheduled-task auto-start all ta
     expect(setupScript).toMatch(/-WorkingDirectory \$InstallDir/);
   });
 
-  it("the scheduled task action points at run-worker.bat inside $InstallDir with -WorkingDirectory $InstallDir", () => {
-    expect(setupScript).toMatch(/\$runWorkerBat = Join-Path \$InstallDir "run-worker\.bat"/);
-    expect(setupScript).toMatch(/New-ScheduledTaskAction -Execute \$runWorkerBat -WorkingDirectory \$InstallDir/);
+  it("the scheduled task action points at the HIDDEN supervisor launcher (never run-worker.bat directly) inside $InstallDir with -WorkingDirectory $InstallDir", () => {
+    expect(setupScript).toMatch(/\$supervisorLauncher = Join-Path \$InstallDir "run-worker-supervisor\.ps1"/);
+    expect(setupScript).toMatch(/New-ScheduledTaskAction -Execute "powershell\.exe"/);
+    expect(setupScript).toMatch(/-WindowStyle Hidden -File `"\$supervisorLauncher`""/);
+    expect(setupScript).toMatch(/-WorkingDirectory \$InstallDir/);
   });
 
   it("DYO-Worker-Start.bat hardcodes the identical install directory", () => {

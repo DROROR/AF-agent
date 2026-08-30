@@ -142,9 +142,11 @@ describe("DYO-Worker-Repair.ps1 re-registers only the existing Scheduled Task, b
     expect(block).toMatch(/Unregister-ScheduledTask -TaskName \$TaskName -Confirm:\$false/);
   });
 
-  it("points the re-registered task at the just-updated run-worker.bat inside $InstallDir", () => {
-    expect(repairScript).toMatch(/\$runWorkerBat = Join-Path \$InstallDir "run-worker\.bat"/);
-    expect(repairScript).toMatch(/New-ScheduledTaskAction -Execute \$runWorkerBat -WorkingDirectory \$InstallDir/);
+  it("points the re-registered task at the HIDDEN supervisor launcher (never run-worker.bat directly) inside $InstallDir", () => {
+    expect(repairScript).toMatch(/\$supervisorLauncher = Join-Path \$InstallDir "run-worker-supervisor\.ps1"/);
+    expect(repairScript).toMatch(/New-ScheduledTaskAction -Execute "powershell\.exe"/);
+    expect(repairScript).toMatch(/-WindowStyle Hidden -File `"\$supervisorLauncher`""/);
+    expect(repairScript).toMatch(/-WorkingDirectory \$InstallDir/);
   });
 
   it("keeps the same no-stored-password AtLogOn/Interactive trigger and restart-on-failure settings as Setup.ps1", () => {

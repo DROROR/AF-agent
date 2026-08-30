@@ -152,16 +152,16 @@ describe("DYO-Worker-Final-Update.ps1 verifies every new capability file, both b
     }
   });
 
-  it("checks $NewCapabilityFiles exist in the source package BEFORE stopping/copying anything", () => {
-    const sourceCheckIdx = updateScript.indexOf("foreach ($relativeFile in $NewCapabilityFiles)");
+  it("checks $NewCapabilityFiles (and the new supervisor files) exist in the source package BEFORE stopping/copying anything", () => {
+    const sourceCheckIdx = updateScript.indexOf("foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles))");
     const stopIdx = updateScript.indexOf("Stopping DYO Worker safely");
     expect(sourceCheckIdx).toBeGreaterThan(-1);
     expect(stopIdx).toBeGreaterThan(sourceCheckIdx);
   });
 
-  it("re-checks $NewCapabilityFiles exist on disk AFTER the copy too, not just in the source package", () => {
+  it("re-checks $NewCapabilityFiles (and the new supervisor files) exist on disk AFTER the copy too, not just in the source package", () => {
     const copyIdx = updateScript.indexOf("Copy-Item -Path (Join-Path $sourceApp");
-    const secondCheckIdx = updateScript.indexOf("foreach ($relativeFile in $NewCapabilityFiles)", copyIdx);
+    const secondCheckIdx = updateScript.indexOf("foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles))", copyIdx);
     expect(copyIdx).toBeGreaterThan(-1);
     expect(secondCheckIdx).toBeGreaterThan(copyIdx);
     const block = updateScript.slice(secondCheckIdx, secondCheckIdx + 400);
@@ -301,13 +301,22 @@ describe("DYO-Worker-Final-Update.ps1 refreshes the Scheduled Task's recovery se
     expect(updateScript).toMatch(/Start-ScheduledTask -TaskName \$TaskName/);
   });
 
-  it("re-registers with the SAME identity - same run-worker.bat path, same Windows user, same AtLogon trigger", () => {
+  it("re-registers with the SAME identity - same hidden supervisor launcher path, same Windows user, same AtLogon trigger", () => {
     const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
     expect(idx, "task definition helper not found").toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 900);
-    expect(block).toMatch(/New-ScheduledTaskAction -Execute \$RunWorkerBat -WorkingDirectory \$InstallDir/);
+    const block = updateScript.slice(idx, idx + 1200);
+    expect(block).toMatch(/New-ScheduledTaskAction -Execute "powershell\.exe"/);
+    expect(block).toMatch(/-WindowStyle Hidden -File `"\$SupervisorLauncher`""/);
+    expect(block).toMatch(/-WorkingDirectory \$InstallDir/);
     expect(block).toMatch(/New-ScheduledTaskTrigger -AtLogOn -User "\$env:USERDOMAIN\\\$env:USERNAME"/);
     expect(block).toMatch(/New-ScheduledTaskPrincipal -UserId "\$env:USERDOMAIN\\\$env:USERNAME" -LogonType Interactive -RunLevel Limited/);
+  });
+
+  it("never runs run-worker.bat directly as the task's own Action - only via the hidden powershell.exe + supervisor launcher chain", () => {
+    const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
+    const block = updateScript.slice(idx, idx + 1200);
+    expect(block).not.toMatch(/-Execute \$RunWorkerBat/);
+    expect(block).not.toMatch(/-Execute \$runWorkerBat/);
   });
 
   it("applies the same robust auto-recovery settings a fresh Setup/Repair install gets", () => {
@@ -478,7 +487,7 @@ describe("DYO-Worker-Final-Update.ps1 auto-repairs a completely missing Schedule
   it("recreated task has the correct recovery settings (RestartCount 999/1-minute interval, StartWhenAvailable, IgnoreNew, unlimited ExecutionTimeLimit, current-user AtLogon trigger)", () => {
     const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
     expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 900);
+    const block = updateScript.slice(idx, idx + 1200);
     expect(block).toMatch(/New-ScheduledTaskTrigger -AtLogOn -User "\$env:USERDOMAIN\\\$env:USERNAME"/);
     expect(block).toMatch(/-RestartCount 999 -RestartInterval \(New-TimeSpan -Minutes 1\)/);
     expect(block).toMatch(/-StartWhenAvailable/);
@@ -486,13 +495,13 @@ describe("DYO-Worker-Final-Update.ps1 auto-repairs a completely missing Schedule
     expect(block).toMatch(/-ExecutionTimeLimit \(\[TimeSpan\]::Zero\)/);
   });
 
-  it("fixes the real undefined-variable bug: $runWorkerBat is resolved from the just-updated install and verified to exist BEFORE Set-DyoWorkerScheduledTaskRecovery is ever called", () => {
-    const defIdx = updateScript.indexOf('$runWorkerBat = Join-Path $InstallDir "run-worker.bat"');
+  it("fixes the real undefined-variable bug (now against the supervisor launcher): $supervisorLauncher is resolved from the just-updated install and verified to exist BEFORE Set-DyoWorkerScheduledTaskRecovery is ever called", () => {
+    const defIdx = updateScript.indexOf('$supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"');
     const callIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
-    expect(defIdx, "$runWorkerBat definition not found - Set-DyoWorkerScheduledTaskRecovery would be called with an undefined path").toBeGreaterThan(-1);
+    expect(defIdx, "$supervisorLauncher definition not found - Set-DyoWorkerScheduledTaskRecovery would be called with an undefined path").toBeGreaterThan(-1);
     expect(callIdx).toBeGreaterThan(defIdx);
     const block = updateScript.slice(defIdx, defIdx + 400);
-    expect(block).toMatch(/if \(-not \(Test-Path \$runWorkerBat\)\)/);
+    expect(block).toMatch(/if \(-not \(Test-Path \$supervisorLauncher\)\)/);
     expect(block).toMatch(/exit 1/);
   });
 
@@ -528,7 +537,7 @@ describe("DYO-Worker-Final-Update.ps1 protects against duplicate worker instance
   it("the refreshed task's own Settings block sets MultipleInstances IgnoreNew - Task Scheduler itself refuses to start a second run while one is active", () => {
     const idx = updateScript.indexOf("function Register-DyoWorkerTaskDefinition");
     expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 900);
+    const block = updateScript.slice(idx, idx + 1200);
     expect(block).toMatch(/-MultipleInstances IgnoreNew/);
   });
 
@@ -553,5 +562,58 @@ describe("DYO-Worker-Final-Update.bat is a thin, no-prompt launcher", () => {
   it("invokes DYO-Worker-Final-Update.ps1 without asking for any input itself", () => {
     expect(updateBat).toMatch(/DYO-Worker-Final-Update\.ps1/);
     expect(updateBat).not.toMatch(/set \/p/i);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 sets/clears the maintenance flag so the supervisor never fights this update (real fix for the 0xC000013A self-healing gap)", () => {
+  it("defines $MaintenanceFlagPath under WorkRoot\\state, the exact path apps/worker/src/supervisor/maintenance-flag.ts checks", () => {
+    expect(updateScript).toMatch(/\$MaintenanceFlagPath = Join-Path \$WorkRoot "state\\maintenance\.flag"/);
+  });
+
+  it("sets the flag BEFORE the actual Stop-ScheduledTask call in Step 2 - never after", () => {
+    const setIdx = updateScript.indexOf("Set-Content -Path $MaintenanceFlagPath");
+    const stopCallIdx = updateScript.indexOf('Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue\n}');
+    expect(setIdx).toBeGreaterThan(-1);
+    expect(stopCallIdx).toBeGreaterThan(setIdx);
+  });
+
+  it("clears the flag BEFORE Start-ScheduledTask in Step 5 - never after, so the freshly-started supervisor does not see a stale maintenance state", () => {
+    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue");
+    const startIdx = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue");
+    expect(clearIdx).toBeGreaterThan(-1);
+    expect(startIdx).toBeGreaterThan(clearIdx);
+  });
+
+  it("the set and clear are on opposite sides of the entire stop/copy/refresh sequence - maintenance is active for the whole risky window, not just part of it", () => {
+    const setIdx = updateScript.indexOf("Set-Content -Path $MaintenanceFlagPath");
+    const copyIdx = updateScript.indexOf("Copy-Item -Path (Join-Path $sourceApp");
+    const refreshIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue");
+    expect(setIdx).toBeGreaterThan(-1);
+    expect(copyIdx).toBeGreaterThan(setIdx);
+    expect(refreshIdx).toBeGreaterThan(copyIdx);
+    expect(clearIdx).toBeGreaterThan(refreshIdx);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 replaces the visible run-worker.bat action with the hidden supervisor launcher (real fix for NTSTATUS 0xC000013A)", () => {
+  it("resolves $supervisorLauncher from the just-updated install and verifies it exists before ever calling Set-DyoWorkerScheduledTaskRecovery", () => {
+    const defIdx = updateScript.indexOf('$supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"');
+    const callIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    expect(defIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(defIdx);
+  });
+
+  it("lists run-worker-supervisor.ps1 and dist/supervisor/index.js in $NewSupervisorFiles, verified both in the source package and after the copy", () => {
+    const idx = updateScript.indexOf("$NewSupervisorFiles = @(");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, updateScript.indexOf(")", idx));
+    expect(block).toContain("run-worker-supervisor.ps1");
+    expect(block).toContain("dist\\supervisor\\index.js");
+  });
+
+  it("Register-DyoWorkerTaskDefinition never falls back to running run-worker.bat directly as the task's own Action", () => {
+    expect(updateScript).not.toMatch(/-Execute \$supervisorLauncher\b/);
+    expect(updateScript).not.toMatch(/-Execute \$runWorkerBat\b/);
   });
 });

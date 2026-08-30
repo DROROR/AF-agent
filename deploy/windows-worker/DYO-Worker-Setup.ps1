@@ -476,19 +476,30 @@ if ($existingTask) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-# Points at run-worker.bat (shipped inside worker-app/, copied into
-# InstallDir above) rather than building an inline cmd.exe /c string here -
-# a plain .bat file avoids cmd.exe's fragile nested-quote parsing entirely,
-# and can be tested by double-clicking it directly. It handles its own
-# logging/rotation into InstallDir\logs (it `cd`s to its own directory
-# first, so this works regardless of what -WorkingDirectory below resolves to).
-$runWorkerBat = Join-Path $InstallDir "run-worker.bat"
-if (-not (Test-Path $runWorkerBat)) {
-  Write-Host "[NEEDS ATTENTION] run-worker.bat is missing from the installed files."
+# Points at run-worker-supervisor.ps1 (shipped inside worker-app/, copied
+# into InstallDir above) via a HIDDEN powershell.exe, never at run-worker.bat
+# directly - real production bug (2026-08-30): a visible, session-attached
+# console window running the worker directly meant an external
+# console-control event (Ctrl+Break, the interactive session ending, or
+# simply the window being closed) could kill the worker with NTSTATUS
+# 0xC000013A and no restart, because Task Scheduler's own
+# RestartCount/RestartInterval below does not reliably cover that class of
+# termination. run-worker-supervisor.ps1 starts a small Node supervisor
+# (apps/worker/src/supervisor/index.ts) that spawns the actual worker as a
+# hidden (windowsHide:true) child with no console window of its own to
+# close, and restarts it automatically after any ordinary/unexpected exit -
+# see docs/ for the full incident and fix. -WindowStyle Hidden suppresses
+# this launcher's own window; CreateNoWindow inside the launcher/supervisor
+# additionally guarantees the worker child never gets one either.
+$supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"
+if (-not (Test-Path $supervisorLauncher)) {
+  Write-Host "[NEEDS ATTENTION] run-worker-supervisor.ps1 is missing from the installed files."
   Write-Host "Re-download the full DYO Worker setup package and try again."
   exit 1
 }
-$action = New-ScheduledTaskAction -Execute $runWorkerBat -WorkingDirectory $InstallDir
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+  -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$supervisorLauncher`"" `
+  -WorkingDirectory $InstallDir
 
 # AtLogOn for the current user only (not all users on this machine) - an
 # "Interactive" logon-type task like this runs using the user's own

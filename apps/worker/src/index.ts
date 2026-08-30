@@ -26,6 +26,7 @@ import { HeartbeatLoop, type HeartbeatLoopEvent } from "./runtime/heartbeat-loop
 import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
 import { installProcessSafetyNet } from "./runtime/process-safety-net.js";
+import { installSignalHandlers } from "./runtime/signal-handlers.js";
 import { buildHeartbeatPayload } from "./application/build-heartbeat-payload.js";
 import { ensureWorkRoot, resolveWorkRoot } from "./workspace/work-root.js";
 
@@ -274,23 +275,12 @@ async function main(): Promise<void> {
     }
   });
 
-  let shuttingDown = false;
-  const handleSignal = (signal: NodeJS.Signals): void => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
-    workerLogger.info({ signal }, "received shutdown signal");
-    void shutdownGracefully(loop, workerLogger).then(
-      () => process.exit(0),
-      (error: unknown) => {
-        workerLogger.error({ error }, "error during shutdown");
-        process.exit(1);
-      }
-    );
-  };
-  process.once("SIGINT", handleSignal);
-  process.once("SIGTERM", handleSignal);
+  installSignalHandlers({
+    logger: workerLogger,
+    shutdownGracefully: () => shutdownGracefully(loop, workerLogger),
+    exit: process.exit.bind(process),
+    on: (event, listener) => process.once(event, listener)
+  });
 
   loop.start();
 }
