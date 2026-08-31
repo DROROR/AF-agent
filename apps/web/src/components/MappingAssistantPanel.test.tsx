@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MappingAssistantPanel } from "./MappingAssistantPanel";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
@@ -139,6 +139,131 @@ describe("MappingAssistantPanel - Improve AI accuracy", () => {
     renderPanel();
     await screen.findByText(/Evidence inspected/);
     expect(screen.queryByRole("button", { name: "Improve AI accuracy" })).toBeNull();
+  });
+});
+
+/**
+ * Client-handoff phase, section I ("Mapping Assistant — bulk review UX") -
+ * a client must not be forced to click Accept 80-100 times. "Safe" is
+ * exactly isSafeToBulkAccept's own predicate (safe-bulk-accept.ts) - never
+ * re-implemented ad hoc here.
+ */
+describe("MappingAssistantPanel - bulk accept", () => {
+  it("shows real safe/needs-review counts, and a checkbox only on the safe suggestion", async () => {
+    stubWorkspace({
+      status: 200,
+      body: {
+        suggestions: [
+          mappingSuggestionFixture({ id: "safe-1", suggestedAssetId: "asset-1", confidence: 1, requiresHumanReview: false }),
+          mappingSuggestionFixture({ id: "needs-review-1", mappingId: "mapping-1", suggestedAssetId: null, suggestedText: null, confidence: 0.3, unresolvedReason: "Needs review - not enough evidence for a confident automatic suggestion" })
+        ],
+        aiAvailable: false,
+        sceneEvidenceAvailability: {}
+      }
+    });
+    renderPanel();
+    await screen.findByText("1 safe suggestion ready");
+    screen.getByText("1 needs review");
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+  });
+
+  it('"Accept All Safe Suggestions" opens a confirmation naming the real count before anything is accepted', async () => {
+    stubWorkspace({
+      status: 200,
+      body: { suggestions: [mappingSuggestionFixture({ suggestedAssetId: "asset-1" })], aiAvailable: false, sceneEvidenceAvailability: {} }
+    });
+    renderPanel();
+    await screen.findByText("1 safe suggestion ready");
+    fireEvent.click(screen.getByRole("button", { name: "Accept All Safe Suggestions" }));
+
+    const dialog = await screen.findByRole("dialog");
+    within(dialog).getByText("You're about to accept 1 safe suggestion. Suggestions needing review are never included automatically.");
+    within(dialog).getByText("Scene 01");
+  });
+
+  it("cancel closes the confirmation without ever calling accept-batch", async () => {
+    stubWorkspace({
+      status: 200,
+      body: { suggestions: [mappingSuggestionFixture({ suggestedAssetId: "asset-1" })], aiAvailable: false, sceneEvidenceAvailability: {} }
+    });
+    renderPanel();
+    await screen.findByText("1 safe suggestion ready");
+    fireEvent.click(screen.getByRole("button", { name: "Accept All Safe Suggestions" }));
+    await screen.findByText("Accept these suggestions?");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Accept these suggestions?")).toBeNull();
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some((call: unknown[]) => String(call[0]).includes("accept-batch"))).toBe(false);
+  });
+
+  it("confirming accepts exactly the safe suggestion ids via the real accept-batch endpoint, and clears the list on success", async () => {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/mapping-suggestions`]: [
+        { status: 200, body: { suggestions: [mappingSuggestionFixture({ id: "safe-1", suggestedAssetId: "asset-1" })], aiAvailable: false, sceneEvidenceAvailability: {} } },
+        { status: 200, body: { suggestions: [mappingSuggestionFixture({ id: "safe-1", suggestedAssetId: "asset-1", status: "ACCEPTED" })], aiAvailable: false, sceneEvidenceAvailability: {} } }
+      ],
+      [`/api/projects/${PROJECT_ID}/mapping-suggestions/accept-batch`]: {
+        status: 200,
+        body: { suggestions: [mappingSuggestionFixture({ id: "safe-1", suggestedAssetId: "asset-1", status: "ACCEPTED" })], executionPlan: { plan: planFixture({ revision: 2 }), sceneTable: [] } }
+      },
+      [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+    renderPanel();
+    await screen.findByText("1 safe suggestion ready");
+    fireEvent.click(screen.getByRole("button", { name: "Accept All Safe Suggestions" }));
+    await screen.findByText("Accept these suggestions?");
+    fireEvent.click(screen.getByRole("button", { name: "Accept Suggestions" }));
+
+    await waitFor(() => expect(screen.getByText("No suggestions yet")).toBeTruthy());
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const call = fetchMock.mock.calls.find((c: unknown[]) => String(c[0]).includes("accept-batch"));
+    const [, init] = call as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { suggestionIds: string[] };
+    expect(body.suggestionIds).toEqual(["safe-1"]);
+  });
+
+  it('"Accept All in This Scene" only appears when that scene has a real safe suggestion, and scopes the confirmation to that scene alone', async () => {
+    const scenes = [
+      sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture({ id: "mapping-1" })] }),
+      sceneFixture({ id: "scene-2", manifestCompositionId: "comp-2", compositionName: "Scene 02", mappings: [mappingFixture({ id: "mapping-2" })] })
+    ];
+    stubWorkspace(
+      {
+        status: 200,
+        body: {
+          suggestions: [
+            mappingSuggestionFixture({ id: "safe-scene-1", scenePlanId: "scene-1", mappingId: "mapping-1", suggestedAssetId: "asset-1" }),
+            mappingSuggestionFixture({
+              id: "needs-review-scene-2",
+              scenePlanId: "scene-2",
+              mappingId: "mapping-2",
+              suggestedAssetId: null,
+              suggestedText: null,
+              confidence: 0.3,
+              unresolvedReason: "Needs review - not enough evidence for a confident automatic suggestion"
+            })
+          ],
+          aiAvailable: false,
+          sceneEvidenceAvailability: {}
+        }
+      },
+      { status: 200, body: { assets: [] } },
+      scenes
+    );
+    renderPanel();
+    await screen.findByText("Scene 01");
+    screen.getByText("Scene 02");
+
+    const acceptAllInScene = screen.getAllByRole("button", { name: "Accept All in This Scene" });
+    expect(acceptAllInScene).toHaveLength(1);
+
+    fireEvent.click(acceptAllInScene[0]!);
+    await screen.findByText("Accept these suggestions?");
+    screen.getByText("You're about to accept 1 safe suggestion. Suggestions needing review are never included automatically.");
   });
 });
 

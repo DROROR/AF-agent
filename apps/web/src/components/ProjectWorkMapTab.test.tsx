@@ -56,7 +56,7 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     stubWorkspace({ status: 200, body: { workMap: null } });
     renderWorkMap();
     await screen.findByText("Tell AI what you want");
-    expect(screen.getByRole("button", { name: "Create Video Plan" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Claude — Create Video Plan" })).not.toBeNull();
     // Never shows a raw composition/asset ID field by default.
     expect(screen.queryByLabelText("Matched composition ID")).toBeNull();
     expect(screen.queryByLabelText("Desired asset ID")).toBeNull();
@@ -79,7 +79,7 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     renderWorkMap();
     const textarea = await screen.findByLabelText("Describe your video");
     fireEvent.change(textarea, { target: { value: "Use the login recording, then show checkout." } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Video Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Claude — Create Video Plan" }));
 
     await screen.findByText("Your Video Plan");
     // Real asset filename, never the raw asset UUID, in the default view.
@@ -99,10 +99,10 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     renderWorkMap();
     const textarea = await screen.findByLabelText("Describe your video");
     fireEvent.change(textarea, { target: { value: "??" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create Video Plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Claude — Create Video Plan" }));
 
     await screen.findByText("AI could not build a plan from that description.");
-    expect(screen.getByRole("button", { name: "Create Video Plan" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Claude — Create Video Plan" })).not.toBeNull();
   });
 
   it("Add details manually reveals the manual form with human-readable scene/asset pickers - never raw ID text inputs", async () => {

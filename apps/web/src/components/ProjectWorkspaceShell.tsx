@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactElement, type ReactNode } from "react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { ProjectWorkflowStepper } from "./ProjectWorkflowStepper";
 import { PlanStatusBadge } from "./PlanStatusBadge";
 import { ErrorState } from "./ErrorState";
 import { Card } from "./ui/Card";
@@ -121,6 +122,7 @@ export function ProjectWorkspaceShell({ projectId, children }: { projectId: stri
           </Button>
         </div>
       </Dialog>
+      <ProjectWorkflowStepper />
       <nav className="workspace-tabs" aria-label={t.projectWorkspace.tabs.overview}>
         {tabs.map((tab) => (
           <Link key={tab.href} href={tab.href} className="workspace-tab" data-active={pathname === tab.href}>

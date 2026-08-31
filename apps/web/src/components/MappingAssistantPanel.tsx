@@ -8,8 +8,11 @@ import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { dispatchJob } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
+import { isSafeToBulkAccept } from "../lib/safe-bulk-accept";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { ClaudeActionButton } from "./ui/ClaudeActionButton";
+import { Dialog } from "./ui/Dialog";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { Skeleton } from "./ui/Skeleton";
@@ -53,7 +56,7 @@ function confidenceLevel(confidence: number): ConfidenceLevel {
 export function MappingAssistantPanel(): ReactElement | null {
   const { t } = useLocale();
   const { project, plan, refetch } = useProjectWorkspaceContext();
-  const { suggestions, aiAvailable, sceneEvidenceAvailability, isLoading, isGenerating, error, generate, accept, reject } =
+  const { suggestions, aiAvailable, sceneEvidenceAvailability, isLoading, isGenerating, error, generate, accept, reject, acceptBatch } =
     useMappingSuggestions(project?.project.projectId ?? "");
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
   const { data: dashboardStatus } = useDashboardStatusContext();
@@ -61,6 +64,9 @@ export function MappingAssistantPanel(): ReactElement | null {
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null);
   const [improvingSceneId, setImprovingSceneId] = useState<string | null>(null);
   const [improveMessage, setImproveMessage] = useState<{ sceneId: string; text: string; isError: boolean } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkConfirmIds, setBulkConfirmIds] = useState<string[] | null>(null);
+  const [isBulkAccepting, setIsBulkAccepting] = useState(false);
 
   if (!project || !plan) {
     return null;
@@ -128,8 +134,57 @@ export function MappingAssistantPanel(): ReactElement | null {
     setImproveMessage({ sceneId: scenePlanId, text: t.mappingAssistant.improveAccuracyQueued, isError: false });
   }
 
+  function toggleSelected(suggestionId: string): void {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(suggestionId)) {
+        next.delete(suggestionId);
+      } else {
+        next.add(suggestionId);
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Client-handoff phase, section I, point 6: "Bulk acceptance must
+   * require explicit user confirmation." This only ever OPENS the
+   * confirmation dialog (see handleConfirmBulkAccept below for the real
+   * accept call) - clicking "Accept All Safe Suggestions"/"Accept All in
+   * This Scene" stages the selection and shows exactly what is about to
+   * be accepted, it never accepts anything by itself.
+   */
+  function openBulkConfirm(ids: string[]): void {
+    setSelectedIds(new Set(ids));
+    setBulkConfirmIds(ids);
+  }
+
+  async function handleConfirmBulkAccept(): Promise<void> {
+    if (!bulkConfirmIds || bulkConfirmIds.length === 0) {
+      return;
+    }
+    setIsBulkAccepting(true);
+    setActionError(null);
+    const result = await acceptBatch(bulkConfirmIds, plan!.plan.revision);
+    setIsBulkAccepting(false);
+    setBulkConfirmIds(null);
+    if (!result.ok) {
+      setActionError(result.message ?? null);
+      return;
+    }
+    setSelectedIds(new Set());
+    await refetch();
+  }
+
   const pending = (suggestions ?? []).filter((s) => s.status === "PENDING");
   const reviewed = (suggestions ?? []).filter((s) => s.status !== "PENDING");
+  const safeSuggestions = pending.filter(isSafeToBulkAccept);
+  const safeIds = new Set(safeSuggestions.map((s) => s.id));
+  const needsReviewCount = pending.length - safeSuggestions.length;
+  const selectedSafeCount = [...selectedIds].filter((id) => safeIds.has(id)).length;
+  const bulkConfirmScenes = bulkConfirmIds
+    ? [...new Set(bulkConfirmIds.map((id) => sceneById.get(pending.find((s) => s.id === id)?.scenePlanId ?? "")?.compositionName).filter((name): name is string => Boolean(name)))]
+    : [];
 
   // Groups by scene in the plan's own real order - never invents an
   // ordering. A suggestion whose scene can't be resolved (should not
@@ -154,9 +209,24 @@ export function MappingAssistantPanel(): ReactElement | null {
             <span className={`status-badge status-badge--${aiAvailable ? "positive" : "neutral"}`}>
               {aiAvailable ? t.mappingAssistant.aiAvailable : t.mappingAssistant.aiUnavailable}
             </span>
-            <Button size="sm" variant="primary" disabled={isGenerating} onClick={() => void handleGenerate()}>
-              {isGenerating ? t.mappingAssistant.generating : t.mappingAssistant.generateAction}
-            </Button>
+            {aiAvailable ? (
+              // A real Anthropic call genuinely happens for this dispatch
+              // only when aiAvailable is true (generate-mapping-suggestions.ts
+              // always runs deterministic matching regardless - AI is
+              // additive, never required) - Claude branding follows that
+              // real fact, never shown when this click is deterministic-only.
+              <ClaudeActionButton
+                size="sm"
+                label={t.mappingAssistant.generateAction}
+                busyLabel={t.mappingAssistant.generating}
+                busy={isGenerating}
+                onClick={() => void handleGenerate()}
+              />
+            ) : (
+              <Button size="sm" variant="primary" disabled={isGenerating} onClick={() => void handleGenerate()}>
+                {isGenerating ? t.mappingAssistant.generating : t.mappingAssistant.generateAction}
+              </Button>
+            )}
           </div>
         }
       />
@@ -170,13 +240,36 @@ export function MappingAssistantPanel(): ReactElement | null {
         <Skeleton height="1.5rem" />
       ) : pending.length === 0 ? (
         <EmptyState title={t.mappingAssistant.emptyTitle} description={t.mappingAssistant.emptyDescription} />
-      ) : (
+      ) : null}
+
+      {!isLoading && pending.length > 0 ? (
+        <div className="mapping-bulk-toolbar">
+          <div className="mapping-bulk-toolbar__counts">
+            <span>{t.mappingAssistant.bulk.safeCount(safeSuggestions.length)}</span>
+            {needsReviewCount > 0 ? <span className="field__hint">{t.mappingAssistant.bulk.needsReviewCount(needsReviewCount)}</span> : null}
+            {selectedSafeCount > 0 ? <span className="field__hint">{t.mappingAssistant.bulk.selectedCount(selectedSafeCount)}</span> : null}
+          </div>
+          <div className="mapping-bulk-toolbar__actions">
+            {selectedSafeCount > 0 ? (
+              <Button size="sm" variant="secondary" onClick={() => openBulkConfirm([...selectedIds].filter((id) => safeIds.has(id)))}>
+                {t.mappingAssistant.bulk.acceptSelectedAction(selectedSafeCount)}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="primary" disabled={safeSuggestions.length === 0} onClick={() => openBulkConfirm(safeSuggestions.map((s) => s.id))}>
+              {t.mappingAssistant.bulk.acceptAllSafeAction}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {!isLoading && pending.length > 0 ? (
         <div className="mapping-suggestion-scene-groups">
           {orderedSceneIds.map((sceneId) => {
             const scene = sceneId === "__ungrouped__" ? null : sceneById.get(sceneId);
             const sceneName = scene?.compositionName ?? t.mappingAssistant.sceneGroupFallback;
             const sceneEvidenceStatus: SceneEvidenceStatus = (scene && sceneEvidenceAvailability[scene.manifestCompositionId]) ?? "NOT_INSPECTED";
             const groupSuggestions = suggestionsByScene.get(sceneId) ?? [];
+            const sceneSafeIds = groupSuggestions.filter(isSafeToBulkAccept).map((s) => s.id);
             return (
               <section key={sceneId} className="mapping-suggestion-scene-group">
                 <div className="mapping-suggestion-scene-group__header">
@@ -194,6 +287,11 @@ export function MappingAssistantPanel(): ReactElement | null {
                       {improvingSceneId === scene.id ? t.mappingAssistant.improvingAccuracy : t.mappingAssistant.improveAccuracyAction}
                     </Button>
                   ) : null}
+                  {sceneSafeIds.length > 0 ? (
+                    <Button size="sm" variant="secondary" onClick={() => openBulkConfirm(sceneSafeIds)}>
+                      {t.mappingAssistant.bulk.acceptAllInSceneAction}
+                    </Button>
+                  ) : null}
                 </div>
                 {improveMessage && scene && improveMessage.sceneId === scene.id ? (
                   <p className={improveMessage.isError ? "mapping-suggestion-scene-group__improve-error" : "field__hint"}>{improveMessage.text}</p>
@@ -209,6 +307,9 @@ export function MappingAssistantPanel(): ReactElement | null {
                         placeholderName={mapping?.placeholderName ?? null}
                         suggestedAssetLabel={suggestedAsset ? (suggestedAsset.label ?? suggestedAsset.originalFilename) : null}
                         busy={busySuggestionId === suggestion.id}
+                        safe={safeIds.has(suggestion.id)}
+                        selected={selectedIds.has(suggestion.id)}
+                        onToggleSelect={() => toggleSelected(suggestion.id)}
                         onAccept={() => void handleAccept(suggestion)}
                         onReject={() => void handleReject(suggestion)}
                       />
@@ -219,7 +320,26 @@ export function MappingAssistantPanel(): ReactElement | null {
             );
           })}
         </div>
-      )}
+      ) : null}
+
+      <Dialog open={bulkConfirmIds !== null} onClose={() => setBulkConfirmIds(null)} title={t.mappingAssistant.bulk.confirmTitle} variant="modal">
+        <p>{t.mappingAssistant.bulk.confirmDescription(bulkConfirmIds?.length ?? 0)}</p>
+        {bulkConfirmScenes.length > 0 ? (
+          <ul className="mapping-bulk-confirm__scenes">
+            {bulkConfirmScenes.map((name) => (
+              <li key={name}>{name}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="edit-drawer-actions">
+          <Button variant="ghost" disabled={isBulkAccepting} onClick={() => setBulkConfirmIds(null)}>
+            {t.mappingAssistant.bulk.cancelAction}
+          </Button>
+          <Button variant="primary" disabled={isBulkAccepting} onClick={() => void handleConfirmBulkAccept()}>
+            {isBulkAccepting ? t.mappingAssistant.bulk.accepting : t.mappingAssistant.bulk.confirmAction}
+          </Button>
+        </div>
+      </Dialog>
 
       {reviewed.length > 0 ? (
         <div className="mapping-suggestion-history">
@@ -245,6 +365,9 @@ function MappingSuggestionCard({
   placeholderName,
   suggestedAssetLabel,
   busy,
+  safe,
+  selected,
+  onToggleSelect,
   onAccept,
   onReject
 }: {
@@ -252,6 +375,9 @@ function MappingSuggestionCard({
   placeholderName: string | null;
   suggestedAssetLabel: string | null;
   busy: boolean;
+  safe: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onAccept: () => void;
   onReject: () => void;
 }): ReactElement {
@@ -263,11 +389,22 @@ function MappingSuggestionCard({
   return (
     <div className="mapping-suggestion-card" data-conflict={suggestion.conflictsWithWorkMap ? "true" : undefined}>
       <div className="mapping-suggestion-card__header">
-        <div>
-          <p className="mapping-suggestion-card__scene">{placeholderName ?? ""}</p>
-          <span className={`status-badge status-badge--${SOURCE_TONE[suggestion.source]}`}>
-            {suggestion.source === "DETERMINISTIC" ? t.mappingAssistant.sourceDeterministic : t.mappingAssistant.sourceAi}
-          </span>
+        <div className="mapping-suggestion-card__title">
+          {safe ? (
+            <input
+              type="checkbox"
+              aria-label={t.mappingAssistant.bulk.selectSuggestionLabel}
+              checked={selected}
+              disabled={busy}
+              onChange={onToggleSelect}
+            />
+          ) : null}
+          <div>
+            <p className="mapping-suggestion-card__scene">{placeholderName ?? ""}</p>
+            <span className={`status-badge status-badge--${SOURCE_TONE[suggestion.source]}`}>
+              {suggestion.source === "DETERMINISTIC" ? t.mappingAssistant.sourceDeterministic : t.mappingAssistant.sourceAi}
+            </span>
+          </div>
         </div>
         <span className={`status-badge status-badge--${CONFIDENCE_TONE[level]}`}>{t.mappingAssistant.confidenceLevel[level]}</span>
       </div>

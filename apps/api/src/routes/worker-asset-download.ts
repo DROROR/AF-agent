@@ -23,6 +23,25 @@ const paramsSchema = z.object({
 });
 
 /**
+ * Client-handoff phase, section AA (security review) - `originalFilename`
+ * is the browser-uploaded filename verbatim (routes/assets.ts's own
+ * multipart handling never sanitizes it, by design - it is only ever
+ * DISPLAYED elsewhere, never used to build a filesystem path), so it must
+ * never be interpolated into this header unescaped: a filename containing
+ * `"` would break out of the quoted value, and one containing CR/LF could
+ * inject an extra header into the worker's response (Node's own header
+ * validation already rejects raw CR/LF, but that means such a filename
+ * would 500 this endpoint for every future download of that same asset -
+ * a real, fixable DoS-by-upload, not merely a defensive nicety). Strips
+ * C0/DEL control characters and escapes `"`/`\` per RFC 6266's own quoted-string rules.
+ */
+export function safeContentDispositionFilename(rawFilename: string): string {
+  // eslint-disable-next-line no-control-regex
+  const withoutControlChars = rawFilename.replace(/[\x00-\x1f\x7f]/g, "");
+  return withoutControlChars.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
  * Worker->API asset download (activation-phase Gap 2: MAP_FOOTAGE's asset
  * delivery pipeline) - worker-bearer-token authenticated, never a
  * session/browser endpoint, mirroring render-artifact-upload.ts's own
@@ -52,7 +71,7 @@ export function registerWorkerAssetDownloadRoutes(app: FastifyInstance, deps: Wo
     );
 
     reply.header("content-type", file.mimeType);
-    reply.header("content-disposition", `attachment; filename="${file.originalFilename}"`);
+    reply.header("content-disposition", `attachment; filename="${safeContentDispositionFilename(file.originalFilename)}"`);
     reply.send(file.buffer);
   });
 }

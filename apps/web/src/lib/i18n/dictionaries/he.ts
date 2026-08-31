@@ -280,7 +280,14 @@ export const he: Dictionary = {
     statusReady: "מוכן",
     completedColumn: "הושלם",
     sizeColumn: "גודל",
-    downloadAction: "הורדה"
+    downloadAction: "הורדה",
+    previewAction: "תצוגה מקדימה",
+    hidePreviewAction: "הסתרת התצוגה המקדימה",
+    playerErrorTitle: "לא ניתן היה להפעיל את הווידאו הזה",
+    playerErrorDescription: "לא ניתן היה לטעון את הקובץ. נסו להוריד אותו במקום זאת.",
+    finalOutputsTitle: "פלטים סופיים",
+    finalOutputsDescription: "סרטוני הווידאו המוגמרים והניתנים להורדה שלכם.",
+    statusComplete: "הושלם"
   },
   activity: {
     title: "פעילות / יומנים",
@@ -404,6 +411,20 @@ export const he: Dictionary = {
   },
   projectWorkspace: {
     backToProjects: "חזרה לפרויקטים",
+    stepper: {
+      ariaLabel: "שלבי הפקת הווידאו",
+      stepOfTotal: (current: number, total: number, title: string): string => `שלב ${current} מתוך ${total} — ${title}`,
+      status: { complete: "הושלם", inProgress: "בתהליך", locked: "נעול", ready: "מוכן" },
+      steps: {
+        upload: { title: "העלאה", description: "התבנית והנכסים שלכם הועלו ומוכנים." },
+        tellClaude: { title: "ספרו ל-Claude", description: "תארו את הווידאו שלכם בשפה פשוטה ותנו ל-Claude לנסח תוכנית." },
+        reviewPlan: { title: "בדיקת התוכנית", description: "בדקו את הסצנות, התוכן, הטקסט והתזמון שהכין Claude לווידאו שלכם." },
+        sceneMappings: { title: "מיפויים", description: "בדקו את התוכן המוצע לכל סצנה, ואז אשרו את התוכנית כדי להמשיך." },
+        firstPreview: { title: "תצוגה מקדימה ראשונה", description: "צרו פריים מעוצב ראשון ואשרו אותו לפני שנבנה שאר הווידאו." },
+        finalPreview: { title: "תצוגה מקדימה סופית", description: "בדקו את הסצנות המוגמרות - סדר, טקסט, נכסים, תזמון ומיתוג - לפני הרינדור." },
+        render: { title: "רינדור", description: "רנדרו את סרטוני הלנדסקייפ והרילס הסופיים והורידו אותם." }
+      }
+    },
     tabs: {
       overview: "סקירה כללית",
       scenes: "מיפוי סצנות",
@@ -663,6 +684,20 @@ export const he: Dictionary = {
     improveAccuracyAction: "שפרו את דיוק הבינה המלאכותית",
     improvingAccuracy: "שולח…",
     improveAccuracyQueued: "נשלח למחשב העריכה שלכם. זה עשוי לקחת כמה דקות - בדקו שוב ובקשו הצעות מחדש כשזה יסתיים.",
-    editingComputerOffline: "מחשב העריכה שלכם כבוי. הפעילו אותו כדי לשפר את דיוק הבינה המלאכותית."
+    editingComputerOffline: "מחשב העריכה שלכם כבוי. הפעילו אותו כדי לשפר את דיוק הבינה המלאכותית.",
+    bulk: {
+      safeCount: (n: number): string => `${n} הצעות בטוחות מוכנות`,
+      needsReviewCount: (n: number): string => `${n} דורשות בדיקה`,
+      selectedCount: (n: number): string => `${n} נבחרו`,
+      acceptAllSafeAction: "אישור כל ההצעות הבטוחות",
+      acceptSelectedAction: (n: number): string => `אישור הנבחרות (${n})`,
+      acceptAllInSceneAction: "אישור כל ההצעות בסצנה זו",
+      selectSuggestionLabel: "בחרו הצעה זו לאישור מרובה",
+      confirmTitle: "לאשר את ההצעות הללו?",
+      confirmDescription: (n: number): string => `אתם עומדים לאשר ${n} הצעות בטוחות. הצעות הדורשות בדיקה לעולם לא נכללות אוטומטית.`,
+      cancelAction: "ביטול",
+      confirmAction: "אישור ההצעות",
+      accepting: "מאשר…"
+    }
   }
 };

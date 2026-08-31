@@ -287,7 +287,14 @@ export const en = {
     statusReady: "Ready",
     completedColumn: "Completed",
     sizeColumn: "Size",
-    downloadAction: "Download"
+    downloadAction: "Download",
+    previewAction: "Preview",
+    hidePreviewAction: "Hide preview",
+    playerErrorTitle: "Could not play this video",
+    playerErrorDescription: "The file could not be loaded. Try downloading it instead.",
+    finalOutputsTitle: "Final Outputs",
+    finalOutputsDescription: "Your finished, downloadable videos.",
+    statusComplete: "Complete"
   },
   activity: {
     title: "Activity / Logs",
@@ -411,6 +418,20 @@ export const en = {
   },
   projectWorkspace: {
     backToProjects: "Back to Projects",
+    stepper: {
+      ariaLabel: "Video production steps",
+      stepOfTotal: (current: number, total: number, title: string): string => `Step ${current} of ${total} — ${title}`,
+      status: { complete: "Complete", inProgress: "In progress", locked: "Locked", ready: "Ready" },
+      steps: {
+        upload: { title: "Upload", description: "Your template and assets are uploaded and ready." },
+        tellClaude: { title: "Tell Claude", description: "Describe your video in plain language and let Claude draft a plan." },
+        reviewPlan: { title: "Review Plan", description: "Check the scenes, content, text and timing Claude prepared for your video." },
+        sceneMappings: { title: "Mappings", description: "Review each scene's suggested content, then approve the plan to continue." },
+        firstPreview: { title: "First Preview", description: "Create a first designed frame and approve it before the rest of the video is built." },
+        finalPreview: { title: "Final Preview", description: "Review the finished scenes - order, text, assets, timing and branding - before rendering." },
+        render: { title: "Render", description: "Render the final Landscape and Reels videos and download them." }
+      }
+    },
     tabs: {
       overview: "Overview",
       scenes: "Scene Mapping",
@@ -672,6 +693,21 @@ export const en = {
     improveAccuracyAction: "Improve AI accuracy",
     improvingAccuracy: "Sending…",
     improveAccuracyQueued: "Sent to your editing computer. This can take a few minutes - check back and generate suggestions again once it's done.",
-    editingComputerOffline: "Your editing computer is offline. Turn it on to improve AI accuracy."
+    editingComputerOffline: "Your editing computer is offline. Turn it on to improve AI accuracy.",
+    bulk: {
+      safeCount: (n: number): string => `${n} safe suggestion${n === 1 ? "" : "s"} ready`,
+      needsReviewCount: (n: number): string => `${n} need${n === 1 ? "s" : ""} review`,
+      selectedCount: (n: number): string => `${n} selected`,
+      acceptAllSafeAction: "Accept All Safe Suggestions",
+      acceptSelectedAction: (n: number): string => `Accept Selected (${n})`,
+      acceptAllInSceneAction: "Accept All in This Scene",
+      selectSuggestionLabel: "Select this suggestion for bulk accept",
+      confirmTitle: "Accept these suggestions?",
+      confirmDescription: (n: number): string =>
+        `You're about to accept ${n} safe suggestion${n === 1 ? "" : "s"}. Suggestions needing review are never included automatically.`,
+      cancelAction: "Cancel",
+      confirmAction: "Accept Suggestions",
+      accepting: "Accepting…"
+    }
   }
 } as const;

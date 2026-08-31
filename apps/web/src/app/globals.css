@@ -13,6 +13,11 @@
   --brand-primary-contrast: #ffffff;
   --brand-accent: #65c7c2;
   --brand-accent-strong: #3fada7;
+  /* Claude/Anthropic's own brand color - used ONLY on the dedicated Claude action button (ClaudeActionButton.tsx), never elsewhere in the DYO theme. */
+  --brand-claude: #d97757;
+  --brand-claude-hover: #c56344;
+  --brand-claude-active: #a94f34;
+  --brand-claude-contrast: #ffffff;
 
   /* Surfaces */
   --color-bg: #f6f7f9;
@@ -946,6 +951,31 @@ select:focus-visible,
   font-size: 0.78rem;
 }
 
+/* Dedicated Claude/Anthropic action button (ClaudeActionButton.tsx) - only
+   ever used where a real Anthropic API call happens, never on a
+   deterministic action (Upload/Save/Approve/Delete/Render/Download). */
+.btn--claude {
+  background: var(--brand-claude);
+  color: var(--brand-claude-contrast);
+  border-color: var(--brand-claude);
+}
+
+.btn--claude:hover:not(:disabled) {
+  background: var(--brand-claude-hover);
+  border-color: var(--brand-claude-hover);
+}
+
+.btn--claude:active:not(:disabled) {
+  background: var(--brand-claude-active);
+  border-color: var(--brand-claude-active);
+}
+
+.btn--claude__mark {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 /* ==========================================================================
    Form controls
    ========================================================================== */
@@ -1815,6 +1845,114 @@ thead th {
   margin-inline-start: auto;
 }
 
+/* ==========================================================================
+   Project workflow stepper (client-handoff phase, section B)
+   ========================================================================== */
+
+.workflow-stepper {
+  margin-bottom: var(--space-4);
+}
+
+.workflow-stepper__current {
+  font-weight: 700;
+  margin: 0 0 var(--space-1);
+}
+
+.workflow-stepper__hint {
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-3);
+  font-size: 0.9rem;
+}
+
+.workflow-stepper__list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.workflow-stepper__item {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.workflow-stepper__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  text-decoration: none;
+  color: inherit;
+  background: var(--color-surface);
+}
+
+a.workflow-stepper__step:hover {
+  background: var(--color-surface-sunken);
+}
+
+.workflow-stepper__item[data-state="locked"] .workflow-stepper__step {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workflow-stepper__item[data-state="current"] .workflow-stepper__step {
+  border-color: var(--brand-primary);
+}
+
+.workflow-stepper__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+
+.workflow-stepper__marker svg {
+  width: 13px;
+  height: 13px;
+}
+
+.workflow-stepper__marker[data-state="complete"] {
+  background: var(--color-positive-bg, var(--color-surface-sunken));
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
+.workflow-stepper__marker[data-state="current"] {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary-contrast);
+}
+
+.workflow-stepper__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-stepper__status {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
 .workspace-header__facts {
   display: flex;
   flex-wrap: wrap;
@@ -1858,6 +1996,53 @@ thead th {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: var(--space-4);
+}
+
+.final-outputs-card {
+  grid-column: 1 / -1;
+}
+
+.final-outputs-card__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.final-outputs-card__item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.final-outputs-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.final-outputs-card__variant {
+  font-weight: 700;
+}
+
+.final-outputs-card__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.video-artifact-player {
+  margin-top: var(--space-3);
+  max-width: 480px;
+}
+
+.video-artifact-player__video {
+  width: 100%;
+  border-radius: var(--radius-md);
+  background: #000;
 }
 
 .overview-section h2 {
@@ -2148,6 +2333,43 @@ thead th {
   flex-direction: column;
   gap: var(--space-4);
   margin-top: var(--space-4);
+}
+
+.mapping-bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.mapping-bulk-toolbar__counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-weight: 600;
+}
+
+.mapping-bulk-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mapping-bulk-confirm__scenes {
+  margin: var(--space-2) 0;
+  padding-inline-start: 1.2rem;
+}
+
+.mapping-suggestion-card__title {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
 }
 
 .mapping-suggestion-card {

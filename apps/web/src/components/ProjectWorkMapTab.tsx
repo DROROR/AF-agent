@@ -7,6 +7,7 @@ import { useWorkMap } from "../lib/use-work-map";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { ClaudeActionButton } from "./ui/ClaudeActionButton";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
@@ -229,9 +230,13 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
           <Button variant="secondary" disabled={isCreatingPlan} onClick={() => setViewMode("manualForm")}>
             {t.workMapTab.ai.addDetailsManually}
           </Button>
-          <Button variant="primary" disabled={isCreatingPlan || instructions.trim() === ""} onClick={() => void handleCreatePlan()}>
-            {isCreatingPlan ? t.workMapTab.ai.creatingPlan : t.workMapTab.ai.createPlanAction}
-          </Button>
+          <ClaudeActionButton
+            label={t.workMapTab.ai.createPlanAction}
+            busyLabel={t.workMapTab.ai.creatingPlan}
+            busy={isCreatingPlan}
+            disabled={instructions.trim() === ""}
+            onClick={() => void handleCreatePlan()}
+          />
         </div>
       </Card>
     );

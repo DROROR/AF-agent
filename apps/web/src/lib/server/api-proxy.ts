@@ -144,12 +144,24 @@ export async function proxyMultipartUpload(path: string, request: Request): Prom
 }
 
 /**
+ * Client-handoff phase, section S: a render artifact can be up to
+ * RENDER_ARTIFACT_MAX_UPLOAD_BYTES (2GB, see routes/jobs.ts's own upload
+ * config) - the normal 8-second REQUEST_TIMEOUT_MS is sized for ordinary
+ * JSON calls, not for this proxy buffering a large video's full bytes
+ * server-side (`response.arrayBuffer()` below) before it can respond.
+ * Used only by the render-artifact file route - every other
+ * proxyBinaryDownload caller (asset file, execution-session preview, both
+ * always small images) keeps the normal 8-second timeout unchanged.
+ */
+export const RENDER_ARTIFACT_DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
  * Streams a real asset's raw bytes back from the control-plane API for
  * preview/download - never re-encodes as JSON, and forwards the real
  * `content-type` the API reports (see get-asset-file.ts) so the browser
  * can render an <img>/<video> directly against this same-origin URL.
  */
-export async function proxyBinaryDownload(path: string): Promise<NextResponse> {
+export async function proxyBinaryDownload(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<NextResponse> {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   const headers: Record<string, string> = {};
@@ -158,7 +170,7 @@ export async function proxyBinaryDownload(path: string): Promise<NextResponse> {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${getApiBaseUrl()}${path}`, {
       method: "GET",

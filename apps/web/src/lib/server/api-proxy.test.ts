@@ -148,7 +148,7 @@ describe("proxyMultipartUpload - upload-specific timeout (proven fix for real MP
 });
 
 describe("proxyBinaryDownload - unrelated to the upload timeout fix, unchanged", () => {
-  it("still arms its abort timer at the normal 8 seconds, never the upload timeout", async () => {
+  it("still arms its abort timer at the normal 8 seconds by default, never the upload timeout", async () => {
     const setTimeoutSpy = vi.spyOn(global, "setTimeout");
     vi.stubGlobal(
       "fetch",
@@ -164,5 +164,31 @@ describe("proxyBinaryDownload - unrelated to the upload timeout fix, unchanged",
     const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
     expect(delays).toContain(8_000);
     expect(delays).not.toContain(10 * 60 * 1000);
+  });
+});
+
+/**
+ * Client-handoff phase, section S: a real render artifact can be up to
+ * 2GB - the render-artifact file route passes RENDER_ARTIFACT_DOWNLOAD_TIMEOUT_MS
+ * explicitly (see that route's own file) rather than relying on the
+ * normal 8-second default, which is sized for ordinary JSON calls.
+ */
+describe("proxyBinaryDownload - explicit timeoutMs override (large render artifact downloads)", () => {
+  it("arms its abort timer at the caller-supplied timeout, not the normal 8 seconds, when one is passed", async () => {
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: { get: (name: string) => (name === "content-type" ? "video/mp4" : null) },
+        arrayBuffer: async () => new ArrayBuffer(0),
+        text: async () => ""
+      }))
+    );
+    await proxyBinaryDownload("/api/projects/x/render-artifacts/y/file", 5 * 60 * 1000);
+    const delays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+    expect(delays).toContain(5 * 60 * 1000);
+    expect(delays).not.toContain(8_000);
   });
 });

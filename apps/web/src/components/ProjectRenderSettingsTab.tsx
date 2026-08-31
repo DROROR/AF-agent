@@ -2,18 +2,28 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import { RENDER_OUTPUT_VARIANTS, type Composition, type ExecutionSessionDto, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
+import type { RenderArtifactDto } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
+import { useRenderArtifacts } from "../lib/use-render-artifacts";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
+import { Skeleton } from "./ui/Skeleton";
+import { VideoArtifactPlayer } from "./ui/VideoArtifactPlayer";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
-import { dispatchJob, fetchCurrentExecutionSession } from "../lib/projects-api-client";
+import { dispatchJob, fetchCurrentExecutionSession, renderArtifactFileUrl } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /**
  * Real Output Config UI (render-delivery phase section 2) - the composition
@@ -74,7 +84,61 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
           renderReady={renderReady}
         />
       ))}
+      <FinalOutputsCard projectId={projectId} />
     </div>
+  );
+}
+
+/**
+ * Client-handoff phase, section S ("Final Outputs / Downloads") - a real,
+ * project-scoped view of every completed render artifact, with an actual
+ * video player (never metadata-only) and the existing authenticated
+ * download link. Never shows "Download ready" for anything that isn't a
+ * real, server-confirmed render_artifacts row (list-render-artifacts.ts
+ * only ever returns genuinely persisted, VALID artifacts - see that
+ * file's own doc comment).
+ */
+function FinalOutputsCard({ projectId }: { projectId: string }): ReactElement {
+  const { t } = useLocale();
+  const { artifacts, isLoading, error } = useRenderArtifacts(projectId);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+
+  return (
+    <Card className="overview-section final-outputs-card">
+      <CardHeader title={t.renders.finalOutputsTitle} />
+      <p>{t.renders.finalOutputsDescription}</p>
+      {isLoading ? (
+        <Skeleton height="1.5rem" />
+      ) : error ? (
+        <ErrorState title={t.renders.loadErrorTitle} description={error} />
+      ) : !artifacts || artifacts.length === 0 ? (
+        <EmptyState title={t.renders.emptyTitle} description={t.renders.emptyDescription} />
+      ) : (
+        <ul className="final-outputs-card__list">
+          {artifacts.map((artifact: RenderArtifactDto) => (
+            <li key={artifact.id} className="final-outputs-card__item">
+              <div className="final-outputs-card__facts">
+                <span className="final-outputs-card__variant">{t.renders.variantLabel[artifact.variant]}</span>
+                <span className="status-badge status-badge--positive">{t.renders.statusComplete}</span>
+                <span className="field__hint">{new Date(artifact.renderCompletedAt).toLocaleString()}</span>
+                <span className="field__hint">{formatBytes(artifact.byteSize)}</span>
+              </div>
+              <div className="final-outputs-card__actions">
+                <Button size="sm" variant="secondary" onClick={() => setPreviewingId(previewingId === artifact.id ? null : artifact.id)}>
+                  {previewingId === artifact.id ? t.renders.hidePreviewAction : t.renders.previewAction}
+                </Button>
+                <a className="btn btn--secondary btn--sm" href={renderArtifactFileUrl(projectId, artifact.id)}>
+                  {t.renders.downloadAction}
+                </a>
+              </div>
+              {previewingId === artifact.id ? (
+                <VideoArtifactPlayer src={renderArtifactFileUrl(projectId, artifact.id)} ariaLabel={`${t.renders.variantLabel[artifact.variant]} - ${artifact.compositionName}`} />
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

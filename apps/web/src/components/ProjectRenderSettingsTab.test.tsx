@@ -5,7 +5,7 @@ import { ProjectRenderSettingsTab } from "./ProjectRenderSettingsTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
-import { PROJECT_ID, SOURCE_SHA, manifestFixture, planFixture, projectDtoFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
+import { PROJECT_ID, SOURCE_SHA, manifestFixture, planFixture, projectDtoFixture, renderArtifactFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
 
 afterEach(() => {
   cleanup();
@@ -87,6 +87,62 @@ function renderTab(): void {
     </DashboardStatusProvider>
   );
 }
+
+/**
+ * Client-handoff phase, section S/N ("Final Outputs / Downloads", "First
+ * Preview Player / Image") - placed BEFORE the main describe block below
+ * (whose last test switches the shared jsdom document's lang to "he" via
+ * renderWithLocale and never resets it) so these tests always run while
+ * the locale is still the default "en" - same convention established in
+ * MappingAssistantPanel.test.tsx.
+ */
+describe("ProjectRenderSettingsTab - Final Outputs", () => {
+  it("shows the honest empty state when no render artifact exists yet", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+    renderTab();
+    await screen.findByText("No renders yet");
+  });
+
+  it("lists a real completed artifact with its variant, completed status, and a working download link - never a fake placeholder", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } }
+    });
+    renderTab();
+    await screen.findByText("Complete");
+    screen.getByText("Landscape");
+
+    const downloadLink = screen.getByRole("link", { name: "Download" }) as HTMLAnchorElement;
+    expect(downloadLink.getAttribute("href")).toBe(`/api/projects/${PROJECT_ID}/render-artifacts/${renderArtifactFixture().id}/file`);
+  });
+
+  it("Preview toggles a real video element with the same authenticated artifact URL - never a fake placeholder", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "REELS" })] } }
+    });
+    renderTab();
+    await screen.findByRole("button", { name: "Preview" });
+    expect(document.querySelector("video")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const video = document.querySelector("video") as HTMLVideoElement;
+    expect(video).not.toBeNull();
+    expect(video.getAttribute("src")).toBe(`/api/projects/${PROJECT_ID}/render-artifacts/${renderArtifactFixture().id}/file`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide preview" }));
+    expect(document.querySelector("video")).toBeNull();
+  });
+});
 
 describe("ProjectRenderSettingsTab", () => {
   it("shows the honest no-compositions state when the manifest has none", async () => {

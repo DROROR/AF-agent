@@ -1,31 +1,74 @@
 # MVP Runbook
 
-## Normal client flow (dashboard-simplification phase, 2026-08-31)
+## Normal client flow (client-handoff phase, 2026-08-31)
 
 The dashboard's default UI hides technical IDs/operation codes from a
-normal client. What they actually click, in order:
+normal client, and every project page shows a real 7-step workflow
+stepper (`ProjectWorkflowStepper.tsx`) as the PRIMARY orientation layer -
+"Step X of 7 — <Title>" plus one plain sentence of what to do now. Every
+step's complete/current/locked state is derived from real persisted facts
+(`project-workflow-steps.ts`) - never from which page has been visited.
+Existing tabs remain secondary/direct navigation, unchanged.
 
-1. **Create Project** - name it, upload the `.aep` template (dispatches
-   INSPECT_TEMPLATE on a worker under the hood).
-2. **Upload Template & Assets** - screen recordings, logo, images.
-3. **Tell AI What You Want** - a plain-language textarea drives an AI
-   Work Map draft (draft-only: never auto-approves anything, never touches
-   AE - see `generate-ai-work-map-draft.ts`).
-4. **Review Video Plan** - a human-readable table (Scene/Content/Text/
-   Duration/Action), real scene names and asset filenames, never raw IDs.
-   Raw composition/asset/mapping IDs remain available under "Advanced
+1. **Upload** - create the project, upload the `.aep` template (dispatches
+   INSPECT_TEMPLATE on a worker under the hood) and assets.
+2. **Tell Claude** - a plain-language textarea drives an AI Work Map draft
+   via the dedicated Claude-branded action button (`ClaudeActionButton.tsx`
+   - only ever shown where a real Anthropic call genuinely happens).
+   Draft-only: never auto-approves anything, never touches AE - see
+   `generate-ai-work-map-draft.ts`.
+3. **Review Plan** - a human-readable table (Scene/Content/Text/Duration/
+   Action), real scene names and asset filenames, never raw IDs. Raw
+   composition/asset/mapping IDs remain available under "Advanced
    details" - never deleted from the data model, just not shown by default.
-5. **Review Scene Mappings** - the Mapping Assistant, grouped by scene,
-   plain-language confidence (High/Medium/Needs review). "Improve AI
-   accuracy" (see below) is available per scene here.
-6. **Create First Preview / Approve Full Preview** - the same human
-   approval gates as before, unchanged.
-7. **Render Landscape / Reels**.
+4. **Mappings** - the Mapping Assistant, grouped by scene, plain-language
+   confidence (High/Medium/Needs review). "Improve AI accuracy" (see
+   below) is available per scene. A strict "Accept All Safe Suggestions" /
+   "Accept All in This Scene" bulk-review path exists alongside individual
+   Accept/Reject (see "Bulk mapping review" below) - the plan must then be
+   approved to continue.
+5. **First Preview** - dispatch the first scene edit, review the real
+   captured preview image, approve or reject it.
+6. **Final Preview** - once every approved scene has completed, this step
+   shows as the guided checkpoint to review the finished result before
+   rendering (see "Final Preview - honest framing" below - this is a UI
+   checkpoint, not a new backend approval flag).
+7. **Render** - configure Landscape/Reels output, render, then a real
+   "Final Outputs" section (`ProjectRenderSettingsTab.tsx`) shows each
+   completed artifact with an actual in-dashboard video player
+   (`VideoArtifactPlayer.tsx`) and a working authenticated download link -
+   never a fake placeholder for an artifact that doesn't really exist yet.
 
 This is presentation only - every technical requirement below (Template
 Manifest, Work Map persistence, Execution Plan, deterministic AE
 execution, `.aep` protection, approval gates, checkpoint/recovery) is
 unchanged underneath.
+
+### Final Preview - honest framing
+
+There is no distinct backend-persisted "final preview approved" flag.
+`resolve-render-dispatch.ts`'s own real RENDER precondition has always
+been exactly `firstPreviewApproved && allScenesComplete`, nothing else -
+confirmed directly from that file during this task. `project-workflow-
+steps.ts` deliberately does NOT fabricate a separate flag to make step 6
+look more gated than the system actually is: "Final Preview" becomes
+"complete" the moment `allScenesComplete` is true, exactly when the real
+RENDER precondition is already satisfied too - it is a guided review
+checkpoint in the UI, not a new enforcement gate. If a genuinely separate,
+backend-enforced final-preview approval is wanted later, that requires a
+real schema decision (a new session-level flag + a new precondition in
+resolve-render-dispatch.ts) - flagged here rather than built silently.
+
+### Bulk mapping review
+
+`isSafeToBulkAccept` (`safe-bulk-accept.ts`) reuses the Mapping
+Assistant's OWN existing trust signals - `requiresHumanReview: false`
+(only the deterministic matcher's highest-trust rules: an explicit Work
+Map assignment, or a brand-logo match), `unresolvedReason: null` (not
+already downgraded by the low-confidence-guess safety gate), `confidence
+>= 0.75`, and no Work Map conflict. This is a client-side selection
+convenience only, never a security boundary - `/mapping-suggestions/
+accept-batch` independently re-validates every id server-side regardless.
 
 ## What can be done with the client PC offline vs. what needs it ONLINE
 

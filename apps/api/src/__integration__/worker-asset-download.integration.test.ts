@@ -317,4 +317,20 @@ describe("GET /api/workers/:workerId/jobs/:jobId/assets/:assetId/file", () => {
     expect(response.headers["content-disposition"]).not.toMatch(/\/|storageKey/i);
     expect(Buffer.from(response.rawPayload)).toEqual(realBytes);
   });
+
+  it("stays healthy (200, well-formed header) for an unusual uploaded filename - see safeContentDispositionFilename's own unit tests for the exact escaping rules; Node's real multipart encoder already percent-encodes a literal quote before it reaches the server, so this only proves the endpoint never breaks end to end", async () => {
+    const projectId = await createProject();
+    const { workerId, workerToken } = await registerWorker();
+    const job = await claimAndReachRunning(workerId, workerToken, projectId);
+    const assetId = await uploadAsset(projectId, Buffer.from("bytes"), 'evil".jpg', "image/jpeg");
+
+    const response = await harness.app.inject({
+      method: "GET",
+      url: downloadUrl(workerId, job.id, assetId),
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-disposition"]).toMatch(/^attachment; filename=".*"$/);
+  });
 });
