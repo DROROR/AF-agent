@@ -103,7 +103,17 @@ describe("DYO-Worker-Final-Update.ps1 never registers a new worker identity", ()
 
   it("never opens, reads, or parses worker-credentials.json - only checks that it exists", () => {
     expect(updateScript).not.toMatch(/Get-Content[^\n]*worker-credentials/);
-    expect(updateScript).not.toMatch(/ConvertFrom-Json/);
+    // The only legitimate ConvertFrom-Json use is reading this package's
+    // own harmless worker-app/BUILD_INFO.json (commit + build timestamp,
+    // never a secret - see the $ExpectedCommit test above) - assert THAT
+    // specifically, rather than a blanket "no JSON parsing at all" ban
+    // that would also (wrongly) forbid this legitimate, unrelated read.
+    const jsonUses = updateScript.match(/^.*ConvertFrom-Json.*$/gm) ?? [];
+    expect(jsonUses.length).toBeGreaterThan(0);
+    for (const line of jsonUses) {
+      expect(line).not.toMatch(/credential/i);
+      expect(line).toMatch(/buildInfo/i);
+    }
   });
 
   it("never prompts for anything - no Read-Host anywhere", () => {
@@ -287,14 +297,35 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
   });
 
   it("requires the running build's commit to match the exact expected final commit, not just any commit marker", () => {
-    const expectedIdx = updateScript.indexOf('$ExpectedCommit = "');
-    expect(expectedIdx).toBeGreaterThan(-1);
-    const expectedMatch = /\$ExpectedCommit = "([0-9a-f]{40})"/.exec(updateScript);
-    expect(expectedMatch?.[1]).toMatch(/^[0-9a-f]{40}$/);
-
     const compareIdx = updateScript.indexOf("if ($runningCommit -ne $ExpectedCommit)");
     expect(compareIdx).toBeGreaterThan(-1);
     const block = updateScript.slice(compareIdx, compareIdx + 400);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("real production bug: $ExpectedCommit is NEVER a hand-maintained literal - it must be read from this same package's own worker-app/BUILD_INFO.json, so it can never drift out of sync with the program files it ships alongside", () => {
+    // A real release once shipped with $ExpectedCommit hand-copied from a
+    // PRIOR build and never updated - the running worker (genuinely the
+    // new commit) then failed this exact check against a stale
+    // expectation. This asserts the literal-assignment pattern can never
+    // silently return: no `$ExpectedCommit = "<40 hex chars>"` anywhere.
+    expect(updateScript).not.toMatch(/\$ExpectedCommit\s*=\s*"[0-9a-f]{40}"/);
+
+    const readIdx = updateScript.indexOf("$buildInfoPath = Join-Path $sourceApp \"BUILD_INFO.json\"");
+    expect(readIdx).toBeGreaterThan(-1);
+    // Must be read from $sourceApp (this package's own worker-app/), not
+    // the just-installed copy under $InstallDir - the expectation has to
+    // be knowable BEFORE anything is stopped/copied.
+    const sourceAppIdx = updateScript.indexOf("$sourceApp = Join-Path $PSScriptRoot");
+    expect(readIdx).toBeGreaterThan(sourceAppIdx);
+
+    const assignIdx = updateScript.indexOf("$ExpectedCommit = $buildInfo.commit");
+    expect(assignIdx).toBeGreaterThan(readIdx);
+
+    // Fails closed (never proceeds with an unverified/missing/malformed
+    // commit) rather than silently trusting a corrupt or absent file.
+    const block = updateScript.slice(readIdx, assignIdx + 100);
+    expect(block).toMatch(/\[0-9a-f\]\{40\}/);
     expect(block).toMatch(/exit 1/);
   });
 

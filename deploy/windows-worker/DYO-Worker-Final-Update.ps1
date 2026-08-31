@@ -168,12 +168,16 @@ $ErrorActionPreference = "Stop"
 # with the worker's own identity.
 $TaskName = "DYO Video Worker"
 
-# The exact commit this final package was built from (see BUILD_INFO.json
-# alongside worker-app/, written by scripts/package-windows-worker.mjs at
-# package time) - verified below against the NEW process's own real
-# startup log line, not merely "some" commit marker, since this is meant
-# to be a specific, known-good final release.
-$ExpectedCommit = "d87f3b44b41a8a0910e2d8665050e4491421333f"
+# The exact commit this final package was built from - read below, once
+# $sourceApp is known, directly from THIS SAME package's own
+# worker-app\BUILD_INFO.json (written by scripts/package-windows-worker.mjs
+# at package time - see the read below). Deliberately NEVER a second,
+# separately-maintained literal here: a real release once shipped with
+# this value hand-copied from a PRIOR build and never updated for the new
+# one, so the running worker (genuinely the new commit) failed this exact
+# check against a stale expectation - reading the one real source
+# BUILD_INFO.json itself, already inside this same package, makes that
+# whole class of drift structurally impossible going forward.
 
 # The worker's own fixed, real invocation signature - `node --env-file=.env
 # dist\index.js`, spawned by the supervisor (supervisor/spawn-worker-child.ts,
@@ -346,6 +350,26 @@ foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles)) {
   }
 }
 Write-CheckResult $true "This package's own files are complete (execute-scene-edit/render/upload/supervisor modules all present)"
+
+# The one real, canonical release identity for this exact package - read
+# directly from this same worker-app/'s own BUILD_INFO.json (written by
+# scripts/package-windows-worker.mjs from a real `git rev-parse HEAD` at
+# package time), never a second, hand-maintained literal that could drift
+# out of sync with the program files sitting right next to it.
+$buildInfoPath = Join-Path $sourceApp "BUILD_INFO.json"
+if (-not (Test-Path $buildInfoPath)) {
+  Write-Host "[NEEDS ATTENTION] worker-app\BUILD_INFO.json is missing from this package - cannot determine its expected release commit."
+  Write-Host "Re-download the full DYO Worker FINAL update package and try again."
+  exit 1
+}
+$buildInfo = Get-Content $buildInfoPath -Raw | ConvertFrom-Json
+if (-not ($buildInfo.commit -match '^[0-9a-f]{40}$')) {
+  Write-Host "[NEEDS ATTENTION] worker-app\BUILD_INFO.json does not contain a real 40-character commit hash."
+  Write-Host "Re-download the full DYO Worker FINAL update package and try again."
+  exit 1
+}
+$ExpectedCommit = $buildInfo.commit
+Write-CheckResult $true "This package's own expected release commit" $ExpectedCommit
 
 # ---- Step 2: stop DYO Worker safely, and PROVE it actually stopped ----
 Write-Host ""
