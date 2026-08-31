@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectScenesTab } from "./ProjectScenesTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
+import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
@@ -19,14 +20,25 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
+/**
+ * These tests exercise the Advanced-mode raw Scene Mapping table
+ * (SceneTable) specifically - see SimpleScenesView.test.tsx for the
+ * default Simple Mode real-scene-card view. Forcing "advanced" here
+ * mirrors a real operator who has already flipped the workspace toggle on
+ * their own device (see WorkspaceModeProvider/workspace-mode.ts).
+ */
 function renderScenes(): void {
+  window.localStorage.setItem("dyo-workspace-mode", "advanced");
   renderWithLocale(
     <DashboardStatusProvider>
-      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-        <ProjectScenesTab />
-      </ProjectWorkspaceProvider>
+      <WorkspaceModeProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <ProjectScenesTab />
+        </ProjectWorkspaceProvider>
+      </WorkspaceModeProvider>
     </DashboardStatusProvider>
   );
 }

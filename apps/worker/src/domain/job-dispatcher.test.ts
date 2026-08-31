@@ -16,6 +16,10 @@ import { NotAvailableRenderCapabilitiesInspector } from "../execution/render/ins
 import type { RenderArtifactUploader, UploadRenderArtifactResult } from "../execution/render/upload-render-artifact.js";
 import type { PreviewUploader, UploadPreviewResult } from "../execution/upload-preview.js";
 import type { FullPreviewUploader, UploadFullPreviewResult } from "../execution/preview/upload-full-preview.js";
+import type {
+  SceneEvidencePreviewUploader,
+  UploadSceneEvidencePreviewResult
+} from "../inspection/upload-scene-evidence-preview.js";
 import type { AssetDownloadClient } from "../workspace/asset-cache.js";
 import { sessionWorkingCopyPath } from "../workspace/working-copy.js";
 
@@ -33,6 +37,12 @@ class FakePreviewUploader implements PreviewUploader {
 
 class FakeFullPreviewUploader implements FullPreviewUploader {
   async upload(): Promise<UploadFullPreviewResult> {
+    return { ok: true };
+  }
+}
+
+class FakeSceneEvidencePreviewUploader implements SceneEvidencePreviewUploader {
+  async upload(): Promise<UploadSceneEvidencePreviewResult> {
     return { ok: true };
   }
 }
@@ -89,6 +99,7 @@ function healthyDeps(overrides: Partial<JobDispatcherDeps> = {}): JobDispatcherD
     artifactUploader: new FakeArtifactUploader(),
     renderCapabilitiesInspector: new NotAvailableRenderCapabilitiesInspector(),
     fullPreviewUploader: new FakeFullPreviewUploader(),
+    sceneEvidencePreviewUploader: new FakeSceneEvidencePreviewUploader(),
     workRoot: "/tmp/does-not-matter-for-these-tests",
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     ...overrides
@@ -335,6 +346,80 @@ describe("executeJob - INSPECT_SCENE_EVIDENCE", () => {
     expect(result.status).toBe("FAILED");
     expect(result.error?.code).toBe("PRECONDITION_NOT_MET");
     expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it("uploads the captured preview frame's bytes when the inspector reports one (client-facing UX redesign, M. VISUAL PREVIEWS ARE MANDATORY)", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        aeProjectItemIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: { path: "/work-root/session-1/preview.png", capturedAtSeconds: 0 },
+        previewFailureReason: null,
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const upload = vi.fn().mockResolvedValue({ ok: true });
+    const job = sceneEvidenceJob();
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect }, sceneEvidencePreviewUploader: { upload } }),
+      job
+    );
+    expect(result.status).toBe("SUCCEEDED");
+    expect(upload).toHaveBeenCalledWith({ jobId: job.jobId, filePath: "/work-root/session-1/preview.png" });
+  });
+
+  it("never calls the preview uploader when the inspector reports no preview (preview: null)", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        aeProjectItemIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: null,
+        previewFailureReason: "capture failed",
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const upload = vi.fn().mockResolvedValue({ ok: true });
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect }, sceneEvidencePreviewUploader: { upload } }),
+      sceneEvidenceJob()
+    );
+    expect(result.status).toBe("SUCCEEDED");
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("still reports the job SUCCEEDED with the real structural evidence even when the preview upload itself fails - a failed preview upload never fails the whole evidence result", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        aeProjectItemIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: { path: "/work-root/session-1/preview.png", capturedAtSeconds: 0 },
+        previewFailureReason: null,
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const upload = vi.fn().mockResolvedValue({ ok: false, reason: "network error" });
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect }, sceneEvidencePreviewUploader: { upload } }),
+      sceneEvidenceJob()
+    );
+    expect(result.status).toBe("SUCCEEDED");
+    expect(result.result).toBe(evidenceResult.response);
+    expect(upload).toHaveBeenCalledTimes(1);
   });
 });
 

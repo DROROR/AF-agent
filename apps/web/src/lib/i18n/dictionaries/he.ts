@@ -726,5 +726,50 @@ export const he: Dictionary = {
     landscape: "הגרסה הרוחבית הרגילה של הסרטון שלכם.",
     reels: "יוצר גרסה אנכית טבעית של 1080×1920. DYO ממקמת מחדש את אלמנטי הסצנה האמיתיים במקום פשוט לחתוך את סרטון ה-Landscape.",
     safeSuggestions: "הצעות ש-DYO בטוחה לגביהן. הן מקובצות כאן כדי שתוכלו לאשר כמה בבת אחת במקום אחת בכל פעם."
+  },
+  workspaceMode: {
+    simpleAction: "פשוט",
+    advancedAction: "מתקדם",
+    toggleAriaLabel: "החלפה בין תצוגה פשוטה למתקדמת"
+  },
+  simpleScenes: {
+    emptyTitle: "אין עדיין סצנות",
+    emptyDescription: "הסצנות יופיעו כאן ברגע שתוכנית הסרטון שלכם תהיה מוכנה.",
+    status: {
+      ready: "מוכן",
+      needsChoice: "דורש את בחירתכם",
+      analyzing: "מנתח…",
+      generating: "התצוגה המקדימה נוצרת…",
+      outdated: "התצוגה המקדימה לא עדכנית"
+    },
+    screenLabel: "מסך",
+    textLabel: "טקסט",
+    noTextLabel: "לא הוגדר טקסט",
+    durationLabel: "משך",
+    durationSeconds: (seconds: number): string => `${seconds.toFixed(1)} שניות`,
+    durationUnset: "עדיין לא הוגדר",
+    noAssetAssigned: "עדיין לא הוקצה נכס",
+    previewSceneAction: "תצוגה מקדימה של הסצנה",
+    generatingPreviewAction: "יוצר…",
+    editAction: "עריכה",
+    advancedDetailsToggle: "פרטים מתקדמים",
+    plannedPreviewLabel: "תצוגה מקדימה מתוכננת — עדיין לא עובדה ב-After Effects",
+    aePreviewLabel: "תצוגה מקדימה מ-After Effects",
+    outdatedPreviewHint: "הסצנה השתנתה מאז שהתצוגה המקדימה הזו צולמה - ייתכן שהיא כבר לא תואמת. צרו תצוגה מקדימה חדשה כדי לראות את התוצאה הנוכחית.",
+    noPreviewYetHint: "אין עדיין תצוגה מקדימה. לחצו על \"תצוגה מקדימה של הסצנה\" כדי ליצור אחת מפרויקט ה-After Effects האמיתי.",
+    previewErrorPrefix: "לא ניתן היה ליצור תצוגה מקדימה:",
+    reviewQueueTitle: "דורש את הבדיקה שלכם",
+    reviewQueueEmptyDescription: "שום דבר לא דורש את הקלט שלכם כרגע.",
+    currentTextLabel: (text: string): string => `הטקסט כרגע: "${text}"`,
+    suggestedTextLabel: (text: string): string => `Claude מציע: "${text}"`,
+    keepOriginalAction: "השארת המקור",
+    useSuggestionAction: "שימוש בהצעה",
+    approveScenesAction: "אישור הסצנות",
+    approvingScenes: "מאשר…",
+    allScenesReadyHint: "כל הסצנות מוכנות - אשרו כדי להמשיך.",
+    scenesNotReadyHint: "סיימו לבדוק כל סצנה למטה לפני האישור.",
+    storyboardTitle: "לוח סיפור",
+    playFullPreviewAction: "הפעלת התצוגה המקדימה המלאה",
+    workerOfflineHint: "אין כרגע מחשב מחובר שיכול ליצור תצוגה מקדימה זו."
   }
 };

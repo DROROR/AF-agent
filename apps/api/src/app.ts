@@ -15,6 +15,7 @@ import type { SceneEvidenceRepository } from "./domain/scene-evidence/types.js";
 import type { RenderArtifactRepository } from "./domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "./domain/render-artifact-upload/types.js";
 import type { FullPreviewArtifactRepository } from "./domain/full-preview-artifact/types.js";
+import type { SceneEvidencePreviewRepository } from "./domain/scene-evidence-preview/types.js";
 import type { ExecutionSessionRepository } from "./domain/execution-session/types.js";
 import type { UserAiProviderRepository } from "./domain/user-ai-provider/types.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
@@ -29,6 +30,7 @@ import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
 import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upload.js";
 import { registerFullPreviewUploadRoutes } from "./routes/full-preview-upload.js";
+import { registerSceneEvidencePreviewUploadRoutes } from "./routes/scene-evidence-preview-upload.js";
 import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-download.js";
 import { registerPreviewUploadRoutes } from "./routes/preview-upload.js";
 import { registerExecutionSessionRoutes } from "./routes/execution-sessions.js";
@@ -59,6 +61,7 @@ export interface AppDependencies {
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
   fullPreviewArtifactRepository: FullPreviewArtifactRepository;
+  sceneEvidencePreviewRepository: SceneEvidencePreviewRepository;
   executionSessionRepository: ExecutionSessionRepository;
   userAiProviderRepository: UserAiProviderRepository;
   checkDatabaseHealth: () => Promise<boolean>;
@@ -163,6 +166,16 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     maxUploadBytes: deps.env.RENDER_ARTIFACT_MAX_UPLOAD_BYTES,
     ...(deps.now ? { now: deps.now } : {})
   });
+  registerSceneEvidencePreviewUploadRoutes(app, {
+    jobRepository: deps.jobRepository,
+    workerRepository: deps.workerRepository,
+    sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository,
+    assetStorage: deps.assetStorage,
+    // Reuses the same render-artifact ceiling - a captured evidence frame
+    // is a small still image, comfortably under this limit.
+    maxUploadBytes: deps.env.RENDER_ARTIFACT_MAX_UPLOAD_BYTES,
+    ...(deps.now ? { now: deps.now } : {})
+  });
   registerWorkerAssetDownloadRoutes(app, {
     jobRepository: deps.jobRepository,
     workerRepository: deps.workerRepository,
@@ -186,6 +199,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     executionSessionRepository: deps.executionSessionRepository,
     renderArtifactRepository: deps.renderArtifactRepository,
     renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
+    sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     ...(deps.now ? { now: deps.now } : {}),

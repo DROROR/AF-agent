@@ -137,3 +137,38 @@ export type SceneEvidenceResponse = z.infer<typeof sceneEvidenceResponseSchema>;
 export const SCENE_EVIDENCE_STATUSES = ["AVAILABLE", "STALE", "NOT_INSPECTED"] as const;
 export type SceneEvidenceStatus = (typeof SCENE_EVIDENCE_STATUSES)[number];
 export const sceneEvidenceStatusSchema = z.enum(SCENE_EVIDENCE_STATUSES);
+
+/**
+ * Client-facing UX redesign, "M. VISUAL PREVIEWS ARE MANDATORY" - a real,
+ * uploaded per-scene evidence preview frame (scene_evidence_previews'
+ * own table doc comment, packages/database/src/schema.ts). Browser-facing
+ * DTO carries NO filesystem path - only `filename` (a bare, deterministic,
+ * worker-derived basename).
+ */
+export const sceneEvidencePreviewDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    projectId: z.string().uuid(),
+    manifestCompositionId: z.string().min(1),
+    sourceProjectSha256: z.string().min(1),
+    filename: z.string().min(1),
+    mimeType: z.string().min(1),
+    byteSize: z.number().int().nonnegative(),
+    capturedAt: z.string().datetime(),
+    createdAt: z.string().datetime()
+  })
+  .strict();
+export type SceneEvidencePreviewDto = z.infer<typeof sceneEvidencePreviewDtoSchema>;
+
+/** GET .../scenes/:scenePlanId/preview-status - preview metadata, null when no preview has ever been captured for this scene's composition. */
+export const sceneEvidencePreviewStatusResponseSchema = z.object({ preview: sceneEvidencePreviewDtoSchema.nullable() }).strict();
+export type SceneEvidencePreviewStatusResponse = z.infer<typeof sceneEvidencePreviewStatusResponseSchema>;
+
+/** What POST /api/workers/:workerId/jobs/:jobId/scene-evidence-preview returns on success - mirrors fullPreviewUploadResponseSchema's own contract. */
+export const sceneEvidencePreviewUploadResponseSchema = z.object({
+  id: z.string().uuid(),
+  jobId: z.string().uuid(),
+  byteSize: z.number().int().nonnegative(),
+  sha256: z.string()
+});
+export type SceneEvidencePreviewUploadResponse = z.infer<typeof sceneEvidencePreviewUploadResponseSchema>;

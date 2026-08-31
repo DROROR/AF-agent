@@ -20,6 +20,7 @@ import type { ExecutionSessionRepository } from "../domain/execution-session/typ
 import type { JobRepository } from "../domain/job/types.js";
 import type { RenderArtifactRepository } from "../domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "../domain/render-artifact-upload/types.js";
+import type { SceneEvidencePreviewRepository } from "../domain/scene-evidence-preview/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
@@ -37,6 +38,7 @@ import { rejectExecutionPlan } from "../application/execution-plan/reject-execut
 import { reopenExecutionPlan } from "../application/execution-plan/reopen-execution-plan.js";
 import { setRenderOutputConfig } from "../application/execution-plan/set-render-output-config.js";
 import { reconcileExecutionPlanReadiness } from "../application/execution-plan/reconcile-execution-plan-readiness.js";
+import { getSceneEvidencePreviewMetadata, getSceneEvidencePreviewFile } from "../application/execution-plan/get-scene-evidence-preview.js";
 import type { BrandRulesConfig } from "../domain/brand-rules/validate-brand-rules.js";
 
 export interface ProjectsRouteDeps {
@@ -48,6 +50,7 @@ export interface ProjectsRouteDeps {
   executionSessionRepository: ExecutionSessionRepository;
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
+  sceneEvidencePreviewRepository: SceneEvidencePreviewRepository;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   now?: () => Date;
@@ -57,6 +60,7 @@ export interface ProjectsRouteDeps {
 
 const projectIdParamsSchema = z.object({ projectId: z.string().uuid() });
 const renderOutputParamsSchema = z.object({ projectId: z.string().uuid(), variant: renderOutputVariantSchema });
+const scenePreviewParamsSchema = z.object({ projectId: z.string().uuid(), scenePlanId: z.string().min(1) });
 
 /**
  * Phase 4 (docs/PHASES.md: "Dynamic Approval Table + Execution Plan") -
@@ -215,6 +219,36 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     reconcileExecutionPlanReadinessRequestSchema.parse(request.body ?? {});
     const result = await reconcileExecutionPlanReadiness({ executionPlanRepository: deps.executionPlanRepository, now }, projectId);
     reply.send(result);
+  });
+
+  /**
+   * Client-facing UX redesign, "M. VISUAL PREVIEWS ARE MANDATORY" -
+   * metadata only (see the .../preview route below for the real bytes).
+   * null when no evidence preview has ever been captured for this scene's
+   * composition yet - a real, valid state, never an error.
+   */
+  app.get("/api/projects/:projectId/execution-plan/scenes/:scenePlanId/preview-status", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, scenePlanId } = scenePreviewParamsSchema.parse(request.params);
+    const preview = await getSceneEvidencePreviewMetadata(
+      { executionPlanRepository: deps.executionPlanRepository, sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository },
+      projectId,
+      scenePlanId
+    );
+    reply.send({ preview });
+  });
+
+  /** Streams the real scene-evidence preview frame bytes back - same project-scoping/no-filesystem-path contract as .../preview-status above. */
+  app.get("/api/projects/:projectId/execution-plan/scenes/:scenePlanId/preview", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, scenePlanId } = scenePreviewParamsSchema.parse(request.params);
+    const file = await getSceneEvidencePreviewFile(
+      { executionPlanRepository: deps.executionPlanRepository, sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository, assetStorage: deps.assetStorage },
+      projectId,
+      scenePlanId
+    );
+    reply.header("content-type", file.mimeType);
+    reply.send(file.buffer);
   });
 
   /**

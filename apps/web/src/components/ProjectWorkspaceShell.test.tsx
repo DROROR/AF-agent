@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkspaceShell } from "./ProjectWorkspaceShell";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import { PROJECT_ID, manifestFixture, planFixture, projectDtoFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
 
@@ -21,11 +22,13 @@ afterEach(() => {
 
 function renderShell(): void {
   renderWithLocale(
-    <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <ProjectWorkspaceShell projectId={PROJECT_ID}>
-        <div>tab content</div>
-      </ProjectWorkspaceShell>
-    </ProjectWorkspaceProvider>
+    <WorkspaceModeProvider>
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <ProjectWorkspaceShell projectId={PROJECT_ID}>
+          <div>tab content</div>
+        </ProjectWorkspaceShell>
+      </ProjectWorkspaceProvider>
+    </WorkspaceModeProvider>
   );
 }
 

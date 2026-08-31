@@ -17,6 +17,7 @@ import { DrizzleSceneEvidenceRepository } from "../infrastructure/db/drizzle-sce
 import { DrizzleRenderArtifactRepository } from "../infrastructure/db/drizzle-render-artifact-repository.js";
 import { DrizzleRenderArtifactUploadRepository } from "../infrastructure/db/drizzle-render-artifact-upload-repository.js";
 import { DrizzleFullPreviewArtifactRepository } from "../infrastructure/db/drizzle-full-preview-artifact-repository.js";
+import { DrizzleSceneEvidencePreviewRepository } from "../infrastructure/db/drizzle-scene-evidence-preview-repository.js";
 import { DrizzleUserAiProviderRepository } from "../infrastructure/db/drizzle-user-ai-provider-repository.js";
 import { LocalFilesystemAssetStorage } from "../infrastructure/storage/local-filesystem-asset-storage.js";
 import { mkdtempSync } from "node:fs";
@@ -55,6 +56,7 @@ async function setup() {
     renderArtifactRepository,
     renderArtifactUploadRepository,
     fullPreviewArtifactRepository: new DrizzleFullPreviewArtifactRepository(db),
+    sceneEvidencePreviewRepository: new DrizzleSceneEvidencePreviewRepository(db),
     userAiProviderRepository: new DrizzleUserAiProviderRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");

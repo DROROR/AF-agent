@@ -19,6 +19,7 @@ function statusForCode(code: ErrorCode): number {
     case "EXECUTION_SESSION_NOT_FOUND":
     case "PREVIEW_NOT_FOUND":
     case "FULL_PREVIEW_NOT_FOUND":
+    case "SCENE_EVIDENCE_PREVIEW_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
@@ -209,6 +210,14 @@ export class FullPreviewNotFoundError extends AppError {
   constructor(sessionId: string) {
     super("FULL_PREVIEW_NOT_FOUND", `Execution session ${sessionId} has no complete preview yet`);
     this.name = "FullPreviewNotFoundError";
+  }
+}
+
+/** A scene exists, but no evidence preview frame has ever been captured+uploaded for it yet. */
+export class SceneEvidencePreviewNotFoundError extends AppError {
+  constructor(scenePlanId: string) {
+    super("SCENE_EVIDENCE_PREVIEW_NOT_FOUND", `Scene ${scenePlanId} has no evidence preview yet`);
+    this.name = "SceneEvidencePreviewNotFoundError";
   }
 }
 

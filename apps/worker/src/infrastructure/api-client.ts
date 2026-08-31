@@ -5,6 +5,7 @@ import {
   previewUploadResponseSchema,
   registerWorkerResponseSchema,
   renderArtifactUploadResponseSchema,
+  sceneEvidencePreviewUploadResponseSchema,
   workerDtoSchema,
   type ClaimJobResponse,
   type FullPreviewUploadResponse,
@@ -16,6 +17,7 @@ import {
   type RenderArtifactUploadResponse,
   type RenderOutputVariant,
   type ReportJobStatusRequest,
+  type SceneEvidencePreviewUploadResponse,
   type WorkerDto
 } from "@dyo/schemas";
 import { ApiResponseError, NetworkError, UnauthorizedApiError } from "../errors/worker-error.js";
@@ -286,6 +288,40 @@ export class ApiClient {
     const json = await parseJson(response);
     if (response.status === 201) {
       return fullPreviewUploadResponseSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  /**
+   * Worker->API scene-evidence preview byte transfer (client-facing UX
+   * redesign, "M. VISUAL PREVIEWS ARE MANDATORY") - the ONE place a real
+   * captured scene-evidence frame's bytes ever leave this worker machine.
+   * Mirrors uploadFullPreview's own shape exactly.
+   */
+  async uploadSceneEvidencePreview(workerId: string, workerToken: string, jobId: string, fileBuffer: Buffer, filename: string, mimeType: string): Promise<SceneEvidencePreviewUploadResponse> {
+    const form = new FormData();
+    form.append("file", new Blob([fileBuffer], { type: mimeType }), filename);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const path = `/api/workers/${workerId}/jobs/${jobId}/scene-evidence-preview`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.apiUrl}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${workerToken}` },
+        body: form,
+        signal: controller.signal
+      });
+    } catch (cause) {
+      throw new NetworkError(`Failed to reach ${path}`, { cause });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const json = await parseJson(response);
+    if (response.status === 201) {
+      return sceneEvidencePreviewUploadResponseSchema.parse(json);
     }
     throw this.errorForResponse(response, json);
   }

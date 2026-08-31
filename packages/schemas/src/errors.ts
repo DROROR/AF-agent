@@ -21,6 +21,8 @@ export const ERROR_CODES = [
   "PREVIEW_NOT_FOUND",
   /** An execution session exists, but no full-preview video has ever been captured+uploaded for its CURRENT working copy yet - client-handoff phase, "real final preview approval gate". */
   "FULL_PREVIEW_NOT_FOUND",
+  /** A scene exists, but no evidence preview frame has ever been captured+uploaded for it yet - client-facing UX redesign, "visual previews are mandatory". */
+  "SCENE_EVIDENCE_PREVIEW_NOT_FOUND",
   /** Upload's real MIME type is not on the allowlist, or an explicit requested mediaKind doesn't match the real file. */
   "UNSUPPORTED_MEDIA_TYPE",
   /** Upload exceeds the configured maximum byte size. */

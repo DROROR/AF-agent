@@ -34,6 +34,7 @@ import {
   executionSessionResponseSchema,
   currentExecutionSessionResponseSchema,
   fullPreviewArtifactResponseSchema,
+  sceneEvidencePreviewStatusResponseSchema,
   type RenderArtifactDto,
   type RenderOutputVariant,
   type SetRenderOutputConfigRequest,
@@ -42,7 +43,8 @@ import {
   type ExecutionSessionDto,
   type FullPreviewArtifactDto,
   type JobDto,
-  type ListJobsResponse
+  type ListJobsResponse,
+  type SceneEvidencePreviewDto
 } from "@dyo/schemas";
 
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -691,6 +693,32 @@ export async function fetchFullPreviewStatus(projectId: string, sessionId: strin
 /** Same-origin URL for a session's current complete-preview video - safe to use directly as a <video> src; never a filesystem path or storage key. */
 export function fullPreviewFileUrl(projectId: string, sessionId: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/full-preview`;
+}
+
+/**
+ * Metadata only - null when this scene's composition has never had a real
+ * AE-captured evidence preview frame yet, a real valid state (client-facing
+ * UX redesign, "M. VISUAL PREVIEWS ARE MANDATORY"). Callers combine this
+ * with live job status to distinguish "Analyzing…"/"Preview generating…"
+ * from "Ready".
+ */
+export async function fetchSceneEvidencePreviewStatus(projectId: string, scenePlanId: string): Promise<ApiResult<SceneEvidencePreviewDto | null>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-plan/scenes/${encodeURIComponent(scenePlanId)}/preview-status`
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = sceneEvidencePreviewStatusResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected scene-evidence preview contract" };
+  }
+  return { ok: true, data: parsed.data.preview };
+}
+
+/** Same-origin URL for a scene's latest real, AE-captured evidence preview frame - safe to use directly as an <img> src; never a filesystem path or storage key. */
+export function sceneEvidencePreviewFileUrl(projectId: string, scenePlanId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/execution-plan/scenes/${encodeURIComponent(scenePlanId)}/preview`;
 }
 
 /** "Approve Final Preview" - the SEPARATE, later human gate before the final Landscape/Reels render can be dispatched (never the same gate as approveFirstPreview). */

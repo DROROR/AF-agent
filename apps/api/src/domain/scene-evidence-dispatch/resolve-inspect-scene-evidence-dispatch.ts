@@ -84,7 +84,14 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       aeProjectItemIndex: composition.aeProjectItemIndex,
       compositionName: composition.name,
       layerIndices,
-      previewTimestampSeconds: null
+      // Client-facing UX redesign, "M. VISUAL PREVIEWS ARE MANDATORY":
+      // always request a real representative frame now (deterministic,
+      // server-resolved - the very start of the composition - never a
+      // caller-supplied timestamp). A failed capture never fails the
+      // whole evidence result (see SceneEvidenceResponse.preview's own
+      // doc comment) - the structural layer facts remain useful on
+      // their own either way.
+      previewTimestampSeconds: 0
     }
   };
 }

@@ -134,6 +134,13 @@
       "when": 1788181841895,
       "tag": "0018_lonely_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788212660801,
+      "tag": "0019_friendly_spitfire",
+      "breakpoints": true
     }
   ]
 }

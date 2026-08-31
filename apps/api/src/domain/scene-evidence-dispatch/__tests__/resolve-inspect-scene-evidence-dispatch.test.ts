@@ -109,7 +109,7 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
       aeProjectItemIndex: 5,
       compositionName: "Scene 01",
       layerIndices: [1, 3],
-      previewTimestampSeconds: null
+      previewTimestampSeconds: 0
     });
   });
 

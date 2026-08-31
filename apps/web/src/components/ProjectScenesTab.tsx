@@ -2,9 +2,11 @@
 
 import { useState, type ReactElement } from "react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { SceneTable } from "./SceneTable";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { MappingAssistantPanel } from "./MappingAssistantPanel";
+import { SimpleScenesView } from "./SimpleScenesView";
 import { ErrorState } from "./ErrorState";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -14,12 +16,19 @@ import { computeFinalOrderSwap } from "../lib/scene-reorder";
 
 export function ProjectScenesTab(): ReactElement {
   const { t } = useLocale();
+  const { mode } = useWorkspaceMode();
   const { plan, applyEdit, isStale, createPlan } = useProjectWorkspaceContext();
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
   const [createPlanError, setCreatePlanError] = useState<string | null>(null);
+
+  // Every hook above runs unconditionally on every render (rules of
+  // hooks) - only the RETURNED JSX branches on mode, right after.
+  if (mode === "simple") {
+    return <SimpleScenesView />;
+  }
 
   async function handleCreatePlan(): Promise<void> {
     if (isCreatingPlan) {
@@ -44,12 +53,23 @@ export function ProjectScenesTab(): ReactElement {
           title={t.projectWorkspace.noPlanTitle}
           description={t.projectWorkspace.noPlanDescription}
           action={
-            <Button variant="primary" disabled={isCreatingPlan} onClick={() => void handleCreatePlan()}>
-              {isCreatingPlan ? t.projectWorkspace.creatingPlan : t.projectWorkspace.createPlanAction}
+            <Button
+              variant="primary"
+              disabled={isCreatingPlan}
+              onClick={() => void handleCreatePlan()}
+            >
+              {isCreatingPlan
+                ? t.projectWorkspace.creatingPlan
+                : t.projectWorkspace.createPlanAction}
             </Button>
           }
         />
-        {createPlanError ? <ErrorState title={t.projectWorkspace.createPlanFailedTitle} description={createPlanError} /> : null}
+        {createPlanError ? (
+          <ErrorState
+            title={t.projectWorkspace.createPlanFailedTitle}
+            description={createPlanError}
+          />
+        ) : null}
       </Card>
     );
   }
@@ -57,7 +77,9 @@ export function ProjectScenesTab(): ReactElement {
   async function handleToggleUse(scenePlanId: string, use: boolean): Promise<void> {
     setIsMutating(true);
     setMutationError(null);
-    const result = await applyEdit([{ type: use ? "INCLUDE_SCENE" : "EXCLUDE_SCENE", scenePlanId }]);
+    const result = await applyEdit([
+      { type: use ? "INCLUDE_SCENE" : "EXCLUDE_SCENE", scenePlanId }
+    ]);
     if (!result.ok) {
       setMutationError(result.message ?? null);
     }
@@ -80,7 +102,9 @@ export function ProjectScenesTab(): ReactElement {
     }
     setIsMutating(true);
     setMutationError(null);
-    const result = await applyEdit(swap.map((assignment) => ({ type: "SET_FINAL_ORDER", ...assignment })));
+    const result = await applyEdit(
+      swap.map((assignment) => ({ type: "SET_FINAL_ORDER", ...assignment }))
+    );
     if (!result.ok) {
       setMutationError(result.message ?? null);
     }
@@ -89,8 +113,15 @@ export function ProjectScenesTab(): ReactElement {
 
   return (
     <>
-      {isStale ? <ErrorState title={t.projectWorkspace.staleRevisionTitle} description={t.projectWorkspace.staleRevisionDescription} /> : null}
-      {mutationError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={mutationError} /> : null}
+      {isStale ? (
+        <ErrorState
+          title={t.projectWorkspace.staleRevisionTitle}
+          description={t.projectWorkspace.staleRevisionDescription}
+        />
+      ) : null}
+      {mutationError ? (
+        <ErrorState title={t.projectWorkspace.saveFailedTitle} description={mutationError} />
+      ) : null}
       <MappingAssistantPanel />
       <Card>
         <SceneTable

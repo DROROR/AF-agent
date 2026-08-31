@@ -736,5 +736,50 @@ export const en = {
     landscape: "The standard widescreen version of your video.",
     reels: "Creates a native 1080×1920 vertical version. DYO repositions the real scene elements instead of simply cropping the Landscape video.",
     safeSuggestions: "Suggestions DYO is confident about. They're grouped here so you can approve several at once instead of one at a time."
+  },
+  workspaceMode: {
+    simpleAction: "Simple",
+    advancedAction: "Advanced",
+    toggleAriaLabel: "Switch between Simple and Advanced view"
+  },
+  simpleScenes: {
+    emptyTitle: "No scenes yet",
+    emptyDescription: "Scenes will appear here once your video plan is ready.",
+    status: {
+      ready: "Ready",
+      needsChoice: "Needs your choice",
+      analyzing: "Analyzing…",
+      generating: "Preview generating…",
+      outdated: "Preview outdated"
+    },
+    screenLabel: "Screen",
+    textLabel: "Text",
+    noTextLabel: "No text set",
+    durationLabel: "Duration",
+    durationSeconds: (seconds: number): string => `${seconds.toFixed(1)} sec`,
+    durationUnset: "Not set yet",
+    noAssetAssigned: "No asset assigned yet",
+    previewSceneAction: "Preview Scene",
+    generatingPreviewAction: "Generating…",
+    editAction: "Edit",
+    advancedDetailsToggle: "Advanced details",
+    plannedPreviewLabel: "Planned preview — not yet rendered in After Effects",
+    aePreviewLabel: "After Effects preview",
+    outdatedPreviewHint: "This scene changed since this preview was captured - it may no longer match. Generate a new preview to see the current result.",
+    noPreviewYetHint: "No preview yet. Click \"Preview Scene\" to generate one from the real After Effects project.",
+    previewErrorPrefix: "Could not generate a preview:",
+    reviewQueueTitle: "Needs your review",
+    reviewQueueEmptyDescription: "Nothing needs your input right now.",
+    currentTextLabel: (text: string): string => `Text currently: "${text}"`,
+    suggestedTextLabel: (text: string): string => `Claude suggests: "${text}"`,
+    keepOriginalAction: "Keep original",
+    useSuggestionAction: "Use suggestion",
+    approveScenesAction: "Approve Scenes",
+    approvingScenes: "Approving…",
+    allScenesReadyHint: "Every scene is ready - approve to continue.",
+    scenesNotReadyHint: "Finish reviewing every scene below before approving.",
+    storyboardTitle: "Storyboard",
+    playFullPreviewAction: "Play Full Preview",
+    workerOfflineHint: "No computer is online to generate this preview right now."
   }
 } as const;

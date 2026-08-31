@@ -27,6 +27,7 @@ import type { RenderArtifactUploader } from "../execution/render/upload-render-a
 import type { RenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
 import { executeCreateFullPreview } from "../execution/preview/create-full-preview-executor.js";
 import type { FullPreviewUploader } from "../execution/preview/upload-full-preview.js";
+import type { SceneEvidencePreviewUploader } from "../inspection/upload-scene-evidence-preview.js";
 
 export interface JobExecutionResult {
   status: "SUCCEEDED" | "FAILED";
@@ -52,6 +53,8 @@ export interface JobDispatcherDeps {
   previewCapture: PreviewCapture;
   /** Multi-scene-accumulation phase, section 3: the real worker->API preview byte transfer - see execution/upload-preview.ts. */
   previewUploader: PreviewUploader;
+  /** INSPECT_SCENE_EVIDENCE's own preview-frame upload - see inspection/upload-scene-evidence-preview.ts. */
+  sceneEvidencePreviewUploader: SceneEvidencePreviewUploader;
   /** EXECUTE_FRAME's durable mid-job checkpoint reporter - see execute-scene-edit-executor.ts's PersistCheckpoint. Reused unchanged by RENDER (see render-project.ts's own doc comment on the shared checkpoint shape). */
   persistCheckpoint: PersistCheckpoint;
   /** MAP_FOOTAGE's asset-delivery dependency - see workspace/asset-cache.ts/execution/resolve-scene-edit-operation.ts. */
@@ -242,6 +245,16 @@ async function runInspectSceneEvidence(deps: JobDispatcherDeps, job: JobDto): Pr
     const result = await deps.sceneEvidenceInspector.inspect(payload as SceneEvidenceRequest);
     if (result.kind === "failure") {
       return { status: "FAILED", error: { code: "NOT_AVAILABLE", message: result.reason } };
+    }
+    // Client-facing UX redesign, "M. VISUAL PREVIEWS ARE MANDATORY": a
+    // captured preview frame's bytes are uploaded to the API's durable
+    // storage - best-effort, exactly like the capture step itself (see
+    // SceneEvidenceResponse.preview's own doc comment: "a failed preview
+    // never fails the whole evidence result"). An upload failure here is
+    // never surfaced as a job failure - the structural layer facts this
+    // job exists to report remain valid and useful either way.
+    if (result.response.preview) {
+      await deps.sceneEvidencePreviewUploader.upload({ jobId: job.jobId, filePath: result.response.preview.path });
     }
     return { status: "SUCCEEDED", result: result.response };
   } catch (cause) {

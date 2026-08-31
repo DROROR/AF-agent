@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactElement, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { ProjectWorkflowStepper } from "./ProjectWorkflowStepper";
 import { PlanStatusBadge } from "./PlanStatusBadge";
 import { ErrorState } from "./ErrorState";
@@ -20,11 +21,22 @@ interface TabDef {
   labelKey: "overview" | "scenes" | "assets" | "workMap" | "revisions" | "renderSettings";
 }
 
-function tabsFor(projectId: string): TabDef[] {
-  return [
+/**
+ * Client-facing UX redesign, section H: Simple Mode's nav is Overview/
+ * Scenes/Assets only - Work Map, Render Settings and Revisions move under
+ * Advanced (never removed, never deleted - see WorkspaceModeProvider).
+ */
+function tabsFor(projectId: string, mode: "simple" | "advanced"): TabDef[] {
+  const simpleTabs: TabDef[] = [
     { href: `/projects/${projectId}`, labelKey: "overview" },
     { href: `/projects/${projectId}/scenes`, labelKey: "scenes" },
-    { href: `/projects/${projectId}/assets`, labelKey: "assets" },
+    { href: `/projects/${projectId}/assets`, labelKey: "assets" }
+  ];
+  if (mode === "simple") {
+    return simpleTabs;
+  }
+  return [
+    ...simpleTabs,
     { href: `/projects/${projectId}/work-map`, labelKey: "workMap" },
     { href: `/projects/${projectId}/render-settings`, labelKey: "renderSettings" },
     { href: `/projects/${projectId}/revisions`, labelKey: "revisions" }
@@ -38,11 +50,18 @@ function tabsFor(projectId: string): TabDef[] {
  * per-tab) and renders the header facts + tab nav required by the
  * dashboard-integration task, using only real API values.
  */
-export function ProjectWorkspaceShell({ projectId, children }: { projectId: string; children: ReactNode }): ReactElement {
+export function ProjectWorkspaceShell({
+  projectId,
+  children
+}: {
+  projectId: string;
+  children: ReactNode;
+}): ReactElement {
   const { t } = useLocale();
   const pathname = usePathname();
   const router = useRouter();
   const { project, plan, isLoading, error } = useProjectWorkspaceContext();
+  const { mode, setMode } = useWorkspaceMode();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -68,11 +87,18 @@ export function ProjectWorkspaceShell({ projectId, children }: { projectId: stri
   }
 
   if (error || !project) {
-    return <ErrorState title={t.projectWorkspace.loadErrorTitle} {...(error ? { description: error } : {})} />;
+    return (
+      <ErrorState
+        title={t.projectWorkspace.loadErrorTitle}
+        {...(error ? { description: error } : {})}
+      />
+    );
   }
 
-  const unresolvedCount = plan ? plan.plan.scenePlans.filter((scene) => scene.unresolvedReasons.length > 0).length : null;
-  const tabs = tabsFor(projectId);
+  const unresolvedCount = plan
+    ? plan.plan.scenePlans.filter((scene) => scene.unresolvedReasons.length > 0).length
+    : null;
+  const tabs = tabsFor(projectId, mode);
 
   return (
     <>
@@ -83,6 +109,28 @@ export function ProjectWorkspaceShell({ projectId, children }: { projectId: stri
         <h1>{project.project.name}</h1>
         <div className="workspace-header__actions">
           {plan ? <PlanStatusBadge status={plan.plan.status} /> : null}
+          <div
+            className="workspace-mode-toggle"
+            role="group"
+            aria-label={t.workspaceMode.toggleAriaLabel}
+          >
+            <button
+              type="button"
+              className="workspace-mode-toggle__option"
+              data-active={mode === "simple"}
+              onClick={() => setMode("simple")}
+            >
+              {t.workspaceMode.simpleAction}
+            </button>
+            <button
+              type="button"
+              className="workspace-mode-toggle__option"
+              data-active={mode === "advanced"}
+              onClick={() => setMode("advanced")}
+            >
+              {t.workspaceMode.advancedAction}
+            </button>
+          </div>
           <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)}>
             <Trash2 aria-hidden="true" />
             {t.projectWorkspace.deleteProjectAction}
@@ -93,10 +141,12 @@ export function ProjectWorkspaceShell({ projectId, children }: { projectId: stri
         <summary>{t.projectWorkspace.header.detailsToggle}</summary>
         <p className="workspace-header__facts">
           <span>
-            {t.projectWorkspace.header.sourceProject}: <strong>{project.manifest.sourceProject.name}</strong>
+            {t.projectWorkspace.header.sourceProject}:{" "}
+            <strong>{project.manifest.sourceProject.name}</strong>
           </span>
           <span>
-            {t.projectWorkspace.header.sourceSha}: <strong>{project.manifest.sourceProject.sha256.slice(0, 12)}</strong>
+            {t.projectWorkspace.header.sourceSha}:{" "}
+            <strong>{project.manifest.sourceProject.sha256.slice(0, 12)}</strong>
           </span>
           {plan ? (
             <>
@@ -113,23 +163,37 @@ export function ProjectWorkspaceShell({ projectId, children }: { projectId: stri
           ) : null}
         </p>
       </details>
-      <Dialog open={confirmingDelete} onClose={() => setConfirmingDelete(false)} title={t.projectWorkspace.deleteConfirmTitle} variant="modal">
+      <Dialog
+        open={confirmingDelete}
+        onClose={() => setConfirmingDelete(false)}
+        title={t.projectWorkspace.deleteConfirmTitle}
+        variant="modal"
+      >
         <p>{t.projectWorkspace.deleteConfirmDescription(project.project.name)}</p>
-        {deleteError ? <ErrorState title={t.projectWorkspace.deleteFailedTitle} description={deleteError} /> : null}
+        {deleteError ? (
+          <ErrorState title={t.projectWorkspace.deleteFailedTitle} description={deleteError} />
+        ) : null}
         <div className="edit-drawer-actions">
           <Button variant="ghost" disabled={isDeleting} onClick={() => setConfirmingDelete(false)}>
             {t.projectWorkspace.deleteCancelAction}
           </Button>
           <Button variant="danger" disabled={isDeleting} onClick={() => void handleConfirmDelete()}>
             <Trash2 aria-hidden="true" />
-            {isDeleting ? t.projectWorkspace.deletingAction : t.projectWorkspace.deleteConfirmAction}
+            {isDeleting
+              ? t.projectWorkspace.deletingAction
+              : t.projectWorkspace.deleteConfirmAction}
           </Button>
         </div>
       </Dialog>
       <ProjectWorkflowStepper />
       <nav className="workspace-tabs" aria-label={t.projectWorkspace.tabs.overview}>
         {tabs.map((tab) => (
-          <Link key={tab.href} href={tab.href} className="workspace-tab" data-active={pathname === tab.href}>
+          <Link
+            key={tab.href}
+            href={tab.href}
+            className="workspace-tab"
+            data-active={pathname === tab.href}
+          >
             {t.projectWorkspace.tabs[tab.labelKey]}
           </Link>
         ))}

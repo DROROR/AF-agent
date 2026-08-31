@@ -691,6 +691,58 @@ export const fullPreviewArtifacts = pgTable(
 export type FullPreviewArtifactRow = typeof fullPreviewArtifacts.$inferSelect;
 export type NewFullPreviewArtifactRow = typeof fullPreviewArtifacts.$inferInsert;
 
+/**
+ * Durable per-scene evidence PREVIEW FRAME (client-facing UX redesign,
+ * "M. VISUAL PREVIEWS ARE MANDATORY") - a real, uploaded, browsable PNG
+ * frame captured by the SAME real INSPECT_SCENE_EVIDENCE job that already
+ * records scene_evidence's own structural layer facts (jobId-unique,
+ * same append-only "never mutate a past capture" pattern). Deliberately a
+ * SEPARATE table from scene_evidence, not an extra column there:
+ * scene_evidence.response is the worker's already-validated
+ * SceneEvidenceResponse jsonb blob (whose own `preview.path` field is
+ * explicitly a WORKER-LOCAL filesystem path never uploaded anywhere - see
+ * scene-evidence.ts's own doc comment); this table is the real, uploaded,
+ * server-storage-backed counterpart once the worker chooses to upload
+ * those same captured bytes, mirroring full_preview_artifacts/
+ * render_artifacts' own "storageKey/sha256 bind this row to REAL uploaded
+ * bytes" contract. Keyed by (projectId, manifestCompositionId) rather
+ * than executionSessionId - independent of, and never overwriting,
+ * execution_sessions.latestPreviewStorageKey (the EXECUTE_FRAME "First
+ * Preview" PNG, which is session-scoped and reflects only whichever ONE
+ * scene was most recently executed). sourceProjectSha256 is the same
+ * staleness signal scene_evidence's own compatibility check already
+ * uses - a preview captured against a source revision that no longer
+ * matches the project's current manifest is never presented as current.
+ */
+export const sceneEvidencePreviews = pgTable(
+  "scene_evidence_previews",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .unique()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    manifestCompositionId: text("manifest_composition_id").notNull(),
+    sourceProjectSha256: text("source_project_sha256").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    storageKey: text("storage_key").notNull(),
+    sha256: text("sha256").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("scene_evidence_previews_byte_size_check", sql`${table.byteSize} >= 0`),
+    unique("scene_evidence_previews_storage_key_unique").on(table.storageKey)
+  ]
+);
+export type SceneEvidencePreviewRow = typeof sceneEvidencePreviews.$inferSelect;
+export type NewSceneEvidencePreviewRow = typeof sceneEvidencePreviews.$inferInsert;
+
 /** Single value today (Anthropic only) - a real column + CHECK constraint rather than a boolean flag so adding OpenAI/Gemini later is an enum-value addition, never a schema shape change. */
 export const DB_AI_PROVIDER_NAMES = ["ANTHROPIC"] as const;
 
