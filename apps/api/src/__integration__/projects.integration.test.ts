@@ -300,23 +300,34 @@ describe("execution plan API", () => {
 
   it("approve/reject/reopen transition status without changing revision, and never touch worker/job tables", async () => {
     const projectId = await createProjectViaApi();
-    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const created = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const sceneId = created.json().plan.scenePlans[0].id;
+    const mappingId = created.json().plan.scenePlans[0].mappings[0].id;
+
+    // A real content decision - readiness must genuinely pass (mapping-review propagation fix).
+    const withDecision = await harness.app.inject({
+      method: "PATCH",
+      url: `/api/projects/${projectId}/execution-plan`,
+      ...authed(),
+      payload: { baseRevision: 1, operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }] }
+    });
+    const decidedRevision = withDecision.json().plan.revision;
 
     const approved = await harness.app.inject({
       method: "POST",
       url: `/api/projects/${projectId}/execution-plan/approve`,
       ...authed(),
-      payload: { baseRevision: 1 }
+      payload: { baseRevision: decidedRevision }
     });
     expect(approved.statusCode).toBe(200);
     expect(approved.json().plan.status).toBe("APPROVED");
-    expect(approved.json().plan.revision).toBe(1);
+    expect(approved.json().plan.revision).toBe(decidedRevision);
 
     const rejected = await harness.app.inject({
       method: "POST",
       url: `/api/projects/${projectId}/execution-plan/reject`,
       ...authed(),
-      payload: { baseRevision: 1 }
+      payload: { baseRevision: decidedRevision }
     });
     expect(rejected.statusCode).toBe(200);
     expect(rejected.json().plan.status).toBe("REJECTED");
@@ -325,7 +336,7 @@ describe("execution plan API", () => {
       method: "POST",
       url: `/api/projects/${projectId}/execution-plan/reopen`,
       ...authed(),
-      payload: { baseRevision: 1 }
+      payload: { baseRevision: decidedRevision }
     });
     expect(reopened.statusCode).toBe(200);
     expect(reopened.json().plan.status).toBe("DRAFT");
@@ -423,16 +434,62 @@ describe("execution plan API", () => {
 
   it("allows approval once the plan is genuinely resolved (real success path, not just the rejection path)", async () => {
     const projectId = await createProjectViaApi();
-    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const created = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const sceneId = created.json().plan.scenePlans[0].id;
+    const mappingId = created.json().plan.scenePlans[0].mappings[0].id;
+
+    const withDecision = await harness.app.inject({
+      method: "PATCH",
+      url: `/api/projects/${projectId}/execution-plan`,
+      ...authed(),
+      payload: { baseRevision: 1, operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }] }
+    });
 
     const response = await harness.app.inject({
       method: "POST",
       url: `/api/projects/${projectId}/execution-plan/approve`,
       ...authed(),
-      payload: { baseRevision: 1 }
+      payload: { baseRevision: withDecision.json().plan.revision }
     });
     expect(response.statusCode).toBe(200);
     expect(response.json().plan.status).toBe("APPROVED");
+  });
+
+  describe("POST /api/projects/:projectId/execution-plan/reconcile-readiness (mapping-review propagation fix)", () => {
+    it("rejects an unauthenticated request", async () => {
+      const projectId = await createProjectViaApi();
+      const response = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan/reconcile-readiness` });
+      expect(response.statusCode).toBe(401);
+    });
+
+    it("returns 404 when the project has no execution plan yet", async () => {
+      const projectId = await createProjectViaApi();
+      const response = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan/reconcile-readiness`, ...authed() });
+      expect(response.statusCode).toBe(404);
+    });
+
+    it("is a real no-op (changed: false) on a freshly-built plan whose readiness is already correct - never fabricates a change", async () => {
+      const projectId = await createProjectViaApi();
+      await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+
+      const response = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan/reconcile-readiness`, ...authed() });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().changed).toBe(false);
+      expect(response.json().changedScenePlanIds).toEqual([]);
+    });
+
+    it("never bumps the plan revision or touches its status - metadata-only, callable repeatedly and safely", async () => {
+      const projectId = await createProjectViaApi();
+      const created = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+
+      const response = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan/reconcile-readiness`, ...authed() });
+      expect(response.json().plan.revision).toBe(created.json().plan.revision);
+      expect(response.json().plan.status).toBe(created.json().plan.status);
+
+      const again = await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan/reconcile-readiness`, ...authed() });
+      expect(again.statusCode).toBe(200);
+      expect(again.json().changed).toBe(false);
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import type { PlaceholderMapping, Placeholder, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { deterministicId } from "../../domain/execution-plan/deterministic-id.js";
+import { computeMappingsUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
 
 const DETAIL_UNAVAILABLE_REASON_PATTERN = /did not return usable layer data/;
 
@@ -49,16 +50,26 @@ export function buildScenePlans(manifest: TemplateManifest, now: () => Date = ()
     const placeholders = scene?.placeholders ?? [];
     const mappings = placeholders.map((p) => buildMapping(p, timestamp));
 
-    const unresolvedReasons: string[] = [];
+    // Mapping-review propagation fix: a freshly-built plan must already
+    // reflect real readiness, not merely "does every placeholder have a
+    // confident manifest classification" (the exact stale/overbroad
+    // build-time check that used to leave a scene "unresolved" forever
+    // even once every real content decision was made - see
+    // compute-scene-unresolved-reasons.ts's own doc comment). No
+    // mapping ever has a decision or instructions yet at build time, so
+    // this only ever resolves a scene here via structural exemption
+    // (camera/mask/shape-layer/CONTROL/...), never a content decision
+    // that couldn't possibly exist yet.
+    let unresolvedReasons: string[];
     if (!scene) {
-      unresolvedReasons.push("composition is nested-only - not a candidate top-level scene");
+      unresolvedReasons = ["composition is nested-only - not a candidate top-level scene"];
     } else if (placeholders.length === 0) {
       const detailFailure = manifest.unknownItems.find(
         (u) => u.context === composition.name && DETAIL_UNAVAILABLE_REASON_PATTERN.test(u.reason)
       );
-      unresolvedReasons.push(detailFailure ? detailFailure.reason : "no placeholder detected in this composition");
-    } else if (mappings.every((m) => m.placeholderClassification.value === null)) {
-      unresolvedReasons.push("no confident structural classification for any detected placeholder yet");
+      unresolvedReasons = [detailFailure ? detailFailure.reason : "no placeholder detected in this composition"];
+    } else {
+      unresolvedReasons = computeMappingsUnresolvedReasons(mappings, null);
     }
 
     return {
@@ -74,7 +85,7 @@ export function buildScenePlans(manifest: TemplateManifest, now: () => Date = ()
       // independent fields from this point on (Phase 4's own hard rule).
       finalOrder: scene ? scene.originalOrderIndex : compositionIndex,
       finalDuration: null,
-      approvalState: "UNREVIEWED",
+      approvalState: unresolvedReasons.length === 0 ? "READY_FOR_APPROVAL" : "UNREVIEWED",
       instructions: null,
       notes: null,
       unresolvedReasons,

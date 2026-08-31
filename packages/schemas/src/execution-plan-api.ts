@@ -57,3 +57,25 @@ export const setRenderOutputConfigRequestSchema = z
   })
   .strict();
 export type SetRenderOutputConfigRequest = z.infer<typeof setRenderOutputConfigRequestSchema>;
+
+/**
+ * POST /api/projects/:projectId/execution-plan/reconcile-readiness
+ * (mapping-review propagation fix) - explicitly recomputes every scene's
+ * `unresolvedReasons`/`approvalState` from its real, current mapping
+ * state, for a plan whose CONTENT was edited before this fix existed
+ * (see reconcile-execution-plan-readiness.ts's own doc comment for the
+ * full safety contract - never touches mapping content, never bumps
+ * revision, never touches plan status, idempotent/no-op when nothing is
+ * actually stale). No request body: operates on the project's own
+ * current plan only, never client-supplied targeting.
+ */
+export const reconcileExecutionPlanReadinessRequestSchema = z.object({});
+export type ReconcileExecutionPlanReadinessRequest = z.infer<typeof reconcileExecutionPlanReadinessRequestSchema>;
+
+export const reconcileExecutionPlanReadinessResponseSchema = z.object({
+  changed: z.boolean(),
+  changedScenePlanIds: z.array(z.string().min(1)),
+  plan: executionPlanSchema,
+  sceneTable: z.array(sceneTableRowSchema)
+});
+export type ReconcileExecutionPlanReadinessResponse = z.infer<typeof reconcileExecutionPlanReadinessResponseSchema>;

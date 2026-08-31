@@ -110,17 +110,25 @@ describe("listExecutionPlanRevisions", () => {
   });
 
   it("reflects an approval transition without creating a new revision (approve is in-place)", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
+    // A real content decision - readiness must genuinely pass (mapping-review propagation fix).
+    const withDecision = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: created.plan.revision,
+      operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
+    });
     await approveExecutionPlan(
       { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
-      { baseRevision: created.plan.revision }
+      { baseRevision: withDecision.plan.revision }
     );
 
     const result = await listExecutionPlanRevisions({ executionPlanRepository }, project.projectId);
-    expect(result.revisions).toHaveLength(1);
-    expect(result.revisions[0]).toMatchObject({ revision: 1, status: "APPROVED", isCurrent: true });
+    expect(result.revisions).toHaveLength(2);
+    const current = result.revisions.find((r) => r.isCurrent);
+    expect(current).toMatchObject({ revision: withDecision.plan.revision, status: "APPROVED", isCurrent: true });
   });
 });

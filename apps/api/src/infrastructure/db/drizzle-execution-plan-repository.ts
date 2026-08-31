@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { executionPlans, type Database, type ExecutionPlanRow } from "@dyo/database";
-import { EMPTY_RENDER_OUTPUTS, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
+import { EMPTY_RENDER_OUTPUTS, type RenderOutputConfig, type RenderOutputVariant, type ScenePlanEntry } from "@dyo/schemas";
 import type {
   ExecutionPlanRecord,
   ExecutionPlanRepository,
@@ -112,6 +112,23 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
       .update(executionPlans)
       .set({ renderOutputs: nextRenderOutputs, updatedAt: now })
       .where(eq(executionPlans.id, id))
+      .returning();
+    return row ? toDomain(row) : null;
+  }
+
+  /**
+   * In-place update of the CURRENT revision's own scenePlans, same
+   * revision - never a new revision, since this never changes real
+   * mapping content (mapping-review propagation fix,
+   * reconcile-execution-plan-readiness.ts's own doc comment). Optimistic
+   * concurrency (expectedRevision) so this can never silently clobber a
+   * concurrent real content edit.
+   */
+  async updateSceneReadiness(id: string, expectedRevision: number, scenePlans: ScenePlanEntry[], now: Date): Promise<ExecutionPlanRecord | null> {
+    const [row] = await this.db
+      .update(executionPlans)
+      .set({ scenePlans, updatedAt: now })
+      .where(and(eq(executionPlans.id, id), eq(executionPlans.revision, expectedRevision)))
       .returning();
     return row ? toDomain(row) : null;
   }

@@ -299,3 +299,63 @@ describe("applyExecutionPlanEdit", () => {
     });
   });
 });
+
+describe("applyExecutionPlanEdit - mapping-review -> execution-plan propagation fix (real production bug on test22)", () => {
+  it("SET_TEXT on the only mapping resolves the scene - unresolvedReasons empties and approvalState becomes READY_FOR_APPROVAL", () => {
+    const undecided = scene({ unresolvedReasons: ["no confident structural classification for any detected placeholder yet"] });
+    const result = applyExecutionPlanEdit([undecided], { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1", text: "Real headline" }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scenePlans[0]?.unresolvedReasons).toEqual([]);
+    expect(result.scenePlans[0]?.approvalState).toBe("READY_FOR_APPROVAL");
+  });
+
+  it("MAP_ASSET on the only mapping resolves the scene the same way", () => {
+    const undecided = scene({ unresolvedReasons: ["no confident structural classification for any detected placeholder yet"] });
+    const result = applyExecutionPlanEdit([undecided], { type: "MAP_ASSET", scenePlanId: "scene-1", mappingId: "mapping-1", selectedAssetId: "asset-1", selectedAssetType: "image" }, fixedNow);
+    expect(result.ok && result.scenePlans[0]?.unresolvedReasons).toEqual([]);
+    expect(result.ok && result.scenePlans[0]?.approvalState).toBe("READY_FOR_APPROVAL");
+  });
+
+  it("CLEAR_TEXT on a scene's only mapping makes it unresolved again - stays in sync in both directions", () => {
+    const resolved = scene({ mappings: [mapping({ text: "Was real" })], unresolvedReasons: [], approvalState: "READY_FOR_APPROVAL" });
+    const result = applyExecutionPlanEdit([resolved], { type: "CLEAR_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1" }, fixedNow);
+    expect(result.ok && result.scenePlans[0]?.unresolvedReasons.length).toBeGreaterThan(0);
+    expect(result.ok && result.scenePlans[0]?.approvalState).toBe("UNREVIEWED");
+  });
+
+  it("a scene explicitly APPROVED by a human is never silently downgraded back to UNREVIEWED by a later content edit that clears a decision", () => {
+    const approvedScene = scene({ mappings: [mapping({ text: "Was real" })], unresolvedReasons: [], approvalState: "APPROVED" });
+    const result = applyExecutionPlanEdit([approvedScene], { type: "SET_INSTRUCTIONS", scenePlanId: "scene-1", instructions: "unrelated note" }, fixedNow);
+    expect(result.ok && result.scenePlans[0]?.approvalState).toBe("APPROVED");
+  });
+
+  it("a scene explicitly REJECTED by a human is never silently upgraded to READY_FOR_APPROVAL just because a mapping now has content", () => {
+    const rejectedScene = scene({ approvalState: "REJECTED", notes: "needs rework" });
+    const result = applyExecutionPlanEdit([rejectedScene], { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1", text: "Fixed" }, fixedNow);
+    expect(result.ok && result.scenePlans[0]?.approvalState).toBe("REJECTED");
+  });
+
+  it("duplicate label identity: two mappings sharing the exact same placeholderName in different scenes - an edit targeting one by its real mappingId/scenePlanId never touches the other", () => {
+    const sceneA = scene({ id: "scene-A", mappings: [mapping({ id: "mapping-A", placeholderName: "Text 01" })] });
+    const sceneB = scene({ id: "scene-B", mappings: [mapping({ id: "mapping-B", placeholderName: "Text 01" })] });
+    const result = applyExecutionPlanEdit([sceneA, sceneB], { type: "SET_TEXT", scenePlanId: "scene-A", mappingId: "mapping-A", text: "Scene A's real text" }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scenePlans.find((s) => s.id === "scene-A")?.mappings[0]?.text).toBe("Scene A's real text");
+    // Scene B, sharing the exact same placeholderName, is completely untouched - never recomputed either, since only the addressed scene is.
+    expect(result.scenePlans.find((s) => s.id === "scene-B")?.mappings[0]?.text).toBeNull();
+    expect(result.scenePlans.find((s) => s.id === "scene-B")).toEqual(sceneB);
+  });
+
+  it("duplicate label identity: two mappings sharing the same placeholderName in the SAME scene - the untouched sibling stays undecided", () => {
+    const twoTitles = scene({ mappings: [mapping({ id: "mapping-1", placeholderName: "Title" }), mapping({ id: "mapping-2", placeholderName: "Title" })] });
+    const result = applyExecutionPlanEdit([twoTitles], { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1", text: "First title" }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scenePlans[0]?.mappings.find((m) => m.id === "mapping-1")?.text).toBe("First title");
+    expect(result.scenePlans[0]?.mappings.find((m) => m.id === "mapping-2")?.text).toBeNull();
+    // The scene as a whole stays unresolved - mapping-2 still needs its own real decision.
+    expect(result.scenePlans[0]?.unresolvedReasons.length).toBeGreaterThan(0);
+  });
+});

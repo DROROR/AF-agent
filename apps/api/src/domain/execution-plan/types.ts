@@ -60,4 +60,13 @@ export interface ExecutionPlanRepository {
    * variant's configuration. Returns null only if `id` doesn't exist.
    */
   updateRenderOutput(id: string, variant: RenderOutputVariant, config: RenderOutputConfig | null, now: Date): Promise<ExecutionPlanRecord | null>;
+  /**
+   * In-place update of the CURRENT revision's own scenePlans, same
+   * revision - never bumps revision or touches status (mapping-review
+   * propagation fix: a readiness-only correction, e.g.
+   * reconcile-execution-plan-readiness.ts, is never a content edit).
+   * Optimistic concurrency identical to updateStatus. Returns null if the
+   * row doesn't exist or the revision has already moved on.
+   */
+  updateSceneReadiness(id: string, expectedRevision: number, scenePlans: ScenePlanEntry[], now: Date): Promise<ExecutionPlanRecord | null>;
 }

@@ -206,17 +206,24 @@ describe("execution plan lifecycle", () => {
   });
 
   it("approve is an in-place status change - revision does not change", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
-    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
+    // A real content decision - readiness must genuinely pass (mapping-review propagation fix).
+    const withDecision = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
+    });
 
     const approved = await approveExecutionPlan(
       { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
-      { baseRevision: 1 }
+      { baseRevision: withDecision.plan.revision }
     );
     expect(approved.plan.status).toBe("APPROVED");
-    expect(approved.plan.revision).toBe(1);
+    expect(approved.plan.revision).toBe(withDecision.plan.revision);
     expect(approved.plan.approvedBy).toBe(USER_ID);
     expect(approved.plan.approvedAt).toBe(NOW.toISOString());
   });
@@ -237,13 +244,23 @@ describe("execution plan lifecycle", () => {
     const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const initial = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = initial.plan.scenePlans[0]?.id as string;
-    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 });
+    const mappingId = initial.plan.scenePlans[0]?.mappings[0]?.id as string;
+    const withDecision = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
+    });
+    await approveExecutionPlan(
+      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      project.projectId,
+      USER_ID,
+      { baseRevision: withDecision.plan.revision }
+    );
 
     const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
-      baseRevision: 1,
+      baseRevision: withDecision.plan.revision,
       operations: [{ type: "EXCLUDE_SCENE", scenePlanId: sceneId }]
     });
-    expect(updated.plan.revision).toBe(2);
+    expect(updated.plan.revision).toBe(withDecision.plan.revision + 1);
     expect(updated.plan.status).toBe("DRAFT");
     expect(updated.plan.approvedAt).toBeNull();
     expect(updated.plan.approvedBy).toBeNull();
@@ -318,12 +335,28 @@ describe("execution plan lifecycle", () => {
   });
 
   it("refuses to re-approve a plan that is already APPROVED (plan not in an eligible state)", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
-    await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
-    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 });
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
+    const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
+    const sceneId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
+    const withDecision = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
+    });
+    await approveExecutionPlan(
+      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      project.projectId,
+      USER_ID,
+      { baseRevision: withDecision.plan.revision }
+    );
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan(
+        { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+        project.projectId,
+        USER_ID,
+        { baseRevision: withDecision.plan.revision }
+      )
     ).rejects.toThrow(PreconditionNotMetError);
   });
 
@@ -341,9 +374,17 @@ describe("execution plan lifecycle", () => {
     const { projectRepository, executionPlanRepository, assetRepository, project } = await setup();
     const created = await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     const sceneId = created.plan.scenePlans[0]?.id as string;
+    const mappingId = created.plan.scenePlans[0]?.mappings[0]?.id as string;
     await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
       baseRevision: 1,
-      operations: [{ type: "SET_INSTRUCTIONS", scenePlanId: sceneId, instructions: "revision 1 note" }]
+      // A real content decision (mapping-review propagation fix) - this
+      // scene's own Headline mapping must genuinely be resolved for
+      // approval to succeed under the live readiness check, not merely
+      // carry a note.
+      operations: [
+        { type: "SET_INSTRUCTIONS", scenePlanId: sceneId, instructions: "revision 1 note" },
+        { type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }
+      ]
     });
 
     await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 });

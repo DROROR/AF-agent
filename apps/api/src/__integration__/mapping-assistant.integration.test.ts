@@ -212,6 +212,30 @@ describe("Mapping Assistant API", () => {
     expect(body.suggestion.status).toBe("ACCEPTED");
     expect(body.executionPlan.plan.revision).toBe(2);
     expect(body.executionPlan.plan.scenePlans[0].mappings[0].selectedAssetId).toBe(asset.id);
+
+    // Mapping-review -> execution-plan propagation fix (real bug found on
+    // test22): accepting a suggestion must propagate all the way to the
+    // scene's own authoritative readiness state, never leave it stuck
+    // showing "Unreviewed"/unresolved after a real decision was made.
+    expect(body.executionPlan.plan.scenePlans[0].unresolvedReasons).toEqual([]);
+    expect(body.executionPlan.plan.scenePlans[0].approvalState).toBe("READY_FOR_APPROVAL");
+    expect(body.executionPlan.sceneTable[0].unresolvedReasons).toEqual([]);
+    expect(body.executionPlan.sceneTable[0].approvalState).toBe("READY_FOR_APPROVAL");
+
+    // The SAME authoritative readiness state is what actually gates
+    // approval too - no separate/competing notion of "ready" between the
+    // Scene Mapping table and the real backend Approve Plan gate (this
+    // project's real dyo-brand-rules.yaml still requires a logo/Hebrew
+    // text this fixture never maps, so approval itself still correctly
+    // refuses - but never on the mapping-readiness gate this fix closes).
+    const approveAttempt = await harness.app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/execution-plan/approve`,
+      ...authed(),
+      payload: { baseRevision: 2 }
+    });
+    expect(approveAttempt.statusCode).toBe(409);
+    expect(approveAttempt.json().error.message).not.toMatch(/unresolved reason/i);
   });
 
   it("rejects a suggestion and leaves the plan completely unchanged", async () => {

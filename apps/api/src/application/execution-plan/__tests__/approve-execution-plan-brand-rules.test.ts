@@ -76,13 +76,23 @@ async function setup() {
 
 describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, not a UI restriction)", () => {
   it("refuses to approve a plan missing the required logo and Hebrew text - CLAUDE.md's permanent brand rules", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, assetRepository, project, mappingId, sceneId } = await setup();
+
+    // A real (non-brand) content decision - readiness itself must pass so
+    // this test genuinely exercises the BRAND RULES gate specifically,
+    // not the separate mapping-readiness gate (mapping-review propagation
+    // fix - a scene with zero content decisions is never ready to
+    // approve for ANY reason, brand rules included).
+    await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Ordinary headline" }]
+    });
 
     const attempt = approveExecutionPlan(
       { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: REAL_BRAND_RULES },
       project.projectId,
       USER_ID,
-      { baseRevision: 1 }
+      { baseRevision: 2 }
     );
     await expect(attempt).rejects.toThrow(PreconditionNotMetError);
     await expect(attempt).rejects.toThrow(/logo/i);

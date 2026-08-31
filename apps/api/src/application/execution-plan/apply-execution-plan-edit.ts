@@ -1,6 +1,39 @@
 import type { ExecutionPlanEditOperation, PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
+import { computeSceneUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
 
 export type ApplyEditResult = { ok: true; scenePlans: ScenePlanEntry[] } | { ok: false; reason: string };
+
+function unresolvedReasonsEqual(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((reason, index) => reason === b[index]);
+}
+
+/**
+ * Mapping-review -> execution-plan propagation fix: recomputes the
+ * touched scene's `unresolvedReasons` from its real, current mapping
+ * state (compute-scene-unresolved-reasons.ts) after EVERY edit
+ * operation, rather than leaving the build-time snapshot frozen forever
+ * (the exact real bug proven on test22 - 45 scenes stayed "unresolved"
+ * no matter how many suggestions were accepted/rejected, because nothing
+ * ever recomputed this field). `approvalState` is recomputed alongside
+ * it using the SAME live signal, reusing the existing RowApprovalState
+ * vocabulary (never a second, invented state system) - but a scene
+ * already explicitly APPROVED/REJECTED by a human (APPROVE_SCENE/
+ * REJECT_SCENE) is NEVER silently downgraded back to UNREVIEWED by a
+ * later content edit; that is still a real, sticky human decision.
+ */
+function withRecomputedReadiness(scene: ScenePlanEntry): ScenePlanEntry {
+  const unresolvedReasons = computeSceneUnresolvedReasons(scene);
+  const approvalState =
+    scene.approvalState === "APPROVED" || scene.approvalState === "REJECTED"
+      ? scene.approvalState
+      : unresolvedReasons.length === 0
+        ? "READY_FOR_APPROVAL"
+        : "UNREVIEWED";
+  if (unresolvedReasonsEqual(unresolvedReasons, scene.unresolvedReasons) && approvalState === scene.approvalState) {
+    return scene;
+  }
+  return { ...scene, unresolvedReasons, approvalState };
+}
 
 /**
  * Normalizes an operator-facing hex color (3 or 6 digits, "#" optional -
@@ -45,7 +78,7 @@ function updateMapping(
  * rejected by the request schema before this is ever called - never
  * duplicated here.
  */
-export function applyExecutionPlanEdit(
+function applyExecutionPlanEditRaw(
   scenePlans: readonly ScenePlanEntry[],
   operation: ExecutionPlanEditOperation,
   now: () => Date
@@ -294,4 +327,38 @@ export function applyExecutionPlanEdit(
       throw new Error(`Unhandled execution plan edit operation: ${JSON.stringify(_exhaustive)}`);
     }
   }
+}
+
+/**
+ * Applies exactly one allowlisted, already-schema-validated edit
+ * operation (execution-plan-edit.ts) to a plan's scenePlans - pure, no
+ * I/O. Structural validity (unknown composition/placeholder ID, a
+ * duplicate finalOrder among included scenes) is checked here; value-
+ * level validity (negative duration, invalid timestamp) is already
+ * rejected by the request schema before this is ever called - never
+ * duplicated here. Wraps applyExecutionPlanEditRaw with a live
+ * readiness recomputation for the touched scene (see
+ * withRecomputedReadiness above) - the one place every edit path shares,
+ * so `unresolvedReasons`/`approvalState` can never again silently drift
+ * from the real mapping state that produced them.
+ */
+export function applyExecutionPlanEdit(
+  scenePlans: readonly ScenePlanEntry[],
+  operation: ExecutionPlanEditOperation,
+  now: () => Date
+): ApplyEditResult {
+  const result = applyExecutionPlanEditRaw(scenePlans, operation, now);
+  if (!result.ok) {
+    return result;
+  }
+  const sceneIndex = result.scenePlans.findIndex((s) => s.id === operation.scenePlanId);
+  if (sceneIndex === -1) {
+    return result;
+  }
+  const scene = result.scenePlans[sceneIndex] as ScenePlanEntry;
+  const recomputed = withRecomputedReadiness(scene);
+  if (recomputed === scene) {
+    return result;
+  }
+  return { ok: true, scenePlans: replaceScene(result.scenePlans, sceneIndex, recomputed) };
 }

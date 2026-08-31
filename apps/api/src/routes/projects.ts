@@ -4,6 +4,7 @@ import {
   approveExecutionPlanRequestSchema,
   createExecutionPlanRequestSchema,
   createProjectRequestSchema,
+  reconcileExecutionPlanReadinessRequestSchema,
   rejectExecutionPlanRequestSchema,
   renderOutputVariantSchema,
   reopenExecutionPlanRequestSchema,
@@ -35,6 +36,7 @@ import { approveExecutionPlan } from "../application/execution-plan/approve-exec
 import { rejectExecutionPlan } from "../application/execution-plan/reject-execution-plan.js";
 import { reopenExecutionPlan } from "../application/execution-plan/reopen-execution-plan.js";
 import { setRenderOutputConfig } from "../application/execution-plan/set-render-output-config.js";
+import { reconcileExecutionPlanReadiness } from "../application/execution-plan/reconcile-execution-plan-readiness.js";
 import type { BrandRulesConfig } from "../domain/brand-rules/validate-brand-rules.js";
 
 export interface ProjectsRouteDeps {
@@ -197,6 +199,21 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const body = reopenExecutionPlanRequestSchema.parse(request.body);
     const result = await reopenExecutionPlan({ executionPlanRepository: deps.executionPlanRepository, now }, projectId, body);
+    reply.send(result);
+  });
+
+  /**
+   * Mapping-review propagation fix - explicit, safe, idempotent
+   * reconciliation for a plan whose unresolvedReasons/approvalState went
+   * stale before this fix existed (see reconcile-execution-plan-
+   * readiness.ts's own doc comment). Never touches mapping content,
+   * never bumps revision, never approves/rejects anything.
+   */
+  app.post("/api/projects/:projectId/execution-plan/reconcile-readiness", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId } = projectIdParamsSchema.parse(request.params);
+    reconcileExecutionPlanReadinessRequestSchema.parse(request.body ?? {});
+    const result = await reconcileExecutionPlanReadiness({ executionPlanRepository: deps.executionPlanRepository, now }, projectId);
     reply.send(result);
   });
 

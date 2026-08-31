@@ -2,6 +2,24 @@ import type { PlaceholderType } from "@dyo/schemas";
 import type { MappingEvidenceBundle } from "../mapping-evidence/types.js";
 
 /**
+ * The minimal shape classifyStructuralPlaceholder/detectKeepUnchangedIntent/
+ * resolveKeepOriginal actually read - deliberately narrower than the full
+ * MappingEvidenceBundle (mapping-suggestion generation's own type) so this
+ * SAME structural-classification logic can also be reused from the
+ * execution-plan readiness side (mapping-review-propagation fix,
+ * "one authoritative current state" - never a second, duplicated notion
+ * of "is this a structural no-op"). A real MappingEvidenceBundle already
+ * satisfies this shape structurally, so every existing call site keeps
+ * working unchanged.
+ */
+export interface StructuralClassificationInput {
+  placeholderName: MappingEvidenceBundle["placeholderName"];
+  currentClassification: MappingEvidenceBundle["currentClassification"];
+  workMapEntry: MappingEvidenceBundle["workMapEntry"];
+  userInstructions: MappingEvidenceBundle["userInstructions"];
+}
+
+/**
  * Mapping-review deadlock fix (client-handoff completion phase, section A/B):
  * a normal client must never be asked to Accept/Reject a structural/
  * template-helper layer (a camera, a mask, a phone-frame graphic, a shape
@@ -82,7 +100,7 @@ export interface StructuralClassification {
  * (null/"unknown", exactly the state a real structural helper is in
  * today, since PLACEHOLDER_TYPES has no dedicated "structural" value yet).
  */
-export function classifyStructuralPlaceholder(bundle: MappingEvidenceBundle): StructuralClassification {
+export function classifyStructuralPlaceholder(bundle: StructuralClassificationInput): StructuralClassification {
   if (bundle.currentClassification && CONTENT_CLASSIFICATIONS.includes(bundle.currentClassification)) {
     return { isStructural: false, reason: null };
   }
@@ -116,7 +134,7 @@ export interface KeepUnchangedIntent {
  * never decides on its own whether THIS specific placeholder is allowed
  * to resolve that way.
  */
-export function detectKeepUnchangedIntent(bundle: MappingEvidenceBundle): KeepUnchangedIntent {
+export function detectKeepUnchangedIntent(bundle: StructuralClassificationInput): KeepUnchangedIntent {
   const text = [bundle.workMapEntry?.instructions, bundle.userInstructions].filter((value): value is string => Boolean(value)).join(" ");
   if (!text) {
     return { matched: false, reason: null };
@@ -144,7 +162,7 @@ export interface KeepOriginalResolution {
  * structural, so a scene-wide "keep wrapper unchanged" note can never
  * silently swallow a Phone_screen/text/logo placeholder here.
  */
-export function resolveKeepOriginal(bundle: MappingEvidenceBundle): KeepOriginalResolution {
+export function resolveKeepOriginal(bundle: StructuralClassificationInput): KeepOriginalResolution {
   const structural = classifyStructuralPlaceholder(bundle);
   if (structural.isStructural) {
     const intent = detectKeepUnchangedIntent(bundle);
@@ -205,7 +223,7 @@ export function detectWorkMapConflict(bundle: MappingEvidenceBundle, proposal: P
   return detectKeepUnchangedIntent(bundle).matched;
 }
 
-function isRecognizedContentTarget(bundle: MappingEvidenceBundle): boolean {
+function isRecognizedContentTarget(bundle: StructuralClassificationInput): boolean {
   if (bundle.currentClassification && CONTENT_CLASSIFICATIONS.includes(bundle.currentClassification)) {
     return true;
   }
