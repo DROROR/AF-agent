@@ -13,10 +13,10 @@
   --brand-primary-contrast: #ffffff;
   --brand-accent: #65c7c2;
   --brand-accent-strong: #3fada7;
-  /* Claude/Anthropic's own brand color - used ONLY on the dedicated Claude action button (ClaudeActionButton.tsx), never elsewhere in the DYO theme. */
-  --brand-claude: #d97757;
-  --brand-claude-hover: #c56344;
-  --brand-claude-active: #a94f34;
+  /* Anthropic's own real brand color ("Antique Brass"/clay, #CC785C) - used ONLY on the dedicated Claude action button (ClaudeActionButton.tsx), never elsewhere in the DYO theme. */
+  --brand-claude: #cc785c;
+  --brand-claude-hover: #b4664c;
+  --brand-claude-active: #9c5540;
   --brand-claude-contrast: #ffffff;
 
   /* Surfaces */
@@ -1000,6 +1000,53 @@ select:focus-visible,
 .field__error {
   font-size: 0.76rem;
   color: var(--color-negative-text);
+}
+
+.help-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.help-tooltip__trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  margin-inline-start: 0.3rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: help;
+}
+
+.help-tooltip__trigger:hover,
+.help-tooltip__trigger:focus-visible {
+  color: var(--color-text-muted);
+}
+
+.help-tooltip__bubble {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 0.4rem);
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 16rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.35;
+  box-shadow: var(--shadow-md);
+  text-align: start;
 }
 
 .field[data-invalid="true"] .input {
@@ -1998,8 +2045,14 @@ a.workflow-stepper__step:hover {
   gap: var(--space-4);
 }
 
-.final-outputs-card {
+.final-outputs-card,
+.final-preview-card {
   grid-column: 1 / -1;
+}
+
+.final-preview-card__error {
+  color: var(--color-negative-text);
+  font-size: 0.84rem;
 }
 
 .final-outputs-card__list {

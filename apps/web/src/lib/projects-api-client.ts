@@ -33,12 +33,14 @@ import {
   listJobsResponseSchema,
   executionSessionResponseSchema,
   currentExecutionSessionResponseSchema,
+  fullPreviewArtifactResponseSchema,
   type RenderArtifactDto,
   type RenderOutputVariant,
   type SetRenderOutputConfigRequest,
   type DispatchJobRequest,
   type DispatchJobResponse,
   type ExecutionSessionDto,
+  type FullPreviewArtifactDto,
   type JobDto,
   type ListJobsResponse
 } from "@dyo/schemas";
@@ -671,6 +673,56 @@ export async function rejectFirstPreview(projectId: string, sessionId: string): 
 /** Same-origin URL for a session's current preview PNG - safe to use directly as an <img> src; never a filesystem path or storage key. */
 export function executionSessionPreviewUrl(projectId: string, sessionId: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/preview`;
+}
+
+/** Metadata only - null when no complete preview has ever been captured yet for this session, a real valid state (client-handoff phase, "real final preview approval gate"). */
+export async function fetchFullPreviewStatus(projectId: string, sessionId: string): Promise<ApiResult<FullPreviewArtifactDto | null>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/full-preview-status`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = fullPreviewArtifactResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected complete-preview contract" };
+  }
+  return { ok: true, data: parsed.data.artifact };
+}
+
+/** Same-origin URL for a session's current complete-preview video - safe to use directly as a <video> src; never a filesystem path or storage key. */
+export function fullPreviewFileUrl(projectId: string, sessionId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/full-preview`;
+}
+
+/** "Approve Final Preview" - the SEPARATE, later human gate before the final Landscape/Reels render can be dispatched (never the same gate as approveFirstPreview). */
+export async function approveFinalPreview(projectId: string, sessionId: string): Promise<ApiResult<ExecutionSessionDto>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/approve-final-preview`,
+    { method: "POST" }
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionSessionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-session contract" };
+  }
+  return { ok: true, data: parsed.data.session };
+}
+
+/** "Request Changes" - marks the complete preview as not approved so the client can return to Mappings/Plan; never touches session status, completed scenes, or the working copy (see request-final-preview-changes.ts). */
+export async function requestFinalPreviewChanges(projectId: string, sessionId: string): Promise<ApiResult<ExecutionSessionDto>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/request-final-preview-changes`,
+    { method: "POST" }
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = executionSessionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected execution-session contract" };
+  }
+  return { ok: true, data: parsed.data.session };
 }
 
 /** Accepts several PENDING suggestions as one batched plan revision bump - never partial (see batch-accept-mapping-suggestions.ts). */

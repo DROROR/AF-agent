@@ -487,6 +487,16 @@ export const he: Dictionary = {
       rejectPreviewAction: "דחיית תצוגה מקדימה",
       previewImageAlt: "תצוגה מקדימה של הפריים הראשון",
       allScenesCompleteLabel: "כל הסצנות המאושרות בוצעו - מוכן לרינדור.",
+      finalPreview: {
+        title: "תצוגה מקדימה סופית",
+        notReadyTitle: "התצוגה המקדימה המלאה שלכם עדיין לא מוכנה.",
+        notReadyDescription: "צרו את התצוגה המקדימה המלאה כדי לבדוק את הווידאו המוגמר לפני הרינדור.",
+        workerOffline: "מחשב העריכה שלכם כבוי. הפעילו אותו כדי ליצור את התצוגה המקדימה המלאה.",
+        createAction: "יצירת תצוגה מקדימה מלאה",
+        requestChangesAction: "בקשת שינויים",
+        approveAction: "אישור תצוגה מקדימה סופית",
+        approvedBadge: "אושר"
+      },
       sessionStatusLabel: "סטטוס",
       sessionWorkerLabel: "עובד",
       sessionProgressLabel: (done: number, total: number): string => `${done} / ${total} סצנות הושלמו`,
@@ -699,5 +709,15 @@ export const he: Dictionary = {
       confirmAction: "אישור ההצעות",
       accepting: "מאשר…"
     }
+  },
+  helpTooltips: {
+    timestamp: "בחרו מאיפה הסרטון שהועלה יתחיל.",
+    duration: "כמה זמן הסצנה הזו תופיע בסרטון הסופי.",
+    needsReview: "ההצעה הזו אינה בטוחה מספיק כדי לאשר אוטומטית - כדאי שמישהו יבדוק אותה לפני שימוש.",
+    firstPreview: "הצצה מהירה לפריים מעוצב אחד, כדי שתאשרו את המראה לפני שכל הסצנות נבנות.",
+    finalPreview: "הסרטון המלא עם כל הסצנות במקומן, לבדיקה ואישור שלכם לפני הרינדור הסופי.",
+    landscape: "הגרסה הרוחבית הרגילה של הסרטון שלכם.",
+    reels: "יוצר גרסה אנכית טבעית של 1080×1920. DYO ממקמת מחדש את אלמנטי הסצנה האמיתיים במקום פשוט לחתוך את סרטון ה-Landscape.",
+    safeSuggestions: "הצעות ש-DYO בטוחה לגביהן. הן מקובצות כאן כדי שתוכלו לאשר כמה בבת אחת במקום אחת בכל פעם."
   }
 };

@@ -20,6 +20,7 @@ export const DISPATCHABLE_OPERATIONS = [
   "INSPECT_SCENE_EVIDENCE",
   "INSPECT_RENDER_CAPABILITIES",
   "EXECUTE_FRAME",
+  "CREATE_PREVIEW",
   "RENDER"
 ] as const;
 export type DispatchableOperation = (typeof DISPATCHABLE_OPERATIONS)[number];
@@ -108,6 +109,14 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
       projectId: z.string().uuid(),
       executionSessionId: z.string().uuid(),
       scenePlanId: z.string().min(1)
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("CREATE_PREVIEW"),
+      workerId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      executionSessionId: z.string().uuid()
     })
     .strict(),
   z

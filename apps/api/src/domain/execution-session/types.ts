@@ -16,6 +16,8 @@ export interface ExecutionSessionRecord {
   latestPreviewSha256: string | null;
   latestPreviewScenePlanId: string | null;
   latestPreviewCapturedAt: Date | null;
+  /** Client-handoff phase, "real final preview approval gate" - see schema.ts's own doc comment. Separate from firstPreviewApproved above; never derived from it. */
+  fullPreviewApproved: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -77,4 +79,13 @@ export interface ExecutionSessionRepository {
     preview: { storageKey: string; sha256: string; scenePlanId: string; capturedAt: Date },
     now: Date
   ): Promise<{ record: ExecutionSessionRecord; priorStorageKey: string | null } | null>;
+  /**
+   * Sets fullPreviewApproved to exactly `approved` - used by both
+   * approve-final-preview.ts (true) and request-final-preview-changes.ts
+   * (false), and by upload-full-preview.ts to reset it to false whenever a
+   * NEW full-preview artifact is captured (an old approval must never
+   * silently carry over to unreviewed content). Never touches any other
+   * field. Returns null only if `id` doesn't exist.
+   */
+  setFullPreviewApproved(id: string, approved: boolean, now: Date): Promise<ExecutionSessionRecord | null>;
 }

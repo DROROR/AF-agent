@@ -19,6 +19,7 @@ function toDomain(row: ExecutionSessionRow): ExecutionSessionRecord {
     latestPreviewSha256: row.latestPreviewSha256,
     latestPreviewScenePlanId: row.latestPreviewScenePlanId,
     latestPreviewCapturedAt: row.latestPreviewCapturedAt,
+    fullPreviewApproved: row.fullPreviewApproved,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -45,6 +46,7 @@ export class DrizzleExecutionSessionRepository implements ExecutionSessionReposi
         latestPreviewSha256: null,
         latestPreviewScenePlanId: null,
         latestPreviewCapturedAt: null,
+        fullPreviewApproved: false,
         createdAt: now,
         updatedAt: now
       })
@@ -140,5 +142,14 @@ export class DrizzleExecutionSessionRepository implements ExecutionSessionReposi
       return null;
     }
     return { record: toDomain(row), priorStorageKey: existingRow.latestPreviewStorageKey };
+  }
+
+  async setFullPreviewApproved(id: string, approved: boolean, now: Date): Promise<ExecutionSessionRecord | null> {
+    const [row] = await this.db
+      .update(executionSessions)
+      .set({ fullPreviewApproved: approved, updatedAt: now })
+      .where(eq(executionSessions.id, id))
+      .returning();
+    return row ? toDomain(row) : null;
   }
 }

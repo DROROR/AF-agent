@@ -7,6 +7,7 @@ import type { ProjectRepository } from "../domain/project/types.js";
 import type { SceneEvidenceRepository } from "../domain/scene-evidence/types.js";
 import type { RenderArtifactRepository } from "../domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "../domain/render-artifact-upload/types.js";
+import type { FullPreviewArtifactRepository } from "../domain/full-preview-artifact/types.js";
 import type { AssetRepository } from "../domain/asset/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { UnauthorizedError } from "../errors/app-error.js";
@@ -37,6 +38,7 @@ export interface JobsRouteDeps {
   sceneEvidenceRepository: SceneEvidenceRepository;
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
+  fullPreviewArtifactRepository: FullPreviewArtifactRepository;
   staleAfterMs: number;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
@@ -89,6 +91,7 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
         executionPlanRepository: deps.executionPlanRepository,
         executionSessionRepository: deps.executionSessionRepository,
         assetRepository: deps.assetRepository,
+        fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository,
         now,
         staleAfterMs: deps.staleAfterMs
       },

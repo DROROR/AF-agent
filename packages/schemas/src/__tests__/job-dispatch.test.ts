@@ -6,13 +6,14 @@ const PROJECT_ID = "22222222-2222-2222-2222-222222222222";
 const SESSION_ID = "33333333-3333-3333-3333-333333333333";
 
 describe("DISPATCHABLE_OPERATIONS", () => {
-  it("includes all six activated capabilities, in the order routes/dashboard should expect", () => {
+  it("includes all seven activated capabilities, in the order routes/dashboard should expect", () => {
     expect(DISPATCHABLE_OPERATIONS).toEqual([
       "INSPECT_TEMPLATE",
       "CHECK_HEALTH",
       "INSPECT_SCENE_EVIDENCE",
       "INSPECT_RENDER_CAPABILITIES",
       "EXECUTE_FRAME",
+      "CREATE_PREVIEW",
       "RENDER"
     ]);
   });

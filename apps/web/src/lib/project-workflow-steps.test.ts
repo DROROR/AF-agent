@@ -9,6 +9,7 @@ function input(overrides: Partial<WorkflowStepInput> = {}): WorkflowStepInput {
     planApproved: false,
     firstPreviewApproved: false,
     allScenesComplete: false,
+    fullPreviewApproved: false,
     hasRenderArtifact: false,
     ...overrides
   };
@@ -70,30 +71,38 @@ describe("computeWorkflowSteps", () => {
     expect(stateOf(steps, "finalPreview")).toBe("locked");
   });
 
-  it("finalPreview and render both unlock together once allScenesComplete - the same real RENDER dispatch precondition, never a fabricated separate flag", () => {
+  it("finalPreview becomes current (never complete) once allScenesComplete is true, and render stays locked until finalPreview is actually approved - never a fabricated 'complete' from allScenesComplete alone", () => {
     const inProgress = computeWorkflowSteps(
       input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: false })
     );
-    expect(stateOf(inProgress, "finalPreview")).toBe("current");
+    expect(stateOf(inProgress, "finalPreview")).toBe("locked");
     expect(stateOf(inProgress, "render")).toBe("locked");
 
-    const allDone = computeWorkflowSteps(
-      input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true })
+    const readyForFinalPreview = computeWorkflowSteps(
+      input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, fullPreviewApproved: false })
     );
-    expect(stateOf(allDone, "finalPreview")).toBe("complete");
-    expect(stateOf(allDone, "render")).toBe("current");
+    expect(stateOf(readyForFinalPreview, "finalPreview")).toBe("current");
+    expect(stateOf(readyForFinalPreview, "render")).toBe("locked");
+  });
+
+  it("finalPreview completes ONLY once the real, persisted fullPreviewApproved flag is true - this unlocks render as current", () => {
+    const approved = computeWorkflowSteps(
+      input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, fullPreviewApproved: true })
+    );
+    expect(stateOf(approved, "finalPreview")).toBe("complete");
+    expect(stateOf(approved, "render")).toBe("current");
   });
 
   it("render completes only once a real render artifact exists", () => {
     const steps = computeWorkflowSteps(
-      input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, hasRenderArtifact: true })
+      input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, fullPreviewApproved: true, hasRenderArtifact: true })
     );
     expect(stateOf(steps, "render")).toBe("complete");
   });
 
   it("every step is complete once the whole real workflow has actually happened", () => {
     const steps = computeWorkflowSteps(
-      input({ workMapEntryCount: 3, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, hasRenderArtifact: true })
+      input({ workMapEntryCount: 3, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, fullPreviewApproved: true, hasRenderArtifact: true })
     );
     expect(steps.every((s) => s.state === "complete")).toBe(true);
   });
@@ -115,7 +124,7 @@ describe("currentStepIndex", () => {
 
   it("points at the last step once everything is complete", () => {
     const steps = computeWorkflowSteps(
-      input({ workMapEntryCount: 3, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, hasRenderArtifact: true })
+      input({ workMapEntryCount: 3, hasPlan: true, planApproved: true, firstPreviewApproved: true, allScenesComplete: true, fullPreviewApproved: true, hasRenderArtifact: true })
     );
     expect(currentStepIndex(steps)).toBe(6);
   });

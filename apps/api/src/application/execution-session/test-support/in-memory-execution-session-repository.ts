@@ -21,6 +21,7 @@ export class InMemoryExecutionSessionRepository implements ExecutionSessionRepos
       latestPreviewSha256: null,
       latestPreviewScenePlanId: null,
       latestPreviewCapturedAt: null,
+      fullPreviewApproved: false,
       createdAt: now,
       updatedAt: now
     };
@@ -107,5 +108,15 @@ export class InMemoryExecutionSessionRepository implements ExecutionSessionRepos
     };
     this.rows.set(id, updated);
     return { record: updated, priorStorageKey };
+  }
+
+  async setFullPreviewApproved(id: string, approved: boolean, now: Date): Promise<ExecutionSessionRecord | null> {
+    const existing = this.rows.get(id);
+    if (!existing) {
+      return null;
+    }
+    const updated: ExecutionSessionRecord = { ...existing, fullPreviewApproved: approved, updatedAt: now };
+    this.rows.set(id, updated);
+    return updated;
   }
 }

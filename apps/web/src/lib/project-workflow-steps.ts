@@ -24,23 +24,29 @@ export interface WorkflowStepInput {
   planApproved: boolean;
   /** True once the execution session's own firstPreviewApproved flag is true (approve-first-preview.ts) - never inferred from anything else. */
   firstPreviewApproved: boolean;
-  /** True once every required (use=true, APPROVED, no unresolvedReasons) scene has completed EXECUTE_FRAME in the current session - the SAME real precondition resolve-render-dispatch.ts itself enforces before RENDER can be dispatched. */
+  /** True once every required (use=true, APPROVED, no unresolvedReasons) scene has completed EXECUTE_FRAME in the current session - needed to reach (not to complete) the Final Preview step, matching resolveCreateFullPreviewDispatch's own real precondition. */
   allScenesComplete: boolean;
+  /**
+   * Client-handoff phase, "real final preview approval gate" - the
+   * session's own real, persisted `fullPreviewApproved` flag
+   * (execution_sessions.full_preview_approved), given only after a human
+   * reviews the real full_preview_artifacts video via Approve Final
+   * Preview. NEVER derived from allScenesComplete/firstPreviewApproved -
+   * this is the exact same flag resolve-render-dispatch.ts's own RENDER
+   * precondition checks.
+   */
+  fullPreviewApproved: boolean;
   hasRenderArtifact: boolean;
 }
 
 /**
- * "Final Preview" (step 6) has no distinct backend-persisted approval flag
- * today - resolve-render-dispatch.ts's own real precondition for RENDER is
- * exactly `firstPreviewApproved && allScenesComplete`, nothing else (see
- * that file's own doc comment, confirmed directly from the render-dispatch
- * source during this task). This function does NOT fabricate a
- * `finalPreviewApproved` flag that doesn't exist - `finalPreview` becomes
- * "complete" (a guided pass-through checkpoint, not a hard gate) the
- * moment `allScenesComplete` is true, exactly when the real RENDER
- * precondition would also already be satisfied. See RUNBOOK.md/the task's
- * own final report for the honest framing of this as a UI-only guided
- * step, not a new backend approval gate.
+ * Step 6 ("Final Preview") is complete ONLY once the real, persisted
+ * fullPreviewApproved flag is true - never derived from allScenesComplete
+ * alone (see WorkflowStepInput.fullPreviewApproved's own doc comment).
+ * Step 7 ("Render") stays locked until that same real approval exists,
+ * matching resolve-render-dispatch.ts's own backend-enforced RENDER
+ * precondition exactly - there is no UI-only bypass: the API independently
+ * refuses RENDER dispatch regardless of what this function computes.
  */
 export function computeWorkflowSteps(input: WorkflowStepInput): ComputedWorkflowStep[] {
   const uploadComplete = input.hasProject;
@@ -48,14 +54,8 @@ export function computeWorkflowSteps(input: WorkflowStepInput): ComputedWorkflow
   const reviewPlanComplete = input.hasPlan;
   const sceneMappingsComplete = input.hasPlan && input.planApproved;
   const firstPreviewComplete = input.firstPreviewApproved;
-  // Matches resolve-render-dispatch.ts's own real RENDER precondition
-  // exactly: `firstPreviewApproved && allScenesComplete` together, never
-  // allScenesComplete alone - EXECUTE_FRAME dispatch itself does not
-  // independently enforce firstPreviewApproved (only the dashboard's own
-  // button visibility does), so allScenesComplete can technically become
-  // true before firstPreviewApproved is - this must not show as "final
-  // preview complete" in that case.
-  const finalPreviewComplete = input.firstPreviewApproved && input.allScenesComplete;
+  const readyForFinalPreview = input.firstPreviewApproved && input.allScenesComplete;
+  const finalPreviewComplete = input.fullPreviewApproved;
   const renderComplete = input.hasRenderArtifact;
 
   return [
@@ -64,7 +64,7 @@ export function computeWorkflowSteps(input: WorkflowStepInput): ComputedWorkflow
     { id: "reviewPlan", state: reviewPlanComplete ? "complete" : tellClaudeComplete ? "current" : "locked" },
     { id: "sceneMappings", state: sceneMappingsComplete ? "complete" : reviewPlanComplete ? "current" : "locked" },
     { id: "firstPreview", state: firstPreviewComplete ? "complete" : sceneMappingsComplete ? "current" : "locked" },
-    { id: "finalPreview", state: finalPreviewComplete ? "complete" : firstPreviewComplete ? "current" : "locked" },
+    { id: "finalPreview", state: finalPreviewComplete ? "complete" : readyForFinalPreview ? "current" : "locked" },
     { id: "render", state: renderComplete ? "complete" : finalPreviewComplete ? "current" : "locked" }
   ];
 }

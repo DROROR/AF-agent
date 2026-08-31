@@ -59,6 +59,16 @@ export const executionSessionDtoSchema = z
     /** The scenePlanId whose completed edit produced the CURRENT preview - null until hasPreview is true. */
     latestPreviewScenePlanId: z.string().min(1).nullable(),
     latestPreviewCapturedAt: z.string().datetime().nullable(),
+    /**
+     * Client-handoff phase, "real final preview approval gate" - a
+     * SEPARATE approval from firstPreviewApproved above, given only after
+     * a human has reviewed the real full_preview_artifacts video (see
+     * resolve-render-dispatch.ts's own updated RENDER precondition). Reset
+     * to false whenever a NEW full-preview artifact is captured
+     * (upload-full-preview.ts) - an old approval never silently carries
+     * over to unreviewed content.
+     */
+    fullPreviewApproved: z.boolean(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime()
   })

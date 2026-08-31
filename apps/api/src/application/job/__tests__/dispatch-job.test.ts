@@ -13,6 +13,7 @@ import { InMemoryJobRepository } from "../test-support/in-memory-job-repository.
 import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
 import { InMemoryExecutionPlanRepository } from "../../execution-plan/test-support/in-memory-execution-plan-repository.js";
 import { InMemoryExecutionSessionRepository } from "../../execution-session/test-support/in-memory-execution-session-repository.js";
+import { InMemoryFullPreviewArtifactRepository } from "../../execution-session/test-support/in-memory-full-preview-artifact-repository.js";
 import { InMemoryAssetRepository } from "../../asset/test-support/in-memory-asset-repository.js";
 import { createProject } from "../../project/create-project.js";
 import { dispatchJob } from "../dispatch-job.js";
@@ -43,7 +44,8 @@ function deps(
   projectRepository: InMemoryProjectRepository = new InMemoryProjectRepository(),
   executionPlanRepository: InMemoryExecutionPlanRepository = new InMemoryExecutionPlanRepository(),
   assetRepository: InMemoryAssetRepository = new InMemoryAssetRepository(),
-  executionSessionRepository: InMemoryExecutionSessionRepository = new InMemoryExecutionSessionRepository()
+  executionSessionRepository: InMemoryExecutionSessionRepository = new InMemoryExecutionSessionRepository(),
+  fullPreviewArtifactRepository: InMemoryFullPreviewArtifactRepository = new InMemoryFullPreviewArtifactRepository()
 ) {
   return {
     jobRepository,
@@ -52,6 +54,7 @@ function deps(
     executionPlanRepository,
     executionSessionRepository,
     assetRepository,
+    fullPreviewArtifactRepository,
     now: () => now,
     staleAfterMs: STALE_AFTER_MS
   };
@@ -324,6 +327,7 @@ describe("dispatchJob", () => {
           projectRepository,
           executionPlanRepository: new InMemoryExecutionPlanRepository(),
           executionSessionRepository: new InMemoryExecutionSessionRepository(),
+          fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(),
           assetRepository: new InMemoryAssetRepository(),
           now: () => FIXED_NOW,
           staleAfterMs: STALE_AFTER_MS
@@ -371,6 +375,7 @@ describe("dispatchJob", () => {
         projectRepository,
         executionPlanRepository,
         executionSessionRepository: new InMemoryExecutionSessionRepository(),
+          fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(),
         assetRepository: new InMemoryAssetRepository(),
         now: () => FIXED_NOW,
         staleAfterMs: STALE_AFTER_MS
@@ -473,7 +478,7 @@ function approvedTextScene() {
   };
 }
 
-async function setupWorkerWithCapability(workerRepository: InMemoryWorkerRepository, capability: "EXECUTE_FRAME" | "RENDER" | "INSPECT_RENDER_CAPABILITIES") {
+async function setupWorkerWithCapability(workerRepository: InMemoryWorkerRepository, capability: "EXECUTE_FRAME" | "RENDER" | "INSPECT_RENDER_CAPABILITIES" | "CREATE_PREVIEW") {
   const workerId = randomUUID();
   await workerRepository.create({ id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: [capability] }, FIXED_NOW);
   await workerRepository.updateHeartbeat(workerId, { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null }, FIXED_NOW);
@@ -488,13 +493,43 @@ async function createSession(executionSessionRepository: InMemoryExecutionSessio
   );
 }
 
-/** A session with scene-1 already completed, preview approved, ready to render. */
-async function readyToRenderSession(executionSessionRepository: InMemoryExecutionSessionRepository, projectId: string, workerId: string) {
+/**
+ * A session with scene-1 already completed, first preview approved, a
+ * matching approved complete preview on record, and READY_TO_RENDER -
+ * i.e. every real RENDER precondition satisfied (client-handoff phase,
+ * "real final preview approval gate" - resolveRenderDispatch's own real
+ * gate requires a fresh, approved full-preview artifact, not merely
+ * firstPreviewApproved).
+ */
+async function readyToRenderSession(
+  executionSessionRepository: InMemoryExecutionSessionRepository,
+  projectId: string,
+  workerId: string,
+  fullPreviewArtifactRepository: InMemoryFullPreviewArtifactRepository
+) {
   const session = await createSession(executionSessionRepository, projectId, workerId);
   await executionSessionRepository.recordSceneCompleted(session.id, "scene-1", "d".repeat(64), "AWAITING_PREVIEW_APPROVAL", FIXED_NOW);
   const approved = await executionSessionRepository.approvePreview(session.id, "READY_TO_RENDER", FIXED_NOW);
   if (!approved) throw new Error("test setup: approvePreview returned null");
-  return approved;
+  await fullPreviewArtifactRepository.record(
+    {
+      id: randomUUID(),
+      projectId,
+      executionSessionId: approved.id,
+      jobId: randomUUID(),
+      workingProjectSha256: "d".repeat(64),
+      filename: "preview.mp4",
+      mimeType: "video/mp4",
+      byteSize: 100,
+      storageKey: `${projectId}/preview.mp4`,
+      sha256: "e".repeat(64),
+      capturedAt: FIXED_NOW
+    },
+    FIXED_NOW
+  );
+  const fullyApproved = await executionSessionRepository.setFullPreviewApproved(approved.id, true, FIXED_NOW);
+  if (!fullyApproved) throw new Error("test setup: setFullPreviewApproved returned null");
+  return fullyApproved;
 }
 
 describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
@@ -524,7 +559,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
     const session = await createSession(executionSessionRepository, project.projectId, workerId);
 
     const result = await dispatchJob(
-      { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
       { operation: "EXECUTE_FRAME", workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" }
     );
 
@@ -563,7 +598,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
       FIXED_NOW
     );
     const session = await createSession(executionSessionRepository, project.projectId, workerId);
-    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
     const dispatchArgs = { operation: "EXECUTE_FRAME" as const, workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" };
 
     const firstDispatch = await dispatchJob(commonDeps, dispatchArgs);
@@ -615,7 +650,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
       FIXED_NOW
     );
     const session = await createSession(executionSessionRepository, project.projectId, workerId);
-    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
     const dispatchArgs = { operation: "EXECUTE_FRAME" as const, workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" };
 
     const firstDispatch = await dispatchJob(commonDeps, dispatchArgs);
@@ -699,7 +734,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
       FIXED_NOW
     );
     const session = await createSession(executionSessionRepository, project.projectId, workerId);
-    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
 
     await dispatchJob(commonDeps, { operation: "EXECUTE_FRAME", workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" });
 
@@ -736,7 +771,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
 
     await expect(
       dispatchJob(
-        { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository: new InMemoryAssetRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+        { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository: new InMemoryAssetRepository(), fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
         { operation: "EXECUTE_FRAME", workerId, projectId: project.projectId, executionSessionId: session.id, scenePlanId: "scene-1" }
       )
     ).rejects.toThrow(PreconditionNotMetError);
@@ -781,10 +816,11 @@ describe("dispatchJob - RENDER (safe dispatch)", () => {
       },
       FIXED_NOW
     );
-    const session = await readyToRenderSession(executionSessionRepository, project.projectId, workerId);
+    const fullPreviewArtifactRepository = new InMemoryFullPreviewArtifactRepository();
+    const session = await readyToRenderSession(executionSessionRepository, project.projectId, workerId, fullPreviewArtifactRepository);
 
     const result = await dispatchJob(
-      { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
       { operation: "RENDER", workerId, projectId: project.projectId, executionSessionId: session.id, variant: "LANDSCAPE" }
     );
 
@@ -834,8 +870,9 @@ describe("dispatchJob - RENDER (safe dispatch)", () => {
       },
       FIXED_NOW
     );
-    const session = await readyToRenderSession(executionSessionRepository, project.projectId, workerId);
-    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
+    const fullPreviewArtifactRepository = new InMemoryFullPreviewArtifactRepository();
+    const session = await readyToRenderSession(executionSessionRepository, project.projectId, workerId, fullPreviewArtifactRepository);
+    const commonDeps = { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS };
     const dispatchArgs = { operation: "RENDER" as const, workerId, projectId: project.projectId, executionSessionId: session.id, variant: "LANDSCAPE" as const };
 
     const firstDispatch = await dispatchJob(commonDeps, dispatchArgs);
@@ -898,8 +935,113 @@ describe("dispatchJob - RENDER (safe dispatch)", () => {
 
     await expect(
       dispatchJob(
-        { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository: new InMemoryAssetRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+        { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository: new InMemoryAssetRepository(), fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(), now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
         { operation: "RENDER", workerId, projectId: project.projectId, executionSessionId: session.id, variant: "LANDSCAPE" }
+      )
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
+});
+
+describe("dispatchJob - CREATE_PREVIEW (safe dispatch, client-handoff phase 'real final preview approval gate')", () => {
+  it("resolves the full worker payload from the persisted LANDSCAPE RenderOutputConfig + the session's own working-copy identity, and creates a job carrying it", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const fullPreviewArtifactRepository = new InMemoryFullPreviewArtifactRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "CREATE_PREVIEW");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    const plan = await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    await executionPlanRepository.updateRenderOutput(
+      plan.id,
+      "LANDSCAPE",
+      {
+        manifestCompositionId: "comp-1",
+        aeProjectItemIndex: 5,
+        compositionName: "Scene 01",
+        sourceProjectSha256: "a".repeat(64),
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Source",
+        configuredAt: FIXED_NOW.toISOString()
+      },
+      FIXED_NOW
+    );
+    // The FIRST preview must already be approved before a complete preview
+    // is even reachable - never allScenesComplete alone.
+    const session = await createSession(executionSessionRepository, project.projectId, workerId);
+    await executionSessionRepository.recordSceneCompleted(session.id, "scene-1", "d".repeat(64), "AWAITING_PREVIEW_APPROVAL", FIXED_NOW);
+    const approved = await executionSessionRepository.approvePreview(session.id, "READY_TO_RENDER", FIXED_NOW);
+
+    const result = await dispatchJob(
+      { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { operation: "CREATE_PREVIEW", workerId, projectId: project.projectId, executionSessionId: approved!.id }
+    );
+
+    const job = await jobRepository.findById(result.jobId);
+    expect(job?.projectId).toBe(project.projectId);
+    const payload = job?.payload as Record<string, unknown>;
+    expect(payload.executionSessionId).toBe(approved!.id);
+    expect(payload.expectedWorkingProjectSha256).toBe("d".repeat(64));
+    expect(payload.compositionName).toBe("Scene 01");
+    expect(payload.renderSettingsTemplateName).toBe("Best Settings");
+    // Never a raw caller-supplied field - entirely server-resolved.
+    expect(payload).not.toHaveProperty("checkpoint");
+  });
+
+  it("rejects with PreconditionNotMetError when the first preview has not been approved yet - never queues a job anyway", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "CREATE_PREVIEW");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "APPROVED",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: FIXED_NOW,
+        approvedBy: "user-1"
+      },
+      FIXED_NOW
+    );
+    // No first-preview approval at all.
+    const session = await createSession(executionSessionRepository, project.projectId, workerId);
+
+    await expect(
+      dispatchJob(
+        {
+          jobRepository,
+          workerRepository,
+          projectRepository,
+          executionPlanRepository,
+          executionSessionRepository,
+          assetRepository: new InMemoryAssetRepository(),
+          fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(),
+          now: () => FIXED_NOW,
+          staleAfterMs: STALE_AFTER_MS
+        },
+        { operation: "CREATE_PREVIEW", workerId, projectId: project.projectId, executionSessionId: session.id }
       )
     ).rejects.toThrow(PreconditionNotMetError);
   });

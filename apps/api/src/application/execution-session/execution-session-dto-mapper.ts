@@ -16,6 +16,7 @@ export function toExecutionSessionDto(record: ExecutionSessionRecord, displaySta
     hasPreview: record.latestPreviewStorageKey !== null,
     latestPreviewScenePlanId: record.latestPreviewScenePlanId,
     latestPreviewCapturedAt: record.latestPreviewCapturedAt ? record.latestPreviewCapturedAt.toISOString() : null,
+    fullPreviewApproved: record.fullPreviewApproved,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

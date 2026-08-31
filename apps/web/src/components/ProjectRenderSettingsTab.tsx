@@ -15,6 +15,7 @@ import { Skeleton } from "./ui/Skeleton";
 import { VideoArtifactPlayer } from "./ui/VideoArtifactPlayer";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
+import { HelpTooltip } from "./ui/HelpTooltip";
 import { useLocale } from "./LocaleProvider";
 import { dispatchJob, fetchCurrentExecutionSession, renderArtifactFileUrl } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
@@ -262,7 +263,14 @@ function VariantConfigCard({
 
   return (
     <Card className="overview-section">
-      <CardHeader title={t.projectWorkspace.renderSettings.variantSection[variant]} />
+      <CardHeader
+        title={
+          <>
+            {t.projectWorkspace.renderSettings.variantSection[variant]}
+            <HelpTooltip text={variant === "REELS" ? t.helpTooltips.reels : t.helpTooltips.landscape} />
+          </>
+        }
+      />
 
       {compositions.length === 0 ? (
         <EmptyState

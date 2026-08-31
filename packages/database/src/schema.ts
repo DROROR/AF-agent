@@ -363,6 +363,18 @@ export const executionSessions = pgTable(
     latestPreviewSha256: text("latest_preview_sha256"),
     latestPreviewScenePlanId: text("latest_preview_scene_plan_id"),
     latestPreviewCapturedAt: timestamp("latest_preview_captured_at", { withTimezone: true }),
+    /**
+     * Client-handoff phase, "real final preview approval gate" - the
+     * SEPARATE, distinct approval a human must explicitly give after
+     * reviewing the assembled full_preview_artifacts video (never the same
+     * gate as firstPreviewApproved above, and never derived from
+     * allScenesComplete alone - see resolve-render-dispatch.ts's own
+     * updated RENDER precondition). Defaults false; reset back to false by
+     * upload-full-preview.ts every time a NEW full-preview artifact is
+     * captured, so an old approval can never silently carry over to
+     * different, unreviewed content.
+     */
+    fullPreviewApproved: boolean("full_preview_approved").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -626,6 +638,58 @@ export const renderArtifactUploads = pgTable(
 );
 export type RenderArtifactUploadRow = typeof renderArtifactUploads.$inferSelect;
 export type NewRenderArtifactUploadRow = typeof renderArtifactUploads.$inferInsert;
+
+/**
+ * Client-handoff phase, "real final preview approval gate" - a durable,
+ * append-only record of one successful CREATE_PREVIEW job's real uploaded
+ * video bytes (mirrors render_artifacts' own "genuinely separate,
+ * historical, append-only" convention exactly, applied a third time -
+ * see also scene_evidence). Deliberately a SEPARATE table from
+ * render_artifacts: a full preview is a distinct artifact TYPE from a
+ * final Landscape/Reels delivery - the final render artifact must never
+ * double as the pre-render approval artifact, and vice versa.
+ *
+ * Unlike render_artifacts (which needs a separate render_artifact_uploads
+ * staging table because its own job-report and upload happen on
+ * genuinely separate timelines that must be correlated after the fact -
+ * see that table's own doc comment), a full-preview row is written
+ * directly at upload time (mirrors execution_sessions.latestPreview*'s own
+ * simpler "record on upload" pattern - see upload-full-preview.ts) - no
+ * separate staging table is needed here.
+ *
+ * `job_id` unique: idempotent by job, same convention as every other
+ * append-only artifact table here.
+ */
+export const fullPreviewArtifacts = pgTable(
+  "full_preview_artifacts",
+  {
+    id: uuid("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    executionSessionId: uuid("execution_session_id")
+      .notNull()
+      .references(() => executionSessions.id, { onDelete: "cascade" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .unique()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    workingProjectSha256: text("working_project_sha256").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    storageKey: text("storage_key").notNull(),
+    sha256: text("sha256").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("full_preview_artifacts_byte_size_check", sql`${table.byteSize} >= 0`),
+    unique("full_preview_artifacts_storage_key_unique").on(table.storageKey)
+  ]
+);
+export type FullPreviewArtifactRow = typeof fullPreviewArtifacts.$inferSelect;
+export type NewFullPreviewArtifactRow = typeof fullPreviewArtifacts.$inferInsert;
 
 /** Single value today (Anthropic only) - a real column + CHECK constraint rather than a boolean flag so adding OpenAI/Gemini later is an enum-value addition, never a schema shape change. */
 export const DB_AI_PROVIDER_NAMES = ["ANTHROPIC"] as const;

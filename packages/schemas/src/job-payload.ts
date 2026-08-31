@@ -4,6 +4,7 @@ import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import { sceneEvidenceRequestSchema } from "./scene-evidence.js";
 import { executeSceneEditRequestSchema } from "./execute-scene-edit.js";
 import { renderProjectRequestSchema } from "./render-project.js";
+import { createFullPreviewRequestSchema } from "./create-full-preview.js";
 import { inspectRenderCapabilitiesRequestSchema } from "./inspect-render-capabilities.js";
 import type { WorkerCapability } from "./worker.js";
 
@@ -34,7 +35,16 @@ export const JOB_PAYLOAD_SCHEMAS: Partial<Record<WorkerCapability, z.ZodTypeAny>
   // integration tests constructing a JobDto by hand), never through
   // POST /api/jobs, until a later phase wires real dispatch.
   RENDER: renderProjectRequestSchema,
-  INSPECT_RENDER_CAPABILITIES: inspectRenderCapabilitiesRequestSchema
+  INSPECT_RENDER_CAPABILITIES: inspectRenderCapabilitiesRequestSchema,
+  // Client-handoff phase, "real final preview approval gate": the first
+  // real implementation of a previously reserved/planned-only capability
+  // (see worker.ts's own WORKER_CAPABILITIES doc comment) - registered
+  // here (and in job-dispatch.ts's DISPATCHABLE_OPERATIONS) so the real
+  // API/dashboard contract exists end to end. No real Worker build
+  // reports this capability yet - see resolve-create-full-preview-dispatch.ts's
+  // own doc comment for exactly what Worker-side execution is still
+  // needed (READY_FOR_LIVE_ACCEPTANCE).
+  CREATE_PREVIEW: createFullPreviewRequestSchema
 };
 
 export function hasJobPayloadSchema(operation: WorkerCapability): boolean {

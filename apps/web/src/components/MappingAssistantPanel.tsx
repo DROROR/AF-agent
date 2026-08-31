@@ -16,6 +16,7 @@ import { Dialog } from "./ui/Dialog";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { Skeleton } from "./ui/Skeleton";
+import { HelpTooltip } from "./ui/HelpTooltip";
 import { useLocale } from "./LocaleProvider";
 import type { Tone } from "./StatusBadge";
 
@@ -245,8 +246,16 @@ export function MappingAssistantPanel(): ReactElement | null {
       {!isLoading && pending.length > 0 ? (
         <div className="mapping-bulk-toolbar">
           <div className="mapping-bulk-toolbar__counts">
-            <span>{t.mappingAssistant.bulk.safeCount(safeSuggestions.length)}</span>
-            {needsReviewCount > 0 ? <span className="field__hint">{t.mappingAssistant.bulk.needsReviewCount(needsReviewCount)}</span> : null}
+            <span>
+              {t.mappingAssistant.bulk.safeCount(safeSuggestions.length)}
+              <HelpTooltip text={t.helpTooltips.safeSuggestions} />
+            </span>
+            {needsReviewCount > 0 ? (
+              <span className="field__hint">
+                {t.mappingAssistant.bulk.needsReviewCount(needsReviewCount)}
+                <HelpTooltip text={t.helpTooltips.needsReview} />
+              </span>
+            ) : null}
             {selectedSafeCount > 0 ? <span className="field__hint">{t.mappingAssistant.bulk.selectedCount(selectedSafeCount)}</span> : null}
           </div>
           <div className="mapping-bulk-toolbar__actions">

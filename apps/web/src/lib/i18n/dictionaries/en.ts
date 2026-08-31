@@ -495,6 +495,16 @@ export const en = {
       rejectPreviewAction: "Reject preview",
       previewImageAlt: "Captured first-frame preview",
       allScenesCompleteLabel: "All approved scenes have been executed - ready to render.",
+      finalPreview: {
+        title: "Final Preview",
+        notReadyTitle: "Your complete preview is not ready yet.",
+        notReadyDescription: "Create the complete preview to review the finished video before rendering.",
+        workerOffline: "Your editing computer is offline. Turn it on to create the complete preview.",
+        createAction: "Create Complete Preview",
+        requestChangesAction: "Request Changes",
+        approveAction: "Approve Final Preview",
+        approvedBadge: "Approved"
+      },
       sessionStatusLabel: "Status",
       sessionWorkerLabel: "Worker",
       sessionProgressLabel: (done: number, total: number): string => `${done} / ${total} scenes completed`,
@@ -709,5 +719,15 @@ export const en = {
       confirmAction: "Accept Suggestions",
       accepting: "Accepting…"
     }
+  },
+  helpTooltips: {
+    timestamp: "Choose where an uploaded video should start from.",
+    duration: "How long this scene should appear in the final video.",
+    needsReview: "This suggestion isn't confident enough to accept automatically - a person should check it before it's used.",
+    firstPreview: "A quick look at one designed frame, so you can approve the look before every scene is built.",
+    finalPreview: "The complete video with every scene in place, for you to review and approve before the final render.",
+    landscape: "The standard widescreen version of your video.",
+    reels: "Creates a native 1080×1920 vertical version. DYO repositions the real scene elements instead of simply cropping the Landscape video.",
+    safeSuggestions: "Suggestions DYO is confident about. They're grouped here so you can approve several at once instead of one at a time."
   }
 } as const;

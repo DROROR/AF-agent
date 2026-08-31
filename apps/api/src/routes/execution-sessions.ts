@@ -7,6 +7,7 @@ import type { ProjectRepository } from "../domain/project/types.js";
 import type { WorkerRepository } from "../domain/worker/types.js";
 import type { JobRepository } from "../domain/job/types.js";
 import type { AssetStorage } from "../domain/asset-storage/types.js";
+import type { FullPreviewArtifactRepository } from "../domain/full-preview-artifact/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
@@ -15,6 +16,10 @@ import { getCurrentExecutionSession } from "../application/execution-session/get
 import { approveFirstPreview } from "../application/execution-session/approve-first-preview.js";
 import { rejectFirstPreview } from "../application/execution-session/reject-first-preview.js";
 import { getPreviewFile } from "../application/execution-session/get-preview-file.js";
+import { approveFinalPreview } from "../application/execution-session/approve-final-preview.js";
+import { requestFinalPreviewChanges } from "../application/execution-session/request-final-preview-changes.js";
+import { getFullPreviewFile } from "../application/execution-session/get-full-preview-file.js";
+import { getFullPreviewMetadata } from "../application/execution-session/get-full-preview-metadata.js";
 
 export interface ExecutionSessionsRouteDeps {
   executionSessionRepository: ExecutionSessionRepository;
@@ -23,6 +28,7 @@ export interface ExecutionSessionsRouteDeps {
   workerRepository: WorkerRepository;
   jobRepository: JobRepository;
   assetStorage: AssetStorage;
+  fullPreviewArtifactRepository: FullPreviewArtifactRepository;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   staleAfterMs: number;
@@ -117,5 +123,54 @@ export function registerExecutionSessionRoutes(app: FastifyInstance, deps: Execu
     const file = await getPreviewFile({ executionSessionRepository: deps.executionSessionRepository, assetStorage: deps.assetStorage }, projectId, sessionId);
     reply.header("content-type", file.mimeType);
     reply.send(file.buffer);
+  });
+
+  /**
+   * Client-handoff phase, "real final preview approval gate" - metadata
+   * only (null when no complete preview has ever been captured yet, a
+   * real valid state, never an error - see get-full-preview-metadata.ts).
+   */
+  app.get("/api/projects/:projectId/execution-sessions/:sessionId/full-preview-status", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
+    const artifact = await getFullPreviewMetadata(
+      { executionSessionRepository: deps.executionSessionRepository, fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository },
+      projectId,
+      sessionId
+    );
+    reply.send({ artifact });
+  });
+
+  /** Streams the real complete-preview video bytes back - same project-scoping/no-filesystem-path contract as .../preview above. */
+  app.get("/api/projects/:projectId/execution-sessions/:sessionId/full-preview", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
+    const file = await getFullPreviewFile(
+      { executionSessionRepository: deps.executionSessionRepository, fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository, assetStorage: deps.assetStorage },
+      projectId,
+      sessionId
+    );
+    reply.header("content-type", file.mimeType);
+    reply.send(file.buffer);
+  });
+
+  /** "Approve Final Preview" - see approve-final-preview.ts for the real freshness/existence gate. */
+  app.post("/api/projects/:projectId/execution-sessions/:sessionId/approve-final-preview", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
+    const session = await approveFinalPreview(
+      { executionSessionRepository: deps.executionSessionRepository, fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository, now },
+      projectId,
+      sessionId
+    );
+    reply.send({ session });
+  });
+
+  /** "Request Changes" - see request-final-preview-changes.ts's own doc comment for why this is deliberately lighter than reject-first-preview.ts. */
+  app.post("/api/projects/:projectId/execution-sessions/:sessionId/request-final-preview-changes", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
+    const session = await requestFinalPreviewChanges({ executionSessionRepository: deps.executionSessionRepository, now }, projectId, sessionId);
+    reply.send({ session });
   });
 }

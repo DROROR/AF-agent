@@ -4,6 +4,7 @@ import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
 import { RowApprovalBadge } from "./RowApprovalBadge";
 import { Button } from "./ui/Button";
+import { HelpTooltip } from "./ui/HelpTooltip";
 
 export interface SceneGroup {
   scenePlanId: string;
@@ -88,8 +89,14 @@ export function SceneTable({ rows, disabled = false, onToggleUse, onMove, onEdit
             <th scope="col">{t.sceneTable.mappingColumn}</th>
             <th scope="col">{t.sceneTable.assetColumn}</th>
             <th scope="col">{t.sceneTable.textColumn}</th>
-            <th scope="col">{t.sceneTable.assetTimestampColumn}</th>
-            <th scope="col">{t.sceneTable.finalDurationColumn}</th>
+            <th scope="col">
+              {t.sceneTable.assetTimestampColumn}
+              <HelpTooltip text={t.helpTooltips.timestamp} />
+            </th>
+            <th scope="col">
+              {t.sceneTable.finalDurationColumn}
+              <HelpTooltip text={t.helpTooltips.duration} />
+            </th>
             <th scope="col" className="scene-table__sticky">
               {t.sceneTable.statusColumn}
             </th>

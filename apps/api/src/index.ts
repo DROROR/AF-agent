@@ -14,6 +14,7 @@ import { DrizzleMappingSuggestionRepository } from "./infrastructure/db/drizzle-
 import { DrizzleSceneEvidenceRepository } from "./infrastructure/db/drizzle-scene-evidence-repository.js";
 import { DrizzleRenderArtifactRepository } from "./infrastructure/db/drizzle-render-artifact-repository.js";
 import { DrizzleRenderArtifactUploadRepository } from "./infrastructure/db/drizzle-render-artifact-upload-repository.js";
+import { DrizzleFullPreviewArtifactRepository } from "./infrastructure/db/drizzle-full-preview-artifact-repository.js";
 import { DrizzleExecutionSessionRepository } from "./infrastructure/db/drizzle-execution-session-repository.js";
 import { LocalFilesystemAssetStorage } from "./infrastructure/storage/local-filesystem-asset-storage.js";
 import { DrizzleUserAiProviderRepository } from "./infrastructure/db/drizzle-user-ai-provider-repository.js";
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
     sceneEvidenceRepository: new DrizzleSceneEvidenceRepository(db),
     renderArtifactRepository: new DrizzleRenderArtifactRepository(db),
     renderArtifactUploadRepository: new DrizzleRenderArtifactUploadRepository(db),
+    fullPreviewArtifactRepository: new DrizzleFullPreviewArtifactRepository(db),
     executionSessionRepository: new DrizzleExecutionSessionRepository(db),
     userAiProviderRepository: new DrizzleUserAiProviderRepository(db),
     checkDatabaseHealth: async () => {

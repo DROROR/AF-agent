@@ -7,6 +7,7 @@ import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectStepperStatus } from "../lib/use-project-stepper-status";
 import { computeWorkflowSteps, currentStepIndex, WORKFLOW_STEP_IDS, type WorkflowStepId, type WorkflowStepState } from "../lib/project-workflow-steps";
 import { useLocale } from "./LocaleProvider";
+import { HelpTooltip } from "./ui/HelpTooltip";
 
 function stepHref(projectId: string, id: WorkflowStepId): string {
   switch (id) {
@@ -62,6 +63,7 @@ export function ProjectWorkflowStepper(): ReactElement | null {
     planApproved: plan?.plan.status === "APPROVED",
     firstPreviewApproved: activeSession?.firstPreviewApproved ?? false,
     allScenesComplete,
+    fullPreviewApproved: activeSession?.fullPreviewApproved ?? false,
     hasRenderArtifact: (renderArtifacts?.length ?? 0) > 0
   });
   const currentIndex = currentStepIndex(steps);
@@ -102,6 +104,8 @@ export function ProjectWorkflowStepper(): ReactElement | null {
                   {content}
                 </Link>
               )}
+              {step.id === "firstPreview" ? <HelpTooltip text={t.helpTooltips.firstPreview} /> : null}
+              {step.id === "finalPreview" ? <HelpTooltip text={t.helpTooltips.finalPreview} /> : null}
             </li>
           );
         })}

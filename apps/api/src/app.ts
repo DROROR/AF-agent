@@ -14,6 +14,7 @@ import type { MappingSuggestionRepository } from "./domain/mapping-suggestion/ty
 import type { SceneEvidenceRepository } from "./domain/scene-evidence/types.js";
 import type { RenderArtifactRepository } from "./domain/render-artifact/types.js";
 import type { RenderArtifactUploadRepository } from "./domain/render-artifact-upload/types.js";
+import type { FullPreviewArtifactRepository } from "./domain/full-preview-artifact/types.js";
 import type { ExecutionSessionRepository } from "./domain/execution-session/types.js";
 import type { UserAiProviderRepository } from "./domain/user-ai-provider/types.js";
 import { registerErrorHandler } from "./errors/error-handler-plugin.js";
@@ -27,6 +28,7 @@ import { registerWorkMapRoutes } from "./routes/work-map.js";
 import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
 import { registerRenderArtifactUploadRoutes } from "./routes/render-artifact-upload.js";
+import { registerFullPreviewUploadRoutes } from "./routes/full-preview-upload.js";
 import { registerWorkerAssetDownloadRoutes } from "./routes/worker-asset-download.js";
 import { registerPreviewUploadRoutes } from "./routes/preview-upload.js";
 import { registerExecutionSessionRoutes } from "./routes/execution-sessions.js";
@@ -56,6 +58,7 @@ export interface AppDependencies {
   sceneEvidenceRepository: SceneEvidenceRepository;
   renderArtifactRepository: RenderArtifactRepository;
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
+  fullPreviewArtifactRepository: FullPreviewArtifactRepository;
   executionSessionRepository: ExecutionSessionRepository;
   userAiProviderRepository: UserAiProviderRepository;
   checkDatabaseHealth: () => Promise<boolean>;
@@ -114,6 +117,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     sceneEvidenceRepository: deps.sceneEvidenceRepository,
     renderArtifactRepository: deps.renderArtifactRepository,
     renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
+    fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
@@ -126,6 +130,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     workerRepository: deps.workerRepository,
     jobRepository: deps.jobRepository,
     assetStorage: deps.assetStorage,
+    fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     staleAfterMs: deps.env.WORKER_HEARTBEAT_STALE_AFTER_MS,
@@ -144,6 +149,17 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     workerRepository: deps.workerRepository,
     renderArtifactUploadRepository: deps.renderArtifactUploadRepository,
     assetStorage: deps.assetStorage,
+    maxUploadBytes: deps.env.RENDER_ARTIFACT_MAX_UPLOAD_BYTES,
+    ...(deps.now ? { now: deps.now } : {})
+  });
+  registerFullPreviewUploadRoutes(app, {
+    jobRepository: deps.jobRepository,
+    workerRepository: deps.workerRepository,
+    executionSessionRepository: deps.executionSessionRepository,
+    fullPreviewArtifactRepository: deps.fullPreviewArtifactRepository,
+    assetStorage: deps.assetStorage,
+    // Reuses the same larger render-artifact ceiling - a real complete-
+    // preview video is comparable in size to a real render.
     maxUploadBytes: deps.env.RENDER_ARTIFACT_MAX_UPLOAD_BYTES,
     ...(deps.now ? { now: deps.now } : {})
   });

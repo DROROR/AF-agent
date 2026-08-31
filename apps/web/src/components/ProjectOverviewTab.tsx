@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import { getExecutionPlanReadiness, type ExecutionSessionDto, type ExecutionSessionStatus } from "@dyo/schemas";
+import { getExecutionPlanReadiness, type ExecutionSessionDto, type ExecutionSessionStatus, type FullPreviewArtifactDto } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { PlanStatusBadge } from "./PlanStatusBadge";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { VideoArtifactPlayer } from "./ui/VideoArtifactPlayer";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
@@ -16,7 +17,11 @@ import {
   fetchCurrentExecutionSession,
   approveFirstPreview,
   rejectFirstPreview,
-  executionSessionPreviewUrl
+  executionSessionPreviewUrl,
+  fetchFullPreviewStatus,
+  fullPreviewFileUrl,
+  approveFinalPreview,
+  requestFinalPreviewChanges
 } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 
@@ -366,6 +371,123 @@ export function ProjectOverviewTab(): ReactElement | null {
           ) : null}
         </div>
       </Card>
+
+      {allScenesComplete && activeSession ? <FinalPreviewCard projectId={projectId} session={activeSession} /> : null}
     </div>
+  );
+}
+
+/**
+ * "Final Preview" (client-handoff phase, "real final preview approval
+ * gate") - only reachable once every approved scene has completed
+ * (allScenesComplete, computed by the parent from the same real session/
+ * plan state RENDER dispatch itself checks). Renders the REAL complete-
+ * preview artifact via the authenticated video player - never a fake
+ * placeholder - and requires an explicit "Approve Final Preview" click
+ * before the final render becomes available (enforced server-side by
+ * resolve-render-dispatch.ts regardless of anything this component does).
+ */
+function FinalPreviewCard({ projectId, session }: { projectId: string; session: ExecutionSessionDto }): ReactElement {
+  const { t } = useLocale();
+  const { data: dashboardStatus } = useDashboardStatusContext();
+  const [artifact, setArtifact] = useState<FullPreviewArtifactDto | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchMessage, setDispatchMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [sessionOverride, setSessionOverride] = useState<ExecutionSessionDto | null>(null);
+
+  const currentSession = sessionOverride ?? session;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchFullPreviewStatus(projectId, session.id).then((result) => {
+      if (!cancelled) {
+        if (result.ok) {
+          setArtifact(result.data);
+        }
+        setHasLoaded(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, session.id, refreshKey]);
+
+  const isFresh = artifact !== null && artifact.workingProjectSha256 === session.latestWorkingProjectSha256;
+  const worker = findDispatchableWorker(dashboardStatus?.workers ?? null, "CREATE_PREVIEW");
+
+  async function handleCreatePreview(): Promise<void> {
+    setDispatchMessage(null);
+    if (!worker) {
+      setDispatchMessage({ text: t.projectWorkspace.overview.finalPreview.workerOffline, isError: true });
+      return;
+    }
+    setIsDispatching(true);
+    const result = await dispatchJob({ operation: "CREATE_PREVIEW", workerId: worker.workerId, projectId, executionSessionId: session.id });
+    setIsDispatching(false);
+    if (!result.ok) {
+      setDispatchMessage({ text: result.message, isError: true });
+      return;
+    }
+    setDispatchMessage({ text: t.jobDispatch.queuedDescription(result.data.jobId), isError: false });
+  }
+
+  async function handleApprove(): Promise<void> {
+    setActionError(null);
+    const result = await approveFinalPreview(projectId, session.id);
+    if (!result.ok) {
+      setActionError(result.message ?? null);
+      return;
+    }
+    setSessionOverride(result.data);
+  }
+
+  async function handleRequestChanges(): Promise<void> {
+    setActionError(null);
+    const result = await requestFinalPreviewChanges(projectId, session.id);
+    if (!result.ok) {
+      setActionError(result.message ?? null);
+      return;
+    }
+    setSessionOverride(result.data);
+  }
+
+  return (
+    <Card className="overview-section final-preview-card">
+      <CardHeader
+        title={t.projectWorkspace.overview.finalPreview.title}
+        action={currentSession.fullPreviewApproved ? <span className="status-badge status-badge--positive">{t.projectWorkspace.overview.finalPreview.approvedBadge}</span> : null}
+      />
+      {actionError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} /> : null}
+
+      {!hasLoaded ? null : !isFresh ? (
+        <>
+          <EmptyState title={t.projectWorkspace.overview.finalPreview.notReadyTitle} description={t.projectWorkspace.overview.finalPreview.notReadyDescription} />
+          {dispatchMessage ? <p className={dispatchMessage.isError ? "final-preview-card__error" : "field__hint"}>{dispatchMessage.text}</p> : null}
+          <div className="overview-actions">
+            <Button variant="primary" disabled={isDispatching} onClick={() => void handleCreatePreview()}>
+              {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.finalPreview.createAction}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setRefreshKey((k) => k + 1)}>
+              {t.projectWorkspace.reload}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <VideoArtifactPlayer src={fullPreviewFileUrl(projectId, session.id)} ariaLabel={t.projectWorkspace.overview.finalPreview.title} />
+          <div className="overview-actions">
+            <Button variant="secondary" disabled={currentSession.fullPreviewApproved} onClick={() => void handleRequestChanges()}>
+              {t.projectWorkspace.overview.finalPreview.requestChangesAction}
+            </Button>
+            <Button variant="primary" disabled={currentSession.fullPreviewApproved} onClick={() => void handleApprove()}>
+              {currentSession.fullPreviewApproved ? t.projectWorkspace.overview.finalPreview.approvedBadge : t.projectWorkspace.overview.finalPreview.approveAction}
+            </Button>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }

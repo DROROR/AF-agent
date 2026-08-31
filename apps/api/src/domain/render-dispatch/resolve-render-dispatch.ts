@@ -30,6 +30,13 @@ export interface RenderDispatchSessionSnapshot {
   latestWorkingProjectSha256: string | null;
   completedScenePlanIds: string[];
   firstPreviewApproved: boolean;
+  /** Client-handoff phase, "real final preview approval gate" - a SEPARATE approval from firstPreviewApproved above. */
+  fullPreviewApproved: boolean;
+}
+
+/** The fields resolveRenderDispatch needs from the session's latest full-preview artifact, if any - null when none has ever been captured. */
+export interface RenderDispatchFullPreviewSnapshot {
+  workingProjectSha256: string;
 }
 
 export interface ResolveRenderDispatchInput {
@@ -43,6 +50,8 @@ export interface ResolveRenderDispatchInput {
   currentProjectSourceProjectSha256: string | null;
   /** The project's CURRENT manifest sourceProject.path, freshly read - null if the project doesn't exist. */
   currentProjectSourceProjectPath: string | null;
+  /** The session's own latest full-preview artifact, freshly read - null if none has ever been captured for this session. */
+  latestFullPreview: RenderDispatchFullPreviewSnapshot | null;
   /** The worker actually being dispatched to, freshly read - null if it has never reported in. */
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
@@ -75,7 +84,18 @@ export type ResolveRenderDispatchResult =
  *   - firstPreviewApproved is true (section 10 - the human preview gate),
  *   - every plan scene that is use=true/APPROVED/no-unresolved-reasons has
  *     completed in this session (completedScenePlanIds covers them all -
- *     never a partial render from an in-progress session).
+ *     never a partial render from an in-progress session),
+ *   - a full-preview artifact exists for this session AND its own
+ *     workingProjectSha256 matches the session's CURRENT
+ *     latestWorkingProjectSha256 (client-handoff phase, "real final
+ *     preview approval gate" - a stale full preview captured against an
+ *     OLDER working copy never counts, same "freshness" rule
+ *     scene-evidence's own listCompatibleByProject already established
+ *     for a different artifact type),
+ *   - fullPreviewApproved is true - a SEPARATE, later human approval than
+ *     firstPreviewApproved, given only after reviewing that exact fresh
+ *     full-preview artifact (never silently reused/derived from
+ *     firstPreviewApproved or from allScenesComplete alone).
  *
  * Every precondition here is checked fresh against data the caller
  * already fetched (pure function, same style as
@@ -91,7 +111,7 @@ export type ResolveRenderDispatchResult =
  * enforcement point, by design).
  */
 export function resolveRenderDispatch(input: ResolveRenderDispatchInput): ResolveRenderDispatchResult {
-  const { projectId, variant, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, worker, now, staleAfterMs } = input;
+  const { projectId, variant, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, latestFullPreview, worker, now, staleAfterMs } = input;
 
   if (!session) {
     return { ok: false, reason: "No execution session was found for the requested executionSessionId" };
@@ -156,6 +176,16 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
       ok: false,
       reason: `This execution session has not yet completed every approved scene (${missingScenes.length} remaining) - not ready to render`
     };
+  }
+
+  if (!latestFullPreview || latestFullPreview.workingProjectSha256 !== session.latestWorkingProjectSha256) {
+    return {
+      ok: false,
+      reason: "The complete preview has not been created yet for the current working copy - create and approve it before rendering the final video"
+    };
+  }
+  if (!session.fullPreviewApproved) {
+    return { ok: false, reason: "The complete preview has not been approved yet - review and approve it before rendering the final video" };
   }
 
   if (!worker) {

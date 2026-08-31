@@ -70,6 +70,7 @@ function validSession(overrides: Partial<RenderDispatchSessionSnapshot> = {}): R
     latestWorkingProjectSha256: WORKING_SHA,
     completedScenePlanIds: ["scene-1"],
     firstPreviewApproved: true,
+    fullPreviewApproved: true,
     ...overrides
   };
 }
@@ -95,6 +96,7 @@ function baseInput(overrides: Partial<Parameters<typeof resolveRenderDispatch>[0
     currentPlan: validPlan(),
     currentProjectSourceProjectSha256: SHA,
     currentProjectSourceProjectPath: SOURCE_PATH,
+    latestFullPreview: { workingProjectSha256: WORKING_SHA },
     worker: validWorker(),
     now: NOW,
     staleAfterMs: STALE_AFTER_MS,
@@ -237,6 +239,32 @@ describe("resolveRenderDispatch", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("not ready to render");
+  });
+
+  it("fails closed when no complete-preview artifact exists yet for the current working copy - client-handoff phase, 'real final preview approval gate'", () => {
+    const result = resolveRenderDispatch(baseInput({ latestFullPreview: null }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("complete preview has not been created yet");
+  });
+
+  it("fails closed when the complete-preview artifact is stale (captured against an OLDER working copy than the session's current one)", () => {
+    const result = resolveRenderDispatch(baseInput({ latestFullPreview: { workingProjectSha256: "e".repeat(64) } }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("complete preview has not been created yet");
+  });
+
+  it("fails closed when a fresh complete-preview artifact exists but has not been approved yet - a SEPARATE gate from firstPreviewApproved", () => {
+    const result = resolveRenderDispatch(baseInput({ session: validSession({ fullPreviewApproved: false }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("complete preview has not been approved yet");
+  });
+
+  it("succeeds once the complete preview is both fresh (matches the current working copy) and approved", () => {
+    const result = resolveRenderDispatch(baseInput({ session: validSession({ fullPreviewApproved: true }), latestFullPreview: { workingProjectSha256: WORKING_SHA } }));
+    expect(result.ok).toBe(true);
   });
 
   it("ignores excluded (use=false) and unapproved scenes when computing the required set - only approved, resolved, in-use scenes gate readiness", () => {

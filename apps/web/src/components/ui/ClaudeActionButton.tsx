@@ -1,17 +1,19 @@
 import type { ButtonHTMLAttributes, ReactElement } from "react";
 
 /**
- * Abstract 8-point sunburst mark, in Claude/Anthropic's own brand color -
- * a local, static, inline SVG (never a hotlinked third-party image URL -
- * see this component's own module doc comment). Not the literal Anthropic
- * wordmark/logotype (no license to redistribute that asset file exists in
- * this repo) - a good-faith visual reference to Claude's own public mark
- * shape, used consistently only on this one button.
+ * The real Anthropic "A" mark - a local, static, inline SVG (never a
+ * hotlinked third-party image URL at runtime - see this component's own
+ * module doc comment). Path data taken from the Simple Icons project
+ * (simple-icons.org, MIT-licensed for exactly this "monochrome brand mark,
+ * recolored via currentColor" use), which mirrors Anthropic's own public
+ * mark - never fetched live from this component; the path is checked into
+ * this file so the icon renders identically with no network dependency
+ * and no CSP/hotlink risk.
  */
 function ClaudeMark(): ReactElement {
   return (
     <svg className="btn--claude__mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M12 0l1.8 8.2L22 10l-8.2 1.8L12 20l-1.8-8.2L2 10l8.2-1.8z" />
+      <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
     </svg>
   );
 }

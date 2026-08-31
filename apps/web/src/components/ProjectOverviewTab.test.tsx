@@ -193,6 +193,7 @@ describe("ProjectOverviewTab", () => {
             hasPreview: false,
             latestPreviewScenePlanId: null,
             latestPreviewCapturedAt: null,
+            fullPreviewApproved: false,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           }
@@ -225,6 +226,7 @@ describe("ProjectOverviewTab", () => {
       hasPreview: true,
       latestPreviewScenePlanId: "s1",
       latestPreviewCapturedAt: new Date().toISOString(),
+      fullPreviewApproved: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...overrides
@@ -263,5 +265,138 @@ describe("ProjectOverviewTab", () => {
     const rejectButton = await screen.findByRole("button", { name: "Reject preview" });
     fireEvent.click(rejectButton);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Approve preview" })).toBeNull());
+  });
+});
+
+/**
+ * Client-handoff phase, "real final preview approval gate" - the
+ * FinalPreviewCard only appears once every approved scene has completed
+ * (allScenesComplete), and requires an explicit "Approve Final Preview"
+ * click before the render step ever becomes reachable.
+ */
+describe("ProjectOverviewTab - Final Preview", () => {
+  const SESSION_ID = "77777777-7777-7777-7777-777777777777";
+  const WORKER_ID = "44444444-4444-4444-4444-444444444444";
+
+  function readyToRenderSession(overrides: Record<string, unknown> = {}) {
+    return {
+      id: SESSION_ID,
+      projectId: PROJECT_ID,
+      executionPlanId: "plan-1",
+      planRevision: 3,
+      sourceProjectSha256: SOURCE_SHA,
+      assignedWorkerId: WORKER_ID,
+      status: "READY_TO_RENDER",
+      latestWorkingProjectSha256: "d".repeat(64),
+      completedScenePlanIds: ["s1"],
+      firstPreviewApproved: true,
+      hasPreview: true,
+      latestPreviewScenePlanId: "s1",
+      latestPreviewCapturedAt: new Date().toISOString(),
+      fullPreviewApproved: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...overrides
+    };
+  }
+
+  function stubReady(extra: Record<string, Parameters<typeof stubFetchByUrl>[0][string]> = {}): void {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: { status: 200, body: { artifact: null } },
+      ...extra
+    });
+  }
+
+  it('shows "not ready yet" and a real worker-offline message when Create Complete Preview is clicked with no compatible worker online', async () => {
+    stubReady();
+    renderOverview();
+    await screen.findByText("Your complete preview is not ready yet.");
+    fireEvent.click(screen.getByRole("button", { name: "Create Complete Preview" }));
+    await screen.findByText("Your editing computer is offline. Turn it on to create the complete preview.");
+  });
+
+  it("renders the real complete-preview video and Approve/Request Changes actions once a fresh artifact exists", async () => {
+    stubReady({
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
+        status: 200,
+        body: {
+          artifact: {
+            id: "88888888-8888-8888-8888-888888888888",
+            projectId: PROJECT_ID,
+            executionSessionId: SESSION_ID,
+            workingProjectSha256: "d".repeat(64),
+            filename: "preview.mp4",
+            mimeType: "video/mp4",
+            byteSize: 100,
+            capturedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderOverview();
+    await screen.findByRole("button", { name: "Approve Final Preview" });
+    screen.getByRole("button", { name: "Request Changes" });
+    const video = document.querySelector("video") as HTMLVideoElement;
+    expect(video.getAttribute("src")).toBe(`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview`);
+  });
+
+  it("a STALE artifact (captured against an older working copy) is treated as not ready - never shown as if it were the current preview", async () => {
+    stubReady({
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
+        status: 200,
+        body: {
+          artifact: {
+            id: "88888888-8888-8888-8888-888888888888",
+            projectId: PROJECT_ID,
+            executionSessionId: SESSION_ID,
+            workingProjectSha256: "b".repeat(64), // different from the session's current working copy
+            filename: "preview.mp4",
+            mimeType: "video/mp4",
+            byteSize: 100,
+            capturedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderOverview();
+    await screen.findByText("Your complete preview is not ready yet.");
+    expect(document.querySelector("video")).toBeNull();
+  });
+
+  it("clicking Approve Final Preview calls the real endpoint and shows the Approved badge", async () => {
+    stubReady({
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
+        status: 200,
+        body: {
+          artifact: {
+            id: "88888888-8888-8888-8888-888888888888",
+            projectId: PROJECT_ID,
+            executionSessionId: SESSION_ID,
+            workingProjectSha256: "d".repeat(64),
+            filename: "preview.mp4",
+            mimeType: "video/mp4",
+            byteSize: 100,
+            capturedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString()
+          }
+        }
+      },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/approve-final-preview`]: {
+        status: 200,
+        body: { session: readyToRenderSession({ fullPreviewApproved: true }) }
+      }
+    });
+    renderOverview();
+    const approveButton = await screen.findByRole("button", { name: "Approve Final Preview" });
+    fireEvent.click(approveButton);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Approved" }) as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
   });
 });

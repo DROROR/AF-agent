@@ -7,6 +7,7 @@ import type { ProjectRepository } from "../../domain/project/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ExecutionSessionRepository } from "../../domain/execution-session/types.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
+import type { FullPreviewArtifactRepository } from "../../domain/full-preview-artifact/types.js";
 import {
   PreconditionNotMetError,
   ProjectNotFoundError,
@@ -17,6 +18,7 @@ import {
 import { sweepStaleWorkers } from "../worker/sweep-stale-workers.js";
 import { resolveExecuteFrameDispatch } from "../../domain/execute-frame-dispatch/resolve-execute-frame-dispatch.js";
 import { resolveRenderDispatch } from "../../domain/render-dispatch/resolve-render-dispatch.js";
+import { resolveCreateFullPreviewDispatch } from "../../domain/full-preview-dispatch/resolve-create-full-preview-dispatch.js";
 import { resolveInspectSceneEvidenceDispatch } from "../../domain/scene-evidence-dispatch/resolve-inspect-scene-evidence-dispatch.js";
 import { createJob } from "./create-job.js";
 import { resolveExecuteFrameResumeCheckpoint, resolveRenderResumeCheckpoint } from "./resolve-resume-checkpoint.js";
@@ -28,6 +30,7 @@ export interface DispatchJobDeps {
   executionPlanRepository: ExecutionPlanRepository;
   executionSessionRepository: ExecutionSessionRepository;
   assetRepository: AssetRepository;
+  fullPreviewArtifactRepository: FullPreviewArtifactRepository;
   now: () => Date;
   staleAfterMs: number;
 }
@@ -38,6 +41,7 @@ const AE_MCP_DEPENDENT_OPERATIONS = new Set<DispatchJobRequest["operation"]>([
   "INSPECT_SCENE_EVIDENCE",
   "INSPECT_RENDER_CAPABILITIES",
   "EXECUTE_FRAME",
+  "CREATE_PREVIEW",
   "RENDER"
 ]);
 
@@ -101,10 +105,19 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
   // dispatch time, rather than trusted blindly through to job completion -
   // same rationale as INSPECT_SCENE_EVIDENCE's own pre-existing check.
   const project =
-    request.operation === "INSPECT_SCENE_EVIDENCE" || request.operation === "EXECUTE_FRAME" || request.operation === "RENDER"
+    request.operation === "INSPECT_SCENE_EVIDENCE" ||
+    request.operation === "EXECUTE_FRAME" ||
+    request.operation === "CREATE_PREVIEW" ||
+    request.operation === "RENDER"
       ? await deps.projectRepository.findById(request.projectId)
       : null;
-  if ((request.operation === "INSPECT_SCENE_EVIDENCE" || request.operation === "EXECUTE_FRAME" || request.operation === "RENDER") && !project) {
+  if (
+    (request.operation === "INSPECT_SCENE_EVIDENCE" ||
+      request.operation === "EXECUTE_FRAME" ||
+      request.operation === "CREATE_PREVIEW" ||
+      request.operation === "RENDER") &&
+    !project
+  ) {
     throw new ProjectNotFoundError(request.projectId);
   }
 
@@ -158,6 +171,27 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     // operation 0. Fails closed to a fresh start (null) on any mismatch.
     const resumeCheckpoint = await resolveExecuteFrameResumeCheckpoint(deps.jobRepository, resolved.payload);
     payload = { ...resolved.payload, checkpoint: resumeCheckpoint };
+  } else if (request.operation === "CREATE_PREVIEW") {
+    if (!project) {
+      throw new ProjectNotFoundError(request.projectId);
+    }
+    projectId = request.projectId;
+    const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    const session = await deps.executionSessionRepository.findById(request.executionSessionId);
+    const resolved = resolveCreateFullPreviewDispatch({
+      projectId: request.projectId,
+      session,
+      currentPlan: plan,
+      currentProjectSourceProjectSha256: project.sourceProjectSha256,
+      currentProjectSourceProjectPath: project.manifest.sourceProject.path,
+      worker,
+      now,
+      staleAfterMs: deps.staleAfterMs
+    });
+    if (!resolved.ok) {
+      throw new PreconditionNotMetError(resolved.reason);
+    }
+    payload = resolved.payload;
   } else if (request.operation === "RENDER") {
     if (!project) {
       throw new ProjectNotFoundError(request.projectId);
@@ -165,6 +199,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     projectId = request.projectId;
     const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
     const session = await deps.executionSessionRepository.findById(request.executionSessionId);
+    const latestFullPreview = session ? await deps.fullPreviewArtifactRepository.findLatestForSession(session.id) : null;
     const resolved = resolveRenderDispatch({
       projectId: request.projectId,
       variant: request.variant,
@@ -172,6 +207,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       currentPlan: plan,
       currentProjectSourceProjectSha256: project.sourceProjectSha256,
       currentProjectSourceProjectPath: project.manifest.sourceProject.path,
+      latestFullPreview,
       worker,
       now,
       staleAfterMs: deps.staleAfterMs

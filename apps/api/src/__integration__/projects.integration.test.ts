@@ -10,6 +10,7 @@ import { DrizzleMappingSuggestionRepository } from "../infrastructure/db/drizzle
 import { DrizzleSceneEvidenceRepository } from "../infrastructure/db/drizzle-scene-evidence-repository.js";
 import { DrizzleRenderArtifactRepository } from "../infrastructure/db/drizzle-render-artifact-repository.js";
 import { DrizzleRenderArtifactUploadRepository } from "../infrastructure/db/drizzle-render-artifact-upload-repository.js";
+import { DrizzleFullPreviewArtifactRepository } from "../infrastructure/db/drizzle-full-preview-artifact-repository.js";
 import { DrizzleUserAiProviderRepository } from "../infrastructure/db/drizzle-user-ai-provider-repository.js";
 import { LocalFilesystemAssetStorage } from "../infrastructure/storage/local-filesystem-asset-storage.js";
 import { DrizzleJobRepository } from "../infrastructure/db/drizzle-job-repository.js";
@@ -104,6 +105,7 @@ async function setup(initialNow: Date) {
     sceneEvidenceRepository: new DrizzleSceneEvidenceRepository(db),
     renderArtifactRepository: new DrizzleRenderArtifactRepository(db),
     renderArtifactUploadRepository: new DrizzleRenderArtifactUploadRepository(db),
+    fullPreviewArtifactRepository: new DrizzleFullPreviewArtifactRepository(db),
     userAiProviderRepository: new DrizzleUserAiProviderRepository(db),
     checkDatabaseHealth: async () => {
       await db.execute("select 1");

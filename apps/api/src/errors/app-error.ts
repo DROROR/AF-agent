@@ -18,6 +18,7 @@ function statusForCode(code: ErrorCode): number {
     case "RENDER_ARTIFACT_NOT_FOUND":
     case "EXECUTION_SESSION_NOT_FOUND":
     case "PREVIEW_NOT_FOUND":
+    case "FULL_PREVIEW_NOT_FOUND":
       return 404;
     case "CONFLICT":
     case "WORKER_OFFLINE":
@@ -200,6 +201,14 @@ export class PreviewNotFoundError extends AppError {
   constructor(sessionId: string) {
     super("PREVIEW_NOT_FOUND", `Execution session ${sessionId} has no preview yet`);
     this.name = "PreviewNotFoundError";
+  }
+}
+
+/** The execution session exists, but has no complete preview captured yet - distinct from the session itself not existing, and from PreviewNotFoundError (the mid-execution first-preview PNG). */
+export class FullPreviewNotFoundError extends AppError {
+  constructor(sessionId: string) {
+    super("FULL_PREVIEW_NOT_FOUND", `Execution session ${sessionId} has no complete preview yet`);
+    this.name = "FullPreviewNotFoundError";
   }
 }
 
