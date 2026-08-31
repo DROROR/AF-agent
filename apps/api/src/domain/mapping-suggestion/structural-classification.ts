@@ -70,6 +70,7 @@ const STRUCTURAL_NAME_PATTERNS: readonly RegExp[] = [
   /control/i,
   /alpha.?helper/i,
   /^phone(\.png)?$/i,
+  /phone.?comp/i,
   /wrapper/i,
   /structural/i,
   /template.?control/i
@@ -168,16 +169,30 @@ export function resolveKeepOriginal(bundle: StructuralClassificationInput): Keep
     const intent = detectKeepUnchangedIntent(bundle);
     return { shouldKeepOriginal: true, reason: intent.matched ? `${structural.reason}; ${intent.reason}` : structural.reason };
   }
+  const intent = detectKeepUnchangedIntent(bundle);
+  // A composition-level-only target (build-evidence-bundles.ts's
+  // mappingId: null case - "no placeholder detected in this
+  // composition") has no specific placeholder name/classification to
+  // pattern-match at all, so name-based structural detection can never
+  // apply to it. Real production bug: a real client Work Map entry that
+  // explicitly says "this whole scene is a structural wrapper/phone-frame
+  // comp - keep unchanged" was still stuck as Needs Review forever,
+  // because this function unconditionally refused to resolve ANY
+  // nameless bundle, no matter how explicit the Work Map was. Safe to
+  // resolve here on explicit wording alone (never a bare guess) - unlike
+  // the named-placeholder branch below, there is no risk of this
+  // silently swallowing a REAL content placeholder, since a
+  // composition-level bundle by definition has no individual content
+  // field to swallow; a sibling bundle for an actual nested placeholder
+  // (e.g. "Text 02" inside the same scene) is a wholly separate bundle
+  // with its own real name, evaluated independently by the branch below.
+  if (bundle.placeholderName === null) {
+    return intent.matched ? { shouldKeepOriginal: true, reason: intent.reason } : { shouldKeepOriginal: false, reason: null };
+  }
   // Not identified as structural by name/classification - an ambiguous
-  // NAMED placeholder (never a composition-level "no placeholder
-  // detected" bundle, which has no name at all and is a different kind of
-  // unresolved state) may still resolve here, but ONLY on genuinely
+  // NAMED placeholder may still resolve here, but ONLY on genuinely
   // explicit client wording naming it as unchanged, never a bare
   // structural guess, and never a recognized content target.
-  if (bundle.placeholderName === null) {
-    return { shouldKeepOriginal: false, reason: null };
-  }
-  const intent = detectKeepUnchangedIntent(bundle);
   if (intent.matched && !isRecognizedContentTarget(bundle)) {
     return { shouldKeepOriginal: true, reason: intent.reason };
   }

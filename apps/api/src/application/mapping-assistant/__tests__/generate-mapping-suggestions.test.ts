@@ -1018,4 +1018,30 @@ describe("generateMappingSuggestions - mapping-review deadlock fix (client-hando
     expect(result.suggestions).toHaveLength(1);
     expect(result.suggestions[0]!.conflictsWithWorkMap).toBe(true);
   });
+
+  it("real production bug on test22 (false Needs Review): a composition-level scene (no placeholder detected at all) whose Work Map entry explicitly marks it a structural wrapper/phone-frame comp resolves with status RESOLVED - never reaches the AI provider, never counted in the 'needs review' bucket", async () => {
+    const noPlaceholderManifest = { ...manifest(), scenes: [{ ...manifest().scenes[0]!, placeholders: [] }] };
+    const provider = new StubAiProvider([]);
+    const deps = await setup(provider, noPlaceholderManifest);
+    await updateWorkMap({ workMapRepository: deps.workMapRepository, now: fixedNow }, deps.project.projectId, {
+      baseRevision: 0,
+      entries: [
+        {
+          sourceCompositionId: "comp-1",
+          sourceReference: null,
+          desiredAssetId: null,
+          desiredText: null,
+          assetTimestampSeconds: null,
+          desiredDurationSeconds: null,
+          instructions: "Work Map explicitly states this is a structural scene wrapper to keep unchanged. No evidence supports content assignment."
+        }
+      ]
+    });
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]).toMatchObject({ status: "RESOLVED", mappingId: null, requiresHumanReview: false, conflictsWithWorkMap: false });
+    expect(provider.lastBundles).toEqual([]);
+  });
 });

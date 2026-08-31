@@ -110,12 +110,102 @@ describe("resolveKeepOriginal - the mapping-review deadlock fix", () => {
     expect(resolveKeepOriginal(bundle({ placeholderName: "Logo", userInstructions: "Keep scene wrapper animation unchanged." })).shouldKeepOriginal).toBe(false);
   });
 
-  it("never resolves a composition-level bundle with no placeholder name at all, even with keep-unchanged instructions - a different kind of unresolved state", () => {
-    expect(resolveKeepOriginal(bundle({ placeholderName: null, mappingId: null, userInstructions: "Keep unchanged." })).shouldKeepOriginal).toBe(false);
+  it("real production bug on test22: resolves a composition-level bundle (no specific placeholder detected) when the Work Map/scene instructions explicitly say to keep it unchanged - e.g. 'structural scene wrapper'/'structural phone frame comp' Work Map entries stuck as Needs Review forever", () => {
+    expect(resolveKeepOriginal(bundle({ placeholderName: null, mappingId: null, userInstructions: "Keep unchanged." })).shouldKeepOriginal).toBe(true);
+  });
+
+  it("never resolves a composition-level bundle with no explicit keep-unchanged wording at all - genuinely nothing to go on", () => {
+    expect(resolveKeepOriginal(bundle({ placeholderName: null, mappingId: null, userInstructions: null })).shouldKeepOriginal).toBe(false);
   });
 
   it("never resolves an ordinary content placeholder with no structural evidence and no explicit intent", () => {
     expect(resolveKeepOriginal(bundle({ placeholderName: "Hero Image" })).shouldKeepOriginal).toBe(false);
+  });
+
+  it("real production bug on test22, exact shape: the 'keep unchanged' wording comes from the Work Map ENTRY's own instructions field, not the scene's separate userInstructions - both are honored", () => {
+    const result = resolveKeepOriginal(
+      bundle({
+        placeholderName: null,
+        mappingId: null,
+        userInstructions: null,
+        workMapEntry: {
+          id: "wm-1",
+          sourceCompositionId: "comp-1",
+          sourceReference: null,
+          desiredAssetId: null,
+          desiredText: null,
+          assetTimestampSeconds: null,
+          desiredDurationSeconds: null,
+          instructions: "Work Map explicitly states this is a structural scene wrapper to keep unchanged. No evidence supports content assignment."
+        }
+      })
+    );
+    expect(result.shouldKeepOriginal).toBe(true);
+  });
+
+  it("real production bug on test22, exact shape: 'structural phone frame comp to keep unchanged' Work Map wording also resolves the composition-level target", () => {
+    const result = resolveKeepOriginal(
+      bundle({
+        placeholderName: null,
+        mappingId: null,
+        workMapEntry: {
+          id: "wm-1",
+          sourceCompositionId: "comp-1",
+          sourceReference: null,
+          desiredAssetId: null,
+          desiredText: null,
+          assetTimestampSeconds: null,
+          desiredDurationSeconds: null,
+          instructions: "Work Map explicitly states this is a structural phone frame comp to keep unchanged, with no content assignment needed."
+        }
+      })
+    );
+    expect(result.shouldKeepOriginal).toBe(true);
+  });
+
+  it("real production bug on test22, exact shape: a SIBLING nested content placeholder (e.g. 'Text 02') in the SAME scene, sharing the exact same 'keep unchanged' Work Map entry, is never swallowed - it is its own bundle with its own real name and no explicit text of its own", () => {
+    const sharedWorkMapEntry = {
+      id: "wm-1",
+      sourceCompositionId: "comp-1",
+      sourceReference: null,
+      desiredAssetId: null,
+      desiredText: null,
+      assetTimestampSeconds: null,
+      desiredDurationSeconds: null,
+      instructions: "Work Map explicitly states this is a structural scene wrapper to keep unchanged."
+    };
+    // The composition-level bundle itself resolves...
+    const compositionLevel = resolveKeepOriginal(bundle({ placeholderName: null, mappingId: null, workMapEntry: sharedWorkMapEntry }));
+    expect(compositionLevel.shouldKeepOriginal).toBe(true);
+    // ...but a real nested text placeholder in the SAME scene, sharing the SAME Work Map entry, does not.
+    const nestedText = resolveKeepOriginal(bundle({ placeholderName: "Text 02", mappingId: "mapping-text-02", workMapEntry: sharedWorkMapEntry }));
+    expect(nestedText.shouldKeepOriginal).toBe(false);
+  });
+
+  it("Phone_screen.png (a real content target) stays reviewable even when its parent comp's Work Map entry says the comp is a structural phone frame to keep unchanged", () => {
+    const result = resolveKeepOriginal(
+      bundle({
+        placeholderName: "Phone_screen.png",
+        currentClassification: null,
+        workMapEntry: {
+          id: "wm-1",
+          sourceCompositionId: "comp-1",
+          sourceReference: null,
+          desiredAssetId: null,
+          desiredText: null,
+          assetTimestampSeconds: null,
+          desiredDurationSeconds: null,
+          instructions: "Work Map explicitly states this is a structural phone frame comp to keep unchanged."
+        }
+      })
+    );
+    expect(result.shouldKeepOriginal).toBe(false);
+  });
+});
+
+describe("classifyStructuralPlaceholder - Phone_Comp naming (client-handoff false-Needs-Review fix)", () => {
+  it.each(["Phone_Comp 01", "Phone Comp 3", "PhoneComp_02"])("identifies %s as structural", (name) => {
+    expect(classifyStructuralPlaceholder(bundle({ placeholderName: name })).isStructural).toBe(true);
   });
 });
 

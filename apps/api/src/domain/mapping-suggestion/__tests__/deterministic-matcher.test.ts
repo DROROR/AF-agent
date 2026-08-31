@@ -250,6 +250,39 @@ describe("matchDeterministic", () => {
       const result = matchDeterministic(bundle({ placeholderName: "Body Text", userInstructions: "Keep scene wrapper animation unchanged." }));
       expect(result).toBeNull();
     });
+
+    it("real production bug on test22 (false Needs Review): a composition-level target (no placeholder detected at all - mappingId/placeholderName both null) whose Work Map entry explicitly marks the whole scene a structural wrapper resolves with no replacement and no review, never reaching the AI provider at all", () => {
+      const result = matchDeterministic(
+        bundle({
+          placeholderName: null,
+          mappingId: null,
+          manifestPlaceholderId: null,
+          currentClassification: null,
+          workMapEntry: {
+            id: "wm-1",
+            sourceCompositionId: "comp-1",
+            sourceReference: null,
+            desiredAssetId: null,
+            desiredText: null,
+            assetTimestampSeconds: null,
+            desiredDurationSeconds: null,
+            instructions: "Work Map explicitly states this is a structural scene wrapper to keep unchanged. No evidence supports content assignment."
+          }
+        })
+      );
+      expect(result).toMatchObject({
+        suggestedAssetId: null,
+        suggestedText: null,
+        requiresHumanReview: false,
+        conflictsWithWorkMap: false,
+        unresolvedReason: null
+      });
+    });
+
+    it("a Phone_Comp-named placeholder resolves as structural, same as Phone.png/Phone_mask.png", () => {
+      const result = matchDeterministic(bundle({ placeholderName: "Phone_Comp 01" }));
+      expect(result).toMatchObject({ requiresHumanReview: false, suggestedAssetId: null });
+    });
   });
 
   it("Work Map priority: never falls through to the filename-match heuristic when Work Map already has an opinion", () => {
