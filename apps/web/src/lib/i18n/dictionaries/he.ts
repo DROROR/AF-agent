@@ -585,6 +585,30 @@ export const he: Dictionary = {
     fieldHints: {
       desiredAssetId: "מזהה נכס אמיתי מקטלוג הנכסים של הפרויקט - לא מאומת כאן, רק כאשר הוא ממופה בפועל במיפוי סצנות.",
       sourceCompositionId: "השאירו ריק אם התבנית טרם נבדקה."
+    },
+    ai: {
+      heading: "ספרו לבינה המלאכותית מה תרצו",
+      textareaLabel: "תארו את הסרטון שלכם",
+      placeholder: "השתמשו תחילה בהקלטת מסך ההתחברות, ואז הציגו את הקופה.\nשמרו על אנימציות התבנית המקוריות.\nהשתמשו בלוגו שלנו בסוף.\nשמרו על אורך הסרטון הסופי סביב 20 שניות.",
+      createPlanAction: "יצירת תוכנית וידאו",
+      creatingPlan: "יוצר את התוכנית שלכם…",
+      addDetailsManually: "הוספת פרטים ידנית",
+      createPlanFailedTitle: "לא ניתן היה ליצור תוכנית וידאו",
+      notConfiguredHint: "חברו ספק בינה מלאכותית בהגדרות כדי ליצור תוכנית וידאו עם בינה מלאכותית, או הוסיפו פרטים ידנית למטה."
+    },
+    planPreview: {
+      title: "תוכנית הווידאו שלכם",
+      description: "בדקו מה הבינה המלאכותית תכננה לכל סצנה. ניתן לערוך כל שורה, או להשתמש במיפוי סצנות לכיוונון נוסף.",
+      columns: { scene: "סצנה", content: "תוכן", text: "טקסט", duration: "משך", action: "פעולה" },
+      noContent: "—",
+      editAction: "עריכה",
+      tellAiAgainAction: "לספר לבינה המלאכותית שוב",
+      advancedDetailsToggle: "פרטים מתקדמים"
+    },
+    picker: {
+      assetNoneOption: "ללא נכס",
+      sceneNoneOption: "אין עדיין סצנה מתאימה",
+      backToSimpleView: "חזרה לתצוגה הפשוטה"
     }
   },
   mappingAssistant: {
@@ -620,6 +644,13 @@ export const he: Dictionary = {
       AVAILABLE: "זמינות",
       STALE: "לא עדכניות (נלכדו על גרסה ישנה יותר של הפרויקט)",
       NOT_INSPECTED: "לא נבדקו"
-    }
+    },
+    confidenceLevel: {
+      high: "גבוהה",
+      medium: "בינונית",
+      needsReview: "דורש בדיקה"
+    },
+    whyThisSuggestion: "למה ההצעה הזו?",
+    sceneGroupFallback: "לא מקובצות"
   }
 };

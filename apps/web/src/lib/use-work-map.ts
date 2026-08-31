@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { WorkMap, WorkMapEntry } from "@dyo/schemas";
-import { fetchWorkMap, updateWorkMap as saveWorkMap, type ApiResult } from "./projects-api-client";
+import { createAiWorkMapDraft, fetchWorkMap, updateWorkMap as saveWorkMap, type ApiResult } from "./projects-api-client";
 
 export interface WorkMapMutationOutcome {
   ok: boolean;
@@ -17,6 +17,8 @@ export interface WorkMapState {
   isStale: boolean;
   refetch: () => Promise<void>;
   save: (entries: Array<Omit<WorkMapEntry, "id"> & { id?: string }>) => Promise<WorkMapMutationOutcome>;
+  /** "Tell AI what you want" - real single Anthropic call (see createAiWorkMapDraft's own doc comment). Never touches the execution plan or Mapping Assistant suggestions. */
+  createAiDraft: (instructions: string) => Promise<WorkMapMutationOutcome>;
 }
 
 /** Real client-INTENT Work Map state for one project - null is a valid, real "nothing saved yet" state (see get-work-map.ts), never a load error. */
@@ -62,5 +64,18 @@ export function useWorkMap(projectId: string): WorkMapState {
     [projectId, workMap]
   );
 
-  return { workMap, isLoading, error, isStale, refetch: load, save };
+  const createAiDraft = useCallback(
+    async (instructions: string): Promise<WorkMapMutationOutcome> => {
+      const result: ApiResult<WorkMap> = await createAiWorkMapDraft(projectId, instructions);
+      if (result.ok) {
+        setWorkMap(result.data);
+        setIsStale(false);
+        return { ok: true };
+      }
+      return { ok: false, message: result.message };
+    },
+    [projectId]
+  );
+
+  return { workMap, isLoading, error, isStale, refetch: load, save, createAiDraft };
 }

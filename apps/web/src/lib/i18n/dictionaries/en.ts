@@ -593,6 +593,31 @@ export const en = {
     fieldHints: {
       desiredAssetId: "A real asset ID from this project's Asset Catalog - not yet validated here, only when actually mapped in Scene Mapping.",
       sourceCompositionId: "Leave empty if no template has been inspected yet."
+    },
+    ai: {
+      heading: "Tell AI what you want",
+      textareaLabel: "Describe your video",
+      placeholder:
+        "Use the login screen recording first, then show checkout.\nKeep the original template animations.\nUse our logo at the end.\nKeep the final video around 20 seconds.",
+      createPlanAction: "Create Video Plan",
+      creatingPlan: "Creating your plan…",
+      addDetailsManually: "Add details manually",
+      createPlanFailedTitle: "Could not create a video plan",
+      notConfiguredHint: "Connect an AI provider in Settings to create a video plan with AI, or add details manually below."
+    },
+    planPreview: {
+      title: "Your Video Plan",
+      description: "Review what AI planned for each scene. You can edit any row, or use Scene Mapping to fine-tune it further.",
+      columns: { scene: "Scene", content: "Content", text: "Text", duration: "Duration", action: "Action" },
+      noContent: "—",
+      editAction: "Edit",
+      tellAiAgainAction: "Tell AI again",
+      advancedDetailsToggle: "Advanced details"
+    },
+    picker: {
+      assetNoneOption: "No asset",
+      sceneNoneOption: "No matching scene yet",
+      backToSimpleView: "Back to simple view"
     }
   },
   mappingAssistant: {
@@ -628,6 +653,13 @@ export const en = {
       AVAILABLE: "Available",
       STALE: "Stale (captured against an older version of this project)",
       NOT_INSPECTED: "Not inspected"
-    }
+    },
+    confidenceLevel: {
+      high: "High",
+      medium: "Medium",
+      needsReview: "Needs review"
+    },
+    whyThisSuggestion: "Why this suggestion?",
+    sceneGroupFallback: "Ungrouped"
   }
 } as const;

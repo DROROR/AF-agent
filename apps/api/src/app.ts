@@ -182,6 +182,12 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   });
   registerWorkMapRoutes(app, {
     workMapRepository: deps.workMapRepository,
+    projectRepository: deps.projectRepository,
+    executionPlanRepository: deps.executionPlanRepository,
+    assetRepository: deps.assetRepository,
+    sceneEvidenceRepository: deps.sceneEvidenceRepository,
+    userAiProviderRepository: deps.userAiProviderRepository,
+    credentialsEncryptionKey: deps.env.CREDENTIALS_ENCRYPTION_KEY,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     ...(deps.now ? { now: deps.now } : {})

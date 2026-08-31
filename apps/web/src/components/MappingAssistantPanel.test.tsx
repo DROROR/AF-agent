@@ -42,8 +42,11 @@ function mappingFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function stubWorkspace(mappingSuggestionsHandler: Parameters<typeof stubFetchByUrl>[0][string], assetsHandler: Parameters<typeof stubFetchByUrl>[0][string] = { status: 200, body: { assets: [] } }): void {
-  const scenes = [sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture()] })];
+function stubWorkspace(
+  mappingSuggestionsHandler: Parameters<typeof stubFetchByUrl>[0][string],
+  assetsHandler: Parameters<typeof stubFetchByUrl>[0][string] = { status: 200, body: { assets: [] } },
+  scenes = [sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture()] })]
+): void {
   stubFetchByUrl({
     [`/api/projects/${PROJECT_ID}/mapping-suggestions`]: mappingSuggestionsHandler,
     [`/api/projects/${PROJECT_ID}/assets`]: assetsHandler,
@@ -68,18 +71,21 @@ describe("MappingAssistantPanel", () => {
     screen.getByText("AI: not configured (deterministic only)");
   });
 
-  it("renders a real DETERMINISTIC suggestion with its evidence/provenance and confidence visible", async () => {
+  it("renders a real DETERMINISTIC suggestion under its own scene heading, with its evidence/provenance visible under 'Why this suggestion?'", async () => {
     stubWorkspace({
       status: 200,
       body: { suggestions: [mappingSuggestionFixture({ suggestedText: "Hello world" })], aiAvailable: false, sceneEvidenceAvailability: {} }
     });
     renderPanel();
-    await screen.findByText("Scene 01 — Hero Image");
+    await screen.findByText("Scene 01");
+    screen.getByText("Hero Image");
     screen.getByText("Deterministic");
-    screen.getByText("Confidence: 100%");
+    screen.getByText("High"); // confidence 1 -> plain-language "High", not a raw percentage, in the default view
     screen.getByText("Hello world");
     screen.getByText("User intent");
     screen.getByText('Work Map entry for this scene names asset "Client logo"');
+    // The exact percentage is still available, just under the disclosure - never deleted.
+    screen.getByText("Confidence: 100%");
   });
 
   it("renders a real AI suggestion distinctly from a deterministic one, and reports AI as available", async () => {
@@ -96,14 +102,47 @@ describe("MappingAssistantPanel", () => {
             requiresHumanReview: true
           })
         ],
-        aiAvailable: true, sceneEvidenceAvailability: {}
+        aiAvailable: true,
+        sceneEvidenceAvailability: {}
       }
     });
     renderPanel();
     await screen.findByText("AI Suggested");
     screen.getByText("AI: available");
+    screen.getByText("Medium"); // 0.6 falls in the [0.5, 0.75) "Medium" tier
     screen.getByText("Confidence: 60%");
     screen.getByText("AI inference");
+  });
+
+  it("a confidence at or above 0.75 shows as High - the exact same threshold generate-mapping-suggestions.ts already enforces server-side", async () => {
+    stubWorkspace({
+      status: 200,
+      body: { suggestions: [mappingSuggestionFixture({ confidence: 0.75 })], aiAvailable: false, sceneEvidenceAvailability: {} }
+    });
+    renderPanel();
+    await screen.findByText("High");
+  });
+
+  it("a real 'needs review' suggestion (confidence below 0.5, e.g. from the server-side safety gate) shows the plain 'Needs review' label - never a raw low percentage as the primary signal", async () => {
+    stubWorkspace({
+      status: 200,
+      body: {
+        suggestions: [
+          mappingSuggestionFixture({
+            confidence: 0.3,
+            suggestedAssetId: null,
+            suggestedText: null,
+            reasoning: "weak guess based on generic layer name",
+            unresolvedReason: "Needs review - not enough evidence for a confident automatic suggestion"
+          })
+        ],
+        aiAvailable: true,
+        sceneEvidenceAvailability: {}
+      }
+    });
+    renderPanel();
+    await screen.findByText("Needs review");
+    screen.getByText(/Needs review - not enough evidence/);
   });
 
   it("never hides uncertainty - a conflicting suggestion shows its unresolvedReason and the Work Map conflict warning", async () => {
@@ -119,7 +158,8 @@ describe("MappingAssistantPanel", () => {
             unresolvedReason: "Work Map references an asset that no longer exists in this project's Asset Catalog - upload it again or update the Work Map"
           })
         ],
-        aiAvailable: false, sceneEvidenceAvailability: {}
+        aiAvailable: false,
+        sceneEvidenceAvailability: {}
       }
     });
     renderPanel();
@@ -130,7 +170,30 @@ describe("MappingAssistantPanel", () => {
   it("shows the real suggested asset's label, never its raw id", async () => {
     stubWorkspace(
       { status: 200, body: { suggestions: [mappingSuggestionFixture({ suggestedAssetId: "asset-1" })], aiAvailable: false, sceneEvidenceAvailability: {} } },
-      { status: 200, body: { assets: [{ id: "asset-1", projectId: PROJECT_ID, originalFilename: "logo.png", storageKey: `${PROJECT_ID}/asset-1.png`, mediaKind: "LOGO", mimeType: "image/png", byteSize: 10, sha256: "a".repeat(64), width: null, height: null, durationSeconds: null, label: "Client logo", notes: null, uploadedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] } }
+      {
+        status: 200,
+        body: {
+          assets: [
+            {
+              id: "asset-1",
+              projectId: PROJECT_ID,
+              originalFilename: "logo.png",
+              storageKey: `${PROJECT_ID}/asset-1.png`,
+              mediaKind: "LOGO",
+              mimeType: "image/png",
+              byteSize: 10,
+              sha256: "a".repeat(64),
+              width: null,
+              height: null,
+              durationSeconds: null,
+              label: "Client logo",
+              notes: null,
+              uploadedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          ]
+        }
+      }
     );
     renderPanel();
     await screen.findByText("Client logo");
@@ -180,13 +243,40 @@ describe("MappingAssistantPanel", () => {
     await waitFor(() => expect(screen.getByText("Rejected")).toBeTruthy());
   });
 
-  it("shows an honest per-scene evidence status - AVAILABLE, STALE, and NOT_INSPECTED are all rendered, never hidden", async () => {
+  it("shows an honest per-scene evidence status on the scene group heading - AVAILABLE, STALE, and NOT_INSPECTED are all rendered, never hidden", async () => {
     stubWorkspace({
       status: 200,
       body: { suggestions: [mappingSuggestionFixture()], aiAvailable: false, sceneEvidenceAvailability: { "comp-1": "STALE" } }
     });
     renderPanel();
     await screen.findByText("Scene evidence: Stale (captured against an older version of this project)");
+  });
+
+  it("groups multiple suggestions from different scenes under their own scene headings, in the plan's real scene order", async () => {
+    const scenes = [
+      sceneFixture({ id: "scene-1", compositionName: "Scene 01", sourcePosition: 0, mappings: [mappingFixture({ id: "mapping-1", placeholderName: "Hero Image" })] }),
+      sceneFixture({ id: "scene-2", manifestCompositionId: "comp-2", compositionName: "Scene 02", sourcePosition: 1, mappings: [mappingFixture({ id: "mapping-2", placeholderName: "Headline" })] })
+    ];
+    stubWorkspace(
+      {
+        status: 200,
+        body: {
+          suggestions: [
+            mappingSuggestionFixture({ id: "s1", scenePlanId: "scene-1", mappingId: "mapping-1" }),
+            mappingSuggestionFixture({ id: "s2", scenePlanId: "scene-2", mappingId: "mapping-2" })
+          ],
+          aiAvailable: false,
+          sceneEvidenceAvailability: {}
+        }
+      },
+      { status: 200, body: { assets: [] } },
+      scenes
+    );
+    renderPanel();
+    await screen.findByText("Scene 01");
+    screen.getByText("Scene 02");
+    screen.getByText("Hero Image");
+    screen.getByText("Headline");
   });
 
   it("renders in Hebrew when the active locale is he", async () => {

@@ -26,6 +26,27 @@ const SOURCE_TONE: Record<SuggestionSource, Tone> = { DETERMINISTIC: "neutral", 
 const EVIDENCE_TONE: Record<EvidenceRef["kind"], Tone> = { FACT: "neutral", USER_INTENT: "info", AI_INFERENCE: "positive" };
 const SCENE_EVIDENCE_TONE: Record<SceneEvidenceStatus, Tone> = { AVAILABLE: "positive", STALE: "negative", NOT_INSPECTED: "neutral" };
 
+/**
+ * Video-planning UX simplification, 2026-08-31: matches the SAME 0.5
+ * threshold generate-mapping-suggestions.ts already enforces server-side
+ * (a proposal under 0.5 confidence naming concrete content is downgraded
+ * to a plain "needs review" placeholder before it is ever persisted - see
+ * that file's own doc comment) - "needsReview" here is never reachable
+ * for a genuinely low-confidence *content* suggestion, only shown for a
+ * real suggestion whose own confidence is still below the threshold for
+ * some other reason (e.g. a deterministic non-match). "high"/"medium" are
+ * plain-language labels only - the exact percentage remains available
+ * under "Why this suggestion?" for anyone who wants it.
+ */
+type ConfidenceLevel = "high" | "medium" | "needsReview";
+const CONFIDENCE_TONE: Record<ConfidenceLevel, Tone> = { high: "positive", medium: "info", needsReview: "neutral" };
+
+function confidenceLevel(confidence: number): ConfidenceLevel {
+  if (confidence >= 0.75) return "high";
+  if (confidence >= 0.5) return "medium";
+  return "needsReview";
+}
+
 export function MappingAssistantPanel(): ReactElement | null {
   const { t } = useLocale();
   const { project, plan, refetch } = useProjectWorkspaceContext();
@@ -75,6 +96,20 @@ export function MappingAssistantPanel(): ReactElement | null {
   const pending = (suggestions ?? []).filter((s) => s.status === "PENDING");
   const reviewed = (suggestions ?? []).filter((s) => s.status !== "PENDING");
 
+  // Groups by scene in the plan's own real order - never invents an
+  // ordering. A suggestion whose scene can't be resolved (should not
+  // happen for a real persisted suggestion, but never assumed) falls into
+  // one final "Ungrouped" bucket rather than being silently dropped.
+  const scenePlanOrder = plan.plan.scenePlans.map((scene) => scene.id);
+  const suggestionsByScene = new Map<string, MappingSuggestion[]>();
+  for (const suggestion of pending) {
+    const key = sceneById.has(suggestion.scenePlanId) ? suggestion.scenePlanId : "__ungrouped__";
+    const bucket = suggestionsByScene.get(key) ?? [];
+    bucket.push(suggestion);
+    suggestionsByScene.set(key, bucket);
+  }
+  const orderedSceneIds = [...scenePlanOrder.filter((id) => suggestionsByScene.has(id)), ...(suggestionsByScene.has("__ungrouped__") ? ["__ungrouped__"] : [])];
+
   return (
     <Card>
       <CardHeader
@@ -101,25 +136,38 @@ export function MappingAssistantPanel(): ReactElement | null {
       ) : pending.length === 0 ? (
         <EmptyState title={t.mappingAssistant.emptyTitle} description={t.mappingAssistant.emptyDescription} />
       ) : (
-        <div className="mapping-suggestion-list">
-          {pending.map((suggestion) => {
-            const scene = sceneById.get(suggestion.scenePlanId);
-            const mapping = scene?.mappings.find((m) => m.id === suggestion.mappingId) ?? null;
-            const suggestedAsset = suggestion.suggestedAssetId ? assetById.get(suggestion.suggestedAssetId) : null;
-            const sceneEvidenceStatus: SceneEvidenceStatus =
-              (scene && sceneEvidenceAvailability[scene.manifestCompositionId]) ?? "NOT_INSPECTED";
+        <div className="mapping-suggestion-scene-groups">
+          {orderedSceneIds.map((sceneId) => {
+            const scene = sceneId === "__ungrouped__" ? null : sceneById.get(sceneId);
+            const sceneName = scene?.compositionName ?? t.mappingAssistant.sceneGroupFallback;
+            const sceneEvidenceStatus: SceneEvidenceStatus = (scene && sceneEvidenceAvailability[scene.manifestCompositionId]) ?? "NOT_INSPECTED";
+            const groupSuggestions = suggestionsByScene.get(sceneId) ?? [];
             return (
-              <MappingSuggestionCard
-                key={suggestion.id}
-                suggestion={suggestion}
-                sceneName={scene?.compositionName ?? suggestion.scenePlanId}
-                placeholderName={mapping?.placeholderName ?? null}
-                suggestedAssetLabel={suggestedAsset ? (suggestedAsset.label ?? suggestedAsset.originalFilename) : null}
-                sceneEvidenceStatus={sceneEvidenceStatus}
-                busy={busySuggestionId === suggestion.id}
-                onAccept={() => void handleAccept(suggestion)}
-                onReject={() => void handleReject(suggestion)}
-              />
+              <section key={sceneId} className="mapping-suggestion-scene-group">
+                <div className="mapping-suggestion-scene-group__header">
+                  <h3>{sceneName}</h3>
+                  <span className={`status-badge status-badge--${SCENE_EVIDENCE_TONE[sceneEvidenceStatus]}`}>
+                    {t.mappingAssistant.sceneEvidenceLabel}: {t.mappingAssistant.sceneEvidenceStatus[sceneEvidenceStatus]}
+                  </span>
+                </div>
+                <div className="mapping-suggestion-list">
+                  {groupSuggestions.map((suggestion) => {
+                    const mapping = scene?.mappings.find((m) => m.id === suggestion.mappingId) ?? null;
+                    const suggestedAsset = suggestion.suggestedAssetId ? assetById.get(suggestion.suggestedAssetId) : null;
+                    return (
+                      <MappingSuggestionCard
+                        key={suggestion.id}
+                        suggestion={suggestion}
+                        placeholderName={mapping?.placeholderName ?? null}
+                        suggestedAssetLabel={suggestedAsset ? (suggestedAsset.label ?? suggestedAsset.originalFilename) : null}
+                        busy={busySuggestionId === suggestion.id}
+                        onAccept={() => void handleAccept(suggestion)}
+                        onReject={() => void handleReject(suggestion)}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
             );
           })}
         </div>
@@ -146,19 +194,15 @@ export function MappingAssistantPanel(): ReactElement | null {
 
 function MappingSuggestionCard({
   suggestion,
-  sceneName,
   placeholderName,
   suggestedAssetLabel,
-  sceneEvidenceStatus,
   busy,
   onAccept,
   onReject
 }: {
   suggestion: MappingSuggestion;
-  sceneName: string;
   placeholderName: string | null;
   suggestedAssetLabel: string | null;
-  sceneEvidenceStatus: SceneEvidenceStatus;
   busy: boolean;
   onAccept: () => void;
   onReject: () => void;
@@ -166,23 +210,18 @@ function MappingSuggestionCard({
   const { t } = useLocale();
   const timestamp = formatSeconds(suggestion.suggestedAssetTimestamp);
   const duration = formatSeconds(suggestion.suggestedFinalDuration);
+  const level = confidenceLevel(suggestion.confidence);
 
   return (
     <div className="mapping-suggestion-card" data-conflict={suggestion.conflictsWithWorkMap ? "true" : undefined}>
       <div className="mapping-suggestion-card__header">
         <div>
-          <p className="mapping-suggestion-card__scene">
-            {sceneName}
-            {placeholderName ? ` — ${placeholderName}` : ""}
-          </p>
+          <p className="mapping-suggestion-card__scene">{placeholderName ?? ""}</p>
           <span className={`status-badge status-badge--${SOURCE_TONE[suggestion.source]}`}>
             {suggestion.source === "DETERMINISTIC" ? t.mappingAssistant.sourceDeterministic : t.mappingAssistant.sourceAi}
           </span>
-          <span className={`status-badge status-badge--${SCENE_EVIDENCE_TONE[sceneEvidenceStatus]}`}>
-            {t.mappingAssistant.sceneEvidenceLabel}: {t.mappingAssistant.sceneEvidenceStatus[sceneEvidenceStatus]}
-          </span>
         </div>
-        <span className="mapping-suggestion-card__confidence">{t.mappingAssistant.confidenceLabel(Math.round(suggestion.confidence * 100))}</span>
+        <span className={`status-badge status-badge--${CONFIDENCE_TONE[level]}`}>{t.mappingAssistant.confidenceLevel[level]}</span>
       </div>
 
       {suggestion.unresolvedReason ? (
@@ -218,16 +257,19 @@ function MappingSuggestionCard({
 
       {suggestion.conflictsWithWorkMap ? <p className="mapping-suggestion-card__conflict">{t.mappingAssistant.workMapConflict}</p> : null}
 
-      {suggestion.reasoning ? <p className="mapping-suggestion-card__reasoning">{suggestion.reasoning}</p> : null}
-
-      <ul className="mapping-suggestion-card__evidence">
-        {suggestion.evidenceRefs.map((ref, index) => (
-          <li key={index}>
-            <span className={`status-badge status-badge--${EVIDENCE_TONE[ref.kind]}`}>{t.mappingAssistant.evidenceKind[ref.kind]}</span>
-            {ref.summary}
-          </li>
-        ))}
-      </ul>
+      <details className="advanced-details">
+        <summary>{t.mappingAssistant.whyThisSuggestion}</summary>
+        <p className="mapping-suggestion-card__confidence">{t.mappingAssistant.confidenceLabel(Math.round(suggestion.confidence * 100))}</p>
+        {suggestion.reasoning ? <p className="mapping-suggestion-card__reasoning">{suggestion.reasoning}</p> : null}
+        <ul className="mapping-suggestion-card__evidence">
+          {suggestion.evidenceRefs.map((ref, index) => (
+            <li key={index}>
+              <span className={`status-badge status-badge--${EVIDENCE_TONE[ref.kind]}`}>{t.mappingAssistant.evidenceKind[ref.kind]}</span>
+              {ref.summary}
+            </li>
+          ))}
+        </ul>
+      </details>
 
       <div className="mapping-suggestion-card__actions">
         <Button size="sm" variant="ghost" disabled={busy} onClick={onReject}>

@@ -37,6 +37,10 @@ export const ERROR_CODES = [
   "NO_USABLE_SUGGESTIONS",
   /** One batch of a batched AI mapping-suggestion generation hit Anthropic's own MAX_TOKENS ceiling (stop_reason: "max_tokens") before completing - its output cannot be trusted, so the whole generation refuses rather than silently persisting an incomplete/partial batch's worth of suggestions. */
   "AI_MAPPING_BATCH_TRUNCATED",
+  /** The "Tell AI what you want" Work Map draft feature was invoked, but this user has no AI provider connected - a clear, actionable refusal rather than a silent no-op. */
+  "AI_WORK_MAP_NOT_CONFIGURED",
+  /** A real AI Work Map draft attempt ran but produced nothing usable (either no raw entries, or every raw entry was rejected by validation) - never silently reported as an empty-but-successful draft. */
+  "NO_USABLE_WORK_MAP_DRAFT",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

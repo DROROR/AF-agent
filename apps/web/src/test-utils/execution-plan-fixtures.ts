@@ -15,7 +15,9 @@ export function manifestFixture() {
     },
     afterEffects: { version: "26.3x87" },
     generatedAt: new Date().toISOString(),
-    compositions: [],
+    compositions: [
+      { compositionId: "c1", aeProjectItemIndex: 1, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 4, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+    ],
     scenes: [
       { sceneId: "s1", displayName: null, compositionId: "c1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 4, placeholders: [] }
     ],

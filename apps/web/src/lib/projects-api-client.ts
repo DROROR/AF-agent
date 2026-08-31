@@ -381,6 +381,35 @@ export async function updateWorkMap(
   return { ok: true, data: parsed.data.workMap };
 }
 
+/**
+ * "Tell AI what you want" - video-planning UX simplification, 2026-08-31.
+ * Sends the client's own free-text description plus real project context
+ * (server-side: manifest, Asset Catalog, existing Work Map, brand inputs,
+ * scene evidence) to the configured AI provider, which drafts a complete
+ * Work Map - never the execution plan, never Mapping Assistant
+ * suggestions, never AE. A real single Anthropic call, so this uses the
+ * same longer, dedicated timeout as generateMappingSuggestions rather
+ * than the normal 8-second one.
+ */
+export async function createAiWorkMapDraft(projectId: string, instructions: string): Promise<ApiResult<WorkMap>> {
+  const { status, json, timedOut } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/work-map/ai-draft`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ instructions }) },
+    GENERATE_SUGGESTIONS_TIMEOUT_MS
+  );
+  if (status !== 201) {
+    if (timedOut) {
+      return { ok: false, status, code: null, message: "Creating your video plan took too long. Please try again." };
+    }
+    return toErrorResult(status, json);
+  }
+  const parsed = workMapResponseSchema.safeParse(json);
+  if (!parsed.success || !parsed.data.workMap) {
+    return { ok: false, status, code: null, message: "Response did not match the expected work-map contract" };
+  }
+  return { ok: true, data: parsed.data.workMap };
+}
+
 /** Runs deterministic evidence matching (and the AI provider, if configured) over every currently-unresolved mapping and persists the results as PENDING suggestions - never mutates the execution plan itself. */
 export async function generateMappingSuggestions(projectId: string): Promise<ApiResult<ListMappingSuggestionsResponse>> {
   const { status, json, timedOut } = await request(

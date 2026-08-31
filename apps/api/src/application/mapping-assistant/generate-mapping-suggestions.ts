@@ -301,22 +301,46 @@ export async function generateMappingSuggestions(
       referenceValidProposalCount += 1;
 
       const assetIsReal = proposal.suggestedAssetId === null || assets.some((asset) => asset.id === proposal.suggestedAssetId);
+
+      // Video-planning UX simplification, 2026-08-31: a real, dangerous
+      // pattern this codebase's own Mapping Assistant produced in
+      // production - a low-confidence guess still forced a concrete
+      // content replacement (e.g. "Phone.png -> generic uploaded image",
+      // "Color -> arbitrary black") that a rushed reviewer could easily
+      // accept without noticing how thin the evidence was. The system
+      // prompt now asks the model to leave low-confidence targets null
+      // instead of guessing, but that instruction alone is never trusted
+      // by itself (same "never trust a TS type alone across a real
+      // process/network boundary" rule this file already applies
+      // elsewhere) - this is the enforced, server-side backstop: any
+      // proposal under 0.5 confidence that still names a concrete asset
+      // or text is stripped down to a plain "needs review" placeholder
+      // before persistence, never silently trusted as a real suggestion.
+      // Confidence/reasoning/evidenceRefs are kept as-is so "why this
+      // suggestion?" stays honest about what little evidence there was.
+      const isConcreteContentGuess = (assetIsReal && proposal.suggestedAssetId !== null) || (proposal.suggestedText !== null && proposal.suggestedText.trim() !== "");
+      const isLowConfidenceGuess = proposal.confidence < 0.5 && isConcreteContentGuess;
+
       persisted.push({
         id: randomUUID(),
         projectId,
         scenePlanId: proposal.scenePlanId,
         mappingId: proposal.mappingId,
         source: "AI",
-        suggestedClassification: proposal.suggestedClassification,
+        suggestedClassification: isLowConfidenceGuess ? null : proposal.suggestedClassification,
         // Never a fabricated/arbitrary/cross-project id - re-validated against this exact project's real Asset Catalog before ever being persisted (section 10).
-        suggestedAssetId: assetIsReal ? proposal.suggestedAssetId : null,
-        suggestedText: proposal.suggestedText,
-        suggestedAssetTimestamp: proposal.suggestedAssetTimestamp,
-        suggestedFinalDuration: proposal.suggestedFinalDuration,
+        suggestedAssetId: isLowConfidenceGuess ? null : assetIsReal ? proposal.suggestedAssetId : null,
+        suggestedText: isLowConfidenceGuess ? null : proposal.suggestedText,
+        suggestedAssetTimestamp: isLowConfidenceGuess ? null : proposal.suggestedAssetTimestamp,
+        suggestedFinalDuration: isLowConfidenceGuess ? null : proposal.suggestedFinalDuration,
         confidence: proposal.confidence,
         reasoning: proposal.reasoning,
         evidenceRefs: proposal.evidenceRefs,
-        unresolvedReason: assetIsReal ? null : "The AI provider proposed an asset id that is not in this project's Asset Catalog - discarded",
+        unresolvedReason: isLowConfidenceGuess
+          ? "Needs review - not enough evidence for a confident automatic suggestion"
+          : assetIsReal
+            ? null
+            : "The AI provider proposed an asset id that is not in this project's Asset Catalog - discarded",
         requiresHumanReview: true,
         conflictsWithWorkMap: bundle.workMapEntry !== null
       });

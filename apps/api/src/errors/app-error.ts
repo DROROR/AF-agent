@@ -4,6 +4,7 @@ function statusForCode(code: ErrorCode): number {
   switch (code) {
     case "VALIDATION_ERROR":
     case "AI_PROVIDER_CONNECTION_FAILED":
+    case "AI_WORK_MAP_NOT_CONFIGURED":
       return 400;
     case "UNAUTHORIZED":
       return 401;
@@ -31,6 +32,7 @@ function statusForCode(code: ErrorCode): number {
       return 429;
     case "NO_USABLE_SUGGESTIONS":
     case "AI_MAPPING_BATCH_TRUNCATED":
+    case "NO_USABLE_WORK_MAP_DRAFT":
       return 422;
     case "INTERNAL_ERROR":
       return 500;
@@ -358,5 +360,28 @@ export class AiMappingBatchTruncatedError extends AppError {
   constructor() {
     super("AI_MAPPING_BATCH_TRUNCATED", "AI could not complete part of the scene mapping. Please try again.");
     this.name = "AiMappingBatchTruncatedError";
+  }
+}
+
+/** "Tell AI what you want" / Create Video Plan refused: this user has no AI provider connected yet - a clear, actionable message rather than a silent no-op or a generic 500. */
+export class AiWorkMapNotConfiguredError extends AppError {
+  constructor() {
+    super("AI_WORK_MAP_NOT_CONFIGURED", "Connect an AI provider in Settings before creating a video plan with AI.");
+    this.name = "AiWorkMapNotConfiguredError";
+  }
+}
+
+/**
+ * A real AI Work Map draft attempt ran (a real provider call was made)
+ * but produced nothing usable - either it returned zero raw entries, or
+ * every raw entry was rejected by validation. Mirrors
+ * NoUsableMappingSuggestionsError's own rule and rationale (see that
+ * class's doc comment) - never silently reported as an empty, successful
+ * draft.
+ */
+export class NoUsableWorkMapDraftError extends AppError {
+  constructor() {
+    super("NO_USABLE_WORK_MAP_DRAFT", "AI could not build a plan from that description. Try adding more detail about which scene should show what.");
+    this.name = "NoUsableWorkMapDraftError";
   }
 }

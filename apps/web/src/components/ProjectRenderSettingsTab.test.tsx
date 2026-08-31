@@ -64,6 +64,11 @@ function manifestWithCompositions() {
   };
 }
 
+/** manifestFixture() itself now carries one real composition (added for ProjectWorkMapTab's human-readable scene picker, video-planning UX simplification 2026-08-31) - this test's own point is specifically the ZERO-compositions case, so it must never rely on the shared fixture's default happening to be empty. */
+function manifestWithNoCompositions() {
+  return { ...manifestFixture(), compositions: [] };
+}
+
 function stubWorkspace(planOverrides: Record<string, unknown> = {}, manifest = manifestWithCompositions()): void {
   stubFetchByUrl({
     ...NO_WORKERS_STATUS,
@@ -85,7 +90,7 @@ function renderTab(): void {
 
 describe("ProjectRenderSettingsTab", () => {
   it("shows the honest no-compositions state when the manifest has none", async () => {
-    stubWorkspace({}, manifestFixture());
+    stubWorkspace({}, manifestWithNoCompositions());
     renderTab();
     const titles = await screen.findAllByText("No compositions available");
     expect(titles).toHaveLength(2);
@@ -326,7 +331,7 @@ describe("ProjectRenderSettingsTab", () => {
   });
 
   it("renders in Hebrew when the active locale is he - real translated strings, not English fallback text", async () => {
-    stubWorkspace({}, manifestFixture());
+    stubWorkspace({}, manifestWithNoCompositions());
     renderWithLocale(
       <DashboardStatusProvider>
         <ProjectWorkspaceProvider projectId={PROJECT_ID}>

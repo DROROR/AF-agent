@@ -275,6 +275,93 @@ describe("generateMappingSuggestions", () => {
     expect(result.suggestions[0]?.unresolvedReason).not.toBeNull();
   });
 
+  it("video-planning UX simplification, 2026-08-31: a low-confidence AI proposal naming a real asset is downgraded to Needs review, never a forced content replacement", async () => {
+    const deps = await setup();
+    const asset = await uploadTestAsset(deps);
+    const existingPlan = await deps.executionPlanRepository.findCurrentByProjectId(deps.project.projectId);
+    const scenePlanId = existingPlan!.scenePlans[0]!.id;
+    const mappingId = existingPlan!.scenePlans[0]!.mappings[0]!.id;
+
+    const proposal: AiSuggestionProposal = {
+      scenePlanId,
+      mappingId,
+      suggestedClassification: "image",
+      suggestedAssetId: asset.id,
+      suggestedText: null,
+      suggestedAssetTimestamp: null,
+      suggestedFinalDuration: null,
+      confidence: 0.3,
+      reasoning: "weak guess based on generic layer name",
+      evidenceRefs: [{ kind: "AI_INFERENCE", summary: "no strong signal" }]
+    };
+    deps.aiSuggestionProvider = new StubAiProvider([proposal]);
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]?.suggestedAssetId).toBeNull();
+    expect(result.suggestions[0]?.suggestedClassification).toBeNull();
+    expect(result.suggestions[0]?.unresolvedReason).toMatch(/needs review/i);
+    // Confidence and reasoning stay honest about what little evidence there was - never hidden.
+    expect(result.suggestions[0]?.confidence).toBe(0.3);
+    expect(result.suggestions[0]?.reasoning).toBe("weak guess based on generic layer name");
+  });
+
+  it("video-planning UX simplification, 2026-08-31: a low-confidence AI proposal naming desiredText is also downgraded to Needs review", async () => {
+    const plain = await setup();
+    const existingPlan = await plain.executionPlanRepository.findCurrentByProjectId(plain.project.projectId);
+    const scenePlanId = existingPlan!.scenePlans[0]!.id;
+    const mappingId = existingPlan!.scenePlans[0]!.mappings[0]!.id;
+
+    const proposal: AiSuggestionProposal = {
+      scenePlanId,
+      mappingId,
+      suggestedClassification: null,
+      suggestedAssetId: null,
+      suggestedText: "Guessed headline",
+      suggestedAssetTimestamp: null,
+      suggestedFinalDuration: null,
+      confidence: 0.2,
+      reasoning: "no direct evidence for this text",
+      evidenceRefs: [{ kind: "AI_INFERENCE", summary: "no strong signal" }]
+    };
+
+    const deps = await setup(new StubAiProvider([proposal]));
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]?.suggestedText).toBeNull();
+    expect(result.suggestions[0]?.unresolvedReason).toMatch(/needs review/i);
+  });
+
+  it("video-planning UX simplification, 2026-08-31: clear (high-confidence) evidence still produces a normal, concrete suggestion - the safety gate never suppresses well-supported proposals", async () => {
+    const deps = await setup();
+    const asset = await uploadTestAsset(deps);
+    const existingPlan = await deps.executionPlanRepository.findCurrentByProjectId(deps.project.projectId);
+    const scenePlanId = existingPlan!.scenePlans[0]!.id;
+    const mappingId = existingPlan!.scenePlans[0]!.mappings[0]!.id;
+
+    const proposal: AiSuggestionProposal = {
+      scenePlanId,
+      mappingId,
+      suggestedClassification: "image",
+      suggestedAssetId: asset.id,
+      suggestedText: null,
+      suggestedAssetTimestamp: null,
+      suggestedFinalDuration: null,
+      confidence: 0.9,
+      reasoning: "the scene evidence directly names this asset",
+      evidenceRefs: [{ kind: "FACT", summary: "real scene evidence confirms this layer" }]
+    };
+    deps.aiSuggestionProvider = new StubAiProvider([proposal]);
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]?.suggestedAssetId).toBe(asset.id);
+    expect(result.suggestions[0]?.unresolvedReason).toBeNull();
+  });
+
   it("rejects a malformed AI provider response with a typed error rather than a silent empty 200 success - real production bug, 2026-08-30", async () => {
     const deps = await setup(new StubAiProvider([{ nonsense: true }]));
     await expect(generateMappingSuggestions(deps, deps.project.projectId)).rejects.toThrow(NoUsableMappingSuggestionsError);
