@@ -566,7 +566,7 @@ select:focus-visible,
   padding: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-3);
   max-width: 84rem;
   width: 100%;
 }
@@ -845,7 +845,7 @@ select:focus-visible,
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: var(--space-5);
+  padding: var(--space-4);
 }
 
 .card--sunken {
@@ -857,7 +857,7 @@ select:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .card-grid {
@@ -1240,7 +1240,7 @@ thead th {
    ========================================================================== */
 
 .state-panel {
-  padding: var(--space-8) var(--space-5);
+  padding: var(--space-5) var(--space-4);
   border-radius: var(--radius-lg);
   text-align: center;
   display: flex;
@@ -1905,7 +1905,6 @@ thead th {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3) var(--space-5);
-  margin-bottom: var(--space-1);
 }
 
 .workspace-header h1 {
@@ -1916,10 +1915,12 @@ thead th {
 /* Compact project header (client-handoff completion phase, section K):
    name/status/delete stay visible up top; SHA/revision/scene-count
    metadata moves into this closed-by-default disclosure so it never
-   eats viewport height a client doesn't need by default. */
-.workspace-header__details {
-  margin-bottom: var(--space-3);
-}
+   eats viewport height a client doesn't need by default. Deliberately no
+   own margin-bottom here (project-tab spacing compaction phase, section
+   4) - `.page`'s own flex `gap` already provides one consistent rhythm
+   between every top-level layer (header/stepper/tabs/content); an
+   additional per-element margin here would only stack on top of that and
+   silently widen this one transition past the others. */
 
 .advanced-details > summary {
   cursor: pointer;
@@ -1956,10 +1957,10 @@ thead th {
 /* Compact horizontal stepper (section L) - one dense row on desktop; the
    single "Step N of 7 - Title" line + hint above already carries the
    fuller description, so each individual step chip only needs a marker
-   + short label, never a repeated description. */
-.workflow-stepper {
-  margin-bottom: var(--space-3);
-}
+   + short label, never a repeated description. No own margin-bottom
+   (project-tab spacing compaction phase, section 4) - see
+   .workspace-header's own comment on why: `.page`'s flex gap already
+   governs this rhythm, so adding one here would only stack on top of it. */
 
 .workflow-stepper__current {
   font-weight: 700;
@@ -2080,7 +2081,6 @@ a.workflow-stepper__step:hover {
   display: flex;
   gap: var(--space-1);
   border-bottom: 1px solid var(--color-border);
-  margin-bottom: var(--space-3);
   overflow-x: auto;
 }
 
@@ -2317,7 +2317,7 @@ a.workflow-stepper__step:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
   gap: var(--space-4);
-  margin-top: var(--space-4);
+  margin-top: var(--space-3);
 }
 
 .asset-card {
@@ -2406,8 +2406,8 @@ a.workflow-stepper__step:hover {
 .work-map-rows {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  margin-top: var(--space-4);
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .work-map-row {
@@ -2432,7 +2432,7 @@ a.workflow-stepper__step:hover {
 .mapping-suggestion-scene-groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 .mapping-suggestion-scene-group__header {
@@ -2450,8 +2450,8 @@ a.workflow-stepper__step:hover {
 .mapping-suggestion-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  margin-top: var(--space-4);
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .mapping-bulk-toolbar {
