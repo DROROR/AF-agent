@@ -195,6 +195,63 @@ describe("matchDeterministic", () => {
     expect(result).toBeNull();
   });
 
+  describe("mapping-review deadlock fix (section A/B/E): structural/template-helper elements resolve with no replacement and no review required", () => {
+    it.each(["Camera 1", "Phone_mask.png", "Phone.png", "Shape Layer 1", "CONTROL", "Scene Wrapper"])(
+      "resolves %s with no replacement, no human review, no conflict",
+      (name) => {
+        const result = matchDeterministic(bundle({ placeholderName: name }));
+        expect(result).toMatchObject({
+          suggestedAssetId: null,
+          suggestedText: null,
+          requiresHumanReview: false,
+          conflictsWithWorkMap: false,
+          unresolvedReason: null
+        });
+      }
+    );
+
+    it("never assigns a random uploaded asset to a structural layer, even when an asset happens to share its exact filename (section E)", () => {
+      const result = matchDeterministic(
+        bundle({
+          placeholderName: "Phone_mask.png",
+          candidateAssets: [asset({ id: "coincidental-match", label: null, originalFilename: "Phone_mask.png" })]
+        })
+      );
+      expect(result?.suggestedAssetId).toBeNull();
+    });
+
+    it("an explicit Work Map asset assignment for a structural-named layer still wins (a human deliberately overriding it is never silently discarded)", () => {
+      const result = matchDeterministic(
+        bundle({
+          placeholderName: "CONTROL",
+          candidateAssets: [asset({ id: "override-asset" })],
+          workMapEntry: {
+            id: "wm-1",
+            sourceCompositionId: "comp-1",
+            sourceReference: null,
+            desiredAssetId: "override-asset",
+            desiredText: null,
+            assetTimestampSeconds: null,
+            desiredDurationSeconds: null,
+            instructions: null
+          }
+        })
+      );
+      expect(result?.suggestedAssetId).toBe("override-asset");
+      expect(result?.requiresHumanReview).toBe(false);
+    });
+
+    it("never resolves a real content target (Phone_screen) just because the scene's own instructions say to keep the wrapper unchanged (section D)", () => {
+      const result = matchDeterministic(bundle({ placeholderName: "Phone_screen", userInstructions: "Keep scene wrapper animation unchanged." }));
+      expect(result).toBeNull();
+    });
+
+    it("never resolves nested text just because a sibling structural layer exists in the same scene", () => {
+      const result = matchDeterministic(bundle({ placeholderName: "Body Text", userInstructions: "Keep scene wrapper animation unchanged." }));
+      expect(result).toBeNull();
+    });
+  });
+
   it("Work Map priority: never falls through to the filename-match heuristic when Work Map already has an opinion", () => {
     const result = matchDeterministic(
       bundle({

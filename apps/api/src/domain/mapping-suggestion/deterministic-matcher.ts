@@ -1,5 +1,6 @@
 import type { EvidenceRef, PlaceholderType } from "@dyo/schemas";
 import type { MappingEvidenceBundle } from "../mapping-evidence/types.js";
+import { resolveKeepOriginal } from "./structural-classification.js";
 
 export interface DeterministicMatch {
   suggestedClassification: PlaceholderType | null;
@@ -78,6 +79,36 @@ export function matchDeterministic(bundle: MappingEvidenceBundle): Deterministic
       confidence: 1,
       reasoning: "The Work Map explicitly states the desired text for this scene.",
       evidenceRefs: [userIntent("Work Map entry for this scene states the desired text")],
+      unresolvedReason: null,
+      requiresHumanReview: false,
+      conflictsWithWorkMap: false
+    };
+  }
+
+  // Rule 2.5 (mapping-review deadlock fix, section A/B): a structural/
+  // template-helper element (camera, mask, matte, shape layer, CONTROL,
+  // phone-frame artwork, scene wrapper, ...) or a placeholder the client
+  // has explicitly said to leave unchanged - resolved with NO replacement
+  // and NO human review required, distinct from a genuine "nothing found"
+  // null result. Runs strictly before Rule 4's risky filename-match
+  // heuristic so an asset that happens to share a structural layer's name
+  // is never auto-assigned to it (section E: "do not assign random
+  // uploaded files to them"). classifyStructuralPlaceholder itself never
+  // calls a recognized content target (Phone_screen, text, logo, ...)
+  // structural, so this can never silently swallow a real content mapping
+  // just because a sibling layer or the scene's own instructions mention
+  // "keep unchanged" (section D/F).
+  const keepOriginal = resolveKeepOriginal(bundle);
+  if (keepOriginal.shouldKeepOriginal) {
+    return {
+      suggestedClassification: null,
+      suggestedAssetId: null,
+      suggestedText: null,
+      suggestedAssetTimestamp: null,
+      suggestedFinalDuration: null,
+      confidence: 1,
+      reasoning: "This is a structural/template element, or the client explicitly asked to keep it unchanged - no replacement is needed.",
+      evidenceRefs: [fact(keepOriginal.reason ?? "Structural/template element")],
       unresolvedReason: null,
       requiresHumanReview: false,
       conflictsWithWorkMap: false

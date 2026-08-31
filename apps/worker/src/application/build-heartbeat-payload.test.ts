@@ -33,7 +33,8 @@ describe("buildHeartbeatPayload", () => {
       "INSPECT_SCENE_EVIDENCE",
       "INSPECT_RENDER_CAPABILITIES",
       "EXECUTE_FRAME",
-      "RENDER"
+      "RENDER",
+      "CREATE_PREVIEW"
     ]);
   });
 

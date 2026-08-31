@@ -456,7 +456,7 @@ export type ProjectWorkMapRow = typeof projectWorkMaps.$inferSelect;
 export type NewProjectWorkMapRow = typeof projectWorkMaps.$inferInsert;
 
 export const DB_SUGGESTION_SOURCES = ["DETERMINISTIC", "AI"] as const;
-export const DB_SUGGESTION_STATUSES = ["PENDING", "ACCEPTED", "REJECTED"] as const;
+export const DB_SUGGESTION_STATUSES = ["PENDING", "RESOLVED", "ACCEPTED", "REJECTED"] as const;
 
 /**
  * Mapping Assistant suggestions (evidence-backed mapping suggestions

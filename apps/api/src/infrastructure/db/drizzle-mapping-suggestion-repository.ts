@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { mappingSuggestions, type Database, type MappingSuggestionRow } from "@dyo/database";
 import type { SuggestionStatus } from "@dyo/schemas";
 import type { MappingSuggestionRecord, MappingSuggestionRepository, NewMappingSuggestion } from "../../domain/mapping-suggestion/types.js";
@@ -31,11 +31,19 @@ export class DrizzleMappingSuggestionRepository implements MappingSuggestionRepo
   constructor(private readonly db: Database) {}
 
   /**
-   * Replaces any existing PENDING row for the exact same (projectId,
-   * scenePlanId, mappingId) target in one transaction - never lets
-   * duplicate open suggestions accumulate for one target (see
+   * Replaces any existing PENDING or RESOLVED row for the exact same
+   * (projectId, scenePlanId, mappingId) target in one transaction - never
+   * lets duplicate open suggestions accumulate for one target (see
    * domain/mapping-suggestion/types.ts's own doc comment on why this is
-   * an application-level rule, not a DB constraint).
+   * an application-level rule, not a DB constraint). RESOLVED is included
+   * alongside PENDING (mapping-review deadlock fix, section G): it is
+   * still a system-generated, not-yet-human-decided outcome, so a
+   * regeneration that finds the same target no longer resolves the same
+   * way (e.g. the Work Map or manifest changed) must replace it exactly
+   * like a PENDING row - never leaves a stale RESOLVED row sitting
+   * alongside a fresh PENDING/RESOLVED one for the same target.
+   * ACCEPTED/REJECTED are real human decisions and are never touched
+   * here.
    */
   async upsertPending(row: NewMappingSuggestion, now: Date): Promise<MappingSuggestionRecord> {
     return this.db.transaction(async (tx) => {
@@ -47,7 +55,7 @@ export class DrizzleMappingSuggestionRepository implements MappingSuggestionRepo
             eq(mappingSuggestions.projectId, row.projectId),
             eq(mappingSuggestions.scenePlanId, row.scenePlanId),
             mappingIdCondition,
-            eq(mappingSuggestions.status, "PENDING")
+            inArray(mappingSuggestions.status, ["PENDING", "RESOLVED"])
           )
         );
 
@@ -59,7 +67,7 @@ export class DrizzleMappingSuggestionRepository implements MappingSuggestionRepo
           scenePlanId: row.scenePlanId,
           mappingId: row.mappingId,
           source: row.source,
-          status: "PENDING",
+          status: row.status ?? "PENDING",
           suggestedClassification: row.suggestedClassification,
           suggestedAssetId: row.suggestedAssetId,
           suggestedText: row.suggestedText,

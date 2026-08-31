@@ -114,6 +114,7 @@ describe("resolveCreateFullPreviewDispatch", () => {
       projectId: PROJECT_ID,
       executionSessionId: SESSION_ID,
       sourceProjectPath: SOURCE_PATH,
+      sourceProjectSha256: SHA,
       expectedWorkingProjectSha256: WORKING_SHA,
       aeProjectItemIndex: 5,
       compositionName: "Landscape Master",

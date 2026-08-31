@@ -446,7 +446,8 @@ export const en = {
       revision: "Revision",
       status: "Status",
       scenes: "Scenes",
-      unresolved: "Unresolved"
+      unresolved: "Unresolved",
+      detailsToggle: "Project details"
     },
     loadErrorTitle: "Could not load this project",
     notFoundTitle: "Project not found",
@@ -669,6 +670,8 @@ export const en = {
     connectProviderHint: "Connect an AI provider in Settings to use AI Mapping Assistant.",
     emptyTitle: "No suggestions yet",
     emptyDescription: "Generate suggestions to see real, evidence-backed proposals for unresolved scenes.",
+    allResolvedTitle: "Nothing needs your attention",
+    allResolvedDescription: "Every remaining item was resolved automatically - see \"Resolved automatically\" below.",
     sourceDeterministic: "Deterministic",
     sourceAi: "AI Suggested",
     confidenceLabel: (percent: number): string => `Confidence: ${percent}%`,
@@ -682,6 +685,9 @@ export const en = {
     historyTitle: "Reviewed",
     userConfirmed: "User Confirmed",
     rejectedLabel: "Rejected",
+    keepOriginalLabel: "Keep original",
+    resolvedLabel: "Resolved",
+    resolvedSectionTitle: (n: number): string => `Resolved automatically (${n})`,
     evidenceKind: {
       FACT: "Fact",
       USER_INTENT: "User intent",
@@ -705,6 +711,7 @@ export const en = {
     improveAccuracyQueued: "Sent to your editing computer. This can take a few minutes - check back and generate suggestions again once it's done.",
     editingComputerOffline: "Your editing computer is offline. Turn it on to improve AI accuracy.",
     bulk: {
+      resolvedCount: (n: number): string => `${n} resolved automatically`,
       safeCount: (n: number): string => `${n} safe suggestion${n === 1 ? "" : "s"} ready`,
       needsReviewCount: (n: number): string => `${n} need${n === 1 ? "s" : ""} review`,
       selectedCount: (n: number): string => `${n} selected`,

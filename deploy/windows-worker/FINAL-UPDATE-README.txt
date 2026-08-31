@@ -46,6 +46,12 @@ build). It adds:
   DYO has not explicitly configured and approved.
 - Uploading the finished rendered video file back to DYO once a render
   completes successfully, so it appears in DYO's own dashboard.
+- CREATE_PREVIEW - creates a real, complete-length preview video of the
+  project as currently approved, using the exact same `aerender` process
+  as a final render. This is only a review copy for DYO to check before
+  the final video - it never counts as, or replaces, the final rendered
+  output, and it never runs on its own without DYO explicitly requesting
+  it.
 - Self-healing reliability: DYO Worker now survives an unreachable
   internet connection, a temporary DYO outage, or After Effects/ae-mcp
   being closed - it stays running and reconnects automatically, with no

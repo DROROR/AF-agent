@@ -8,7 +8,7 @@
   Ships the complete, real, already-committed AE execution and render
   delivery pipeline to an already-registered machine, without asking for a
   new registration code and without running any inspection, edit, or render
-  itself. This build activates and self-reports ALL SIX capabilities the
+  itself. This build activates and self-reports ALL SEVEN capabilities the
   worker implements - every one of them now appears in the worker's own
   CURRENT_WORKER_CAPABILITIES list at registration/heartbeat time:
     - CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE (unchanged from
@@ -31,6 +31,15 @@
       configured), plus uploading the resulting rendered file back to DYO
       once a render completes successfully. Requires a prior successful
       EXECUTE_FRAME job for the project.
+    - CREATE_PREVIEW (client-handoff completion phase) - a real, full-
+      duration complete-preview video of the session's current cumulative
+      working copy, produced through the exact same real `aerender`
+      process RENDER uses, against the project's own already-configured
+      LANDSCAPE render output identity. This is a review artifact, not a
+      final deliverable - it does not approve itself and does not trigger
+      a final render. Uploaded back to DYO once created successfully.
+      Requires a prior successful EXECUTE_FRAME job for the project, same
+      as RENDER.
 
   This is ONE consolidated package - it supersedes DYO-Worker-CheckHealth-
   Update.ps1/DYO-Worker-Inspector-Update.ps1 for capability delivery going
@@ -103,9 +112,9 @@
       outright,
     - a real new successful heartbeat appears in log content this script
       itself guarantees is fresh,
-    - that same fresh content shows ALL SIX capabilities (CHECK_HEALTH,
+    - that same fresh content shows ALL SEVEN capabilities (CHECK_HEALTH,
       INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES,
-      EXECUTE_FRAME, RENDER) and the EXACT expected final build commit
+      EXECUTE_FRAME, RENDER, CREATE_PREVIEW) and the EXACT expected final build commit
       (not just "some" commit marker - see $ExpectedCommit below),
     - the new render/execute-scene-edit/render-upload program files
       genuinely exist on disk after the copy - an independent check in
@@ -187,9 +196,9 @@ $WorkerEnvArgPattern = '--env-file=\.env'
 
 # New program files this exact update introduces - verified present on
 # disk after the copy, as an independent check in addition to (not instead
-# of) the running process's own self-reported capabilities list (all six
-# capabilities, including INSPECT_RENDER_CAPABILITIES/EXECUTE_FRAME/RENDER,
-# are now in CURRENT_WORKER_CAPABILITIES - see operation-allowlist.ts).
+# of) the running process's own self-reported capabilities list (all seven
+# capabilities, including INSPECT_RENDER_CAPABILITIES/EXECUTE_FRAME/RENDER/
+# CREATE_PREVIEW, are now in CURRENT_WORKER_CAPABILITIES - see operation-allowlist.ts).
 $NewCapabilityFiles = @(
   "dist\execution\execute-scene-edit-executor.js",
   "dist\execution\scene-edit-checkpoint.js",
@@ -198,7 +207,10 @@ $NewCapabilityFiles = @(
   "dist\execution\render\aerender-runner.js",
   "dist\execution\render\inspect-render-capabilities.js",
   "dist\execution\render\upload-render-artifact.js",
-  "dist\workspace\working-copy.js"
+  "dist\workspace\working-copy.js",
+  "dist\execution\preview\create-full-preview-executor.js",
+  "dist\execution\preview\upload-full-preview.js",
+  "dist\execution\preview\full-preview-output-path.js"
 )
 
 # This exact update's own new files - the hidden supervisor (verified
@@ -595,7 +607,7 @@ if (-not $started) {
 # check could never see it, so a perfectly healthy update was reported as
 # failed. PID-diff remains the FIRST and preferred signal (it is checked,
 # above, before anything else) - but the log-content checks immediately
-# below (a fresh startup line, all six capabilities, the exact expected
+# below (a fresh startup line, all seven capabilities, the exact expected
 # commit, and a heartbeat/retry) are independent, deeper ground truth:
 # if ALL of those also confirm success, that is not weaker evidence than
 # a PID match, it is stronger (it proves the exact right build is
@@ -659,12 +671,12 @@ if ($heartbeatSucceeded) {
   }
 }
 
-$expectedCapabilities = @("CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE", "INSPECT_RENDER_CAPABILITIES", "EXECUTE_FRAME", "RENDER")
+$expectedCapabilities = @("CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE", "INSPECT_RENDER_CAPABILITIES", "EXECUTE_FRAME", "RENDER", "CREATE_PREVIEW")
 $missingCapabilities = $expectedCapabilities | Where-Object { $newContent -notmatch [regex]::Escape($_) }
 if (($newContent -match '"msg":"worker starting"') -and ($missingCapabilities.Count -eq 0)) {
-  Write-CheckResult $true "Worker capabilities include all six" ($expectedCapabilities -join ", ")
+  Write-CheckResult $true "Worker capabilities include all seven" ($expectedCapabilities -join ", ")
 } else {
-  Write-Host "[NEEDS ATTENTION] Could not confirm all six capabilities ($($expectedCapabilities -join ', '))"
+  Write-Host "[NEEDS ATTENTION] Could not confirm all seven capabilities ($($expectedCapabilities -join ', '))"
   Write-Host "in the new process's own startup log line. The process is running and heartbeating,"
   Write-Host "but this update may not have taken effect correctly. Contact DYO."
   exit 1

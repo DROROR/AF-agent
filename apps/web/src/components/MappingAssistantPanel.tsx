@@ -178,7 +178,13 @@ export function MappingAssistantPanel(): ReactElement | null {
   }
 
   const pending = (suggestions ?? []).filter((s) => s.status === "PENDING");
-  const reviewed = (suggestions ?? []).filter((s) => s.status !== "PENDING");
+  // RESOLVED (mapping-review deadlock fix, section G) is its own bucket -
+  // never counted as still-open "pending" work, and never lumped into the
+  // ACCEPTED/REJECTED human-decision history below (nobody clicked
+  // anything for these; presenting them as "reviewed" would misrepresent
+  // that).
+  const resolved = (suggestions ?? []).filter((s) => s.status === "RESOLVED");
+  const reviewed = (suggestions ?? []).filter((s) => s.status === "ACCEPTED" || s.status === "REJECTED");
   const safeSuggestions = pending.filter(isSafeToBulkAccept);
   const safeIds = new Set(safeSuggestions.map((s) => s.id));
   const needsReviewCount = pending.length - safeSuggestions.length;
@@ -239,17 +245,22 @@ export function MappingAssistantPanel(): ReactElement | null {
 
       {isLoading ? (
         <Skeleton height="1.5rem" />
-      ) : pending.length === 0 ? (
+      ) : pending.length === 0 && resolved.length === 0 && reviewed.length === 0 ? (
         <EmptyState title={t.mappingAssistant.emptyTitle} description={t.mappingAssistant.emptyDescription} />
+      ) : pending.length === 0 && resolved.length > 0 ? (
+        <EmptyState title={t.mappingAssistant.allResolvedTitle} description={t.mappingAssistant.allResolvedDescription} />
       ) : null}
 
-      {!isLoading && pending.length > 0 ? (
+      {!isLoading && (pending.length > 0 || resolved.length > 0) ? (
         <div className="mapping-bulk-toolbar">
           <div className="mapping-bulk-toolbar__counts">
-            <span>
-              {t.mappingAssistant.bulk.safeCount(safeSuggestions.length)}
-              <HelpTooltip text={t.helpTooltips.safeSuggestions} />
-            </span>
+            {resolved.length > 0 ? <span>{t.mappingAssistant.bulk.resolvedCount(resolved.length)}</span> : null}
+            {pending.length > 0 ? (
+              <span>
+                {t.mappingAssistant.bulk.safeCount(safeSuggestions.length)}
+                <HelpTooltip text={t.helpTooltips.safeSuggestions} />
+              </span>
+            ) : null}
             {needsReviewCount > 0 ? (
               <span className="field__hint">
                 {t.mappingAssistant.bulk.needsReviewCount(needsReviewCount)}
@@ -258,16 +269,18 @@ export function MappingAssistantPanel(): ReactElement | null {
             ) : null}
             {selectedSafeCount > 0 ? <span className="field__hint">{t.mappingAssistant.bulk.selectedCount(selectedSafeCount)}</span> : null}
           </div>
-          <div className="mapping-bulk-toolbar__actions">
-            {selectedSafeCount > 0 ? (
-              <Button size="sm" variant="secondary" onClick={() => openBulkConfirm([...selectedIds].filter((id) => safeIds.has(id)))}>
-                {t.mappingAssistant.bulk.acceptSelectedAction(selectedSafeCount)}
+          {pending.length > 0 ? (
+            <div className="mapping-bulk-toolbar__actions">
+              {selectedSafeCount > 0 ? (
+                <Button size="sm" variant="secondary" onClick={() => openBulkConfirm([...selectedIds].filter((id) => safeIds.has(id)))}>
+                  {t.mappingAssistant.bulk.acceptSelectedAction(selectedSafeCount)}
+                </Button>
+              ) : null}
+              <Button size="sm" variant="primary" disabled={safeSuggestions.length === 0} onClick={() => openBulkConfirm(safeSuggestions.map((s) => s.id))}>
+                {t.mappingAssistant.bulk.acceptAllSafeAction}
               </Button>
-            ) : null}
-            <Button size="sm" variant="primary" disabled={safeSuggestions.length === 0} onClick={() => openBulkConfirm(safeSuggestions.map((s) => s.id))}>
-              {t.mappingAssistant.bulk.acceptAllSafeAction}
-            </Button>
-          </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -329,6 +342,26 @@ export function MappingAssistantPanel(): ReactElement | null {
             );
           })}
         </div>
+      ) : null}
+
+      {resolved.length > 0 ? (
+        <details className="mapping-resolved-section">
+          <summary>{t.mappingAssistant.resolvedSectionTitle(resolved.length)}</summary>
+          <ul className="mapping-resolved-list">
+            {resolved.map((suggestion) => {
+              const scene = sceneById.get(suggestion.scenePlanId);
+              const mapping = scene?.mappings.find((m) => m.id === suggestion.mappingId) ?? null;
+              const rowName = mapping?.placeholderName ?? scene?.compositionName ?? suggestion.scenePlanId;
+              return (
+                <li key={suggestion.id}>
+                  <span className="mapping-resolved-list__name">{rowName}</span>
+                  <span>{t.mappingAssistant.keepOriginalLabel}</span>
+                  <span className="status-badge status-badge--positive">{t.mappingAssistant.resolvedLabel}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       ) : null}
 
       <Dialog open={bulkConfirmIds !== null} onClose={() => setBulkConfirmIds(null)} title={t.mappingAssistant.bulk.confirmTitle} variant="modal">

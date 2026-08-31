@@ -45,7 +45,10 @@ const REAL_PACKAGED_FILES = [
   "dist/execution/render/aerender-runner.js",
   "dist/execution/render/inspect-render-capabilities.js",
   "dist/execution/render/upload-render-artifact.js",
-  "dist/workspace/working-copy.js"
+  "dist/workspace/working-copy.js",
+  "dist/execution/preview/create-full-preview-executor.js",
+  "dist/execution/preview/upload-full-preview.js",
+  "dist/execution/preview/full-preview-output-path.js"
 ];
 
 describe("DYO-Worker-Final-Update.ps1 process matcher - reuses the confirmed-safe CheckHealth-Update approach", () => {
@@ -264,7 +267,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
     expect(block).toMatch(/neither a successful/i);
   });
 
-  it("verifies all six capabilities (CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME, RENDER) all appear in the new process's own startup log line, and STOPs if not", () => {
+  it("verifies all seven capabilities (CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME, RENDER, CREATE_PREVIEW) all appear in the new process's own startup log line, and STOPs if not", () => {
     const declIdx = updateScript.indexOf("$expectedCapabilities = @(");
     expect(declIdx).toBeGreaterThan(-1);
     const declBlock = updateScript.slice(declIdx, declIdx + 200);
@@ -274,6 +277,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
     expect(declBlock).toMatch(/INSPECT_RENDER_CAPABILITIES/);
     expect(declBlock).toMatch(/EXECUTE_FRAME/);
     expect(declBlock).toMatch(/RENDER/);
+    expect(declBlock).toMatch(/CREATE_PREVIEW/);
 
     const idx = updateScript.indexOf('$newContent -match \'"msg":"worker starting"\'');
     expect(idx).toBeGreaterThan(-1);
@@ -656,7 +660,7 @@ describe("DYO-Worker-Final-Update.ps1 does not hard-fail on a PID-diff miss alon
     expect(block).toMatch(/exit 1/);
   });
 
-  it("still requires all six capabilities AND the exact expected commit even when PID was not confirmed - never a weaker bar", () => {
+  it("still requires all seven capabilities AND the exact expected commit even when PID was not confirmed - never a weaker bar", () => {
     const capIdx = updateScript.indexOf("$expectedCapabilities = @(");
     const commitIdx = updateScript.indexOf('$commitMatch = [regex]::Match');
     expect(capIdx).toBeGreaterThan(-1);

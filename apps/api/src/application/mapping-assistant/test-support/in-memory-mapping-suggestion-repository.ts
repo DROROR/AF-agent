@@ -1,14 +1,14 @@
 import type { SuggestionStatus } from "@dyo/schemas";
 import type { MappingSuggestionRecord, MappingSuggestionRepository, NewMappingSuggestion } from "../../../domain/mapping-suggestion/types.js";
 
-/** In-memory fake used only by unit tests - never imported from production code. Mirrors DrizzleMappingSuggestionRepository's upsertPending semantics (replaces any existing PENDING row for the same target). */
+/** In-memory fake used only by unit tests - never imported from production code. Mirrors DrizzleMappingSuggestionRepository's upsertPending semantics (replaces any existing PENDING/RESOLVED row for the same target - see that class's own doc comment). */
 export class InMemoryMappingSuggestionRepository implements MappingSuggestionRepository {
   private readonly rows = new Map<string, MappingSuggestionRecord>();
 
   async upsertPending(row: NewMappingSuggestion, now: Date): Promise<MappingSuggestionRecord> {
     for (const [id, existing] of this.rows) {
       if (
-        existing.status === "PENDING" &&
+        (existing.status === "PENDING" || existing.status === "RESOLVED") &&
         existing.projectId === row.projectId &&
         existing.scenePlanId === row.scenePlanId &&
         existing.mappingId === row.mappingId
@@ -16,7 +16,7 @@ export class InMemoryMappingSuggestionRepository implements MappingSuggestionRep
         this.rows.delete(id);
       }
     }
-    const record: MappingSuggestionRecord = { ...row, status: "PENDING", createdAt: now, updatedAt: now };
+    const record: MappingSuggestionRecord = { ...row, status: row.status ?? "PENDING", createdAt: now, updatedAt: now };
     this.rows.set(record.id, record);
     return record;
   }

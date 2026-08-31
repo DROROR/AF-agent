@@ -1,0 +1,2 @@
+ALTER TABLE "mapping_suggestions" DROP CONSTRAINT "mapping_suggestions_status_check";--> statement-breakpoint
+ALTER TABLE "mapping_suggestions" ADD CONSTRAINT "mapping_suggestions_status_check" CHECK (status in ('PENDING', 'RESOLVED', 'ACCEPTED', 'REJECTED'));

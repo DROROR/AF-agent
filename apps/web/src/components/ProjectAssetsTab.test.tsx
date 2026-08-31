@@ -68,6 +68,18 @@ describe("ProjectAssetsTab", () => {
     await screen.findByText("new-upload.png");
   });
 
+  it("uses the danger button treatment for Delete and its confirm CTA, but never for Cancel (section J)", async () => {
+    stubWorkspace({ status: 200, body: { assets: [assetFixture({ id: "asset-1", originalFilename: "keep-me.png" })] } });
+    renderAssets();
+    await screen.findByText("keep-me.png");
+
+    expect(screen.getByRole("button", { name: "Delete" }).className).toContain("btn--danger");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await screen.findByText("Delete this asset?");
+    expect(screen.getByRole("button", { name: "Delete permanently" }).className).toContain("btn--danger");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("btn--danger");
+  });
+
   it("asks for confirmation before deleting, and never deletes on cancel", async () => {
     stubWorkspace({ status: 200, body: { assets: [assetFixture({ id: "asset-1", originalFilename: "keep-me.png" })] } });
     renderAssets();

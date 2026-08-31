@@ -18,6 +18,7 @@ import { RealAerenderRunner, NotAvailableAerenderRunner } from "./execution/rend
 import { HeroicSwanCompositionVerifier, NotAvailableCompositionVerifier } from "./execution/render/verify-render-composition.js";
 import { HeroicSwanRenderCapabilitiesInspector, NotAvailableRenderCapabilitiesInspector } from "./execution/render/inspect-render-capabilities.js";
 import { HeroicSwanRenderArtifactUploader } from "./execution/render/upload-render-artifact.js";
+import { HeroicSwanFullPreviewUploader } from "./execution/preview/upload-full-preview.js";
 import { HeroicSwanAssetDownloadClient } from "./execution/resolve-scene-edit-operation.js";
 import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
@@ -183,6 +184,10 @@ async function main(): Promise<void> {
   // Same reasoning - uploading an already-captured preview PNG only needs
   // this worker's own credentials, never ae-mcp/aerender.
   const previewUploader = new HeroicSwanPreviewUploader(apiClient, credentials.workerId, credentials.workerToken);
+  // Same reasoning - uploading an already-created complete-preview video
+  // (CREATE_PREVIEW) only needs this worker's own credentials, never
+  // ae-mcp/aerender.
+  const fullPreviewUploader = new HeroicSwanFullPreviewUploader(apiClient, credentials.workerId, credentials.workerToken);
   // Same reasoning - MAP_FOOTAGE's asset delivery only needs this worker's
   // own credentials, never ae-mcp/aerender.
   const assetDownloadClient = new HeroicSwanAssetDownloadClient(apiClient, credentials.workerId, credentials.workerToken);
@@ -222,6 +227,7 @@ async function main(): Promise<void> {
             compositionVerifier,
             artifactUploader,
             renderCapabilitiesInspector,
+            fullPreviewUploader,
             // Durable mid-job checkpoint reporter for THIS job - closes
             // over job.jobId (job is already known at this call site) and
             // never marks the job's own status, only the separate

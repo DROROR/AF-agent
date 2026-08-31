@@ -1,11 +1,13 @@
 import {
   claimJobResponseSchema,
+  fullPreviewUploadResponseSchema,
   jobDtoSchema,
   previewUploadResponseSchema,
   registerWorkerResponseSchema,
   renderArtifactUploadResponseSchema,
   workerDtoSchema,
   type ClaimJobResponse,
+  type FullPreviewUploadResponse,
   type HeartbeatRequest,
   type JobDto,
   type PreviewUploadResponse,
@@ -248,6 +250,42 @@ export class ApiClient {
     const json = await parseJson(response);
     if (response.status === 201) {
       return previewUploadResponseSchema.parse(json);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
+  /**
+   * Worker->API complete-preview byte transfer (client-handoff completion
+   * phase, section T) - the ONE place a real CREATE_PREVIEW output's
+   * bytes ever leave this worker machine. Mirrors uploadRenderArtifact's
+   * own shape exactly (multipart form, worker-authenticated, generous
+   * upload timeout), minus `variant` (a full preview is not
+   * LANDSCAPE/REELS - just one preview per session).
+   */
+  async uploadFullPreview(workerId: string, workerToken: string, jobId: string, fileBuffer: Buffer, filename: string, mimeType: string): Promise<FullPreviewUploadResponse> {
+    const form = new FormData();
+    form.append("file", new Blob([fileBuffer], { type: mimeType }), filename);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const path = `/api/workers/${workerId}/jobs/${jobId}/full-preview`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.apiUrl}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${workerToken}` },
+        body: form,
+        signal: controller.signal
+      });
+    } catch (cause) {
+      throw new NetworkError(`Failed to reach ${path}`, { cause });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const json = await parseJson(response);
+    if (response.status === 201) {
+      return fullPreviewUploadResponseSchema.parse(json);
     }
     throw this.errorForResponse(response, json);
   }

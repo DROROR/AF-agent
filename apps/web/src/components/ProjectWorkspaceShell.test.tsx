@@ -55,6 +55,18 @@ describe("ProjectWorkspaceShell - Delete Project", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it("uses the danger button treatment for Delete Project and its confirm CTA, but never for Cancel (section J)", async () => {
+    stubWorkspace();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    expect(screen.getByRole("button", { name: "Delete Project" }).className).toContain("btn--danger");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Project" }));
+    await screen.findByText("Delete this project?");
+    expect(screen.getByRole("button", { name: "Delete permanently" }).className).toContain("btn--danger");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("btn--danger");
+  });
+
   it("cancel leaves the project untouched - no delete request is ever sent", async () => {
     stubWorkspace();
     renderShell();

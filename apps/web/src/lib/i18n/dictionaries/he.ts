@@ -439,7 +439,8 @@ export const he: Dictionary = {
       revision: "גרסה",
       status: "סטטוס",
       scenes: "סצנות",
-      unresolved: "לא פתורות"
+      unresolved: "לא פתורות",
+      detailsToggle: "פרטי הפרויקט"
     },
     loadErrorTitle: "לא ניתן היה לטעון את הפרויקט הזה",
     notFoundTitle: "הפרויקט לא נמצא",
@@ -660,6 +661,8 @@ export const he: Dictionary = {
     connectProviderHint: "חברו ספק בינה מלאכותית בהגדרות כדי להשתמש בעוזר המיפוי.",
     emptyTitle: "אין עדיין הצעות",
     emptyDescription: "צרו הצעות כדי לראות הצעות אמיתיות המבוססות על ראיות עבור סצנות לא פתורות.",
+    allResolvedTitle: "אין דבר שדורש את תשומת ליבכם",
+    allResolvedDescription: "כל הפריטים הנותרים נפתרו אוטומטית - ראו \"נפתרו אוטומטית\" למטה.",
     sourceDeterministic: "דטרמיניסטי",
     sourceAi: "הצעת בינה מלאכותית",
     confidenceLabel: (percent) => `רמת ביטחון: ${percent}%`,
@@ -673,6 +676,9 @@ export const he: Dictionary = {
     historyTitle: "נבדקו",
     userConfirmed: "אושר על ידי משתמש",
     rejectedLabel: "נדחה",
+    keepOriginalLabel: "השארה כפי שהיה",
+    resolvedLabel: "נפתר",
+    resolvedSectionTitle: (n: number): string => `נפתרו אוטומטית (${n})`,
     evidenceKind: {
       FACT: "עובדה",
       USER_INTENT: "כוונת משתמש",
@@ -696,6 +702,7 @@ export const he: Dictionary = {
     improveAccuracyQueued: "נשלח למחשב העריכה שלכם. זה עשוי לקחת כמה דקות - בדקו שוב ובקשו הצעות מחדש כשזה יסתיים.",
     editingComputerOffline: "מחשב העריכה שלכם כבוי. הפעילו אותו כדי לשפר את דיוק הבינה המלאכותית.",
     bulk: {
+      resolvedCount: (n: number): string => `${n} נפתרו אוטומטית`,
       safeCount: (n: number): string => `${n} הצעות בטוחות מוכנות`,
       needsReviewCount: (n: number): string => `${n} דורשות בדיקה`,
       selectedCount: (n: number): string => `${n} נבחרו`,

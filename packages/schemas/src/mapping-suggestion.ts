@@ -39,7 +39,16 @@ export const SUGGESTION_SOURCES = ["DETERMINISTIC", "AI"] as const;
 export type SuggestionSource = (typeof SUGGESTION_SOURCES)[number];
 export const suggestionSourceSchema = z.enum(SUGGESTION_SOURCES);
 
-export const SUGGESTION_STATUSES = ["PENDING", "ACCEPTED", "REJECTED"] as const;
+/**
+ * RESOLVED (mapping-review deadlock fix, client-handoff completion phase
+ * section A/B): a suggestion the system resolved on its own - a
+ * structural/template-helper element, or a placeholder the client
+ * explicitly said to leave unchanged - with no replacement proposed and
+ * no human Accept/Reject ever required. Distinct from ACCEPTED, which
+ * always means a human explicitly accepted a real proposed change; never
+ * used to misrepresent an automatic outcome as a human decision.
+ */
+export const SUGGESTION_STATUSES = ["PENDING", "RESOLVED", "ACCEPTED", "REJECTED"] as const;
 export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
 export const suggestionStatusSchema = z.enum(SUGGESTION_STATUSES);
 

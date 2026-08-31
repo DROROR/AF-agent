@@ -27,6 +27,8 @@ export const createFullPreviewRequestSchema = z
     projectId: z.string().uuid(),
     executionSessionId: z.string().uuid(),
     sourceProjectPath: z.string().min(1),
+    /** The original .aep's expected hash - re-verified BEFORE and AFTER creating the preview (CLAUDE.md Safety Rule 1/8), same "original .aep must remain byte-for-byte unchanged" contract as RENDER's own sourceProjectSha256. */
+    sourceProjectSha256: z.string().min(1),
     /** Re-verified from the real file on disk before rendering - never merely trusted from the request (same "VERIFY_WORKING_COPY" contract as RENDER). */
     expectedWorkingProjectSha256: z.string().min(1),
     aeProjectItemIndex: z.number().int().positive(),

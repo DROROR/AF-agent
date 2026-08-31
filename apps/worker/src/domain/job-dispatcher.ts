@@ -2,6 +2,7 @@ import {
   validateJobPayload,
   type AeStatus,
   type CheckHealthResponse,
+  type CreateFullPreviewRequest,
   type ExecuteSceneEditRequest,
   type InspectTemplateRequest,
   type JobDto,
@@ -24,6 +25,8 @@ import type { AerenderRunner } from "../execution/render/aerender-runner.js";
 import type { CompositionVerifier } from "../execution/render/verify-render-composition.js";
 import type { RenderArtifactUploader } from "../execution/render/upload-render-artifact.js";
 import type { RenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
+import { executeCreateFullPreview } from "../execution/preview/create-full-preview-executor.js";
+import type { FullPreviewUploader } from "../execution/preview/upload-full-preview.js";
 
 export interface JobExecutionResult {
   status: "SUCCEEDED" | "FAILED";
@@ -60,6 +63,8 @@ export interface JobDispatcherDeps {
   artifactUploader: RenderArtifactUploader;
   /** INSPECT_RENDER_CAPABILITIES's own dependency - see execution/render/inspect-render-capabilities.ts. */
   renderCapabilitiesInspector: RenderCapabilitiesInspector;
+  /** CREATE_PREVIEW's own dependency - see execution/preview/upload-full-preview.ts. Reuses aerenderPath/aerenderRunner/compositionVerifier above, same as RENDER. */
+  fullPreviewUploader: FullPreviewUploader;
   workRoot: string;
   now: () => Date;
 }
@@ -94,6 +99,8 @@ export async function executeJob(deps: JobDispatcherDeps, job: JobDto): Promise<
       return runRenderProject(deps, job);
     case "INSPECT_RENDER_CAPABILITIES":
       return runInspectRenderCapabilities(deps, job);
+    case "CREATE_PREVIEW":
+      return runCreateFullPreview(deps, job);
     default:
       // Every other WORKER_CAPABILITIES entry is a recognized operation
       // name with no execution handler yet - fail safely, never attempt it.
@@ -394,6 +401,75 @@ async function runRenderProject(deps: JobDispatcherDeps, job: JobDto): Promise<J
       error: {
         code: "NOT_AVAILABLE",
         message: cause instanceof Error ? cause.message : "RENDER could not run"
+      }
+    };
+  }
+}
+
+async function runCreateFullPreview(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (job.operation !== "CREATE_PREVIEW") {
+    return {
+      status: "FAILED",
+      error: { code: "INTERNAL_ERROR", message: "runCreateFullPreview called for a non-CREATE_PREVIEW job" }
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = validateJobPayload("CREATE_PREVIEW", job.payload);
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "INVALID_PAYLOAD",
+        message: cause instanceof Error ? cause.message : "CREATE_PREVIEW payload failed validation"
+      }
+    };
+  }
+
+  // Same safety gate as RENDER: VERIFY_COMPOSITION touches ae-mcp (against
+  // a live AfterFX.exe instance), so this never runs unless AE and MCP
+  // were BOTH confirmed ONLINE as of the most recent heartbeat.
+  const health = deps.getLatestHealth();
+  if (!health || health.aeStatus !== "ONLINE" || health.mcpStatus !== "ONLINE") {
+    return {
+      status: "FAILED",
+      error: {
+        code: "PRECONDITION_NOT_MET",
+        message: health
+          ? `AE and MCP must both be ONLINE (aeStatus=${health.aeStatus}, mcpStatus=${health.mcpStatus})`
+          : "No heartbeat has succeeded yet - AE/MCP status is not yet confirmed"
+      }
+    };
+  }
+
+  try {
+    const result = await executeCreateFullPreview(
+      {
+        workRoot: deps.workRoot,
+        aerenderPath: deps.aerenderPath,
+        aerenderRunner: deps.aerenderRunner,
+        compositionVerifier: deps.compositionVerifier,
+        fullPreviewUploader: deps.fullPreviewUploader,
+        now: deps.now
+      },
+      job.jobId,
+      payload as CreateFullPreviewRequest
+    );
+    // job-dispatcher owns job identity - the executor itself is not handed
+    // job/worker IDs, matching runExecuteFrame/runRenderProject's own
+    // stamping convention.
+    const stamped = { ...result, workerId: job.workerId, jobId: job.jobId };
+    if (result.failureReason !== null) {
+      return { status: "FAILED", result: stamped, error: { code: "NOT_AVAILABLE", message: result.failureReason } };
+    }
+    return { status: "SUCCEEDED", result: stamped };
+  } catch (cause) {
+    return {
+      status: "FAILED",
+      error: {
+        code: "NOT_AVAILABLE",
+        message: cause instanceof Error ? cause.message : "CREATE_PREVIEW could not run"
       }
     };
   }

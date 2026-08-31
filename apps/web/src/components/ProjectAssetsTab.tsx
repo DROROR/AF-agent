@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent, type ReactElement } from "react";
+import { Trash2 } from "lucide-react";
 import type { AssetDto, MediaKind } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectAssets } from "../lib/use-project-assets";
@@ -214,7 +215,8 @@ function AssetCard({
           <Button size="sm" variant="secondary" disabled={isSaving} onClick={() => void handleSaveDetails()}>
             {isSaving ? t.assetsTab.savingDetails : t.assetsTab.saveDetails}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(true)}>
+          <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)}>
+            <Trash2 aria-hidden="true" />
             {t.assetsTab.deleteAction}
           </Button>
         </div>
@@ -227,7 +229,8 @@ function AssetCard({
           <Button variant="ghost" disabled={isDeleting} onClick={() => setConfirmingDelete(false)}>
             {t.assetsTab.deleteCancelAction}
           </Button>
-          <Button variant="primary" disabled={isDeleting} onClick={() => void handleConfirmDelete()}>
+          <Button variant="danger" disabled={isDeleting} onClick={() => void handleConfirmDelete()}>
+            <Trash2 aria-hidden="true" />
             {t.assetsTab.deleteConfirmAction}
           </Button>
         </div>

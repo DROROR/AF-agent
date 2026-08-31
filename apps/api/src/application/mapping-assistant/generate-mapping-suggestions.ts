@@ -11,6 +11,7 @@ import type { MappingEvidenceBundle } from "../../domain/mapping-evidence/types.
 import { buildEvidenceBundles } from "../../domain/mapping-evidence/build-evidence-bundles.js";
 import { buildSceneEvidenceAvailability } from "../../domain/mapping-evidence/scene-evidence-availability.js";
 import { matchDeterministic } from "../../domain/mapping-suggestion/deterministic-matcher.js";
+import { detectWorkMapConflict } from "../../domain/mapping-suggestion/structural-classification.js";
 import { SuggestionsNotConfiguredError, type AiSuggestionMetadata, type AiSuggestionProvider } from "./ai-suggestion-provider.js";
 import { toMappingSuggestionDto } from "./mapping-suggestion-dto-mapper.js";
 
@@ -59,6 +60,39 @@ export const AI_MAPPING_BATCH_CONCURRENCY = 2;
 
 function targetKey(bundle: MappingEvidenceBundle): string {
   return `${bundle.scenePlanId}::${bundle.mappingId ?? ""}`;
+}
+
+/**
+ * Mapping-review deadlock fix (section B/G): a suggestion resolves
+ * WITHOUT any human Accept/Reject click - "Keep original — Resolved",
+ * never counted as Needs review or as a Safe suggestion needing a bulk-
+ * accept click - exactly when it proposes NO replacement at all (every
+ * content field null) and carries none of the "this still needs a human
+ * look" signals (requiresHumanReview, conflictsWithWorkMap,
+ * unresolvedReason). A real content assignment (even a high-confidence,
+ * `requiresHumanReview: false` one, e.g. an explicit Work Map asset) is
+ * NEVER resolved this way - it still requires an explicit Accept, just
+ * one eligible for the existing Safe-suggestions bulk-accept path
+ * (section F: "content targets remain human-controlled").
+ */
+function isResolvedNoOp(row: {
+  suggestedAssetId: string | null;
+  suggestedText: string | null;
+  suggestedAssetTimestamp: number | null;
+  suggestedFinalDuration: number | null;
+  requiresHumanReview: boolean;
+  conflictsWithWorkMap: boolean;
+  unresolvedReason: string | null;
+}): boolean {
+  return (
+    !row.requiresHumanReview &&
+    !row.conflictsWithWorkMap &&
+    row.unresolvedReason === null &&
+    row.suggestedAssetId === null &&
+    row.suggestedText === null &&
+    row.suggestedAssetTimestamp === null &&
+    row.suggestedFinalDuration === null
+  );
 }
 
 /** Never trusts the provider's own response shape - a non-array/non-object `proposals` degrades to an empty list here rather than throwing, so a malformed outer shape is just zero raw proposals to iterate, not a crash. */
@@ -200,7 +234,8 @@ export async function generateMappingSuggestions(
         scenePlanId: bundle.scenePlanId,
         mappingId: bundle.mappingId,
         source: "DETERMINISTIC",
-        ...match
+        ...match,
+        ...(isResolvedNoOp(match) ? { status: "RESOLVED" } : {})
       });
     } else {
       unresolvedBundles.push(bundle);
@@ -321,6 +356,28 @@ export async function generateMappingSuggestions(
       const isConcreteContentGuess = (assetIsReal && proposal.suggestedAssetId !== null) || (proposal.suggestedText !== null && proposal.suggestedText.trim() !== "");
       const isLowConfidenceGuess = proposal.confidence < 0.5 && isConcreteContentGuess;
 
+      const finalSuggestedAssetId = isLowConfidenceGuess ? null : assetIsReal ? proposal.suggestedAssetId : null;
+      const finalSuggestedText = isLowConfidenceGuess ? null : proposal.suggestedText;
+      const finalSuggestedAssetTimestamp = isLowConfidenceGuess ? null : proposal.suggestedAssetTimestamp;
+      const finalSuggestedFinalDuration = isLowConfidenceGuess ? null : proposal.suggestedFinalDuration;
+
+      // Work Map conflict fix (section C): a real contradiction against
+      // this target's own Work Map entry, never the old, over-broad
+      // "the scene merely has some Work Map entry" check.
+      const conflictsWithWorkMap = detectWorkMapConflict(bundle, { suggestedAssetId: finalSuggestedAssetId, suggestedText: finalSuggestedText });
+
+      // Note on section B/F ("AI proposes no replacement -> resolved"):
+      // every target reaching the AI provider is, by construction, one
+      // matchDeterministic already returned null for - and Rule 2.5 there
+      // (resolveKeepOriginal) already resolves EVERY structural/explicit-
+      // keep-unchanged target before AI is ever consulted (see
+      // deterministic-matcher.ts). So a bundle can never simultaneously
+      // reach this AI branch AND have resolveKeepOriginal(bundle) true -
+      // an AI-sourced proposal with no replacement is always for a
+      // genuine content target the model simply had no confident evidence
+      // for, which correctly stays requiresHumanReview: true (section F:
+      // "if uncertain: Needs review" - never silently resolved here).
+
       persisted.push({
         id: randomUUID(),
         projectId,
@@ -329,10 +386,10 @@ export async function generateMappingSuggestions(
         source: "AI",
         suggestedClassification: isLowConfidenceGuess ? null : proposal.suggestedClassification,
         // Never a fabricated/arbitrary/cross-project id - re-validated against this exact project's real Asset Catalog before ever being persisted (section 10).
-        suggestedAssetId: isLowConfidenceGuess ? null : assetIsReal ? proposal.suggestedAssetId : null,
-        suggestedText: isLowConfidenceGuess ? null : proposal.suggestedText,
-        suggestedAssetTimestamp: isLowConfidenceGuess ? null : proposal.suggestedAssetTimestamp,
-        suggestedFinalDuration: isLowConfidenceGuess ? null : proposal.suggestedFinalDuration,
+        suggestedAssetId: finalSuggestedAssetId,
+        suggestedText: finalSuggestedText,
+        suggestedAssetTimestamp: finalSuggestedAssetTimestamp,
+        suggestedFinalDuration: finalSuggestedFinalDuration,
         confidence: proposal.confidence,
         reasoning: proposal.reasoning,
         evidenceRefs: proposal.evidenceRefs,
@@ -342,7 +399,7 @@ export async function generateMappingSuggestions(
             ? null
             : "The AI provider proposed an asset id that is not in this project's Asset Catalog - discarded",
         requiresHumanReview: true,
-        conflictsWithWorkMap: bundle.workMapEntry !== null
+        conflictsWithWorkMap
       });
     });
   }

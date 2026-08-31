@@ -15,6 +15,7 @@ import { NotAvailableCompositionVerifier } from "../execution/render/verify-rend
 import { NotAvailableRenderCapabilitiesInspector } from "../execution/render/inspect-render-capabilities.js";
 import type { RenderArtifactUploader, UploadRenderArtifactResult } from "../execution/render/upload-render-artifact.js";
 import type { PreviewUploader, UploadPreviewResult } from "../execution/upload-preview.js";
+import type { FullPreviewUploader, UploadFullPreviewResult } from "../execution/preview/upload-full-preview.js";
 import type { AssetDownloadClient } from "../workspace/asset-cache.js";
 import { sessionWorkingCopyPath } from "../workspace/working-copy.js";
 
@@ -26,6 +27,12 @@ class FakeArtifactUploader implements RenderArtifactUploader {
 
 class FakePreviewUploader implements PreviewUploader {
   async upload(): Promise<UploadPreviewResult> {
+    return { ok: true };
+  }
+}
+
+class FakeFullPreviewUploader implements FullPreviewUploader {
+  async upload(): Promise<UploadFullPreviewResult> {
     return { ok: true };
   }
 }
@@ -81,6 +88,7 @@ function healthyDeps(overrides: Partial<JobDispatcherDeps> = {}): JobDispatcherD
     compositionVerifier: new NotAvailableCompositionVerifier(),
     artifactUploader: new FakeArtifactUploader(),
     renderCapabilitiesInspector: new NotAvailableRenderCapabilitiesInspector(),
+    fullPreviewUploader: new FakeFullPreviewUploader(),
     workRoot: "/tmp/does-not-matter-for-these-tests",
     now: () => new Date("2026-01-01T00:00:00.000Z"),
     ...overrides
@@ -545,6 +553,125 @@ describe("executeJob - RENDER", () => {
 
   it("never fabricates a result when no real aerender/ae-mcp transport is configured (NotAvailable stubs)", async () => {
     const { job, workRoot } = renderJob();
+    const result = await executeJob(healthyDeps({ workRoot }), job);
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("NOT_AVAILABLE");
+  });
+});
+
+describe("executeJob - CREATE_PREVIEW", () => {
+  function previewJob(overrides: { payload?: Record<string, unknown>; jobId?: string } = {}): { job: JobDto; workRoot: string; sourcePath: string } {
+    const root = mkdtempSync(join(tmpdir(), "job-dispatcher-preview-"));
+    execFrameCleanupDirs.push(root);
+    const workRoot = join(root, "work-root");
+    const jobId = overrides.jobId ?? "job-preview-1";
+
+    const sourcePath = join(root, "source.aep");
+    const sourceContent = Buffer.from("source aep bytes");
+    writeFileSync(sourcePath, sourceContent);
+    const sourceSha256 = createHash("sha256").update(sourceContent).digest("hex");
+
+    const executionSessionId = "55555555-5555-5555-5555-555555555555";
+    const workingProjectPath = sessionWorkingCopyPath(workRoot, executionSessionId);
+    mkdirSync(join(workingProjectPath, ".."), { recursive: true });
+    const workingContent = Buffer.from("working copy aep bytes");
+    writeFileSync(workingProjectPath, workingContent);
+    const workingProjectSha256 = createHash("sha256").update(workingContent).digest("hex");
+
+    const payload = {
+      projectId: "11111111-1111-1111-1111-111111111111",
+      executionSessionId,
+      sourceProjectPath: sourcePath,
+      sourceProjectSha256: sourceSha256,
+      expectedWorkingProjectSha256: workingProjectSha256,
+      aeProjectItemIndex: 1,
+      compositionName: "Landscape Master",
+      renderSettingsTemplateName: "Best Settings",
+      outputModuleTemplateName: "H.264 - Match Source",
+      ...overrides.payload
+    };
+    return { job: baseJob({ jobId, operation: "CREATE_PREVIEW", payload }), workRoot, sourcePath };
+  }
+
+  it("fails with PRECONDITION_NOT_MET and never touches the composition verifier when AE/MCP are not both ONLINE", async () => {
+    const { job, workRoot } = previewJob();
+    const verifier = new NotAvailableCompositionVerifier();
+    const verifySpy = vi.spyOn(verifier, "verify");
+    const result = await executeJob(healthyDeps({ getLatestHealth: () => null, compositionVerifier: verifier, workRoot }), job);
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("PRECONDITION_NOT_MET");
+    expect(verifySpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid payload (missing required fields) before ever touching the verifier - never an arbitrary/unallowlisted operation reaching AE", async () => {
+    const { job, workRoot } = previewJob({ payload: { compositionName: undefined } });
+    const verifier = new NotAvailableCompositionVerifier();
+    const verifySpy = vi.spyOn(verifier, "verify");
+    const result = await executeJob(healthyDeps({ compositionVerifier: verifier, workRoot }), job);
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("INVALID_PAYLOAD");
+    expect(verifySpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a payload with an extra/arbitrary field - the strict CREATE_PREVIEW contract, never a generic passthrough", async () => {
+    const { job, workRoot } = previewJob({ payload: { checkpoint: null } });
+    const result = await executeJob(healthyDeps({ workRoot }), job);
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("INVALID_PAYLOAD");
+  });
+
+  it("succeeds end to end with a real spawned fake aerender process, stamping jobId/workerId onto the result and uploading the real bytes", async () => {
+    const { job, workRoot } = previewJob();
+    const fakeVerifier = { verify: vi.fn().mockResolvedValue({ ok: true }) };
+    const fakeRunner = {
+      run: vi.fn().mockImplementation(async (params: { outputPath: string }) => {
+        mkdirSync(join(params.outputPath, ".."), { recursive: true });
+        writeFileSync(params.outputPath, Buffer.from("fake mp4 bytes"));
+        return {
+          ok: true,
+          pid: 123,
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          stdout: "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          spawnError: null,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString()
+        };
+      })
+    };
+    const uploadSpy = vi.fn().mockResolvedValue({ ok: true });
+
+    const result = await executeJob(
+      healthyDeps({ compositionVerifier: fakeVerifier, aerenderRunner: fakeRunner, aerenderPath: "/fake/aerender", fullPreviewUploader: { upload: uploadSpy }, workRoot }),
+      job
+    );
+
+    expect(result.status).toBe("SUCCEEDED");
+    const stamped = result.result as { jobId: string; workerId: string; failureReason: string | null; artifact: { byteSize: number } | null };
+    expect(stamped.jobId).toBe(job.jobId);
+    expect(stamped.workerId).toBe(job.workerId);
+    expect(stamped.failureReason).toBeNull();
+    expect(stamped.artifact?.byteSize).toBeGreaterThan(0);
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a job-level FAILED (never SUCCEEDED) when composition verification fails", async () => {
+    const { job, workRoot } = previewJob();
+    const fakeVerifier = { verify: vi.fn().mockResolvedValue({ ok: false, reason: "ambiguous composition name" }) };
+
+    const result = await executeJob(healthyDeps({ compositionVerifier: fakeVerifier, aerenderPath: "/fake/aerender", workRoot }), job);
+
+    expect(result.status).toBe("FAILED");
+    expect(result.error?.code).toBe("NOT_AVAILABLE");
+    expect(result.error?.message).toContain("ambiguous");
+  });
+
+  it("never fabricates a result when no real aerender/ae-mcp transport is configured (NotAvailable stubs)", async () => {
+    const { job, workRoot } = previewJob();
     const result = await executeJob(healthyDeps({ workRoot }), job);
     expect(result.status).toBe("FAILED");
     expect(result.error?.code).toBe("NOT_AVAILABLE");

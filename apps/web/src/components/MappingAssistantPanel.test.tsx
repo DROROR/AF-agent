@@ -218,7 +218,7 @@ describe("MappingAssistantPanel - bulk accept", () => {
     await screen.findByText("Accept these suggestions?");
     fireEvent.click(screen.getByRole("button", { name: "Accept Suggestions" }));
 
-    await waitFor(() => expect(screen.getByText("No suggestions yet")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByText("1 safe suggestion ready")).toBeNull());
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
     const call = fetchMock.mock.calls.find((c: unknown[]) => String(c[0]).includes("accept-batch"));
     const [, init] = call as [string, RequestInit];
@@ -426,8 +426,8 @@ describe("MappingAssistantPanel", () => {
     await screen.findByText("Accept");
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));
 
-    await waitFor(() => expect(screen.getByText("No suggestions yet")).toBeTruthy());
-    screen.getByText("User Confirmed");
+    await screen.findByText("User Confirmed");
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
   });
 
   it("rejects a suggestion and leaves it visible as Rejected, never silently removed", async () => {

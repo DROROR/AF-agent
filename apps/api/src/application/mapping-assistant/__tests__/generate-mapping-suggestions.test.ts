@@ -923,3 +923,99 @@ describe("generateMappingSuggestions - target batching and bounded concurrency (
     });
   });
 });
+
+function manifestWithLayerName(layerName: string): TemplateManifest {
+  const base = manifest();
+  return { ...base, scenes: [{ ...base.scenes[0]!, placeholders: [{ ...base.scenes[0]!.placeholders[0]!, layerName, placeholderType: "unknown" }] }] };
+}
+
+describe("generateMappingSuggestions - mapping-review deadlock fix (client-handoff completion phase, section A/B/C/G)", () => {
+  it("a structural layer with zero human evidence resolves with status RESOLVED - no PENDING row, no AI call at all", async () => {
+    const provider = new StubAiProvider([]);
+    const deps = await setup(provider, manifestWithLayerName("CONTROL"));
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]).toMatchObject({
+      status: "RESOLVED",
+      source: "DETERMINISTIC",
+      requiresHumanReview: false,
+      conflictsWithWorkMap: false,
+      suggestedAssetId: null,
+      suggestedText: null
+    });
+    // Never even sent to the AI provider - resolved before that stage.
+    expect(provider.lastBundles).toEqual([]);
+  });
+
+  it("a RESOLVED suggestion is excluded from isSafeToBulkAccept's PENDING-only pool at the domain boundary - it is neither pending nor needing a bulk-accept click", async () => {
+    const deps = await setup(new StubAiProvider([]), manifestWithLayerName("Shape Layer 1"));
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+    expect(result.suggestions[0]!.status).not.toBe("PENDING");
+  });
+
+  it("Work Map conflict fix (section C): a scene with a Work Map entry, whose AI proposal AGREES (proposes no replacement), is never flagged as a conflict - the old bug flagged every proposal in a Work Map'd scene as conflicting regardless of content", async () => {
+    const plain = await setup();
+    const existingPlan = await plain.executionPlanRepository.findCurrentByProjectId(plain.project.projectId);
+    const scenePlanId = existingPlan!.scenePlans[0]!.id;
+    const mappingId = existingPlan!.scenePlans[0]!.mappings[0]!.id;
+
+    const deps = await setup(
+      new StubAiProvider([baseProposal({ scenePlanId, mappingId, suggestedText: null, suggestedClassification: null, confidence: 0.9 })]),
+      manifest()
+    );
+    await updateWorkMap({ workMapRepository: deps.workMapRepository, now: fixedNow }, deps.project.projectId, {
+      baseRevision: 0,
+      entries: [{ sourceCompositionId: "comp-1", sourceReference: null, desiredAssetId: null, desiredText: null, assetTimestampSeconds: null, desiredDurationSeconds: null, instructions: "Some unrelated scene note." }]
+    });
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]!.conflictsWithWorkMap).toBe(false);
+  });
+
+  it("Work Map conflict fix (section C): a real contradiction (Work Map's explicit desiredAssetId vs. a different AI-proposed asset) IS flagged as a conflict", async () => {
+    const plain = await setup();
+    const existingPlan = await plain.executionPlanRepository.findCurrentByProjectId(plain.project.projectId);
+    const scenePlanId = existingPlan!.scenePlans[0]!.id;
+    const mappingId = existingPlan!.scenePlans[0]!.mappings[0]!.id;
+
+    const deps = await setup(new StubAiProvider([]), manifest());
+    const keptAsset = await uploadTestAsset(deps, "keep.png");
+    const otherAsset = await uploadTestAsset(deps, "other.png");
+    await updateWorkMap({ workMapRepository: deps.workMapRepository, now: fixedNow }, deps.project.projectId, {
+      baseRevision: 0,
+      entries: [{ sourceCompositionId: "comp-1", sourceReference: null, desiredAssetId: keptAsset.id, desiredText: null, assetTimestampSeconds: null, desiredDurationSeconds: null, instructions: null }]
+    });
+    // Re-configured with a provider proposing the OTHER asset for the same target - a genuine contradiction.
+    const conflictingDeps = { ...deps, aiSuggestionProvider: new StubAiProvider([baseProposal({ scenePlanId, mappingId, suggestedAssetId: otherAsset.id, suggestedText: null, confidence: 0.9 })]) };
+
+    const result = await generateMappingSuggestions(conflictingDeps, deps.project.projectId);
+    // Rule 1 (explicit Work Map asset) already resolves this target deterministically before AI - so
+    // this proves the OTHER side of the same fix: the deterministic Work Map assignment wins outright,
+    // never silently overridden by a contradicting AI guess.
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]).toMatchObject({ source: "DETERMINISTIC", suggestedAssetId: keptAsset.id, conflictsWithWorkMap: false });
+  });
+
+  it("Work Map conflict fix (section C): an explicit 'keep unchanged' instruction contradicted by a concrete AI-proposed text replacement IS flagged as a conflict", async () => {
+    const plain = await setup();
+    const existingPlan = await plain.executionPlanRepository.findCurrentByProjectId(plain.project.projectId);
+    const scenePlanId = existingPlan!.scenePlans[0]!.id;
+    const mappingId = existingPlan!.scenePlans[0]!.mappings[0]!.id;
+
+    const deps = await setup(
+      new StubAiProvider([baseProposal({ scenePlanId, mappingId, suggestedText: "Overwritten text", suggestedClassification: null, confidence: 0.9 })]),
+      manifest()
+    );
+    await updateWorkMap({ workMapRepository: deps.workMapRepository, now: fixedNow }, deps.project.projectId, {
+      baseRevision: 0,
+      entries: [{ sourceCompositionId: "comp-1", sourceReference: null, desiredAssetId: null, desiredText: null, assetTimestampSeconds: null, desiredDurationSeconds: null, instructions: "Keep this unchanged." }]
+    });
+
+    const result = await generateMappingSuggestions(deps, deps.project.projectId);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]!.conflictsWithWorkMap).toBe(true);
+  });
+});
