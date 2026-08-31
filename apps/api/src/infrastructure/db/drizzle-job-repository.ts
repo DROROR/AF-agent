@@ -195,4 +195,14 @@ export class DrizzleJobRepository implements JobRepository {
       .limit(limit);
     return rows.map(toDomain);
   }
+
+  async hasNonTerminalJobForProject(projectId: string): Promise<boolean> {
+    const result = await this.db.execute<{ id: string }>(
+      sql`select id from ${jobs}
+          where ${jobs.projectId} = ${projectId}
+            and ${jobs.status} not in ${TERMINAL_JOB_STATUSES}
+          limit 1`
+    );
+    return result.rows.length > 0;
+  }
 }

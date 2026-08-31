@@ -38,6 +38,10 @@ export class InMemoryExecutionSessionRepository implements ExecutionSessionRepos
     return candidates.reduce((latest, r) => (r.createdAt > latest.createdAt ? r : latest));
   }
 
+  async listByProjectId(projectId: string): Promise<ExecutionSessionRecord[]> {
+    return [...this.rows.values()].filter((r) => r.projectId === projectId);
+  }
+
   async recordSceneCompleted(
     id: string,
     scenePlanId: string,

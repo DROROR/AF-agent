@@ -433,3 +433,72 @@ describe("execution plan API", () => {
     expect(response.json().plan.status).toBe("APPROVED");
   });
 });
+
+describe("DELETE /api/projects/:projectId (offline-safe-control-plane phase, section 1)", () => {
+  it("rejects an unauthenticated request", async () => {
+    const projectId = await createProjectViaApi();
+    const response = await harness.app.inject({ method: "DELETE", url: `/api/projects/${projectId}` });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("returns 404 for a project that doesn't exist", async () => {
+    const response = await harness.app.inject({
+      method: "DELETE",
+      url: "/api/projects/00000000-0000-0000-0000-000000000000",
+      ...authed()
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("PROJECT_NOT_FOUND");
+  });
+
+  it("deletes a real project - 204, then genuinely gone from GET/list, with its execution plan cascade-deleted too", async () => {
+    const projectId = await createProjectViaApi();
+    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+
+    const deleteResponse = await harness.app.inject({ method: "DELETE", url: `/api/projects/${projectId}`, ...authed() });
+    expect(deleteResponse.statusCode).toBe(204);
+    expect(deleteResponse.body).toBe("");
+
+    const getResponse = await harness.app.inject({ method: "GET", url: `/api/projects/${projectId}`, ...authed() });
+    expect(getResponse.statusCode).toBe(404);
+
+    const listResponse = await harness.app.inject({ method: "GET", url: "/api/projects", ...authed() });
+    expect(listResponse.json().projects).toEqual([]);
+  });
+
+  it("refuses deletion (409) while a real dispatched job for this project is still non-terminal, and leaves the project intact", async () => {
+    const projectId = await createProjectViaApi();
+    const workerResponse = await harness.app.inject({
+      method: "POST",
+      url: "/api/workers/register",
+      headers: { authorization: `Bearer ${REGISTRATION_SECRET}` },
+      payload: { name: "Worker", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] }
+    });
+    const workerId = workerResponse.json().workerId as string;
+    const workerToken = workerResponse.json().workerToken as string;
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/heartbeat`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", capabilities: ["INSPECT_SCENE_EVIDENCE"] }
+    });
+    await harness.app.inject({ method: "POST", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const planResponse = await harness.app.inject({ method: "GET", url: `/api/projects/${projectId}/execution-plan`, ...authed() });
+    const scenePlanId = planResponse.json().plan.scenePlans[0].id as string;
+
+    const dispatchResponse = await harness.app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      ...authed(),
+      payload: { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId, scenePlanId }
+    });
+    expect(dispatchResponse.statusCode).toBe(201);
+
+    const deleteResponse = await harness.app.inject({ method: "DELETE", url: `/api/projects/${projectId}`, ...authed() });
+    expect(deleteResponse.statusCode).toBe(409);
+    expect(deleteResponse.json().error.code).toBe("PROJECT_HAS_ACTIVE_JOB");
+
+    const getResponse = await harness.app.inject({ method: "GET", url: `/api/projects/${projectId}`, ...authed() });
+    expect(getResponse.statusCode).toBe(200);
+  });
+});

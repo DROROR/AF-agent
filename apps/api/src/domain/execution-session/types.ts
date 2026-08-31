@@ -45,6 +45,8 @@ export interface ExecutionSessionRepository {
   findById(id: string): Promise<ExecutionSessionRecord | null>;
   /** The most recently created session for this project, terminal or not - callers decide what "active" means (see is-session-active.ts) by comparing its own planRevision/status against fresh state, never a specialized query here. */
   findLatestByProjectId(projectId: string): Promise<ExecutionSessionRecord | null>;
+  /** Every session ever created for this project, any status - used by delete-project.ts to collect every historical session's own preview storageKey (not just the latest one) before deleting their files. */
+  listByProjectId(projectId: string): Promise<ExecutionSessionRecord[]>;
   /**
    * Appends `scenePlanId` to completedScenePlanIds (idempotent - a
    * duplicate call for the same scenePlanId is a no-op on the array but

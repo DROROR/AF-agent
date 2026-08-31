@@ -433,6 +433,14 @@ export const he: Dictionary = {
     reload: "רענון",
     savingLabel: "שומר…",
     saveFailedTitle: "לא ניתן היה לשמור את השינוי הזה",
+    deleteProjectAction: "מחיקת פרויקט",
+    deleteConfirmTitle: "למחוק את הפרויקט הזה?",
+    deleteConfirmDescription: (name: string): string =>
+      `"${name}" וכל מה שבו (העלאות, מפת עבודה, מיפויי סצנות, תצוגות מקדימות ורינדורים) יימחקו לצמיתות. לא ניתן לבטל פעולה זו.`,
+    deleteConfirmAction: "מחיקה לצמיתות",
+    deletingAction: "מוחק…",
+    deleteCancelAction: "ביטול",
+    deleteFailedTitle: "לא ניתן היה למחוק את הפרויקט",
     overview: {
       projectSection: "פרויקט",
       planSection: "תוכנית ביצוע",
@@ -641,7 +649,7 @@ export const he: Dictionary = {
     },
     sceneEvidenceLabel: "ראיות סצנה",
     sceneEvidenceStatus: {
-      AVAILABLE: "זמינות",
+      AVAILABLE: "הראיות נבדקו — דיוק הבינה המלאכותית השתפר",
       STALE: "לא עדכניות (נלכדו על גרסה ישנה יותר של הפרויקט)",
       NOT_INSPECTED: "לא נבדקו"
     },
@@ -651,6 +659,10 @@ export const he: Dictionary = {
       needsReview: "דורש בדיקה"
     },
     whyThisSuggestion: "למה ההצעה הזו?",
-    sceneGroupFallback: "לא מקובצות"
+    sceneGroupFallback: "לא מקובצות",
+    improveAccuracyAction: "שפרו את דיוק הבינה המלאכותית",
+    improvingAccuracy: "שולח…",
+    improveAccuracyQueued: "נשלח למחשב העריכה שלכם. זה עשוי לקחת כמה דקות - בדקו שוב ובקשו הצעות מחדש כשזה יסתיים.",
+    editingComputerOffline: "מחשב העריכה שלכם כבוי. הפעילו אותו כדי לשפר את דיוק הבינה המלאכותית."
   }
 };

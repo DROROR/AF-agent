@@ -12,6 +12,10 @@ export class InMemoryRenderArtifactUploadRepository implements RenderArtifactUpl
     return [...this.rows.values()].find((r) => r.jobId === jobId) ?? null;
   }
 
+  async listByProjectId(projectId: string): Promise<RenderArtifactUploadRecord[]> {
+    return [...this.rows.values()].filter((r) => r.projectId === projectId);
+  }
+
   async insert(row: NewRenderArtifactUploadRecord, now: Date): Promise<RenderArtifactUploadRecord> {
     const created: RenderArtifactUploadRecord = { ...row, createdAt: now };
     this.rows.set(created.id, created);

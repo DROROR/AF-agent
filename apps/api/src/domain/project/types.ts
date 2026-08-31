@@ -38,4 +38,15 @@ export interface ProjectRepository {
   updateManifest(id: string, manifest: Project["manifest"], now: Date): Promise<Project | null>;
   /** Replaces the whole brand-inputs object in place - never revisioned (this is small, single-value project configuration, not a plan/work-map history). */
   updateBrandInputs(id: string, brandInputs: ProjectBrandInputs, now: Date): Promise<Project | null>;
+  /**
+   * Deletes the project row - cascades (ON DELETE CASCADE) to every
+   * project-scoped table (assets, work maps, execution plans/sessions,
+   * mapping suggestions, scene evidence, render artifacts/uploads, jobs -
+   * see packages/database/src/schema.ts). Never deletes a real storage
+   * file itself - the application layer (delete-project.ts) must collect
+   * and delete every owned AssetStorage object BEFORE calling this, same
+   * ordering rule as delete-asset.ts. A no-op (never throws) if the
+   * project doesn't exist.
+   */
+  delete(id: string): Promise<void>;
 }

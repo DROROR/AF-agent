@@ -104,6 +104,69 @@ describe("dispatchJobRequestSchema - EXECUTE_FRAME never accepts a raw worker pa
   });
 });
 
+describe("dispatchJobRequestSchema - INSPECT_SCENE_EVIDENCE never accepts a raw worker payload", () => {
+  it("accepts the minimal intent shape", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        scenePlanId: "scene-1"
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects a missing scenePlanId - the scene to inspect is never inferred", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({ operation: "INSPECT_SCENE_EVIDENCE", workerId: WORKER_ID, projectId: PROJECT_ID })
+    ).toThrow();
+  });
+
+  it("rejects a raw sourceProjectPath - a real Windows filesystem path is never accepted from the browser, resolved server-side from the project's own manifest instead", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        scenePlanId: "scene-1",
+        sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep"
+      })
+    ).toThrow();
+  });
+
+  it("rejects raw layerIndices - resolved server-side from the scene's own manifest placeholders, never the caller", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        scenePlanId: "scene-1",
+        layerIndices: [1, 2, 3]
+      })
+    ).toThrow();
+  });
+
+  it("rejects the old raw `payload` field entirely - no payload passthrough exists on this operation anymore", () => {
+    expect(() =>
+      dispatchJobRequestSchema.parse({
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId: WORKER_ID,
+        projectId: PROJECT_ID,
+        scenePlanId: "scene-1",
+        payload: {
+          sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
+          sourceProjectSha256: "a".repeat(64),
+          manifestCompositionId: "comp-1",
+          aeProjectItemIndex: 1,
+          compositionName: "Scene 01",
+          layerIndices: [1],
+          previewTimestampSeconds: null
+        }
+      })
+    ).toThrow();
+  });
+});
+
 describe("dispatchJobRequestSchema - RENDER never accepts a raw worker payload", () => {
   it("accepts the minimal intent shape (variant only)", () => {
     expect(() =>

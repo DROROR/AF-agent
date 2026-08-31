@@ -14,6 +14,11 @@ import {
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../domain/project/types.js";
 import type { AssetRepository } from "../domain/asset/types.js";
+import type { AssetStorage } from "../domain/asset-storage/types.js";
+import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
+import type { JobRepository } from "../domain/job/types.js";
+import type { RenderArtifactRepository } from "../domain/render-artifact/types.js";
+import type { RenderArtifactUploadRepository } from "../domain/render-artifact-upload/types.js";
 import type { SessionRepository, UserRepository } from "../domain/auth/types.js";
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
@@ -21,6 +26,7 @@ import { createProject } from "../application/project/create-project.js";
 import { getProject } from "../application/project/get-project.js";
 import { listProjects } from "../application/project/list-projects.js";
 import { updateBrandInputs } from "../application/project/update-brand-inputs.js";
+import { deleteProject } from "../application/project/delete-project.js";
 import { createExecutionPlan } from "../application/execution-plan/create-execution-plan.js";
 import { getExecutionPlan } from "../application/execution-plan/get-execution-plan.js";
 import { listExecutionPlanRevisions } from "../application/execution-plan/list-execution-plan-revisions.js";
@@ -35,6 +41,11 @@ export interface ProjectsRouteDeps {
   projectRepository: ProjectRepository;
   executionPlanRepository: ExecutionPlanRepository;
   assetRepository: AssetRepository;
+  assetStorage: AssetStorage;
+  jobRepository: JobRepository;
+  executionSessionRepository: ExecutionSessionRepository;
+  renderArtifactRepository: RenderArtifactRepository;
+  renderArtifactUploadRepository: RenderArtifactUploadRepository;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   now?: () => Date;
@@ -80,6 +91,32 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const result = await getProject({ projectRepository: deps.projectRepository }, projectId);
     reply.send(result);
+  });
+
+  /**
+   * Offline-safe-control-plane phase, section 1 ("Add Delete Project") -
+   * see delete-project.ts's own doc comment for the full safety contract
+   * (refuses while an active job exists, deletes owned storage before the
+   * DB row, never touches the Windows worker's own filesystem). 204: a
+   * real DELETE with no body to return, same convention as every other
+   * successful DELETE in this API.
+   */
+  app.delete("/api/projects/:projectId", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId } = projectIdParamsSchema.parse(request.params);
+    await deleteProject(
+      {
+        projectRepository: deps.projectRepository,
+        jobRepository: deps.jobRepository,
+        assetRepository: deps.assetRepository,
+        assetStorage: deps.assetStorage,
+        executionSessionRepository: deps.executionSessionRepository,
+        renderArtifactRepository: deps.renderArtifactRepository,
+        renderArtifactUploadRepository: deps.renderArtifactUploadRepository
+      },
+      projectId
+    );
+    reply.status(204).send();
   });
 
   /** Replaces the client's whole brand-inputs object - input only, never DYO's own permanent brand rules (see project.ts's doc comment) and never executed in After Effects by this phase. */

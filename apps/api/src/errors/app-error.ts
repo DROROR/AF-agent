@@ -23,6 +23,7 @@ function statusForCode(code: ErrorCode): number {
     case "WORKER_OFFLINE":
     case "PRECONDITION_NOT_MET":
     case "WORKER_BUSY":
+    case "PROJECT_HAS_ACTIVE_JOB":
       return 409;
     case "PAYLOAD_TOO_LARGE":
       return 413;
@@ -383,5 +384,22 @@ export class NoUsableWorkMapDraftError extends AppError {
   constructor() {
     super("NO_USABLE_WORK_MAP_DRAFT", "AI could not build a plan from that description. Try adding more detail about which scene should show what.");
     this.name = "NoUsableWorkMapDraftError";
+  }
+}
+
+/**
+ * Delete Project refused: a QUEUED/CLAIMED/RUNNING/WAITING_FOR_ACTION job
+ * still exists for this project (offline-safe-control-plane phase,
+ * section 1: "refuse deletion while an active/running job exists") -
+ * deleting the project's rows out from under an in-flight worker job would
+ * cascade-delete state (execution plan, work map, assets) the worker may
+ * still be reading mid-job, and would leave a job pointing at a project
+ * that no longer exists. The operator must wait for the job to finish or
+ * fail before deleting.
+ */
+export class ProjectHasActiveJobError extends AppError {
+  constructor(projectId: string) {
+    super("PROJECT_HAS_ACTIVE_JOB", `Project ${projectId} has a job still in progress - wait for it to finish before deleting`);
+    this.name = "ProjectHasActiveJobError";
   }
 }

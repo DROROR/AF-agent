@@ -922,6 +922,13 @@ describe("POST /api/jobs (dispatch) - CHECK_HEALTH", () => {
 describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistence (full real HTTP cycle)", () => {
   const SOURCE_SHA = "a".repeat(64);
 
+  /**
+   * A real composition + scene + one placeholder (layerIndex 3) - the
+   * server-side resolver (resolve-inspect-scene-evidence-dispatch.ts)
+   * derives sourceProjectPath/aeProjectItemIndex/compositionName/
+   * layerIndices entirely from this manifest, never from the caller (see
+   * that file's own doc comment).
+   */
   async function createRealProject(): Promise<string> {
     const response = await harness.app.inject({
       method: "POST",
@@ -936,8 +943,36 @@ describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistenc
           sourceProject: { path: "/copies/test.aep", name: "test.aep", sha256: SOURCE_SHA },
           afterEffects: { version: "26.3x87" },
           generatedAt: new Date().toISOString(),
-          compositions: [],
-          scenes: [],
+          compositions: [
+            { compositionId: "comp-1", aeProjectItemIndex: 1, name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+          ],
+          scenes: [
+            {
+              sceneId: "scene-a",
+              displayName: null,
+              compositionId: "comp-1",
+              originalOrderIndex: 0,
+              startTimeSeconds: 0,
+              durationSeconds: 5,
+              placeholders: [
+                {
+                  placeholderId: "ph-1",
+                  displayLabel: null,
+                  compositionId: "comp-1",
+                  layerName: "Headline",
+                  layerIndex: 3,
+                  layerPath: [],
+                  placeholderType: "text",
+                  editable: true,
+                  sourceType: "TextLayer",
+                  dimensions: null,
+                  startTimeSeconds: 0,
+                  durationSeconds: 5,
+                  evidence: { source: "read_directly", reason: "confirmed via ae_get_composition" }
+                }
+              ]
+            }
+          ],
           preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
           unknownItems: []
         }
@@ -947,8 +982,23 @@ describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistenc
     return response.json().projectId as string;
   }
 
+  /** Creates the project's initial (auto-derived) execution plan and returns its one real scenePlanId. */
+  async function createPlanAndGetScenePlanId(projectId: string): Promise<string> {
+    const response = await harness.app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/execution-plan`,
+      headers: { authorization: `Bearer ${sessionToken}` },
+      payload: {}
+    });
+    expect(response.statusCode).toBe(201);
+    const scenePlanId = response.json().plan.scenePlans[0]?.id as string | undefined;
+    if (!scenePlanId) throw new Error("test setup: auto-derived execution plan has no scene plans");
+    return scenePlanId;
+  }
+
   it("persists a durable scene_evidence record only once the reported job genuinely reaches SUCCEEDED with a valid result", async () => {
     const projectId = await createRealProject();
+    const scenePlanId = await createPlanAndGetScenePlanId(projectId);
     const { workerId, workerToken } = await registerHealthyWorker(harness.app, { capabilities: ["INSPECT_SCENE_EVIDENCE"] });
 
     const dispatchResponse = await harness.app.inject({
@@ -959,19 +1009,22 @@ describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistenc
         operation: "INSPECT_SCENE_EVIDENCE",
         workerId,
         projectId,
-        payload: {
-          sourceProjectPath: "/copies/test.aep",
-          sourceProjectSha256: SOURCE_SHA,
-          manifestCompositionId: "comp-1",
-          aeProjectItemIndex: 1,
-          compositionName: "Scene A",
-          layerIndices: [1],
-          previewTimestampSeconds: null
-        }
+        scenePlanId
       }
     });
     expect(dispatchResponse.statusCode).toBe(201);
     const jobId = dispatchResponse.json().jobId as string;
+    // The server resolved the real worker payload itself (never the caller) -
+    // proves the safe-dispatch resolver actually ran, not just that a job
+    // was created.
+    const jobResponse = await harness.app.inject({
+      method: "GET",
+      url: `/api/jobs/${jobId}`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    const dispatchedPayload = jobResponse.json().job.payload as Record<string, unknown>;
+    expect(dispatchedPayload.sourceProjectPath).toBe("/copies/test.aep");
+    expect(dispatchedPayload.layerIndices).toEqual([3]);
 
     const claimResponse = await harness.app.inject({
       method: "POST",
@@ -1021,6 +1074,7 @@ describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistenc
 
   it("never persists scene evidence for a FAILED job, even one that reports a result-shaped payload", async () => {
     const projectId = await createRealProject();
+    const scenePlanId = await createPlanAndGetScenePlanId(projectId);
     const { workerId, workerToken } = await registerHealthyWorker(harness.app, { capabilities: ["INSPECT_SCENE_EVIDENCE"] });
 
     const dispatchResponse = await harness.app.inject({
@@ -1031,15 +1085,7 @@ describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistenc
         operation: "INSPECT_SCENE_EVIDENCE",
         workerId,
         projectId,
-        payload: {
-          sourceProjectPath: "/copies/test.aep",
-          sourceProjectSha256: SOURCE_SHA,
-          manifestCompositionId: "comp-1",
-          aeProjectItemIndex: 1,
-          compositionName: "Scene A",
-          layerIndices: [1],
-          previewTimestampSeconds: null
-        }
+        scenePlanId
       }
     });
     const jobId = dispatchResponse.json().jobId as string;

@@ -266,22 +266,12 @@ describe("dispatchJob", () => {
       FIXED_NOW
     );
 
-    const sceneEvidencePayload = {
-      sourceProjectPath: "/copies/t.aep",
-      sourceProjectSha256: "a".repeat(64),
-      manifestCompositionId: "comp-275",
-      aeProjectItemIndex: 14,
-      compositionName: "Text 01",
-      layerIndices: [1],
-      previewTimestampSeconds: null
-    };
-
     await expect(
       dispatchJob(deps(jobRepository, workerRepository), {
         operation: "INSPECT_SCENE_EVIDENCE",
         workerId,
         projectId: randomUUID(),
-        payload: sceneEvidencePayload
+        scenePlanId: "scene-1"
       })
     ).rejects.toThrow(PreconditionNotMetError);
   });
@@ -300,27 +290,17 @@ describe("dispatchJob", () => {
       FIXED_NOW
     );
 
-    const sceneEvidencePayload = {
-      sourceProjectPath: "/copies/t.aep",
-      sourceProjectSha256: "a".repeat(64),
-      manifestCompositionId: "comp-275",
-      aeProjectItemIndex: 14,
-      compositionName: "Text 01",
-      layerIndices: [1],
-      previewTimestampSeconds: null
-    };
-
     await expect(
       dispatchJob(deps(jobRepository, workerRepository), {
         operation: "INSPECT_SCENE_EVIDENCE",
         workerId,
         projectId: randomUUID(),
-        payload: sceneEvidencePayload
+        scenePlanId: "scene-1"
       })
     ).rejects.toThrow(ProjectNotFoundError);
   });
 
-  it("attaches the real projectId to the created job when dispatching INSPECT_SCENE_EVIDENCE for a project that exists", async () => {
+  it("rejects an INSPECT_SCENE_EVIDENCE dispatch when no execution plan exists yet for the project - never guesses a scene", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);
     const projectRepository = new InMemoryProjectRepository();
@@ -336,32 +316,77 @@ describe("dispatchJob", () => {
     );
     const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: minimalManifest() });
 
-    const sceneEvidencePayload = {
-      sourceProjectPath: "/copies/t.aep",
-      sourceProjectSha256: "a".repeat(64),
-      manifestCompositionId: "comp-275",
-      aeProjectItemIndex: 14,
-      compositionName: "Text 01",
-      layerIndices: [1],
-      previewTimestampSeconds: null
-    };
+    await expect(
+      dispatchJob(
+        {
+          jobRepository,
+          workerRepository,
+          projectRepository,
+          executionPlanRepository: new InMemoryExecutionPlanRepository(),
+          executionSessionRepository: new InMemoryExecutionSessionRepository(),
+          assetRepository: new InMemoryAssetRepository(),
+          now: () => FIXED_NOW,
+          staleAfterMs: STALE_AFTER_MS
+        },
+        { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1" }
+      )
+    ).rejects.toThrow(PreconditionNotMetError);
+  });
+
+  it("resolves the real worker payload (sourceProjectPath/layerIndices) from the trusted manifest and plan - never a raw caller-supplied path", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const workerId = randomUUID();
+    await workerRepository.create(
+      { id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] },
+      FIXED_NOW
+    );
+    await workerRepository.updateHeartbeat(
+      workerId,
+      { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null },
+      FIXED_NOW
+    );
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "DRAFT",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: null,
+        approvedBy: null
+      },
+      FIXED_NOW
+    );
 
     const result = await dispatchJob(
       {
         jobRepository,
         workerRepository,
         projectRepository,
-        executionPlanRepository: new InMemoryExecutionPlanRepository(),
+        executionPlanRepository,
         executionSessionRepository: new InMemoryExecutionSessionRepository(),
         assetRepository: new InMemoryAssetRepository(),
         now: () => FIXED_NOW,
         staleAfterMs: STALE_AFTER_MS
       },
-      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, payload: sceneEvidencePayload }
+      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1" }
     );
 
     const job = await jobRepository.findById(result.jobId);
     expect(job?.projectId).toBe(project.projectId);
+    const payload = job?.payload as Record<string, unknown>;
+    expect(payload.sourceProjectPath).toBe("C:\\vidio agent\\White App Promo (converted).aep");
+    expect(payload.sourceProjectSha256).toBe("a".repeat(64));
+    expect(payload.manifestCompositionId).toBe("comp-1");
+    expect(payload.aeProjectItemIndex).toBe(5);
+    expect(payload.compositionName).toBe("Scene 01");
+    expect(payload.layerIndices).toEqual([2]);
   });
 });
 

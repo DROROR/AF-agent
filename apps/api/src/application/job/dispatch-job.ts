@@ -17,6 +17,7 @@ import {
 import { sweepStaleWorkers } from "../worker/sweep-stale-workers.js";
 import { resolveExecuteFrameDispatch } from "../../domain/execute-frame-dispatch/resolve-execute-frame-dispatch.js";
 import { resolveRenderDispatch } from "../../domain/render-dispatch/resolve-render-dispatch.js";
+import { resolveInspectSceneEvidenceDispatch } from "../../domain/scene-evidence-dispatch/resolve-inspect-scene-evidence-dispatch.js";
 import { createJob } from "./create-job.js";
 import { resolveExecuteFrameResumeCheckpoint, resolveRenderResumeCheckpoint } from "./resolve-resume-checkpoint.js";
 
@@ -185,8 +186,20 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     const resumeCheckpoint = await resolveRenderResumeCheckpoint(deps.jobRepository, resolved.payload);
     payload = { ...resolved.payload, checkpoint: resumeCheckpoint };
   } else if (request.operation === "INSPECT_SCENE_EVIDENCE") {
+    if (!project) {
+      throw new ProjectNotFoundError(request.projectId);
+    }
     projectId = request.projectId;
-    payload = request.payload;
+    const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    const resolved = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: request.scenePlanId,
+      currentPlan: plan,
+      currentProjectManifest: project.manifest
+    });
+    if (!resolved.ok) {
+      throw new PreconditionNotMetError(resolved.reason);
+    }
+    payload = resolved.payload;
   } else {
     payload = request.payload;
   }

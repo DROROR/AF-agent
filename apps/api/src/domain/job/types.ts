@@ -111,4 +111,6 @@ export interface JobRepository {
   ): Promise<Job | null>;
   /** This user's own full dispatch history, newest first, capped at `limit` - see list-jobs-for-user.ts ("job history + errors" closure requirement). Never another user's jobs. */
   listByCreatedByUserId(userId: string, limit: number): Promise<Job[]>;
+  /** True if any job for this project is still non-terminal (QUEUED/CLAIMED/RUNNING/WAITING_FOR_ACTION) - used by delete-project.ts to refuse deleting a project out from under an in-flight worker job. */
+  hasNonTerminalJobForProject(projectId: string): Promise<boolean>;
 }

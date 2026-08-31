@@ -177,6 +177,20 @@ export async function fetchProjectDetail(projectId: string): Promise<ApiResult<P
   return { ok: true, data: parsed.data };
 }
 
+/**
+ * Offline-safe-control-plane phase, section 1 ("Add Delete Project"). The
+ * real API refuses this with 409 PROJECT_HAS_ACTIVE_JOB (surfaced as a
+ * normal ApiResult failure) while a job is still non-terminal for this
+ * project - never silently retried or masked as a generic failure.
+ */
+export async function deleteProject(projectId: string): Promise<ApiResult<true>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+  if (status !== 204) {
+    return toErrorResult(status, json);
+  }
+  return { ok: true, data: true };
+}
+
 export async function fetchExecutionPlan(projectId: string): Promise<ApiResult<ExecutionPlanResponse>> {
   const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-plan`);
   if (status !== 200) {

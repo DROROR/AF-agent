@@ -70,6 +70,11 @@ export class DrizzleExecutionSessionRepository implements ExecutionSessionReposi
     return row ? toDomain(row) : null;
   }
 
+  async listByProjectId(projectId: string): Promise<ExecutionSessionRecord[]> {
+    const rows = await this.db.select().from(executionSessions).where(eq(executionSessions.projectId, projectId));
+    return rows.map(toDomain);
+  }
+
   async recordSceneCompleted(
     id: string,
     scenePlanId: string,

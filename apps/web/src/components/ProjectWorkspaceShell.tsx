@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactElement, ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { PlanStatusBadge } from "./PlanStatusBadge";
 import { ErrorState } from "./ErrorState";
 import { Card } from "./ui/Card";
 import { Skeleton } from "./ui/Skeleton";
+import { Button } from "./ui/Button";
+import { Dialog } from "./ui/Dialog";
 import { useLocale } from "./LocaleProvider";
+import { deleteProject } from "../lib/projects-api-client";
 
 interface TabDef {
   href: string;
@@ -36,7 +39,23 @@ function tabsFor(projectId: string): TabDef[] {
 export function ProjectWorkspaceShell({ projectId, children }: { projectId: string; children: ReactNode }): ReactElement {
   const { t } = useLocale();
   const pathname = usePathname();
+  const router = useRouter();
   const { project, plan, isLoading, error } = useProjectWorkspaceContext();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleConfirmDelete(): Promise<void> {
+    setIsDeleting(true);
+    setDeleteError(null);
+    const result = await deleteProject(projectId);
+    setIsDeleting(false);
+    if (!result.ok) {
+      setDeleteError(result.message ?? null);
+      return;
+    }
+    router.push("/projects");
+  }
 
   if (isLoading) {
     return (
@@ -83,8 +102,25 @@ export function ProjectWorkspaceShell({ projectId, children }: { projectId: stri
             ) : null}
           </p>
         </div>
-        {plan ? <PlanStatusBadge status={plan.plan.status} /> : null}
+        <div className="workspace-header__actions">
+          {plan ? <PlanStatusBadge status={plan.plan.status} /> : null}
+          <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(true)}>
+            {t.projectWorkspace.deleteProjectAction}
+          </Button>
+        </div>
       </div>
+      <Dialog open={confirmingDelete} onClose={() => setConfirmingDelete(false)} title={t.projectWorkspace.deleteConfirmTitle} variant="modal">
+        <p>{t.projectWorkspace.deleteConfirmDescription(project.project.name)}</p>
+        {deleteError ? <ErrorState title={t.projectWorkspace.deleteFailedTitle} description={deleteError} /> : null}
+        <div className="edit-drawer-actions">
+          <Button variant="ghost" disabled={isDeleting} onClick={() => setConfirmingDelete(false)}>
+            {t.projectWorkspace.deleteCancelAction}
+          </Button>
+          <Button variant="primary" disabled={isDeleting} onClick={() => void handleConfirmDelete()}>
+            {isDeleting ? t.projectWorkspace.deletingAction : t.projectWorkspace.deleteConfirmAction}
+          </Button>
+        </div>
+      </Dialog>
       <nav className="workspace-tabs" aria-label={t.projectWorkspace.tabs.overview}>
         {tabs.map((tab) => (
           <Link key={tab.href} href={tab.href} className="workspace-tab" data-active={pathname === tab.href}>

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectScenesTab } from "./ProjectScenesTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
@@ -22,9 +23,11 @@ afterEach(() => {
 
 function renderScenes(): void {
   renderWithLocale(
-    <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <ProjectScenesTab />
-    </ProjectWorkspaceProvider>
+    <DashboardStatusProvider>
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <ProjectScenesTab />
+      </ProjectWorkspaceProvider>
+    </DashboardStatusProvider>
   );
 }
 

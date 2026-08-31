@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MappingAssistantPanel } from "./MappingAssistantPanel";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
@@ -45,23 +46,101 @@ function mappingFixture(overrides: Record<string, unknown> = {}) {
 function stubWorkspace(
   mappingSuggestionsHandler: Parameters<typeof stubFetchByUrl>[0][string],
   assetsHandler: Parameters<typeof stubFetchByUrl>[0][string] = { status: 200, body: { assets: [] } },
-  scenes = [sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture()] })]
+  scenes = [sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture()] })],
+  extra: Record<string, Parameters<typeof stubFetchByUrl>[0][string]> = {}
 ): void {
   stubFetchByUrl({
+    "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
     [`/api/projects/${PROJECT_ID}/mapping-suggestions`]: mappingSuggestionsHandler,
     [`/api/projects/${PROJECT_ID}/assets`]: assetsHandler,
     [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({}, scenes), sceneTable: [] } },
-    [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+    ...extra
   });
 }
 
 function renderPanel(): void {
   renderWithLocale(
-    <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <MappingAssistantPanel />
-    </ProjectWorkspaceProvider>
+    <DashboardStatusProvider>
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <MappingAssistantPanel />
+      </ProjectWorkspaceProvider>
+    </DashboardStatusProvider>
   );
 }
+
+/**
+ * "Improve AI accuracy" (offline-safe-control-plane phase, sections 2/3) -
+ * dispatches via the SAME safe scenePlanId-only intent EXECUTE_FRAME/RENDER
+ * already use (see resolve-inspect-scene-evidence-dispatch.ts). Never
+ * exposes INSPECT_SCENE_EVIDENCE, sourceProjectPath, or any Worker
+ * operation code to the user - and never auto-regenerates suggestions.
+ *
+ * Placed BEFORE the main describe block below (whose last test switches the
+ * shared jsdom document's lang to "he" via renderWithLocale and is never
+ * reset - see that file's own doc comment) so these tests always run while
+ * the locale is still the default "en", matching every other test file's
+ * own "Hebrew test goes last" convention.
+ */
+describe("MappingAssistantPanel - Improve AI accuracy", () => {
+  it("shows the button for a scene whose evidence is NOT_INSPECTED, and dispatches the real minimal-intent job when a worker is available", async () => {
+    stubWorkspace(
+      { status: 200, body: { suggestions: [mappingSuggestionFixture()], aiAvailable: false, sceneEvidenceAvailability: {} } },
+      { status: 200, body: { assets: [] } },
+      [sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture()] })],
+      {
+        "/api/dashboard/status": {
+          status: 200,
+          body: {
+            api: "ok",
+            database: "ok",
+            workers: [{ workerId: "11111111-1111-1111-1111-111111111111", name: "Client PC", status: "ONLINE", aeStatus: "ONLINE", mcpStatus: "ONLINE", capabilities: ["INSPECT_SCENE_EVIDENCE"], currentJobId: null, maxConcurrency: 1, lastHeartbeatAt: new Date().toISOString() }]
+          }
+        },
+        "/api/jobs": {
+          status: 201,
+          body: { jobId: "22222222-2222-2222-2222-222222222222", workerId: "11111111-1111-1111-1111-111111111111", operation: "INSPECT_SCENE_EVIDENCE", status: "QUEUED", createdAt: new Date().toISOString() }
+        }
+      }
+    );
+    renderPanel();
+    await screen.findByText("Scene evidence: Not inspected");
+    fireEvent.click(screen.getByRole("button", { name: "Improve AI accuracy" }));
+
+    await screen.findByText(/Sent to your editing computer/);
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const dispatchCall = fetchMock.mock.calls.find((call: unknown[]) => call[0] === "/api/jobs");
+    const [, init] = dispatchCall as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
+    expect(body).toEqual({ operation: "INSPECT_SCENE_EVIDENCE", workerId: "11111111-1111-1111-1111-111111111111", projectId: PROJECT_ID, scenePlanId: "scene-1" });
+  });
+
+  it("shows the plain offline message and never dispatches when no compatible worker is online - no internal operation codes or paths ever shown", async () => {
+    stubWorkspace(
+      { status: 200, body: { suggestions: [mappingSuggestionFixture()], aiAvailable: false, sceneEvidenceAvailability: {} } },
+      { status: 200, body: { assets: [] } },
+      [sceneFixture({ id: "scene-1", compositionName: "Scene 01", mappings: [mappingFixture()] })],
+      { "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } } }
+    );
+    renderPanel();
+    await screen.findByText("Scene evidence: Not inspected");
+    fireEvent.click(screen.getByRole("button", { name: "Improve AI accuracy" }));
+
+    await screen.findByText("Your editing computer is offline. Turn it on to improve AI accuracy.");
+    expect(screen.queryByText(/INSPECT_SCENE_EVIDENCE/)).toBeNull();
+    expect(screen.queryByText(/sourceProjectPath/)).toBeNull();
+  });
+
+  it("never shows the button once evidence is already available for a scene", async () => {
+    stubWorkspace(
+      { status: 200, body: { suggestions: [mappingSuggestionFixture()], aiAvailable: false, sceneEvidenceAvailability: { "comp-1": "AVAILABLE" } } },
+      { status: 200, body: { assets: [] } }
+    );
+    renderPanel();
+    await screen.findByText(/Evidence inspected/);
+    expect(screen.queryByRole("button", { name: "Improve AI accuracy" })).toBeNull();
+  });
+});
 
 describe("MappingAssistantPanel", () => {
   it('shows the honest empty state "No suggestions yet" when there are none - never a fake suggestion', async () => {
@@ -202,6 +281,7 @@ describe("MappingAssistantPanel", () => {
 
   it("accepts a suggestion and removes it from the pending list, showing it as User Confirmed", async () => {
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/mapping-suggestions`]: [
         { status: 200, body: { suggestions: [mappingSuggestionFixture()], aiAvailable: false, sceneEvidenceAvailability: {} } },
         { status: 200, body: { suggestions: [mappingSuggestionFixture({ status: "ACCEPTED" })], aiAvailable: false, sceneEvidenceAvailability: {} } }
@@ -227,6 +307,7 @@ describe("MappingAssistantPanel", () => {
 
   it("rejects a suggestion and leaves it visible as Rejected, never silently removed", async () => {
     stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/mapping-suggestions`]: [
         { status: 200, body: { suggestions: [mappingSuggestionFixture()], aiAvailable: false, sceneEvidenceAvailability: {} } },
         { status: 200, body: { suggestions: [mappingSuggestionFixture({ status: "REJECTED" })], aiAvailable: false, sceneEvidenceAvailability: {} } }
@@ -282,9 +363,11 @@ describe("MappingAssistantPanel", () => {
   it("renders in Hebrew when the active locale is he", async () => {
     stubWorkspace({ status: 200, body: { suggestions: [], aiAvailable: false, sceneEvidenceAvailability: {} } });
     renderWithLocale(
-      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-        <MappingAssistantPanel />
-      </ProjectWorkspaceProvider>,
+      <DashboardStatusProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <MappingAssistantPanel />
+        </ProjectWorkspaceProvider>
+      </DashboardStatusProvider>,
       { locale: "he" }
     );
     await screen.findByText("אין עדיין הצעות");

@@ -1,5 +1,89 @@
 # MVP Runbook
 
+## Normal client flow (dashboard-simplification phase, 2026-08-31)
+
+The dashboard's default UI hides technical IDs/operation codes from a
+normal client. What they actually click, in order:
+
+1. **Create Project** - name it, upload the `.aep` template (dispatches
+   INSPECT_TEMPLATE on a worker under the hood).
+2. **Upload Template & Assets** - screen recordings, logo, images.
+3. **Tell AI What You Want** - a plain-language textarea drives an AI
+   Work Map draft (draft-only: never auto-approves anything, never touches
+   AE - see `generate-ai-work-map-draft.ts`).
+4. **Review Video Plan** - a human-readable table (Scene/Content/Text/
+   Duration/Action), real scene names and asset filenames, never raw IDs.
+   Raw composition/asset/mapping IDs remain available under "Advanced
+   details" - never deleted from the data model, just not shown by default.
+5. **Review Scene Mappings** - the Mapping Assistant, grouped by scene,
+   plain-language confidence (High/Medium/Needs review). "Improve AI
+   accuracy" (see below) is available per scene here.
+6. **Create First Preview / Approve Full Preview** - the same human
+   approval gates as before, unchanged.
+7. **Render Landscape / Reels**.
+
+This is presentation only - every technical requirement below (Template
+Manifest, Work Map persistence, Execution Plan, deterministic AE
+execution, `.aep` protection, approval gates, checkpoint/recovery) is
+unchanged underneath.
+
+## What can be done with the client PC offline vs. what needs it ONLINE
+
+**CAN be done with the client Windows PC offline** (control-plane only,
+never reaches ae-mcp/AE):
+- create/list/delete a project,
+- upload assets,
+- AI Work Map drafting ("Tell AI what you want"),
+- Mapping Assistant suggestion generation (deterministic + AI, both read
+  only already-persisted scene evidence/manifest/Work Map - never
+  dispatches a new worker job),
+- accept/reject mapping suggestions, edit the execution plan,
+- Delete Project (refuses with 409 if a job is still in-flight for that
+  project - see `delete-project.ts`),
+- every dashboard/account/settings/BYOK-AI-provider configuration.
+
+**REQUIRES the Windows PC (Worker + AE + ae-mcp) ONLINE**:
+- scene evidence inspection ("Improve AI accuracy" - dispatches a real
+  INSPECT_SCENE_EVIDENCE job; the dashboard shows "Your editing computer
+  is offline. Turn it on to improve AI accuracy." rather than queuing
+  anything when no compatible worker is available - see
+  `find-dispatchable-worker.ts`),
+- real AE scene edits (EXECUTE_FRAME),
+- first preview / full preview capture,
+- `aerender` (RENDER),
+- interrupted-job recovery/resume,
+- the full 3-template MVP acceptance run (CLAUDE.md's MVP Acceptance
+  section) - none of those stages can be claimed to have passed while the
+  Worker has not actually run them.
+
+### Delete Project - safety contract
+
+`DELETE /api/projects/:projectId` (see `delete-project.ts`) requires an
+explicit confirmation dialog naming the real project (never one-click),
+refuses with 409 `PROJECT_HAS_ACTIVE_JOB` while any job for that project
+is still QUEUED/CLAIMED/RUNNING/WAITING_FOR_ACTION, and deletes every real
+AssetStorage object the project owns (uploaded assets, execution-session
+previews, render artifacts/uploads) before deleting the DB row (which then
+cascades to every project-scoped table). It never touches the Windows
+worker's own filesystem - the original client `.aep` is never copied into
+Contabo's AssetStorage in the first place, only its path/sha256 live in
+the project's manifest, so there is no "original .aep" this operation
+could ever delete, by construction.
+
+### "Improve AI accuracy" - safe scene-evidence dispatch
+
+The browser never supplies a raw Windows `sourceProjectPath` or AE layer
+indices. It sends only `{ projectId, scenePlanId }`; the server resolves
+the real worker payload (`sourceProjectPath`, `sourceProjectSha256`,
+`aeProjectItemIndex`, `compositionName`, `layerIndices`) entirely from the
+project's trusted, already-persisted manifest and execution plan - see
+`resolve-inspect-scene-evidence-dispatch.ts`, the same safe-dispatch
+pattern EXECUTE_FRAME/RENDER already use. The operation itself is strictly
+read-only (no save, no layer/asset mutation, no approval, no render - see
+`scene-evidence.ts`'s own module doc comment) and never auto-regenerates
+mapping suggestions - the user always clicks "Generate Suggestions"
+explicitly afterward.
+
 ## Start order
 1. Start Contabo database/API/web.
 2. Start Windows DYO Worker.

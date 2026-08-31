@@ -69,4 +69,8 @@ export class DrizzleProjectRepository implements ProjectRepository {
     const [row] = await this.db.update(projects).set({ brandInputs, updatedAt: now }).where(eq(projects.id, id)).returning();
     return row ? toDomain(row) : null;
   }
+
+  async delete(id: string): Promise<void> {
+    await this.db.delete(projects).where(eq(projects.id, id));
+  }
 }

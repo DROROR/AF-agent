@@ -3,8 +3,11 @@
 import { useState, type ReactElement } from "react";
 import type { EvidenceRef, MappingSuggestion, SceneEvidenceStatus, SuggestionSource } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
 import { useProjectAssets } from "../lib/use-project-assets";
+import { dispatchJob } from "../lib/projects-api-client";
+import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./EmptyState";
@@ -53,8 +56,11 @@ export function MappingAssistantPanel(): ReactElement | null {
   const { suggestions, aiAvailable, sceneEvidenceAvailability, isLoading, isGenerating, error, generate, accept, reject } =
     useMappingSuggestions(project?.project.projectId ?? "");
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
+  const { data: dashboardStatus } = useDashboardStatusContext();
   const [actionError, setActionError] = useState<string | null>(null);
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null);
+  const [improvingSceneId, setImprovingSceneId] = useState<string | null>(null);
+  const [improveMessage, setImproveMessage] = useState<{ sceneId: string; text: string; isError: boolean } | null>(null);
 
   if (!project || !plan) {
     return null;
@@ -91,6 +97,35 @@ export function MappingAssistantPanel(): ReactElement | null {
     if (!result.ok) {
       setActionError(result.message ?? null);
     }
+  }
+
+  /**
+   * "Improve AI accuracy" (offline-safe-control-plane phase, section 2/3) -
+   * dispatches the real INSPECT_SCENE_EVIDENCE operation via the SAME safe,
+   * server-resolved path EXECUTE_FRAME/RENDER already use (see
+   * resolve-inspect-scene-evidence-dispatch.ts): the browser sends only
+   * `scenePlanId`, never a raw sourceProjectPath or layer indices. This is
+   * read-only (see CLAUDE.md/scene-evidence.ts) - it never saves the .aep,
+   * modifies layers, or touches mapping/execution-plan approval. Existing
+   * suggestions are never auto-regenerated here; the user must still click
+   * "Generate Suggestions" explicitly once evidence is ready.
+   */
+  async function handleImproveAccuracy(scenePlanId: string): Promise<void> {
+    setImprovingSceneId(scenePlanId);
+    setImproveMessage(null);
+    const worker = findDispatchableWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE");
+    if (!worker) {
+      setImprovingSceneId(null);
+      setImproveMessage({ sceneId: scenePlanId, text: t.mappingAssistant.editingComputerOffline, isError: true });
+      return;
+    }
+    const result = await dispatchJob({ operation: "INSPECT_SCENE_EVIDENCE", workerId: worker.workerId, projectId: project!.project.projectId, scenePlanId });
+    setImprovingSceneId(null);
+    if (!result.ok) {
+      setImproveMessage({ sceneId: scenePlanId, text: result.message, isError: true });
+      return;
+    }
+    setImproveMessage({ sceneId: scenePlanId, text: t.mappingAssistant.improveAccuracyQueued, isError: false });
   }
 
   const pending = (suggestions ?? []).filter((s) => s.status === "PENDING");
@@ -149,7 +184,20 @@ export function MappingAssistantPanel(): ReactElement | null {
                   <span className={`status-badge status-badge--${SCENE_EVIDENCE_TONE[sceneEvidenceStatus]}`}>
                     {t.mappingAssistant.sceneEvidenceLabel}: {t.mappingAssistant.sceneEvidenceStatus[sceneEvidenceStatus]}
                   </span>
+                  {scene && sceneEvidenceStatus !== "AVAILABLE" ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={improvingSceneId === scene.id}
+                      onClick={() => void handleImproveAccuracy(scene.id)}
+                    >
+                      {improvingSceneId === scene.id ? t.mappingAssistant.improvingAccuracy : t.mappingAssistant.improveAccuracyAction}
+                    </Button>
+                  ) : null}
                 </div>
+                {improveMessage && scene && improveMessage.sceneId === scene.id ? (
+                  <p className={improveMessage.isError ? "mapping-suggestion-scene-group__improve-error" : "field__hint"}>{improveMessage.text}</p>
+                ) : null}
                 <div className="mapping-suggestion-list">
                   {groupSuggestions.map((suggestion) => {
                     const mapping = scene?.mappings.find((m) => m.id === suggestion.mappingId) ?? null;

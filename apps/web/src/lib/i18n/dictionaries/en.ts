@@ -441,6 +441,14 @@ export const en = {
     reload: "Reload",
     savingLabel: "Saving…",
     saveFailedTitle: "Could not save this change",
+    deleteProjectAction: "Delete Project",
+    deleteConfirmTitle: "Delete this project?",
+    deleteConfirmDescription: (name: string): string =>
+      `"${name}" and everything in it (uploads, work map, scene mappings, previews, and renders) will be permanently deleted. This cannot be undone.`,
+    deleteConfirmAction: "Delete permanently",
+    deletingAction: "Deleting…",
+    deleteCancelAction: "Cancel",
+    deleteFailedTitle: "Could not delete this project",
     overview: {
       projectSection: "Project",
       planSection: "Execution plan",
@@ -650,7 +658,7 @@ export const en = {
     },
     sceneEvidenceLabel: "Scene evidence",
     sceneEvidenceStatus: {
-      AVAILABLE: "Available",
+      AVAILABLE: "Evidence inspected — AI accuracy improved",
       STALE: "Stale (captured against an older version of this project)",
       NOT_INSPECTED: "Not inspected"
     },
@@ -660,6 +668,10 @@ export const en = {
       needsReview: "Needs review"
     },
     whyThisSuggestion: "Why this suggestion?",
-    sceneGroupFallback: "Ungrouped"
+    sceneGroupFallback: "Ungrouped",
+    improveAccuracyAction: "Improve AI accuracy",
+    improvingAccuracy: "Sending…",
+    improveAccuracyQueued: "Sent to your editing computer. This can take a few minutes - check back and generate suggestions again once it's done.",
+    editingComputerOffline: "Your editing computer is offline. Turn it on to improve AI accuracy."
   }
 } as const;

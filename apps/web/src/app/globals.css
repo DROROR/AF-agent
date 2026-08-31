@@ -1808,6 +1808,13 @@ thead th {
   color: var(--color-text);
 }
 
+.workspace-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
 .workspace-header__facts {
   display: flex;
   flex-wrap: wrap;
@@ -2116,6 +2123,24 @@ thead th {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+
+.mapping-suggestion-scene-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.mapping-suggestion-scene-group__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.mapping-suggestion-scene-group__improve-error {
+  color: var(--color-negative-text);
+  font-size: 0.84rem;
 }
 
 .mapping-suggestion-list {

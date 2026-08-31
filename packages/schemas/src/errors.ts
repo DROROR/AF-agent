@@ -41,6 +41,8 @@ export const ERROR_CODES = [
   "AI_WORK_MAP_NOT_CONFIGURED",
   /** A real AI Work Map draft attempt ran but produced nothing usable (either no raw entries, or every raw entry was rejected by validation) - never silently reported as an empty-but-successful draft. */
   "NO_USABLE_WORK_MAP_DRAFT",
+  /** Delete Project refused: a QUEUED/CLAIMED/RUNNING/WAITING_FOR_ACTION job still exists for this project - deleting its rows out from under an in-flight worker job would leave the job pointing at nothing. */
+  "PROJECT_HAS_ACTIVE_JOB",
   "INTERNAL_ERROR"
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

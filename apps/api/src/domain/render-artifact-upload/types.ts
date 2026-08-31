@@ -31,6 +31,8 @@ export interface NewRenderArtifactUploadRecord {
 
 export interface RenderArtifactUploadRepository {
   findByJobId(jobId: string): Promise<RenderArtifactUploadRecord | null>;
+  /** Every upload ever recorded for this project - used by delete-project.ts to collect every owned storage object, including an upload whose job never reached a recorded render_artifacts row (e.g. a failed/superseded render attempt), before deleting their files. */
+  listByProjectId(projectId: string): Promise<RenderArtifactUploadRecord[]>;
   /** Inserts a brand-new row - callers must check findByJobId first and use replace() instead if one already exists (see upload-render-artifact.ts's own idempotent/replace-on-differing-content logic). */
   insert(row: NewRenderArtifactUploadRecord, now: Date): Promise<RenderArtifactUploadRecord>;
   /** Replaces an existing row's content in place (a genuine re-render produced different bytes) - never creates a second row for the same jobId (job_id is unique). */

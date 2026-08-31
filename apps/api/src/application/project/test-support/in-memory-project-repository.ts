@@ -48,4 +48,8 @@ export class InMemoryProjectRepository implements ProjectRepository {
     this.rows.set(id, updated);
     return updated;
   }
+
+  async delete(id: string): Promise<void> {
+    this.rows.delete(id);
+  }
 }

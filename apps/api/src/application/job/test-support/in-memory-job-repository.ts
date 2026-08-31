@@ -169,4 +169,8 @@ export class InMemoryJobRepository implements JobRepository {
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
   }
+
+  async hasNonTerminalJobForProject(projectId: string): Promise<boolean> {
+    return [...this.rows.values()].some((job) => job.projectId === projectId && !isJobTerminal(job.status));
+  }
 }

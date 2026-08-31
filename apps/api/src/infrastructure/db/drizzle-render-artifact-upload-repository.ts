@@ -29,6 +29,11 @@ export class DrizzleRenderArtifactUploadRepository implements RenderArtifactUplo
     return row ? toDomain(row) : null;
   }
 
+  async listByProjectId(projectId: string): Promise<RenderArtifactUploadRecord[]> {
+    const rows = await this.db.select().from(renderArtifactUploads).where(eq(renderArtifactUploads.projectId, projectId));
+    return rows.map(toDomain);
+  }
+
   async insert(row: NewRenderArtifactUploadRecord, now: Date): Promise<RenderArtifactUploadRecord> {
     const [inserted] = await this.db
       .insert(renderArtifactUploads)
