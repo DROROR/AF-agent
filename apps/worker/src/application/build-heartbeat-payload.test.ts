@@ -7,7 +7,8 @@ const baseHealth: HealthSnapshot = {
   aeVersion: "2026",
   aerenderAvailable: true,
   mcpStatus: "UNKNOWN",
-  mcpConfiguredPath: null
+  mcpConfiguredPath: null,
+  mcpProbeDetail: "not-configured"
 };
 
 describe("buildHeartbeatPayload", () => {
@@ -36,6 +37,11 @@ describe("buildHeartbeatPayload", () => {
       "RENDER",
       "CREATE_PREVIEW"
     ]);
+  });
+
+  it("never leaks mcpProbeDetail (the local-only diagnostic) into the wire payload sent to the server", () => {
+    const payload = buildHeartbeatPayload({ ...baseHealth, mcpProbeDetail: "spawn-error:ENOENT" });
+    expect(payload).not.toHaveProperty("mcpProbeDetail");
   });
 
   it("passes through a null aeVersion unchanged", () => {

@@ -336,6 +336,59 @@ function Write-DyoHeartbeatDiagnostics {
   }
 }
 
+# Bundles the failed new build's own log, its BUILD_INFO.json, and a
+# plain-text summary of the observed AE/MCP heartbeats into one
+# timestamped, clearly-named folder under WorkRoot\diagnostics - so a real
+# failure's actual evidence survives the rollback in one findable place,
+# never mixed in with the reinstalled (restored) program's own future
+# logs. Never copies .env or worker-credentials.json - only these three
+# files. Lives under WorkRoot (not InstallDir), so a later update's own
+# program-file copy (Step 3) never touches or overwrites it. Best-effort:
+# any failure here is swallowed and returns $null - it must never block
+# or fail the rollback itself, which has its own independent success
+# criteria.
+function Save-DyoUpdateFailureDiagnostics {
+  param([string]$Reason)
+  try {
+    $diagnosticsRoot = Join-Path $WorkRoot "diagnostics"
+    New-Item -ItemType Directory -Force -Path $diagnosticsRoot | Out-Null
+    $diagnosticsDir = Join-Path $diagnosticsRoot ("update-failure-" + (Get-Date -Format "yyyyMMddHHmmss"))
+    New-Item -ItemType Directory -Force -Path $diagnosticsDir | Out-Null
+
+    if (Test-Path $logPath) {
+      Copy-Item -Path $logPath -Destination (Join-Path $diagnosticsDir "worker.log") -Force
+    }
+    $attemptedBuildInfoPath = Join-Path $sourceApp "BUILD_INFO.json"
+    if (Test-Path $attemptedBuildInfoPath) {
+      Copy-Item -Path $attemptedBuildInfoPath -Destination (Join-Path $diagnosticsDir "BUILD_INFO.json") -Force
+    }
+
+    $summaryLines = @(
+      "DYO Worker update failure diagnostics",
+      "Generated: $(Get-Date -Format "o")",
+      "Reason: $Reason",
+      "",
+      "Heartbeats observed during the AE/MCP health window:"
+    )
+    if (-not $script:ObservedHeartbeats -or $script:ObservedHeartbeats.Count -eq 0) {
+      $summaryLines += "  (none observed)"
+    } else {
+      foreach ($hb in $script:ObservedHeartbeats) {
+        $ts = if ($hb.TimeMs) {
+          ([DateTimeOffset]::FromUnixTimeMilliseconds($hb.TimeMs).UtcDateTime.ToString("HH:mm:ss.fff")) + " UTC"
+        } else {
+          "(unknown time)"
+        }
+        $summaryLines += "  [$ts] aeStatus=$($hb.AeStatus) mcpStatus=$($hb.McpStatus) maxConcurrency=$($hb.MaxConcurrency)"
+      }
+    }
+    Set-Content -Path (Join-Path $diagnosticsDir "summary.txt") -Value $summaryLines -Force
+    return $diagnosticsDir
+  } catch {
+    return $null
+  }
+}
+
 function Test-DyoWorkerTaskActionHealthy {
   param([string]$TaskName)
   try {
@@ -605,6 +658,7 @@ $script:PidConfirmed = $false
 $script:RunningCommit = $null
 $script:ObservedHeartbeats = @()
 $script:HealthyHeartbeat = $null
+$script:DiagnosticsDir = $null
 
 # Bounded window this gate polls for a fresh heartbeat reporting BOTH AE
 # ONLINE and MCP ONLINE at once (see the real-incident doc comment further
@@ -902,6 +956,13 @@ function Invoke-WorkerRollback {
     Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -SupervisorLauncher $rollbackSupervisorLauncher -InstallDir $InstallDir | Out-Null
   }
 
+  $script:DiagnosticsDir = Save-DyoUpdateFailureDiagnostics -Reason $Reason
+  if ($script:DiagnosticsDir) {
+    Write-Host "Saved failure diagnostics (failed build's log, BUILD_INFO, and a heartbeat summary -"
+    Write-Host "never credentials or .env) to:"
+    Write-Host "  $($script:DiagnosticsDir)"
+  }
+
   if (Test-Path $logPath) {
     $rollbackLogBackup = Join-Path $InstallDir ("logs\worker.log.pre-rollback-" + (Get-Date -Format "yyyyMMddHHmmss"))
     Move-Item -Path $logPath -Destination $rollbackLogBackup -Force
@@ -987,6 +1048,12 @@ if ($rollbackOk) {
   Write-Host "DYO Worker has been automatically restored to its previous, known-working build"
   Write-Host "and is confirmed running and heartbeating again. Your DYO Worker identity,"
   Write-Host "credentials, and configuration were never changed. Nothing was left broken."
+  if ($script:DiagnosticsDir) {
+    Write-Host ""
+    Write-Host "Diagnostics from the failed attempt (log, BUILD_INFO, heartbeat summary - never"
+    Write-Host "credentials or .env) were saved to:"
+    Write-Host "  $($script:DiagnosticsDir)"
+  }
   Write-Host "Contact DYO with this message before trying the update again."
   exit 1
 } else {

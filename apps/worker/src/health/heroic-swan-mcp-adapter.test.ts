@@ -46,7 +46,7 @@ describe("HeroicSwanMcpAdapter - real spawned CLI process, not mocked", () => {
     await writeFakeCli(dir, 0);
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: dir });
     const result = await adapter.checkHealth();
-    expect(result).toEqual({ mcpStatus: "ONLINE", mcpConfiguredPath: join(dir, "dist", "index.js") });
+    expect(result).toEqual({ mcpStatus: "ONLINE", mcpConfiguredPath: join(dir, "dist", "index.js"), mcpProbeDetail: "exit-0" });
   });
 
   it("maps exit code 1 (bridge not connected) to OFFLINE - real evidence of not-running", async () => {
@@ -54,6 +54,7 @@ describe("HeroicSwanMcpAdapter - real spawned CLI process, not mocked", () => {
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: dir });
     const result = await adapter.checkHealth();
     expect(result.mcpStatus).toBe("OFFLINE");
+    expect(result.mcpProbeDetail).toBe("exit-1");
   });
 
   it("maps exit code 2 (health invocation itself failed) to UNKNOWN - ambiguous, never fabricated", async () => {
@@ -61,28 +62,31 @@ describe("HeroicSwanMcpAdapter - real spawned CLI process, not mocked", () => {
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: dir });
     const result = await adapter.checkHealth();
     expect(result.mcpStatus).toBe("UNKNOWN");
+    expect(result.mcpProbeDetail).toBe("exit-2");
   });
 
-  it("maps an unrecognized exit code to UNKNOWN rather than guessing", async () => {
+  it("maps an unrecognized exit code to UNKNOWN rather than guessing, while still preserving the real exit code in the diagnostic detail", async () => {
     await writeFakeCli(dir, 7);
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: dir });
     const result = await adapter.checkHealth();
     expect(result.mcpStatus).toBe("UNKNOWN");
+    expect(result.mcpProbeDetail).toBe("exit-7");
   });
 
   it("reports UNKNOWN with a null path when AE_MCP_PATH is not configured at all", async () => {
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: undefined });
     const result = await adapter.checkHealth();
-    expect(result).toEqual({ mcpStatus: "UNKNOWN", mcpConfiguredPath: null });
+    expect(result).toEqual({ mcpStatus: "UNKNOWN", mcpConfiguredPath: null, mcpProbeDetail: "not-configured" });
   });
 
   it("reports UNKNOWN when the script does not exist (ae-mcp not actually installed at the configured path)", async () => {
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: join(dir, "does-not-exist") });
     const result = await adapter.checkHealth();
     expect(result.mcpStatus).toBe("UNKNOWN");
+    expect(result.mcpProbeDetail).toBe("script-missing");
   });
 
-  it("times out and reports UNKNOWN rather than hanging forever if the bridge never responds", async () => {
+  it("times out and reports UNKNOWN rather than hanging forever if the bridge never responds - diagnostic detail distinguishes this from a real exit code", async () => {
     await mkdir(join(dir, "dist"), { recursive: true });
     await writeFile(
       join(dir, "dist", "index.js"),
@@ -92,6 +96,7 @@ describe("HeroicSwanMcpAdapter - real spawned CLI process, not mocked", () => {
     const adapter = new HeroicSwanMcpAdapter({ aeMcpPath: dir, timeoutMs: 200 });
     const result = await adapter.checkHealth();
     expect(result.mcpStatus).toBe("UNKNOWN");
+    expect(result.mcpProbeDetail).toBe("timeout");
   }, 10_000);
 
   it("invokes the exact fixed script path and subcommand - never a shell string, never extra arguments", async () => {

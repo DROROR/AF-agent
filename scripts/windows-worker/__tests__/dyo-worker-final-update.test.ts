@@ -239,7 +239,12 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
   });
 
   it("proactively moves any existing worker.log aside before restarting, so stale content can never satisfy verification", () => {
-    const idx = updateScript.indexOf("if (Test-Path $logPath) {");
+    // "if (Test-Path $logPath) {" also appears inside
+    // Save-DyoUpdateFailureDiagnostics (a Copy-Item, not this Move-Item) -
+    // anchored to "Step 4" specifically to avoid that collision.
+    const stepIdx = updateScript.indexOf("Step 4: guarantee a clean log slate");
+    expect(stepIdx).toBeGreaterThan(-1);
+    const idx = updateScript.indexOf("if (Test-Path $logPath) {", stepIdx);
     expect(idx).toBeGreaterThan(-1);
     const block = updateScript.slice(idx, idx + 300);
     expect(block).toMatch(/Move-Item -Path \$logPath -Destination \$preUpdateBackup -Force/);
@@ -969,6 +974,58 @@ describe("DYO-Worker-Final-Update.ps1 hardening: wraps the risky replace/verify 
     const endIdx = updateScript.indexOf("function Invoke-WorkerRollback");
     const block = updateScript.slice(fnIdx, endIdx);
     expect(block).not.toMatch(/exit 1/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 P0 follow-up (2026-09-02, second real incident): preserves failed-build diagnostics before rollback, so a future failure never needs another round trip to the client for evidence", () => {
+  it("defines Save-DyoUpdateFailureDiagnostics as a real, best-effort function (wrapped in try/catch, returns $null rather than throwing/blocking the rollback)", () => {
+    const idx = updateScript.indexOf("function Save-DyoUpdateFailureDiagnostics");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 1800);
+    expect(block).toMatch(/try \{/);
+    expect(block).toMatch(/\} catch \{\s*return \$null\s*\}/);
+  });
+
+  it("saves under WorkRoot\\diagnostics (never InstallDir, so a later update's own program-file copy can never touch or overwrite it), in a timestamped update-failure-* folder", () => {
+    const idx = updateScript.indexOf("function Save-DyoUpdateFailureDiagnostics");
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/\$diagnosticsRoot = Join-Path \$WorkRoot "diagnostics"/);
+    expect(block).toMatch(/"update-failure-"/);
+  });
+
+  it("copies exactly three things: the failed build's own worker.log, the ATTEMPTED new build's own BUILD_INFO.json (from $sourceApp, not the just-restored one), and a written summary.txt - never anything else", () => {
+    const idx = updateScript.indexOf("function Save-DyoUpdateFailureDiagnostics");
+    const endIdx = updateScript.indexOf("function Test-DyoWorkerTaskActionHealthy", idx);
+    const block = updateScript.slice(idx, endIdx);
+    expect(block).toMatch(/Copy-Item -Path \$logPath -Destination \(Join-Path \$diagnosticsDir "worker\.log"\)/);
+    expect(block).toMatch(/\$attemptedBuildInfoPath = Join-Path \$sourceApp "BUILD_INFO\.json"/);
+    expect(block).toMatch(/Copy-Item -Path \$attemptedBuildInfoPath -Destination \(Join-Path \$diagnosticsDir "BUILD_INFO\.json"\)/);
+    expect(block).toMatch(/Set-Content -Path \(Join-Path \$diagnosticsDir "summary\.txt"\)/);
+    // Never .env or worker-credentials.json in this function's own body.
+    expect(block).not.toMatch(/\.env\b/);
+    expect(block).not.toMatch(/credential/i);
+  });
+
+  it("the written summary includes the real failure Reason and the per-heartbeat aeStatus/mcpStatus/maxConcurrency table (same evidence already printed to console) - not just a bare log dump", () => {
+    const idx = updateScript.indexOf("function Save-DyoUpdateFailureDiagnostics");
+    const endIdx = updateScript.indexOf("function Test-DyoWorkerTaskActionHealthy", idx);
+    const block = updateScript.slice(idx, endIdx);
+    expect(block).toMatch(/"Reason: \$Reason"/);
+    expect(block).toMatch(/\$script:ObservedHeartbeats/);
+    expect(block).toMatch(/aeStatus=\$\(\$hb\.AeStatus\) mcpStatus=\$\(\$hb\.McpStatus\) maxConcurrency=\$\(\$hb\.MaxConcurrency\)/);
+  });
+
+  it("is called from Invoke-WorkerRollback BEFORE the failed build's log is moved aside for restart, and its path is surfaced in both the mid-rollback console output and the final ROLLED BACK SAFELY report", () => {
+    const rollbackFnIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const saveCallIdx = updateScript.indexOf("$script:DiagnosticsDir = Save-DyoUpdateFailureDiagnostics -Reason $Reason", rollbackFnIdx);
+    const logMoveIdx = updateScript.indexOf("Move-Item -Path $logPath -Destination $rollbackLogBackup -Force", rollbackFnIdx);
+    expect(saveCallIdx).toBeGreaterThan(rollbackFnIdx);
+    expect(logMoveIdx).toBeGreaterThan(saveCallIdx);
+
+    const finalReportIdx = updateScript.indexOf('Write-Host "  UPDATE FAILED - ROLLED BACK SAFELY"');
+    const finalReportBlock = updateScript.slice(finalReportIdx, finalReportIdx + 1000);
+    expect(finalReportBlock).toMatch(/if \(\$script:DiagnosticsDir\) \{/);
+    expect(finalReportBlock).toMatch(/\$\(\$script:DiagnosticsDir\)/);
   });
 });
 

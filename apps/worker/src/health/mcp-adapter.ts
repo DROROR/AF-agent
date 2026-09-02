@@ -3,6 +3,16 @@ import type { McpStatus } from "@dyo/schemas";
 export interface McpHealthResult {
   mcpStatus: McpStatus;
   mcpConfiguredPath: string | null;
+  /**
+   * Raw diagnostic detail behind mcpStatus - local-only (never part of the
+   * heartbeat wire payload/schema, never sent to the server - see
+   * build-heartbeat-payload.ts's explicit field whitelist). A real
+   * incident's actual mechanism (which exit code, a timeout, a spawn
+   * failure) would otherwise be lost the moment it collapses into the
+   * coarser ONLINE/OFFLINE/UNKNOWN enum. A short, fixed vocabulary only -
+   * never a raw error message/stack, which could contain a file path.
+   */
+  mcpProbeDetail: string;
 }
 
 /**

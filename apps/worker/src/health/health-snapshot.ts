@@ -10,6 +10,8 @@ export interface HealthSnapshot {
   aerenderAvailable: boolean;
   mcpStatus: McpStatus;
   mcpConfiguredPath: string | null;
+  /** Local-only diagnostic detail behind mcpStatus - see McpHealthResult's own doc comment. Never part of the heartbeat wire payload (build-heartbeat-payload.ts's explicit field whitelist never reads this). */
+  mcpProbeDetail: string;
 }
 
 export interface HealthSnapshotConfig {
@@ -30,6 +32,7 @@ export async function buildHealthSnapshot(
     aeVersion: ae.aeVersion,
     aerenderAvailable: ae.aerenderAvailable,
     mcpStatus: mcp.mcpStatus,
-    mcpConfiguredPath: mcp.mcpConfiguredPath
+    mcpConfiguredPath: mcp.mcpConfiguredPath,
+    mcpProbeDetail: mcp.mcpProbeDetail
   };
 }

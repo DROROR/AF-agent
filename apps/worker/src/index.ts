@@ -272,6 +272,19 @@ async function main(): Promise<void> {
         { aePath: env.aePath, aerenderPath: env.aerenderPath },
         { processLister, mcpAdapter }
       );
+      // Local-only diagnostic (never part of the heartbeat wire payload -
+      // buildHeartbeatPayload's own explicit field whitelist never reads
+      // mcpProbeDetail) so a real "why" (a specific exit code, a timeout,
+      // a spawn failure) is captured in worker.log itself rather than only
+      // ever surviving as the coarser ONLINE/OFFLINE/UNKNOWN enum the
+      // server sees. Logged only when not ONLINE, to avoid noise on every
+      // routine successful heartbeat.
+      if (health.mcpStatus !== "ONLINE") {
+        workerLogger.warn(
+          { mcpStatus: health.mcpStatus, mcpProbeDetail: health.mcpProbeDetail, mcpConfiguredPath: health.mcpConfiguredPath },
+          "mcp health probe did not report ONLINE"
+        );
+      }
       return buildHeartbeatPayload(health);
     },
     sendHeartbeat: (payload) =>

@@ -45,7 +45,7 @@ export class HeroicSwanMcpAdapter implements McpAdapter {
 
   async checkHealth(): Promise<McpHealthResult> {
     if (!this.aeMcpPath) {
-      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: null };
+      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: null, mcpProbeDetail: "not-configured" };
     }
 
     const scriptPath = path.join(this.aeMcpPath, "dist", "index.js");
@@ -58,35 +58,49 @@ export class HeroicSwanMcpAdapter implements McpAdapter {
     // script is a config problem (AE_MCP_PATH wrong, or ae-mcp not
     // actually installed there), not evidence the bridge is down.
     if (!existsSync(scriptPath)) {
-      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath };
+      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "script-missing" };
     }
 
-    const exitCode = await runHealthCheck(scriptPath, this.timeoutMs);
+    const probe = await runHealthCheck(scriptPath, this.timeoutMs);
 
-    if (exitCode === 0) {
-      return { mcpStatus: "ONLINE", mcpConfiguredPath: scriptPath };
+    if (probe.exitCode === 0) {
+      return { mcpStatus: "ONLINE", mcpConfiguredPath: scriptPath, mcpProbeDetail: probe.detail };
     }
-    if (exitCode === 1) {
-      return { mcpStatus: "OFFLINE", mcpConfiguredPath: scriptPath };
+    if (probe.exitCode === 1) {
+      return { mcpStatus: "OFFLINE", mcpConfiguredPath: scriptPath, mcpProbeDetail: probe.detail };
     }
     // exitCode === 2, null (spawn error/timeout), or any unrecognized code.
-    return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath };
+    return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: probe.detail };
   }
+}
+
+interface HealthProbeResult {
+  exitCode: number | null;
+  /**
+   * Short, fixed-vocabulary diagnostic string - "exit-<n>", "timeout", or
+   * "spawn-error:<NodeErrorCode>" (e.g. "spawn-error:ENOENT" if `node`
+   * itself is not on PATH) - never a raw error message/stack, which could
+   * contain a local file path.
+   */
+  detail: string;
 }
 
 /**
  * Runs the exact allowlisted command `node <scriptPath> health` - never a
  * shell string, never a user-influenced argument, nothing beyond this one
  * fixed script path and this one fixed subcommand literal. Returns the
- * real exit code, or null if the process could not be run at all/timed
+ * real exit code (null if the process could not be run at all/timed
  * out/exited via a signal - the caller treats null the same as an
- * unrecognized code (UNKNOWN).
+ * unrecognized code, UNKNOWN) alongside a short diagnostic detail string,
+ * so a real incident's actual mechanism is never lost the moment it
+ * collapses into the coarser ONLINE/OFFLINE/UNKNOWN enum - see this
+ * module's own doc comment on why this exists.
  */
-function runHealthCheck(scriptPath: string, timeoutMs: number): Promise<number | null> {
+function runHealthCheck(scriptPath: string, timeoutMs: number): Promise<HealthProbeResult> {
   return new Promise((resolve) => {
     execFile("node", [scriptPath, HEALTH_SUBCOMMAND], { timeout: timeoutMs }, (error) => {
       if (!error) {
-        resolve(0);
+        resolve({ exitCode: 0, detail: "exit-0" });
         return;
       }
       // Node's child_process callback reports a non-zero exit via `error`,
@@ -94,8 +108,19 @@ function runHealthCheck(scriptPath: string, timeoutMs: number): Promise<number |
       // ran and exited (as opposed to failing to spawn at all, or being
       // killed for exceeding `timeout`, where `code` is a signal name/
       // undefined instead of a number).
-      const exitCode = typeof error.code === "number" ? error.code : null;
-      resolve(exitCode);
+      if (typeof error.code === "number") {
+        resolve({ exitCode: error.code, detail: `exit-${error.code}` });
+        return;
+      }
+      if (error.killed) {
+        resolve({ exitCode: null, detail: "timeout" });
+        return;
+      }
+      // A genuine spawn failure (e.g. `node` not on PATH at all) - `code`
+      // here is a Node system error code (e.g. "ENOENT"), safe to log in
+      // full (never a path/message).
+      const spawnErrorCode = typeof error.code === "string" ? error.code : "unknown";
+      resolve({ exitCode: null, detail: `spawn-error:${spawnErrorCode}` });
     });
   });
 }
