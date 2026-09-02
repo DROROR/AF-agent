@@ -408,10 +408,12 @@ export const en = {
   },
   jobDispatch: {
     noWorkerTitle: "No worker available",
-    noWorkerDescription: "No ONLINE worker currently reports this capability and is idle - it may be offline, busy with another job, or not yet updated to a build that supports this.",
+    noWorkerDescription: "Your editing computer isn't ready right now - it may be off, busy, or still updating. It will pick this up automatically once it's ready.",
     workerOfflineTitle: "Worker is offline",
-    workerOfflineDescription: "Worker is offline. Reconnect the Worker to inspect, edit, preview, or render.",
-    dispatching: "Dispatching…",
+    workerOfflineDescription: "Your editing computer is offline. Turn it on to continue.",
+    dispatching: "Starting…",
+    /** Simple-mode-only confirmation (ProjectPreviewTab/ProjectExportTab) - deliberately never includes the raw job id queuedDescription below shows; the client's own view already updates automatically once the real result is ready (the preview queue/session poll), so there is nothing for them to track by id. */
+    startedHint: "Started - this will update automatically, no need to check again.",
     queuedTitle: "Job queued",
     queuedDescription: (jobId: string): string => `Job ${jobId} was queued for the worker. It will run once claimed - this page does not yet show live progress.`,
     failedTitle: "Could not dispatch this job"
@@ -433,9 +435,11 @@ export const en = {
       }
     },
     tabs: {
-      overview: "Overview",
-      scenes: "Scene Mapping",
-      assets: "Assets",
+      overview: "Project",
+      scenes: "Scenes",
+      assets: "Files",
+      preview: "Preview",
+      export: "Export",
       workMap: "Work Map",
       revisions: "Revisions",
       renderSettings: "Render Settings"
@@ -556,7 +560,15 @@ export const en = {
       inspectCapabilitiesDescription: "Read-only. Asks the worker to report the real AE Render Queue template names and AE version - never mutates or saves anything.",
       renderAction: "Render",
       sessionNotReadyTitle: "Not ready to render yet",
-      sessionNotReadyDescription: "Every approved scene must be executed and its first preview approved before rendering - see Scene execution on the Overview tab."
+      sessionNotReadyDescription: "Every approved scene must be executed and its first preview approved before rendering - see the Preview tab."
+    },
+    export: {
+      description: "Render and download the final Landscape and Reels videos.",
+      renderAction: (variantLabel: string): string => `Render ${variantLabel}`,
+      notConfiguredTitle: "Not set up yet",
+      notConfiguredDescription: "This export isn't set up yet - ask your editor to finish it in Advanced mode.",
+      notReadyTitle: "Not ready yet",
+      notReadyDescription: "Finish approving every scene and the Final Preview before this export is ready."
     },
     editDrawer: {
       title: "Edit scene mapping",
@@ -779,6 +791,7 @@ export const en = {
     approvingScenes: "Approving…",
     allScenesReadyHint: "Every scene is ready - approve to continue.",
     scenesNotReadyHint: "Finish reviewing every scene below before approving.",
+    previewsUpdatingHint: "Updating previews for scenes you just changed - this only takes a moment, no action needed.",
     storyboardTitle: "Storyboard",
     playFullPreviewAction: "Play Full Preview",
     workerOfflineHint: "No computer is online to generate this preview right now."

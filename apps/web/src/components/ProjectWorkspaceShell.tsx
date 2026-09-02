@@ -18,19 +18,30 @@ import { deleteProject } from "../lib/projects-api-client";
 
 interface TabDef {
   href: string;
-  labelKey: "overview" | "scenes" | "assets" | "workMap" | "revisions" | "renderSettings";
+  labelKey: "overview" | "scenes" | "assets" | "preview" | "export" | "workMap" | "revisions" | "renderSettings";
 }
 
 /**
- * Client-facing UX redesign, section H: Simple Mode's nav is Overview/
- * Scenes/Assets only - Work Map, Render Settings and Revisions move under
- * Advanced (never removed, never deleted - see WorkspaceModeProvider).
+ * Final MVP nav (client-facing UX redesign, section H, finalized): the
+ * normal client-facing nav reads Project / Files / Scenes / Preview /
+ * Export - Work Map, Render Settings (raw composition/template fields)
+ * and Revisions stay under Advanced (never removed, never deleted - see
+ * WorkspaceModeProvider). "overview"/"assets" keep their existing i18n
+ * KEY names (only the displayed label text changed to "Project"/"Files" -
+ * see dictionaries/en.ts's own tabs.overview/tabs.assets) to avoid an
+ * unnecessary key-rename across every locale file; "preview" reuses
+ * ProjectPreviewTab (the first-frame + complete-preview approval gates,
+ * moved out of the old combined Overview tab) and "export" reuses
+ * ProjectExportTab (a plain-language render trigger + the same real
+ * download/playback list Advanced's Render Settings tab already showed).
  */
 function tabsFor(projectId: string, mode: "simple" | "advanced"): TabDef[] {
   const simpleTabs: TabDef[] = [
     { href: `/projects/${projectId}`, labelKey: "overview" },
+    { href: `/projects/${projectId}/assets`, labelKey: "assets" },
     { href: `/projects/${projectId}/scenes`, labelKey: "scenes" },
-    { href: `/projects/${projectId}/assets`, labelKey: "assets" }
+    { href: `/projects/${projectId}/preview`, labelKey: "preview" },
+    { href: `/projects/${projectId}/export`, labelKey: "export" }
   ];
   if (mode === "simple") {
     return simpleTabs;

@@ -99,7 +99,8 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
  * only ever returns genuinely persisted, VALID artifacts - see that
  * file's own doc comment).
  */
-function FinalOutputsCard({ projectId }: { projectId: string }): ReactElement {
+/** Exported for reuse by ProjectExportTab.tsx (the Simple-mode "Export" tab) - the exact same real download/playback list, never a separate implementation. */
+export function FinalOutputsCard({ projectId }: { projectId: string }): ReactElement {
   const { t } = useLocale();
   const { artifacts, isLoading, error } = useRenderArtifacts(projectId);
   const [previewingId, setPreviewingId] = useState<string | null>(null);

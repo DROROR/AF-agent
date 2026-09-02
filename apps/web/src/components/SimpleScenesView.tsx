@@ -144,11 +144,26 @@ export function SimpleScenesView(): ReactElement {
     pendingByScene.set(suggestion.scenePlanId, bucket);
   }
 
-  const allReady = realScenes.every(
+  const reviewsReady = realScenes.every(
     (scene) =>
       (pendingByScene.get(scene.scenePlan.id)?.length ?? 0) === 0 &&
       (scene.scenePlan.approvalState === "READY_FOR_APPROVAL" || scene.scenePlan.approvalState === "APPROVED")
   );
+  // Preview freshness (final MVP polish item 2): a stale scene preview -
+  // captured before the mapped asset/text/timestamp/duration change that
+  // is now current, per useScenePreviewQueue's own isStale check - can
+  // never be treated as the current, approved-against evidence. This
+  // never requires a manual refresh: the same queue that computed
+  // isStale already auto-queued a fresh capture for it (see
+  // use-scene-preview-queue.ts's own needsPreview logic), so this
+  // condition self-resolves as soon as that regeneration completes -
+  // approval is simply held until the client is genuinely looking at the
+  // real, current result, not a guess about whether it still matches.
+  const previewsReady = realScenes.every((scene) => {
+    const entry = previewQueue.getEntry(scene.scenePlan.id);
+    return entry.state === "ready" && !entry.isStale;
+  });
+  const allReady = reviewsReady && previewsReady;
 
   async function handleAccept(suggestion: MappingSuggestion): Promise<void> {
     setBusySuggestionId(suggestion.id);
@@ -188,7 +203,13 @@ export function SimpleScenesView(): ReactElement {
       <Storyboard projectId={projectId} realScenes={realScenes} previewQueue={previewQueue} />
 
       <Card className="simple-scenes__approve-bar">
-        <p>{allReady ? t.simpleScenes.allScenesReadyHint : t.simpleScenes.scenesNotReadyHint}</p>
+        <p>
+          {allReady
+            ? t.simpleScenes.allScenesReadyHint
+            : !reviewsReady
+              ? t.simpleScenes.scenesNotReadyHint
+              : t.simpleScenes.previewsUpdatingHint}
+        </p>
         <Button variant="primary" disabled={!allReady || isApproving || isStale} onClick={() => void handleApprove()}>
           {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
         </Button>

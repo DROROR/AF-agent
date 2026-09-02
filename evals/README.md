@@ -13,24 +13,31 @@ satisfy, tracked here since no template file itself can live in the repo.
 
 Copy `template-case.template.json` to `<template-name>.json` per real
 template run and fill it in as each step is genuinely completed - never
-mark a step done without the real evidence named.
+mark a step done without the real evidence named. A field stays `null`
+(not `true`/`false`) until it has genuinely been checked - `null` means
+"not yet evaluated", never "failed".
 
-| Step | Evidence required |
-|---|---|
-| Original `.aep` hash recorded before any run | real sha256, recorded once |
-| Original `.aep` hash unchanged after the full run | re-hash matches the recorded value exactly |
-| Selected scenes only appear in output | manual comparison against the approved execution plan |
-| Correct assets/text applied | visual check against the Work Map |
-| Timestamp accuracy | within one source frame (CLAUDE.md) |
-| Real visual preview reviewed | a real captured preview frame, not a description |
-| Landscape output produced | a real render artifact, played back |
-| Native 1080x1920 Reels output produced | a real render artifact, played back - reposition confirmed, not merely cropped |
-| One interrupted-job recovery test | a job deliberately killed mid-EXECUTE_FRAME or mid-RENDER, then successfully resumed via re-dispatch without redoing completed work |
+| Field | Step | Evidence required |
+|---|---|---|
+| `originalAepSha256BeforeRun` / `AfterRun` | Original `.aep` hash recorded before any run, unchanged after | real sha256 before and after - both values, recorded once each |
+| `originalAepUnchangedProof` | Original `.aep` hash unchanged after the full run | `true` only once `originalAepSha256BeforeRun === originalAepSha256AfterRun` is confirmed by direct comparison - never inferred from "the run succeeded" |
+| `realSceneStoryboardEvidence` | Real-scene storyboard evidence | a screenshot (file path/link) or exact description of the Simple Mode storyboard for this template, proving real AE nesting evidence produced the correct real-scene grouping (never a raw composition/placeholder list) |
+| `selectedScenesOnly` | Selected scenes only appear in output | manual comparison against the approved execution plan |
+| `correctAssetsAndText` | Correct assets/text applied | visual check against the Work Map |
+| `timestampAccuracyWithinOneFrame` | Timestamp accuracy | within one source frame (CLAUDE.md) |
+| `firstPreviewApproved` | First Preview approval | the real, persisted `firstPreviewApproved` flag on the execution session (approve-first-preview.ts) - a genuine human approval of the first designed frame, not just "a preview was captured" |
+| `finalPreviewApproved` | Final Preview approval | the real, persisted `fullPreviewApproved` flag on the execution session (approve-final-preview.ts) - a SEPARATE, later human approval of the complete assembled video |
+| `landscapeOutputProduced` | Landscape artifact | a real render artifact, played back |
+| `reelsOutputProduced` / `reelsRepositionedNotCropped` | Reels artifact | a real render artifact, played back - reposition confirmed, not merely cropped |
+| `interruptedJobRecoveryTested` / `recoveryTestEvidence` | Recovery test result | a job deliberately killed mid-EXECUTE_FRAME or mid-RENDER, then successfully resumed via re-dispatch without redoing completed work - `recoveryTestEvidence` names which job/stage was killed and how resume was confirmed |
+| `overallResult` | PASS/FAIL summary | `"PASS"` only once every field above is genuinely `true`/filled; `"FAIL"` if any field was checked and failed; stays `"PENDING"` (the template default) while any field is still `null` |
 
-## Status as of 2026-08-29
+## Status as of 2026-09-02
 
 No real template has completed this full checklist yet - the client
-Windows Worker (`DESKTOP-A629N4N`) has been offline for the relevant
-portion of this project so far. This is a genuine, tracked gap, not a
-silent omission - see `docs/ACCEPTANCE.md` for the live status of every
-MVP acceptance criterion.
+Windows Worker (`DESKTOP-A629N4N`) has been intermittently available this
+session but a Windows Worker package update has not yet succeeded end to
+end (see `docs/ACCEPTANCE.md`'s own live status and the session's own
+MCP-health investigation). This is a genuine, tracked gap, not a silent
+omission - see `docs/ACCEPTANCE.md` for the live status of every MVP
+acceptance criterion.

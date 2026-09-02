@@ -401,10 +401,12 @@ export const he: Dictionary = {
   },
   jobDispatch: {
     noWorkerTitle: "אין וורקר זמין",
-    noWorkerDescription: "אף וורקר במצב ONLINE לא מדווח כרגע על היכולת הזו כפנוי - ייתכן שהוא לא מחובר, עסוק במשימה אחרת, או שטרם עודכן לגרסה התומכת בכך.",
+    noWorkerDescription: "מחשב העריכה שלכם לא מוכן כרגע - ייתכן שהוא כבוי, עסוק, או עדיין מתעדכן. הוא ימשיך אוטומטית ברגע שיהיה מוכן.",
     workerOfflineTitle: "העובד לא מקוון",
-    workerOfflineDescription: "העובד לא מקוון. חברו מחדש את העובד כדי לבדוק, לערוך, לתצוגה מקדימה או לרינדור.",
-    dispatching: "שולח…",
+    workerOfflineDescription: "מחשב העריכה שלכם לא מחובר. הפעילו אותו כדי להמשיך.",
+    dispatching: "מתחיל…",
+    /** מחרוזת ייעודית למצב פשוט (ProjectPreviewTab/ProjectExportTab) - לעולם לא כוללת את מזהה המשימה הגולמי שמופיע ב-queuedDescription למטה; התצוגה של הלקוח מתעדכנת אוטומטית ברגע שהתוצאה האמיתית מוכנה. */
+    startedHint: "התחיל - זה יתעדכן אוטומטית, אין צורך לבדוק שוב.",
     queuedTitle: "המשימה נכנסה לתור",
     queuedDescription: (jobId) => `המשימה ${jobId} נכנסה לתור עבור הוורקר. היא תרוץ לאחר שתילקח - עמוד זה עדיין לא מציג התקדמות בזמן אמת.`,
     failedTitle: "לא ניתן היה לשלוח את המשימה"
@@ -426,9 +428,11 @@ export const he: Dictionary = {
       }
     },
     tabs: {
-      overview: "סקירה כללית",
-      scenes: "מיפוי סצנות",
-      assets: "נכסים",
+      overview: "פרויקט",
+      scenes: "סצנות",
+      assets: "קבצים",
+      preview: "תצוגה מקדימה",
+      export: "ייצוא",
       workMap: "מפת עבודה",
       revisions: "גרסאות",
       renderSettings: "הגדרות רינדור"
@@ -548,7 +552,15 @@ export const he: Dictionary = {
       inspectCapabilitiesDescription: "קריאה בלבד. מבקש מהוורקר לדווח על שמות תבניות Render Queue האמיתיים של AE וגרסת AE - לעולם לא משנה או שומר דבר.",
       renderAction: "רינדור",
       sessionNotReadyTitle: "עדיין לא מוכן לרינדור",
-      sessionNotReadyDescription: "יש לבצע כל סצנה מאושרת ולאשר את התצוגה המקדימה הראשונה לפני הרינדור - ראו ביצוע סצנות בלשונית סקירה כללית."
+      sessionNotReadyDescription: "יש לבצע כל סצנה מאושרת ולאשר את התצוגה המקדימה הראשונה לפני הרינדור - ראו את לשונית התצוגה המקדימה."
+    },
+    export: {
+      description: "רינדור והורדה של סרטוני הלנדסקייפ והרילס הסופיים.",
+      renderAction: (variantLabel: string): string => `רינדור ${variantLabel}`,
+      notConfiguredTitle: "עדיין לא הוגדר",
+      notConfiguredDescription: "הייצוא הזה עדיין לא הוגדר - בקשו מהעורך שלכם לסיים את ההגדרה במצב מתקדם.",
+      notReadyTitle: "עדיין לא מוכן",
+      notReadyDescription: "יש לסיים לאשר כל סצנה ואת התצוגה המקדימה הסופית לפני שהייצוא הזה יהיה מוכן."
     },
     editDrawer: {
       title: "עריכת מיפוי סצנה",
@@ -769,6 +781,7 @@ export const he: Dictionary = {
     approvingScenes: "מאשר…",
     allScenesReadyHint: "כל הסצנות מוכנות - אשרו כדי להמשיך.",
     scenesNotReadyHint: "סיימו לבדוק כל סצנה למטה לפני האישור.",
+    previewsUpdatingHint: "מעדכנים תצוגות מקדימות לסצנות ששיניתם כרגע - זה ייקח רק רגע, אין צורך לפעול.",
     storyboardTitle: "לוח סיפור",
     playFullPreviewAction: "הפעלת התצוגה המקדימה המלאה",
     workerOfflineHint: "אין כרגע מחשב מחובר שיכול ליצור תצוגה מקדימה זו."

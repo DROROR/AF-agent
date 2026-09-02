@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkspaceShell } from "./ProjectWorkspaceShell";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
@@ -120,5 +120,44 @@ describe("ProjectWorkspaceShell - Delete Project", () => {
 
     await screen.findByText("Project has a job still in progress - wait for it to finish before deleting");
     expect(pushMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Final MVP nav (client-facing UX redesign, section H, finalized): the
+ * normal client-facing (Simple Mode) nav reads Project / Files / Scenes /
+ * Preview / Export, in that exact order - Work Map / Render Settings /
+ * Revisions only appear once Advanced Mode is selected, never in Simple.
+ */
+describe("ProjectWorkspaceShell - final nav (Project / Files / Scenes / Preview / Export)", () => {
+  function tabLabels(): string[] {
+    // Scoped to the workspace-tabs <nav> specifically - ProjectWorkflowStepper
+    // renders its own <Link>s for each of its 7 steps, which would otherwise
+    // pollute a page-wide getAllByRole("link") query.
+    const nav = document.querySelector(".workspace-tabs");
+    if (!nav) {
+      throw new Error("workspace-tabs nav not found");
+    }
+    return within(nav as HTMLElement)
+      .getAllByRole("link")
+      .map((link) => link.textContent ?? "");
+  }
+
+  it("Simple Mode shows exactly Project / Files / Scenes / Preview / Export, in that order - never Work Map/Render Settings/Revisions", async () => {
+    stubWorkspace();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    expect(tabLabels()).toEqual(["Project", "Files", "Scenes", "Preview", "Export"]);
+  });
+
+  it("Advanced Mode adds Work Map / Render Settings / Revisions after the same five Simple tabs, never replacing them", async () => {
+    stubWorkspace();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+
+    expect(tabLabels()).toEqual(["Project", "Files", "Scenes", "Preview", "Export", "Work Map", "Render Settings", "Revisions"]);
   });
 });

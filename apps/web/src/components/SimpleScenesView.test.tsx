@@ -299,6 +299,62 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     );
   }, 20_000);
 
+  it("final MVP polish item 2 (preview freshness): Approve Scenes stays disabled with a plain 'updating previews' hint while a scene's real preview is stale (captured BEFORE a mapping change) - a stale preview is never treated as current for approval", async () => {
+    const staleCapturedAt = new Date(Date.now() - 60_000).toISOString(); // captured a minute ago
+    const scenes = [
+      sceneFixture({
+        id: "scene-parent",
+        manifestCompositionId: "comp-parent",
+        compositionName: "App Features",
+        mappings: [mappingFixture()],
+        approvalState: "READY_FOR_APPROVAL",
+        unresolvedReasons: [],
+        updatedAt: new Date().toISOString() // NOW - after the stale preview below was captured
+      }),
+      sceneFixture({
+        id: "scene-nested",
+        manifestCompositionId: "comp-nested",
+        compositionName: "Phone Frame",
+        mappings: [],
+        approvalState: "READY_FOR_APPROVAL",
+        unresolvedReasons: [],
+        updatedAt: new Date(0).toISOString()
+      })
+    ];
+    stubWorkspace({
+      scenes,
+      extra: {
+        // No worker online - the auto-regeneration this staleness would
+        // otherwise trigger never resolves, so the disabled state is
+        // observable rather than immediately self-healing mid-test.
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: {
+          status: 200,
+          body: {
+            preview: {
+              id: "22222222-2222-2222-2222-222222222222",
+              projectId: PROJECT_ID,
+              manifestCompositionId: "comp-parent",
+              sourceProjectSha256: "a".repeat(64),
+              filename: "scene-preview-App_Features.png",
+              mimeType: "image/png",
+              byteSize: 42,
+              capturedAt: staleCapturedAt,
+              createdAt: staleCapturedAt
+            }
+          }
+        },
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } }
+      }
+    });
+    renderView();
+    await screen.findByRole("heading", { name: "App Features" });
+
+    await screen.findByText("This scene changed since this preview was captured - it may no longer match. Generate a new preview to see the current result.");
+    await screen.findByText("Updating previews for scenes you just changed - this only takes a moment, no action needed.");
+    expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it(
     "queues previews across multiple real scenes and dispatches them ONE AT A TIME - never a second concurrent dispatch, respecting Worker maxConcurrency=1 (section 6)",
     async () => {
