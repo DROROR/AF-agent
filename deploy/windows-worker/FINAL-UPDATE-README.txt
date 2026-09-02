@@ -114,19 +114,38 @@ added. This update does not add, guess, or change either value - if you
 were not already given one of these paths to set, DYO will tell you
 separately before asking for a real render.
 
+AUTOMATIC BACKUP + ROLLBACK - THIS UPDATE CANNOT LEAVE YOU WITH NO WORKING WORKER
+------------------------------------------------------------------------------------
+Before changing any program file, this update automatically backs up your
+current, known-working DYO Worker build. It then requires the new build to
+prove itself genuinely healthy - TWO real successive heartbeats (not just
+one), After Effects and ae-mcp both confirmed ONLINE, the correct
+single-job-at-a-time setting, all seven capabilities, and the exact
+expected build - before it is ever reported as successful.
+
+If the new build does NOT pass that check, this update automatically rolls
+back to your previous backup on its own, restarts it, confirms it is
+running and heartbeating again, and tells you clearly:
+"UPDATE FAILED - ROLLED BACK SAFELY". Your DYO Worker identity,
+credentials, and configuration are never touched by this. In the rare case
+the rollback itself cannot be fully confirmed, it tells you to run
+DYO-Worker-Recover.bat (included in this same folder) - a simple, one-click
+restore of your last known-working backup that also never asks for a
+registration code or changes any credentials/configuration.
+
 IF IT SAYS "NEEDS ATTENTION"
 ------------------------------
 This update actively verifies each step - including that DYO Worker
 genuinely stopped before files were changed, that every new program file
 this release adds genuinely exists on disk both before and after the
-copy, that a real new process is running afterward with either a real
-successful heartbeat or a genuine, actively-retrying connection attempt
-(a temporary network delay during the update itself is not treated as a
-failure), and that its build marker is the EXACT expected final build -
-rather than just assuming success. If any step could not be verified, it
-stops and tells you exactly which one, instead of printing "Update
-complete" anyway. Re-running the update is safe; contact DYO if the same
-step keeps failing.
+copy, that a real new process is running afterward with two real
+successive heartbeats, After Effects and ae-mcp both ONLINE, and that its
+build marker is the EXACT expected final build - rather than just
+assuming success. If any step could not be verified, this update
+automatically rolls back to your previous build (see above) rather than
+leaving DYO Worker in an unverified state, and tells you exactly what
+happened. Re-running the update is safe; contact DYO if the same step
+keeps failing.
 
 A missing automatic-startup task no longer stops the update - it is
 recreated automatically (see above). You will only be told to run
