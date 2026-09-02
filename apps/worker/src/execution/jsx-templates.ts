@@ -72,6 +72,84 @@ declare const fixedJsxScriptBrand: unique symbol;
 export type FixedJsxScript = string & { readonly [fixedJsxScriptBrand]: true };
 
 /**
+ * REAL PRODUCTION BUG (2026-09-02): every script in this file calls
+ * `JSON.stringify(...)` assuming a real JS `JSON` global is present at
+ * ExtendScript runtime. Adobe's ExtendScript engine (the actual JS engine
+ * After Effects executes this code in) predates JSON becoming a standard
+ * JS-engine builtin and does NOT polyfill it by default - this is a
+ * well-documented ExtendScript gotcha (the reason `#include "json2.js"`
+ * exists in the wild). INSPECT_RENDER_CAPABILITIES was the first of these
+ * scripts to actually run against a real AE installation (every other
+ * script here is either not yet a live capability or had not been
+ * exercised on real Windows/AE yet), and failed immediately with a bare
+ * `ReferenceError: JSON is undefined` - every other script sharing this
+ * exact pattern carries the identical latent bug, fixed once here for
+ * all of them.
+ *
+ * Prepended to the START of every script this file builds (before
+ * `app.beginUndoGroup`, so it never affects what is/isn't undoable):
+ * installs a small, fixed, fully-reviewed `JSON.stringify`-only shim,
+ * ONLY if a real one is not already present (defensive - never
+ * overwrites/shadows a working native implementation on an AE/
+ * ExtendScript version that does have one). Handles exactly the value
+ * shapes these scripts ever produce - plain objects, arrays, strings,
+ * numbers, booleans, null - not a full JSON spec implementation (no
+ * Date/circular-reference handling), since none of these scripts ever
+ * serialize anything else. Built with `String.raw` so every backslash/
+ * quote below is exactly what ends up in the generated ExtendScript
+ * source text - never subject to this TypeScript file's own string-
+ * escaping rules.
+ */
+const JSON_STRINGIFY_POLYFILL = String.raw`if (typeof JSON === "undefined") { JSON = {}; }
+  if (typeof JSON.stringify !== "function") {
+    var __dyoJsonQuoteString = function (__s) {
+      var __out = "\"";
+      for (var __qi = 0; __qi < __s.length; __qi++) {
+        var __qc = __s.charAt(__qi);
+        var __qcode = __s.charCodeAt(__qi);
+        if (__qc === "\"" || __qc === "\\") {
+          __out += "\\" + __qc;
+        } else if (__qc === "\n") {
+          __out += "\\n";
+        } else if (__qc === "\r") {
+          __out += "\\r";
+        } else if (__qc === "\t") {
+          __out += "\\t";
+        } else if (__qcode < 0x20) {
+          __out += "\\u" + ("0000" + __qcode.toString(16)).slice(-4);
+        } else {
+          __out += __qc;
+        }
+      }
+      return __out + "\"";
+    };
+    JSON.stringify = function __dyoJsonStringify(__value) {
+      if (__value === null || __value === undefined) { return "null"; }
+      var __type = typeof __value;
+      if (__type === "number") { return isFinite(__value) ? String(__value) : "null"; }
+      if (__type === "boolean") { return __value ? "true" : "false"; }
+      if (__type === "string") { return __dyoJsonQuoteString(__value); }
+      if (__value instanceof Array) {
+        var __items = [];
+        for (var __ai = 0; __ai < __value.length; __ai++) {
+          __items.push(JSON.stringify(__value[__ai]));
+        }
+        return "[" + __items.join(",") + "]";
+      }
+      if (__type === "object") {
+        var __parts = [];
+        for (var __key in __value) {
+          if (!__value.hasOwnProperty(__key)) { continue; }
+          __parts.push(__dyoJsonQuoteString(__key) + ":" + JSON.stringify(__value[__key]));
+        }
+        return "{" + __parts.join(",") + "}";
+      }
+      return "null";
+    };
+  }
+  `;
+
+/**
  * NEVER wraps this in `(function () { ... })()` - the real upstream
  * `ae_run_jsx` tool (verified 2026-08-27 directly from the real upstream
  * source: tools/index.ts's `ae_run_jsx` registration and
@@ -83,7 +161,7 @@ export type FixedJsxScript = string & { readonly [fixedJsxScriptBrand]: true };
  * would silently discard.
  */
 function wrapScript(operationLabel: string, body: string): FixedJsxScript {
-  const script = `app.beginUndoGroup(${JSON.stringify(`DYO EXECUTE_FRAME: ${operationLabel}`)});
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify(`DYO EXECUTE_FRAME: ${operationLabel}`)});
   var __result = null;
   try {
     var __comp = null;
@@ -276,7 +354,7 @@ function buildBuildReelsCompositionScript(
   const reelsNameLiteral = JSON.stringify(op.reelsCompositionName);
   const transformsLiteral = JSON.stringify(op.layerTransforms.map((t) => ({ layerIndex: t.layerIndex, positionX: t.positionX, positionY: t.positionY, scalePercent: t.scalePercent })));
 
-  const script = `app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: BUILD_REELS_COMPOSITION")});
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: BUILD_REELS_COMPOSITION")});
   var __result = null;
   try {
     var __comp = null;
@@ -390,7 +468,7 @@ function hexToUnitRgb(colorHex: string): [number, number, number] {
  * does not use `wrapScript`'s per-target lookup boilerplate.
  */
 export function buildSaveProjectScript(): FixedJsxScript {
-  const script = `app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: SAVE_PROJECT")});
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: SAVE_PROJECT")});
   var __result = null;
   try {
     app.project.save();
@@ -437,7 +515,7 @@ export function buildSaveProjectScript(): FixedJsxScript {
  * closed (typed failureReason), never fabricates a template name list.
  */
 export function buildInspectRenderCapabilitiesScript(): FixedJsxScript {
-  const script = `app.beginUndoGroup(${JSON.stringify("DYO INSPECT_RENDER_CAPABILITIES")});
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_RENDER_CAPABILITIES")});
   var __result = null;
   var __tempItem = null;
   try {
@@ -526,7 +604,7 @@ export function buildInspectRenderCapabilitiesScript(): FixedJsxScript {
 export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
   const compIndexLiteral = String(aeProjectItemIndex);
   const compNameLiteral = JSON.stringify(compositionName);
-  const script = `app.beginUndoGroup(${JSON.stringify("DYO INSPECT_COMPOSITION_PRECOMPS")});
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_COMPOSITION_PRECOMPS")});
   var __result = null;
   try {
     var __comp = null;

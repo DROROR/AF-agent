@@ -93,6 +93,27 @@ writeJson(path.join(WORKER_APP_DIR, "package.json"), {
   }
 });
 
+// REAL PACKAGING GAP (found 2026-09-02): worker-app/package.json above
+// declares semver RANGES (e.g. "^1.30.0"), and until now nothing shipped
+// alongside it pinned an exact resolved dependency tree - the client's own
+// `npm install --omit=dev` (DYO-Worker-Setup.ps1/DYO-Worker-Final-
+// Update.ps1's Step 3) was free to resolve whatever versions satisfy those
+// ranges AT THE MOMENT the client happens to run it, which can silently
+// differ from the exact versions this build was actually tested against.
+// Generating and shipping a real package-lock.json here closes that gap:
+// `npm install --package-lock-only` resolves the exact same dependency
+// tree `npm install --omit=dev` would (including the `@dyo/schemas`
+// `file:./schemas` link, which npm records in the lock file the same way
+// a registry dependency is), without installing node_modules into this
+// packaging output - the client's own later `npm install --omit=dev`
+// finds this lock file already present and installs the EXACT pinned
+// versions from it, deterministically, no different from any other
+// package-lock.json-governed npm install. Runtime dependency versions
+// themselves are unchanged - this pins whatever the ranges above already
+// resolve to right now, it does not bump or select anything new.
+console.log("Generating worker-app/package-lock.json (pins the exact resolved dependency tree)...");
+run("npm", ["install", "--package-lock-only", "--no-audit", "--no-fund"], WORKER_APP_DIR);
+
 // Presentation-only status formatter for DYO-Worker-Start.bat - never part
 // of apps/worker itself, copied in verbatim (already plain JS, no build step).
 cpSync(

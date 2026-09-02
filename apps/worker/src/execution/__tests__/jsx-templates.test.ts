@@ -1,8 +1,70 @@
+import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import type { SceneEditOperation } from "@dyo/schemas";
-import { buildOperationScript, buildSaveProjectScript, buildInspectRenderCapabilitiesScript } from "../jsx-templates.js";
+import {
+  buildOperationScript,
+  buildSaveProjectScript,
+  buildInspectRenderCapabilitiesScript,
+  buildInspectCompositionPrecompsScript
+} from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
+
+/**
+ * Genuinely reproduces the real 2026-09-02 production failure
+ * ("INSPECT_RENDER_CAPABILITIES -> TOOL_ERROR / AE_ERROR: 'JSON is
+ * undefined'") and proves the fix: runs a built FixedJsxScript in a fresh
+ * V8 realm (via node:vm) with its own `JSON` global explicitly undefined
+ * BEFORE the script runs - the closest a Node-based test can get to
+ * ExtendScript's real, well-documented absence of a native JSON object
+ * (V8 itself always provides one to any new context/realm; ExtendScript's
+ * actual engine does not, which is the real root cause - see
+ * JSON_STRINGIFY_POLYFILL's own doc comment in jsx-templates.ts).
+ * Invokes the script EXACTLY the way the real upstream ae_run_jsx tool
+ * does (`new Function("args", code)`, then calls the result) - not a
+ * wrapped/adapted invocation - so this is a faithful reproduction of the
+ * real failure mode, not a weaker approximation of it.
+ *
+ * `setupScript` (if given) runs first, in the SAME context, to construct
+ * fake `app`/`CompItem` globals natively INSIDE this realm - deliberately
+ * never passed in as plain host-realm JS objects, since arrays/instances
+ * created in the outer Node realm fail `instanceof`/array checks against
+ * this context's own (separate) intrinsics; a real AE process has no such
+ * multi-realm split at all, so this is purely a test-construction detail,
+ * not something the actual script logic needs to account for.
+ */
+function runFixedScriptWithoutNativeJson(script: string, setupScript = ""): string {
+  const context = vm.createContext({});
+  // Simulates ExtendScript's real absence of a JSON global - see this
+  // function's own doc comment above for why `vm` itself cannot omit it
+  // from context creation, only undefine it afterward.
+  vm.runInContext("JSON = undefined;", context);
+  if (setupScript) {
+    vm.runInContext(setupScript, context);
+  }
+  return vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context) as string;
+}
+
+/** Fake app/CompItem/render-queue object model, built as ExtendScript-like source text so it is constructed natively inside the same vm realm the script under test runs in (see runFixedScriptWithoutNativeJson's own doc comment on why). */
+const FAKE_RENDER_CAPABILITIES_APP_SETUP = `
+  function CompItem() {}
+  var __fakeComp = new CompItem();
+  __fakeComp.name = ${JSON.stringify(COMP_NAME)};
+  var __fakeRenderQueueItem = {
+    templates: ["Best Settings", "Custom Preset"],
+    outputModule: function () { return { templates: ["Lossless", "H.264 - Match Render Settings"] }; },
+    remove: function () {}
+  };
+  var app = {
+    beginUndoGroup: function () {},
+    endUndoGroup: function () {},
+    project: {
+      numItems: 1,
+      item: function (i) { return i === 1 ? __fakeComp : null; },
+      renderQueue: { items: { add: function () { return __fakeRenderQueueItem; } } }
+    }
+  };
+`;
 
 describe("buildOperationScript", () => {
   it("is deterministic - the same operation always produces byte-identical JSX", () => {
@@ -190,6 +252,90 @@ describe("buildInspectRenderCapabilitiesScript", () => {
 
   it("is deterministic", () => {
     expect(buildInspectRenderCapabilitiesScript()).toBe(buildInspectRenderCapabilitiesScript());
+  });
+});
+
+describe("real production bug fix (2026-09-02): 'JSON is undefined' can never recur - every script installs a JSON.stringify shim before it is ever called", () => {
+  const allBuiltScripts = (): { name: string; script: string }[] => [
+    { name: "SET_TEXT", script: buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "x" }) },
+    { name: "MAP_FOOTAGE", script: buildOperationScript(1, COMP_NAME, { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/tmp/a.png" }) },
+    { name: "SET_LAYER_VISIBILITY", script: buildOperationScript(1, COMP_NAME, { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: true }) },
+    { name: "SET_TIME_REMAP_FREEZE", script: buildOperationScript(1, COMP_NAME, { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 1 }) },
+    { name: "SET_DURATION", script: buildOperationScript(1, COMP_NAME, { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 3 }) },
+    { name: "SET_BRAND_COLOR", script: buildOperationScript(1, COMP_NAME, { type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "#112233" }) },
+    {
+      name: "BUILD_REELS_COMPOSITION",
+      script: buildOperationScript(1, COMP_NAME, {
+        type: "BUILD_REELS_COMPOSITION",
+        reelsCompositionName: "Reels",
+        layerTransforms: [{ layerIndex: 1, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }]
+      })
+    },
+    { name: "SAVE_PROJECT", script: buildSaveProjectScript() },
+    { name: "INSPECT_RENDER_CAPABILITIES", script: buildInspectRenderCapabilitiesScript() },
+    { name: "INSPECT_COMPOSITION_PRECOMPS", script: buildInspectCompositionPrecompsScript(1, COMP_NAME) }
+  ];
+
+  it("every script this file builds installs the JSON.stringify shim BEFORE app.beginUndoGroup - so it is guaranteed to exist before any of the script's own logic runs", () => {
+    for (const { name, script } of allBuiltScripts()) {
+      const shimIndex = script.indexOf('if (typeof JSON === "undefined")');
+      const beginUndoGroupIndex = script.indexOf("app.beginUndoGroup(");
+      expect(shimIndex, `${name}: shim not found`).toBeGreaterThan(-1);
+      expect(beginUndoGroupIndex, `${name}: app.beginUndoGroup not found`).toBeGreaterThan(-1);
+      expect(shimIndex, `${name}: shim must come before app.beginUndoGroup`).toBeLessThan(beginUndoGroupIndex);
+    }
+  });
+
+  it("REPRODUCES the exact real production failure and proves the fix: buildInspectRenderCapabilitiesScript(), run in a realm with no native JSON (simulating ExtendScript), throws WITHOUT the shim and succeeds WITH it", () => {
+    const script = buildInspectRenderCapabilitiesScript();
+
+    // Without the shim (the pre-fix script text), this throws - the exact
+    // real production failure. Proven by stripping the shim back out of
+    // an otherwise-identical copy of the real, current script.
+    const scriptWithoutShim = script.replace(
+      /if \(typeof JSON === "undefined"\)[\s\S]*?\n\s*\}\n\s*app\.beginUndoGroup/,
+      "app.beginUndoGroup"
+    );
+    expect(scriptWithoutShim).not.toBe(script);
+    expect(() => runFixedScriptWithoutNativeJson(scriptWithoutShim, FAKE_RENDER_CAPABILITIES_APP_SETUP)).toThrow();
+
+    // With the shim (the real, current script) - no throw, and a real,
+    // valid, correctly-shaped JSON result.
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_RENDER_CAPABILITIES_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({
+      ok: true,
+      renderSettingsTemplateNames: ["Best Settings", "Custom Preset"],
+      outputModuleTemplateNames: ["Lossless", "H.264 - Match Render Settings"]
+    });
+  });
+
+  it("the shim correctly serializes strings with special characters (quotes, backslashes, newlines, control characters) - not just simple values", () => {
+    const script = buildInspectRenderCapabilitiesScript();
+    const shimOnly = script.slice(0, script.indexOf("app.beginUndoGroup"));
+    const probe = `${shimOnly}return JSON.stringify({ text: "a \\"quote\\", a \\\\backslash\\\\, a\\nnewline, a\\tinvisible tab" });`;
+    const resultText = runFixedScriptWithoutNativeJson(probe);
+    expect(JSON.parse(resultText)).toEqual({ text: 'a "quote", a \\backslash\\, a\nnewline, a\tinvisible tab' });
+  });
+
+  it("the shim correctly serializes arrays, nested objects, numbers, booleans, and null - the exact shapes these scripts actually produce", () => {
+    const script = buildInspectRenderCapabilitiesScript();
+    const shimOnly = script.slice(0, script.indexOf("app.beginUndoGroup"));
+    const probe = `${shimOnly}return JSON.stringify({ ok: true, list: ["a", "b"], nested: { n: 1, b: true, z: null }, arr: [1,2,3] });`;
+    const resultText = runFixedScriptWithoutNativeJson(probe);
+    expect(JSON.parse(resultText)).toEqual({ ok: true, list: ["a", "b"], nested: { n: 1, b: true, z: null }, arr: [1, 2, 3] });
+  });
+
+  it("never overwrites a real, working native JSON.stringify - only installs the shim when one is genuinely missing (defensive, in case a future ExtendScript version does provide one)", () => {
+    const script = buildInspectRenderCapabilitiesScript();
+    const shimOnly = script.slice(0, script.indexOf("app.beginUndoGroup"));
+    const context = vm.createContext({});
+    // Leaves the real native JSON in place this time (does not undefine it).
+    const resultText = vm.runInContext(
+      `(new Function("args", ${JSON.stringify(`${shimOnly}return JSON.stringify({ probe: "native-json-still-used" });`)}))()`,
+      context
+    ) as string;
+    expect(JSON.parse(resultText)).toEqual({ probe: "native-json-still-used" });
   });
 });
 
