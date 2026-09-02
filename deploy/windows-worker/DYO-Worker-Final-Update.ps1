@@ -290,6 +290,52 @@ function Get-FreshLogContent {
   }
 }
 
+# Parses one "heartbeat succeeded" pino JSON log line (apps/worker/src/
+# index.ts's logHeartbeatEvent) into its individual fields - never anything
+# beyond status enums/numbers/a timestamp, so this is safe to print in full
+# (no worker token, no API URL, no file paths). Any field that fails to
+# parse is left $null rather than assumed - the caller treats a $null
+# AeOnline/McpOnline the same as "not ONLINE" (never fabricated as healthy).
+function ConvertFrom-DyoHeartbeatLine {
+  param([string]$Line)
+  $aeStatus = if ($Line -match '"aeStatus":"([^"]+)"') { $Matches[1] } else { $null }
+  $mcpStatus = if ($Line -match '"mcpStatus":"([^"]+)"') { $Matches[1] } else { $null }
+  $maxConcurrencyMatch = [regex]::Match($Line, '"maxConcurrency":(\d+)')
+  $maxConcurrency = if ($maxConcurrencyMatch.Success) { [int]$maxConcurrencyMatch.Groups[1].Value } else { $null }
+  $timeMatch = [regex]::Match($Line, '"time":(\d+)')
+  $timeMs = if ($timeMatch.Success) { [int64]$timeMatch.Groups[1].Value } else { $null }
+  [pscustomobject]@{
+    TimeMs         = $timeMs
+    AeStatus       = $aeStatus
+    McpStatus      = $mcpStatus
+    MaxConcurrency = $maxConcurrency
+    AeOnline       = ($aeStatus -eq "ONLINE")
+    McpOnline      = ($mcpStatus -eq "ONLINE")
+    Line           = $Line
+  }
+}
+
+# Prints one line per observed heartbeat (timestamp, AE/MCP status,
+# maxConcurrency) - the real diagnostic evidence behind a PASS or a
+# ROLLED-BACK verdict, so "why" is never left to guesswork. Deliberately
+# never prints anything beyond these status fields - no worker token, no
+# credentials, no file paths.
+function Write-DyoHeartbeatDiagnostics {
+  param([array]$Heartbeats)
+  if (-not $Heartbeats -or $Heartbeats.Count -eq 0) {
+    Write-Host "  (no heartbeat lines were observed during the health window)"
+    return
+  }
+  foreach ($hb in $Heartbeats) {
+    $ts = if ($hb.TimeMs) {
+      ([DateTimeOffset]::FromUnixTimeMilliseconds($hb.TimeMs).UtcDateTime.ToString("HH:mm:ss.fff")) + " UTC"
+    } else {
+      "(unknown time)"
+    }
+    Write-Host "  [$ts] aeStatus=$($hb.AeStatus) mcpStatus=$($hb.McpStatus) maxConcurrency=$($hb.MaxConcurrency)"
+  }
+}
+
 function Test-DyoWorkerTaskActionHealthy {
   param([string]$TaskName)
   try {
@@ -555,9 +601,17 @@ if (Test-Path $previousBuildInfoPath) {
 # (Step 1/backup, above) where nothing has been changed yet and there is
 # nothing to roll back.
 $script:FailureReason = $null
-$script:HeartbeatSucceeded = $false
 $script:PidConfirmed = $false
 $script:RunningCommit = $null
+$script:ObservedHeartbeats = @()
+$script:HealthyHeartbeat = $null
+
+# Bounded window this gate polls for a fresh heartbeat reporting BOTH AE
+# ONLINE and MCP ONLINE at once (see the real-incident doc comment further
+# below, at the polling loop itself, for why this is a window rather than
+# a single snapshot). Comfortably covers many real heartbeat cycles with
+# margin for the MCP health probe's own 8-second subprocess timeout.
+$AeMcpHealthWindowSeconds = 90
 
 function Invoke-WorkerUpdateAndVerify {
   # ---- Step 3: replace only the program files - .env is never touched ----
@@ -667,56 +721,94 @@ function Invoke-WorkerUpdateAndVerify {
   }
   Write-CheckResult $true "New process logged its own startup line"
 
-  # Requires TWO real, successful heartbeats - not just one, and never
-  # merely "retrying". A single lucky heartbeat, or a process that starts
-  # but cannot keep a stable connection, both self-heal below via automatic
-  # rollback instead of being reported as a false success. The window
-  # (90 seconds) comfortably covers several real HEARTBEAT_INTERVAL_MS
-  # cycles (15s default) with margin for real network latency.
-  Write-Host "Waiting for TWO real, successful heartbeats from the new process (up to 90 seconds -"
-  Write-Host "proves an ongoing healthy connection, not just a lucky first attempt)..."
+  # ---- Bounded AE/MCP health window - real fix for a startup race ----
+  #
+  # REAL INCIDENT (2026-09-02): the FIRST version of this gate required two
+  # real heartbeats, then inspected ONLY the single most-recent heartbeat
+  # line for aeStatus/mcpStatus. On a real client machine that single
+  # snapshot reported not-both-ONLINE immediately after restart, triggering
+  # an automatic rollback even though AE and MCP were both confirmed
+  # genuinely healthy moments later under the restored build. Root cause:
+  # MCP's own health probe (apps/worker/src/health/heroic-swan-mcp-
+  # adapter.ts) spawns a FRESH `node <ae-mcp>/dist/index.js health` child
+  # process with an 8-second timeout on every single heartbeat - no
+  # caching, no persistent connection. Immediately after an update
+  # (freshly-replaced program files, a real-time antivirus scan of those
+  # new files on first execution, a cold Node start) that spawn can
+  # transiently exceed 8 seconds and report UNKNOWN rather than ONLINE, one
+  # or two heartbeats after restart, before settling. AE/MCP detection code
+  # itself is untouched by this fix - only how many heartbeats this gate is
+  # willing to look at before giving up.
+  #
+  # Fixed by polling the WHOLE window for a heartbeat that reports BOTH AE
+  # ONLINE and MCP ONLINE at once, rather than judging success or failure
+  # from a single snapshot the instant two heartbeats are first observed.
+  # This does not weaken the requirement - AE ONLINE and MCP ONLINE on the
+  # SAME real heartbeat is still mandatory, and a machine that genuinely
+  # never gets there within the window still fails and rolls back exactly
+  # as before. It only stops a transient, early UNKNOWN from being treated
+  # as the final word.
+  Write-Host "Waiting for a fresh heartbeat reporting AE ONLINE and MCP ONLINE (up to $AeMcpHealthWindowSeconds seconds -"
+  Write-Host "an early UNKNOWN right after restart is expected and is not itself a failure)..."
   $heartbeatLinePattern = '\{[^{}]*"msg":"heartbeat succeeded"[^{}]*\}'
-  $heartbeatsOk = Wait-Until -TimeoutSeconds 90 -PollSeconds 3 -Condition {
-    $matchCount = ([regex]::Matches((Get-FreshLogContent), $heartbeatLinePattern)).Count
-    $matchCount -ge 2
+  $script:ObservedHeartbeats = @()
+  $script:HealthyHeartbeat = $null
+  $healthOk = Wait-Until -TimeoutSeconds $AeMcpHealthWindowSeconds -PollSeconds 3 -Condition {
+    $content = Get-FreshLogContent
+    $lines = [regex]::Matches($content, $heartbeatLinePattern)
+    $script:ObservedHeartbeats = @($lines | ForEach-Object { ConvertFrom-DyoHeartbeatLine -Line $_.Value })
+    if ($script:ObservedHeartbeats.Count -lt 2) { return $false }
+    $healthy = $script:ObservedHeartbeats | Where-Object { $_.AeOnline -and $_.McpOnline }
+    if ($healthy.Count -eq 0) { return $false }
+    $script:HealthyHeartbeat = $healthy[-1]
+    return $true
   }
+
+  if (-not $healthOk) {
+    $observedCount = $script:ObservedHeartbeats.Count
+    $anyAeOnline = @($script:ObservedHeartbeats | Where-Object { $_.AeOnline })
+    $anyMcpOnline = @($script:ObservedHeartbeats | Where-Object { $_.McpOnline })
+    Write-Host ""
+    Write-Host "[NEEDS ATTENTION] Did not observe a fresh heartbeat reporting both AE ONLINE and MCP"
+    Write-Host "ONLINE within $AeMcpHealthWindowSeconds seconds ($observedCount heartbeats observed)."
+    if ($observedCount -lt 2) {
+      Write-Host "REASON: heartbeat was stale or missing - fewer than two real heartbeats were observed at all."
+      $script:FailureReason = "Stale/missing heartbeat - fewer than two real heartbeats observed within $AeMcpHealthWindowSeconds seconds"
+    } elseif ($anyAeOnline.Count -eq 0 -and $anyMcpOnline.Count -eq 0) {
+      Write-Host "REASON: AE never reported ONLINE, and MCP never reported ONLINE, on any observed heartbeat."
+      $script:FailureReason = "AE never became ONLINE and MCP never became ONLINE within $AeMcpHealthWindowSeconds seconds"
+    } elseif ($anyAeOnline.Count -eq 0) {
+      Write-Host "REASON: AE never reported ONLINE on any observed heartbeat."
+      $script:FailureReason = "AE never became ONLINE within $AeMcpHealthWindowSeconds seconds"
+    } elseif ($anyMcpOnline.Count -eq 0) {
+      Write-Host "REASON: MCP never reported ONLINE on any observed heartbeat."
+      $script:FailureReason = "MCP never became ONLINE within $AeMcpHealthWindowSeconds seconds"
+    } else {
+      Write-Host "REASON: AE and MCP were each seen ONLINE at some point, but never on the SAME heartbeat."
+      $script:FailureReason = "AE and MCP were never simultaneously ONLINE on the same heartbeat within $AeMcpHealthWindowSeconds seconds"
+    }
+    Write-Host ""
+    Write-Host "Heartbeats observed during this window:"
+    Write-DyoHeartbeatDiagnostics -Heartbeats $script:ObservedHeartbeats
+    Write-Host ""
+    Write-Host "This often just means After Effects/ae-mcp needed a little longer to be detected after"
+    Write-Host "restart - re-running this update is usually safe. Contact DYO if this repeats."
+    return $false
+  }
+  Write-CheckResult $true "A fresh heartbeat reports AE ONLINE and MCP ONLINE" ("$($script:ObservedHeartbeats.Count) heartbeats observed")
+  Write-Host "Heartbeats observed during this window:"
+  Write-DyoHeartbeatDiagnostics -Heartbeats $script:ObservedHeartbeats
+
   $newContent = Get-FreshLogContent
-  $heartbeatLines = [regex]::Matches($newContent, $heartbeatLinePattern)
-  $script:HeartbeatSucceeded = $heartbeatsOk
 
-  if (-not $heartbeatsOk) {
-    Write-Host "[NEEDS ATTENTION] Did not observe two real, successful heartbeats within 90 seconds"
-    Write-Host "(found $($heartbeatLines.Count)). Check your internet connection and logs\worker.log."
-    $script:FailureReason = "Fewer than two real heartbeats succeeded within 90 seconds (found $($heartbeatLines.Count))"
+  if ($script:HealthyHeartbeat.MaxConcurrency -ne 1) {
+    Write-Host "[NEEDS ATTENTION] The heartbeat that confirmed AE/MCP ONLINE does not report the expected"
+    Write-Host "maxConcurrency (1) - found $($script:HealthyHeartbeat.MaxConcurrency)."
+    Write-Host "REASON: capability/concurrency mismatch."
+    $script:FailureReason = "Healthy heartbeat does not report the expected maxConcurrency (1) (found $($script:HealthyHeartbeat.MaxConcurrency))"
     return $false
   }
-  Write-CheckResult $true "Two or more real, successful heartbeats confirmed" ("$($heartbeatLines.Count) heartbeats observed")
-
-  # AE ONLINE / MCP ONLINE / maxConcurrency - read directly from the MOST
-  # RECENT successful heartbeat's own structured log fields (already sent
-  # to DYO on every heartbeat - see apps/worker/src/index.ts's
-  # logHeartbeatEvent), never guessed or assumed from the process merely
-  # running.
-  $latestHeartbeatLine = $heartbeatLines[$heartbeatLines.Count - 1].Value
-  $aeOnline = $latestHeartbeatLine -match '"aeStatus":"ONLINE"'
-  $mcpOnline = $latestHeartbeatLine -match '"mcpStatus":"ONLINE"'
-  if (-not ($aeOnline -and $mcpOnline)) {
-    Write-Host "[NEEDS ATTENTION] Latest heartbeat does not report both AE and MCP ONLINE:"
-    Write-Host "  $latestHeartbeatLine"
-    Write-Host "This often just means After Effects is not open yet - open it and wait a minute,"
-    Write-Host "or re-run this update once it is."
-    $script:FailureReason = "Latest heartbeat does not report both AE and MCP as ONLINE"
-    return $false
-  }
-  Write-CheckResult $true "Latest heartbeat reports AE ONLINE and MCP ONLINE"
-
-  $maxConcurrencyOk = $latestHeartbeatLine -match '"maxConcurrency":1\b'
-  if (-not $maxConcurrencyOk) {
-    Write-Host "[NEEDS ATTENTION] Latest heartbeat does not report the expected maxConcurrency (1)."
-    $script:FailureReason = "Latest heartbeat does not report the expected maxConcurrency (1)"
-    return $false
-  }
-  Write-CheckResult $true "Latest heartbeat reports the expected maxConcurrency (1)"
+  Write-CheckResult $true "Latest healthy heartbeat reports the expected maxConcurrency (1)"
 
   $expectedCapabilities = @("CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE", "INSPECT_RENDER_CAPABILITIES", "EXECUTE_FRAME", "RENDER", "CREATE_PREVIEW")
   $missingCapabilities = $expectedCapabilities | Where-Object { $newContent -notmatch [regex]::Escape($_) }
@@ -726,6 +818,7 @@ function Invoke-WorkerUpdateAndVerify {
     Write-Host "[NEEDS ATTENTION] Could not confirm all seven capabilities ($($expectedCapabilities -join ', '))"
     Write-Host "in the new process's own startup log line. The process is running and heartbeating,"
     Write-Host "but this update may not have taken effect correctly."
+    Write-Host "REASON: capability/concurrency mismatch."
     $script:FailureReason = "Could not confirm all seven expected capabilities in the startup log"
     return $false
   }
@@ -735,6 +828,7 @@ function Invoke-WorkerUpdateAndVerify {
     Write-Host "[NEEDS ATTENTION] No build/version marker (BUILD_INFO commit) was found in the"
     Write-Host "new process's own startup log line. Everything else checks out, but this update"
     Write-Host "package cannot prove which build is now running."
+    Write-Host "REASON: commit mismatch (no commit marker found)."
     $script:FailureReason = "No BUILD_INFO commit marker found in the startup log"
     return $false
   }
@@ -744,6 +838,7 @@ function Invoke-WorkerUpdateAndVerify {
     Write-Host "[NEEDS ATTENTION] The running build's commit ($runningCommit) does not match"
     Write-Host "this exact FINAL update package's expected commit ($ExpectedCommit)."
     Write-Host "The program files were copied, but something is not the exact final build."
+    Write-Host "REASON: commit mismatch."
     $script:FailureReason = "Running commit ($runningCommit) does not match the expected commit ($ExpectedCommit)"
     return $false
   }

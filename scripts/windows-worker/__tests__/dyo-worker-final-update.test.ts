@@ -249,7 +249,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
 
   it("verifies the new process logged its own startup line before checking anything heartbeat-related", () => {
     const startupIdx = updateScript.indexOf("$startupLogged = Wait-Until");
-    const heartbeatIdx = updateScript.indexOf("$heartbeatsOk = Wait-Until");
+    const heartbeatIdx = updateScript.indexOf("$healthOk = Wait-Until");
     expect(startupIdx).toBeGreaterThan(-1);
     expect(heartbeatIdx).toBeGreaterThan(startupIdx);
     const startupBlock = updateScript.slice(startupIdx, heartbeatIdx);
@@ -258,59 +258,156 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
     expect(startupBlock).toMatch(/return \$false/);
   });
 
-  it("hardening: requires TWO real, successful heartbeats (not one, and not merely a logged retry attempt) before the update can pass - real fix so a single lucky heartbeat or a flapping connection can never be reported as healthy", () => {
-    const idx = updateScript.indexOf("$heartbeatsOk = Wait-Until");
-    expect(idx).toBeGreaterThan(-1);
-    const declIdx = updateScript.indexOf("$heartbeatLinePattern = ");
-    expect(declIdx).toBeGreaterThan(-1);
-    expect(declIdx).toBeLessThan(idx);
-    const declBlock = updateScript.slice(declIdx, idx);
-    expect(declBlock).toMatch(/heartbeat succeeded/);
-    const block = updateScript.slice(idx, idx + 500);
-    expect(block).toMatch(/-ge 2/);
-    // The old "a genuinely logged retry attempt also counts as success"
-    // leniency is gone - a health gate is only as strong as what it
-    // accepts, and a retry line proves nothing about AE/MCP/capabilities.
-    expect(updateScript).not.toMatch(/\$retrying/);
-    expect(updateScript).not.toMatch(/heartbeat failed, will retry/);
-  });
+  describe("hardening follow-up (2026-09-02 real incident): bounded AE/MCP health window replaces the single-heartbeat-snapshot race", () => {
+    /**
+     * Real production incident: the first version of this gate required
+     * two heartbeats, then inspected only the single most-recent heartbeat
+     * line for aeStatus/mcpStatus. On a real client machine that single
+     * snapshot reported not-both-ONLINE immediately after restart and
+     * triggered an unnecessary rollback, even though AE/MCP were both
+     * confirmed genuinely healthy moments later. Root cause: MCP's own
+     * health probe spawns a fresh subprocess with an 8-second timeout on
+     * every heartbeat, which can transiently exceed 8s right after an
+     * update (freshly-replaced files, antivirus scan, cold Node start).
+     * These tests extract the REAL regex/condition logic from the .ps1
+     * source and re-apply it against realistic sample log content, the
+     * same convention used elsewhere in this file (e.g. isDyoWorkerCommandLine).
+     */
 
-  it("real regex actually requires 2+ matches against sample log content, not just a heuristic string check", () => {
-    const patternMatch = /\$heartbeatLinePattern\s*=\s*'([^']+)'/.exec(updateScript);
-    expect(patternMatch?.[1], "$heartbeatLinePattern not found").toBeTruthy();
-    const pattern = new RegExp(patternMatch![1]!, "g");
-    const oneHeartbeat = 'noise\n{"level":30,"msg":"heartbeat succeeded","status":"ONLINE"}\nmore noise';
-    const twoHeartbeats = `${oneHeartbeat}\n{"level":30,"msg":"heartbeat succeeded","status":"ONLINE"}`;
-    expect([...oneHeartbeat.matchAll(pattern)].length).toBe(1);
-    expect([...twoHeartbeats.matchAll(pattern)].length).toBe(2);
-  });
+    function extractHeartbeatLinePattern(): RegExp {
+      const match = /\$heartbeatLinePattern\s*=\s*'([^']+)'/.exec(updateScript);
+      expect(match?.[1], "$heartbeatLinePattern not found").toBeTruthy();
+      return new RegExp(match![1]!, "g");
+    }
 
-  it("returns $false (not exit 1) on a heartbeat-count failure, since this is inside the rollback-wrapped verification function", () => {
-    const idx = updateScript.indexOf("if (-not $heartbeatsOk) {");
-    expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 400);
-    expect(block).toMatch(/\$script:FailureReason\s*=/);
-    expect(block).toMatch(/return \$false/);
-    expect(block).not.toMatch(/exit 1/);
-  });
+    /** Re-implements ConvertFrom-DyoHeartbeatLine's parsing in JS, from the real regexes the .ps1 source itself uses, to genuinely exercise the same field-extraction semantics. */
+    function parseHeartbeatLine(line: string): { aeOnline: boolean; mcpOnline: boolean; maxConcurrency: number | null } {
+      const aeStatus = /"aeStatus":"([^"]+)"/.exec(line)?.[1] ?? null;
+      const mcpStatus = /"mcpStatus":"([^"]+)"/.exec(line)?.[1] ?? null;
+      const maxConcurrencyMatch = /"maxConcurrency":(\d+)/.exec(line);
+      return {
+        aeOnline: aeStatus === "ONLINE",
+        mcpOnline: mcpStatus === "ONLINE",
+        maxConcurrency: maxConcurrencyMatch ? Number(maxConcurrencyMatch[1]) : null
+      };
+    }
 
-  it("hardening: checks the LATEST heartbeat's own aeStatus/mcpStatus fields report ONLINE, not just that a heartbeat happened at all", () => {
-    const idx = updateScript.indexOf("$aeOnline = $latestHeartbeatLine");
-    expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 800);
-    expect(block).toMatch(/"aeStatus":"ONLINE"/);
-    expect(block).toMatch(/"mcpStatus":"ONLINE"/);
-    expect(block).toMatch(/return \$false/);
-    expect(block).not.toMatch(/exit 1/);
-  });
+    function heartbeatLine(aeStatus: string, mcpStatus: string, maxConcurrency = 1): string {
+      return `{"level":30,"time":1788344000000,"msg":"heartbeat succeeded","status":"ONLINE","aeStatus":"${aeStatus}","mcpStatus":"${mcpStatus}","maxConcurrency":${maxConcurrency}}`;
+    }
 
-  it("hardening: checks the latest heartbeat reports the expected maxConcurrency (1) - proves the single-job-at-a-time guarantee is actually observed on this exact running process, not merely assumed", () => {
-    const idx = updateScript.indexOf("$maxConcurrencyOk = $latestHeartbeatLine");
-    expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 400);
-    expect(block).toMatch(/"maxConcurrency":1/);
-    expect(block).toMatch(/return \$false/);
-    expect(block).not.toMatch(/exit 1/);
+    it("removed the old single-snapshot variables entirely - $latestHeartbeatLine/$heartbeatsOk/$aeOnline/$mcpOnline/$maxConcurrencyOk no longer exist", () => {
+      expect(updateScript).not.toMatch(/\$latestHeartbeatLine/);
+      expect(updateScript).not.toMatch(/\$heartbeatsOk\b/);
+      expect(updateScript).not.toMatch(/\$aeOnline\b/);
+      expect(updateScript).not.toMatch(/\$mcpOnline\b/);
+      expect(updateScript).not.toMatch(/\$maxConcurrencyOk\b/);
+    });
+
+    it("defines ConvertFrom-DyoHeartbeatLine and Write-DyoHeartbeatDiagnostics as real, testable functions, never inlined into the polling condition", () => {
+      expect(updateScript).toMatch(/function ConvertFrom-DyoHeartbeatLine/);
+      expect(updateScript).toMatch(/function Write-DyoHeartbeatDiagnostics/);
+    });
+
+    it("$AeMcpHealthWindowSeconds is a named, script-level constant (not a bare inline literal) that the polling loop and every failure message actually reference", () => {
+      expect(updateScript).toMatch(/\$AeMcpHealthWindowSeconds = 90/);
+      const pollIdx = updateScript.indexOf("$healthOk = Wait-Until -TimeoutSeconds $AeMcpHealthWindowSeconds");
+      expect(pollIdx).toBeGreaterThan(-1);
+    });
+
+    it("scenario: first heartbeat MCP UNKNOWN, later heartbeat MCP ONLINE => the real polling condition succeeds (not a false rollback)", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = [heartbeatLine("ONLINE", "UNKNOWN"), heartbeatLine("ONLINE", "ONLINE")].join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.length).toBe(2);
+      const healthy = lines.filter((l) => l.aeOnline && l.mcpOnline);
+      expect(healthy.length).toBe(1);
+    });
+
+    it("scenario: first several heartbeats UNKNOWN, later BOTH ONLINE within the window => succeeds", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = [
+        heartbeatLine("UNKNOWN", "UNKNOWN"),
+        heartbeatLine("ONLINE", "UNKNOWN"),
+        heartbeatLine("ONLINE", "UNKNOWN"),
+        heartbeatLine("ONLINE", "ONLINE")
+      ].join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.length).toBe(4);
+      expect(lines.some((l) => l.aeOnline && l.mcpOnline)).toBe(true);
+    });
+
+    it("scenario: MCP never ONLINE across the whole window => no healthy heartbeat found (real fix does not fabricate success)", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = [heartbeatLine("ONLINE", "UNKNOWN"), heartbeatLine("ONLINE", "OFFLINE"), heartbeatLine("ONLINE", "UNKNOWN")].join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.length).toBe(3);
+      expect(lines.some((l) => l.aeOnline && l.mcpOnline)).toBe(false);
+      expect(lines.some((l) => l.mcpOnline)).toBe(false);
+    });
+
+    it("scenario: AE never ONLINE across the whole window => no healthy heartbeat found", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = [heartbeatLine("OFFLINE", "ONLINE"), heartbeatLine("UNKNOWN", "ONLINE")].join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.some((l) => l.aeOnline && l.mcpOnline)).toBe(false);
+      expect(lines.some((l) => l.aeOnline)).toBe(false);
+    });
+
+    it("real fix does NOT weaken the requirement: still requires the SAME heartbeat to report both ONLINE at once, not AE ONLINE on one line and MCP ONLINE on a different line", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = [heartbeatLine("ONLINE", "OFFLINE"), heartbeatLine("OFFLINE", "ONLINE")].join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.some((l) => l.aeOnline)).toBe(true);
+      expect(lines.some((l) => l.mcpOnline)).toBe(true);
+      expect(lines.some((l) => l.aeOnline && l.mcpOnline)).toBe(false);
+    });
+
+    it("still requires at least TWO real heartbeats even if the very first one is already healthy - never a single-lucky-heartbeat pass", () => {
+      const idx = updateScript.indexOf("$healthOk = Wait-Until");
+      const block = updateScript.slice(idx, idx + 700);
+      expect(block).toMatch(/if \(\$script:ObservedHeartbeats\.Count -lt 2\) \{ return \$false \}/);
+    });
+
+    it("the polling condition returns $false (never fabricating success) until a healthy heartbeat is actually found", () => {
+      const idx = updateScript.indexOf("$healthOk = Wait-Until");
+      const block = updateScript.slice(idx, idx + 700);
+      expect(block).toMatch(/if \(\$healthy\.Count -eq 0\) \{ return \$false \}/);
+      expect(block).toMatch(/return \$true/);
+    });
+
+    it("failure diagnostics distinguish stale/missing heartbeat, AE-never-ONLINE, MCP-never-ONLINE, both-never-ONLINE, and never-simultaneous - never one generic message for every case", () => {
+      const idx = updateScript.indexOf("if (-not $healthOk) {");
+      expect(idx).toBeGreaterThan(-1);
+      const block = updateScript.slice(idx, idx + 2200);
+      expect(block).toMatch(/heartbeat was stale or missing/);
+      expect(block).toMatch(/AE never reported ONLINE, and MCP never reported ONLINE/);
+      expect(block).toMatch(/AE never reported ONLINE on any observed heartbeat/);
+      expect(block).toMatch(/MCP never reported ONLINE on any observed heartbeat/);
+      expect(block).toMatch(/never on the SAME heartbeat/);
+      expect(block).toMatch(/return \$false/);
+      expect(block).not.toMatch(/exit 1/);
+    });
+
+    it("failure path prints per-heartbeat diagnostics (timestamp, AE/MCP status, maxConcurrency) via Write-DyoHeartbeatDiagnostics, and never logs a worker token/credential", () => {
+      const idx = updateScript.indexOf("if (-not $healthOk) {");
+      const block = updateScript.slice(idx, idx + 2000);
+      expect(block).toMatch(/Write-DyoHeartbeatDiagnostics -Heartbeats \$script:ObservedHeartbeats/);
+      expect(block).not.toMatch(/WORKER_TOKEN|workerToken|worker-credentials/i);
+      const diagFnIdx = updateScript.indexOf("function Write-DyoHeartbeatDiagnostics");
+      expect(diagFnIdx).toBeGreaterThan(-1);
+      const diagFnBlock = updateScript.slice(diagFnIdx, diagFnIdx + 900);
+      expect(diagFnBlock).not.toMatch(/WORKER_TOKEN|workerToken|credential/i);
+    });
+
+    it("hardening: checks the confirmed-healthy heartbeat's own maxConcurrency field - proves the single-job-at-a-time guarantee on the exact heartbeat that proved AE/MCP ONLINE, not an arbitrary one", () => {
+      const idx = updateScript.indexOf("if ($script:HealthyHeartbeat.MaxConcurrency -ne 1)");
+      expect(idx).toBeGreaterThan(-1);
+      const block = updateScript.slice(idx, idx + 500);
+      expect(block).toMatch(/capability\/concurrency mismatch/);
+      expect(block).toMatch(/return \$false/);
+      expect(block).not.toMatch(/exit 1/);
+    });
   });
 
   it("verifies all seven capabilities (CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME, RENDER, CREATE_PREVIEW) all appear in the new process's own startup log line, and returns $false if not", () => {
@@ -369,7 +466,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
 
   it('never prints "Update complete" before every verification step above has already passed', () => {
     const completeIdx = updateScript.indexOf("Update complete");
-    const heartbeatCheckIdx = updateScript.indexOf("$heartbeatsOk = Wait-Until");
+    const heartbeatCheckIdx = updateScript.indexOf("$healthOk = Wait-Until");
     const capabilityCheckIdx = updateScript.indexOf('$newContent -match \'"msg":"worker starting"\'');
     const buildInfoCheckIdx = updateScript.indexOf("$commitMatch = [regex]::Match");
     const exactCommitCheckIdx = updateScript.indexOf("if ($runningCommit -ne $ExpectedCommit)");
@@ -750,8 +847,8 @@ describe("DYO-Worker-Final-Update.ps1 does not hard-fail on a PID-diff miss alon
     const commitIdx = updateScript.indexOf('$commitMatch = [regex]::Match');
     expect(capIdx).toBeGreaterThan(-1);
     expect(commitIdx).toBeGreaterThan(capIdx);
-    expect(updateScript.slice(capIdx, capIdx + 900)).toMatch(/return \$false/);
-    expect(updateScript.slice(commitIdx, commitIdx + 700)).toMatch(/return \$false/);
+    expect(updateScript.slice(capIdx, capIdx + 1000)).toMatch(/return \$false/);
+    expect(updateScript.slice(commitIdx, commitIdx + 800)).toMatch(/return \$false/);
   });
 
   it("the final summary is honest about which confirmation actually happened (PID vs log-content only)", () => {
@@ -813,10 +910,54 @@ describe("DYO-Worker-Final-Update.ps1 hardening: wraps the risky replace/verify 
     expect(rollbackCallIdx).toBeGreaterThan(ifIdx);
   });
 
-  it("every failure path inside Invoke-WorkerUpdateAndVerify sets $script:FailureReason before returning $false, so the rollback report is never blank", () => {
+  it("MCP-never-ONLINE, AE-never-ONLINE, and stale/missing-heartbeat are each real branches inside Invoke-WorkerUpdateAndVerify that set FailureReason and return $false - and since every $false return from this function is unconditionally routed to Invoke-WorkerRollback (see the top-level wiring test above), each of these three failure modes really does trigger an automatic rollback attempt, not just a printed message", () => {
     const fnIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
     const endIdx = updateScript.indexOf("function Invoke-WorkerRollback");
     const block = updateScript.slice(fnIdx, endIdx);
+    expect(block).toMatch(/\$script:FailureReason = "MCP never became ONLINE within \$AeMcpHealthWindowSeconds seconds"/);
+    expect(block).toMatch(/\$script:FailureReason = "AE never became ONLINE within \$AeMcpHealthWindowSeconds seconds"/);
+    expect(block).toMatch(/\$script:FailureReason = "Stale\/missing heartbeat - fewer than two real heartbeats observed within \$AeMcpHealthWindowSeconds seconds"/);
+    // Every one of these three lines is immediately followed by `return $false`
+    // within the same failing branch - confirmed generically by the
+    // returnFalseCount === setReasonCount test below, covering these three
+    // among all failure branches.
+  });
+
+  it("the AE/MCP health-window failure block has exactly 5 mutually-exclusive REASON branches (stale/missing, both-never-online, AE-never, MCP-never, never-simultaneous), each setting $script:FailureReason, sharing exactly ONE trailing return $false for the whole if/elseif/elseif/elseif/else chain", () => {
+    const idx = updateScript.indexOf("if (-not $healthOk) {");
+    const endIdx = updateScript.indexOf("restart - re-running this update is usually safe", idx);
+    expect(idx).toBeGreaterThan(-1);
+    expect(endIdx).toBeGreaterThan(idx);
+    const block = updateScript.slice(idx, endIdx + 200);
+    const setReasonCount = (block.match(/\$script:FailureReason\s*=/g) ?? []).length;
+    const returnFalseCount = (block.match(/return \$false/g) ?? []).length;
+    expect(setReasonCount).toBe(5);
+    expect(returnFalseCount).toBe(1);
+  });
+
+  it("every OTHER failure path inside Invoke-WorkerUpdateAndVerify (outside the AE/MCP health window's own 5-branches-1-return block) sets $script:FailureReason immediately before its own return $false, so the rollback report is never blank", () => {
+    const fnIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
+    const endIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    let block = updateScript.slice(fnIdx, endIdx);
+    // Two regions are deliberately excluded here, each already verified by
+    // its own dedicated test above:
+    //   1. The AE/MCP bounded-polling Wait-Until Condition scriptblock -
+    //      its `return $false`/`return $true` are the CONDITION's own "not
+    //      yet, keep polling" signal to Wait-Until, a different
+    //      control-flow layer with no $script:FailureReason pairing at all.
+    //   2. The AE/MCP health-window failure block itself - a legitimate
+    //      5-branches-1-shared-return structure (asserted above), which
+    //      would otherwise skew this generic 1:1 pairing count.
+    const pollConditionIdx = block.indexOf("$healthOk = Wait-Until");
+    // Cuts through to the very next Write-CheckResult call AFTER the
+    // health-window failure block's own shared `return $false` and closing
+    // brace, so that trailing return is excluded along with the rest of
+    // the 5-branches-1-return block (verified by its own dedicated test
+    // above) - not just up to its last REASON message.
+    const healthFailureEndIdx = block.indexOf('Write-CheckResult $true "A fresh heartbeat reports AE ONLINE and MCP ONLINE"', pollConditionIdx);
+    expect(pollConditionIdx).toBeGreaterThan(-1);
+    expect(healthFailureEndIdx).toBeGreaterThan(pollConditionIdx);
+    block = block.slice(0, pollConditionIdx) + block.slice(healthFailureEndIdx);
     const returnFalseCount = (block.match(/return \$false/g) ?? []).length;
     const setReasonCount = (block.match(/\$script:FailureReason\s*=/g) ?? []).length;
     expect(returnFalseCount).toBeGreaterThanOrEqual(4);
