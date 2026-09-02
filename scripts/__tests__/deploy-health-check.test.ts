@@ -324,6 +324,80 @@ describe("scripts/deploy-production.sh wiring", () => {
 });
 
 /**
+ * Real operational issue found 2026-09-02: dyo-web genuinely runs on
+ * 127.0.0.1:4100 (deploy/pm2/ecosystem.config.cjs's own `-p 4100` arg -
+ * confirmed the single source of truth for this) - port 3000 on the same
+ * shared host belongs to a completely unrelated NestJS application. This
+ * was never actually wrong in the tracked deploy pipeline (wait_for_healthy/
+ * verify_static_assets_healthy already only ever used 4100/`/login` - see
+ * the tests above), but nothing previously asserted "never 3000" directly,
+ * so a future edit could regress this silently. These tests exist purely
+ * to make that regression impossible without a failing test, across every
+ * file that could plausibly reintroduce it.
+ */
+describe("dyo-web health checks are pinned to port 4100, never 3000 (2026-09-02 real operational issue)", () => {
+  it("deploy/pm2/ecosystem.config.cjs starts dyo-web with -p 4100 - the single source of truth for this port", () => {
+    const ecosystemPath = join(currentDir, "..", "..", "deploy", "pm2", "ecosystem.config.cjs");
+    const ecosystem = readFileSync(ecosystemPath, "utf8");
+
+    expect(ecosystem).toMatch(/args:\s*\[\s*"start"\s*,\s*"-H"\s*,\s*"127\.0\.0\.1"\s*,\s*"-p"\s*,\s*"4100"\s*\]/);
+    expect(ecosystem).not.toContain("3000");
+  });
+
+  it("scripts/lib/deploy-health-check.sh never checks dyo-web on port 3000, and its web check is exactly port 4100", () => {
+    const script = readFileSync(libPath, "utf8");
+
+    expect(script).not.toContain("3000");
+    expect(script).toContain("curl_ok 'http://127.0.0.1:4100'");
+  });
+
+  it("scripts/deploy-production.sh never references port 3000 anywhere, and its static-asset health check is exactly port 4100", () => {
+    const scriptPath = join(currentDir, "..", "deploy-production.sh");
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).not.toContain("3000");
+    expect(script).toContain("verify_static_assets_healthy 'http://127.0.0.1:4100' '/login'");
+  });
+
+  it("a fake dyo-web answering ONLY on port 3000 (simulating the unrelated NestJS app) is never treated as dyo-web being healthy - real runtime behavior, not just a source-text match", () => {
+    // Same fake-curl-on-PATH convention as every other test in this file
+    // (see makeFakeBin above) - but this curl inspects its OWN requested
+    // URL and only "succeeds" for a port-3000 URL, failing (connection-
+    // refused-shaped exit 7) for everything else, including the real
+    // 4000/4100 checks wait_for_healthy is supposed to make. If
+    // wait_for_healthy's own web check somehow targeted 3000 (the
+    // regression this test exists to catch), THIS fake curl would report
+    // it healthy and the test below would wrongly see "dyo-web ready".
+    const fakeBinDir = mkdtempSync(join(tmpdir(), "deploy-health-port3000-"));
+    cleanupDirs.push(fakeBinDir);
+    writeFileSync(
+      join(fakeBinDir, "curl"),
+      `#!/usr/bin/env bash
+for arg in "$@"; do
+  if [[ "$arg" == *":3000"* ]]; then
+    exit 0
+  fi
+done
+exit 7
+`
+    );
+    chmodSync(join(fakeBinDir, "curl"), 0o755);
+    writeFileSync(join(fakeBinDir, "pm2"), `#!/usr/bin/env bash\necho '[]'\n`);
+    chmodSync(join(fakeBinDir, "pm2"), 0o755);
+
+    const result = runWaitForHealthy(fakeBinDir, 2, 1);
+
+    // Times out (dyo-api and dyo-web's own real 4000/4100 checks both
+    // always fail in this fake setup) - never succeeds just because
+    // something would have answered on 3000.
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toContain("dyo-web ready");
+    expect(result.stdout).not.toContain("dyo-api ready");
+    expect(result.stderr).toContain("Health check timed out");
+  });
+});
+
+/**
  * 2026-08-26 incident regression coverage: a manually-launched,
  * PM2-unmanaged process occupied port 4000 while the real PM2-managed
  * dyo-api crash-looped on EADDRINUSE in the background. `curl`/`pm2`/`ss`/

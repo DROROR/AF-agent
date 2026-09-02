@@ -1,6 +1,18 @@
 # MVP Runbook
 
-## Normal client flow (client-handoff phase, 2026-08-31)
+## Ports
+
+- `dyo-api`: `127.0.0.1:4000` (never exposed publicly directly).
+- `dyo-web`: `127.0.0.1:4100` (`deploy/pm2/ecosystem.config.cjs`'s own
+  `-p 4100` is the single source of truth for this) - **never 3000**.
+  Port 3000 on the shared production host belongs to a completely
+  unrelated NestJS application; DYO's own deploy/health-check scripts
+  never reference it (see `scripts/__tests__/deploy-health-check.test.ts`'s
+  own regression coverage for this, added 2026-09-02 after this was
+  confirmed as a real operational mix-up during a live session, never an
+  actual bug in the tracked deploy pipeline itself).
+
+## Normal client flow (final MVP nav, 2026-09-02)
 
 The dashboard's default UI hides technical IDs/operation codes from a
 normal client, and every project page shows a real 7-step workflow
@@ -8,7 +20,15 @@ stepper (`ProjectWorkflowStepper.tsx`) as the PRIMARY orientation layer -
 "Step X of 7 — <Title>" plus one plain sentence of what to do now. Every
 step's complete/current/locked state is derived from real persisted facts
 (`project-workflow-steps.ts`) - never from which page has been visited.
-Existing tabs remain secondary/direct navigation, unchanged.
+
+Simple Mode's own tab bar (secondary/direct navigation) reads exactly
+**Project / Files / Scenes / Preview / Export** (`ProjectWorkspaceShell.tsx`'s
+`tabsFor`) - Work Map / Render Settings / Revisions only appear once
+Advanced Mode is selected, never in Simple. "Preview" (`ProjectPreviewTab.tsx`)
+holds both the First Preview and Final Preview approval gates; "Export"
+(`ProjectExportTab.tsx`) holds a plain-language render trigger per variant
+plus the same real download/playback list Advanced's Render Settings tab
+shows (`FinalOutputsCard`, shared between both).
 
 1. **Upload** - create the project, upload the `.aep` template (dispatches
    INSPECT_TEMPLATE on a worker under the hood) and assets.
@@ -33,31 +53,37 @@ Existing tabs remain secondary/direct navigation, unchanged.
    shows as the guided checkpoint to review the finished result before
    rendering (see "Final Preview - honest framing" below - this is a UI
    checkpoint, not a new backend approval flag).
-7. **Render** - configure Landscape/Reels output, render, then a real
-   "Final Outputs" section (`ProjectRenderSettingsTab.tsx`) shows each
-   completed artifact with an actual in-dashboard video player
-   (`VideoArtifactPlayer.tsx`) and a working authenticated download link -
-   never a fake placeholder for an artifact that doesn't really exist yet.
+7. **Render** - configure Landscape/Reels output (Advanced), render from
+   Simple Mode's own Export tab, then a real "Final Outputs" section
+   (`FinalOutputsCard`, shown on both Export and Advanced's Render
+   Settings tab) shows each completed artifact with an actual
+   in-dashboard video player (`VideoArtifactPlayer.tsx`) and a working
+   authenticated download link - never a fake placeholder for an artifact
+   that doesn't really exist yet.
 
 This is presentation only - every technical requirement below (Template
 Manifest, Work Map persistence, Execution Plan, deterministic AE
 execution, `.aep` protection, approval gates, checkpoint/recovery) is
 unchanged underneath.
 
-### Final Preview - honest framing
+### Final Preview - real, separate approval gate (updated 2026-09-02)
 
-There is no distinct backend-persisted "final preview approved" flag.
-`resolve-render-dispatch.ts`'s own real RENDER precondition has always
-been exactly `firstPreviewApproved && allScenesComplete`, nothing else -
-confirmed directly from that file during this task. `project-workflow-
-steps.ts` deliberately does NOT fabricate a separate flag to make step 6
-look more gated than the system actually is: "Final Preview" becomes
-"complete" the moment `allScenesComplete` is true, exactly when the real
-RENDER precondition is already satisfied too - it is a guided review
-checkpoint in the UI, not a new enforcement gate. If a genuinely separate,
-backend-enforced final-preview approval is wanted later, that requires a
-real schema decision (a new session-level flag + a new precondition in
-resolve-render-dispatch.ts) - flagged here rather than built silently.
+Superseded note: an earlier revision of this section said there was no
+distinct backend-persisted "final preview approved" flag - that has since
+been built for real and this correction replaces it. `execution_sessions.
+full_preview_approved` is a real, persisted boolean, completely separate
+from `first_preview_approved`. `resolve-render-dispatch.ts`'s real RENDER
+precondition requires ALL of: `firstPreviewApproved`, every required
+scene in `completedScenePlanIds`, a full-preview artifact that exists AND
+whose `workingProjectSha256` matches the session's current working copy
+(never a stale preview captured against an older edit), AND
+`fullPreviewApproved` itself - confirmed directly from that file. Set only
+via `POST .../approve-final-preview` (`approve-final-preview.ts`), which
+itself refuses unless a fresh, matching full-preview artifact exists.
+`project-workflow-steps.ts`'s own `fullPreviewApproved` input is this SAME
+real flag, never derived from `allScenesComplete` alone. In the dashboard
+this is the Preview tab's Final Preview card - Approve Final Preview /
+Request Changes (`ProjectPreviewTab.tsx`).
 
 ### Bulk mapping review
 

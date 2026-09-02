@@ -12,12 +12,12 @@ incomplete, see note) · REAL-HARDWARE-PROOF-PENDING (code is real/tested
 against fakes, never yet run against the real Windows/AE machine) ·
 MISSING (no real implementing code).
 
-Last updated: 2026-08-29.
+Last updated: 2026-09-02.
 
 ## Three-template validation
 | Criterion | Status | Evidence |
 |---|---|---|
-| Complete workflow run on three different plugin-free templates | REAL-HARDWARE-PROOF-PENDING | `evals/README.md` + `evals/template-case.template.json` track this; zero real runs completed yet (client Worker offline this session) |
+| Complete workflow run on three different plugin-free templates | REAL-HARDWARE-PROOF-PENDING | `evals/README.md` + `evals/template-case.template.json` (extended 2026-09-02 with real-scene storyboard evidence, separate First/Final Preview approval fields, and an overallResult summary) track this; zero real runs completed yet. Current, specific blocker: the first real client-machine update attempt surfaced a real "JSON is undefined" ExtendScript failure in INSPECT_RENDER_CAPABILITIES (fixed - see Outputs section below), then a second real attempt failed the updater's own AE/MCP health gate for a cause not yet proven from client-side evidence alone - a preserved diagnostic log from the client machine is the next input needed before a further Worker package is built |
 
 ## Source safety
 | Criterion | Status | Evidence |
@@ -57,6 +57,7 @@ Last updated: 2026-08-29.
 | Landscape output correct | REAL-HARDWARE-PROOF-PENDING | full 4-stage render pipeline real and tested against a simulated `aerender`; never run against real AE 2026 |
 | Native 1080x1920 Reels output correct | REAL-HARDWARE-PROOF-PENDING | `BUILD_REELS_COMPOSITION` (schema/JSX/dispatch/checkpoint, all tested against fakes) builds a real, repositioned 1080x1920 duplicate composition, and `register-reels-composition.ts` registers it as an additive derived entry on the project's manifest the moment the job succeeds - immediately selectable from the existing Render Settings dropdown and resolvable by RENDER REELS through the existing, unmodified render-dispatch pipeline, no manual step. Fails closed (never registers) if the plan/session/working-copy-SHA has gone stale since dispatch. Fully tested against fakes; never yet run on real AE 2026 |
 | Reels layout is repositioned, not merely cropped | IMPLEMENTED (by construction) | `jsx-templates.ts`'s `buildBuildReelsCompositionScript` duplicates (never crops) and repositions named layers to explicit human-approved coordinates, refusing to overwrite a layer with existing keyframe animation |
+| Every JSX script's `JSON.stringify` calls work at real ExtendScript runtime | IMPLEMENTED (2026-09-02) | Real production failure on the first client-machine run: `INSPECT_RENDER_CAPABILITIES -> TOOL_ERROR / AE_ERROR: "JSON is undefined"` - ExtendScript has no native `JSON` global. A fixed, reviewed `JSON.stringify`-only shim (`JSON_STRINGIFY_POLYFILL`) is now prepended to every script `jsx-templates.ts` builds (installed only if a real one isn't already present). Reproduced and proven fixed via a `node:vm` sandbox with `JSON` explicitly undefined, invoked the same way the real `ae_run_jsx` tool does - not yet re-run against the real client machine (the client-machine Worker update itself remains blocked on a separate MCP-health investigation, unrelated to this fix) |
 
 ## Reliability
 | Criterion | Status | Evidence |
