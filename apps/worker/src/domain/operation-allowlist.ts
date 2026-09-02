@@ -20,9 +20,13 @@ export function isAllowedOperation(operation: string): operation is WorkerCapabi
  * INSPECT_TEMPLATE added once HeroicSwanTemplateInspector (a real,
  * read-only implementation gated on AE/MCP confirmed ONLINE - see
  * job-dispatcher.ts) replaced NotAvailableTemplateInspector in the real
- * worker execution path. Purely informational today: this list is
- * self-reported at registration/heartbeat time and is not currently used
- * by the API to gate which jobs get created or claimed.
+ * worker execution path. Self-reported at registration/heartbeat time and
+ * persisted on the worker's own DB row - apps/api/src/application/job/
+ * dispatch-job.ts's `worker.capabilities.includes(request.operation)`
+ * check gates every job dispatch against exactly this list, so a worker
+ * whose build does not yet report a given capability can never be handed
+ * a job for it (integration-tested: "rejects a worker that does not
+ * report the INSPECT_TEMPLATE capability").
  */
 export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = [
   "CHECK_HEALTH",

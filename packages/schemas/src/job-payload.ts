@@ -40,10 +40,13 @@ export const JOB_PAYLOAD_SCHEMAS: Partial<Record<WorkerCapability, z.ZodTypeAny>
   // real implementation of a previously reserved/planned-only capability
   // (see worker.ts's own WORKER_CAPABILITIES doc comment) - registered
   // here (and in job-dispatch.ts's DISPATCHABLE_OPERATIONS) so the real
-  // API/dashboard contract exists end to end. No real Worker build
-  // reports this capability yet - see resolve-create-full-preview-dispatch.ts's
-  // own doc comment for exactly what Worker-side execution is still
-  // needed (READY_FOR_LIVE_ACCEPTANCE).
+  // API/dashboard contract exists end to end. Implemented, not just
+  // planned: the current Worker build advertises CREATE_PREVIEW in
+  // CURRENT_WORKER_CAPABILITIES (operation-allowlist.ts) and executes it
+  // for real via executeCreateFullPreview (execution/preview/
+  // create-full-preview-executor.ts, dispatched from job-dispatcher.ts's
+  // own "CREATE_PREVIEW" case) - part of the real live pipeline, same as
+  // every other operation in this map.
   CREATE_PREVIEW: createFullPreviewRequestSchema
 };
 
