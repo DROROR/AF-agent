@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { hasAepExtension, templateManifestSchema, type InspectTemplateRequest, type TemplateManifest } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type AllowedInspectionTool } from "./heroic-swan-mcp-client.js";
 import type {
@@ -17,23 +18,35 @@ import {
   type CompositionDetail,
   type CompositionSummary
 } from "./parse-mcp-shapes.js";
+import { buildInspectCompositionPrecompsScript } from "../execution/jsx-templates.js";
+import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 
 /**
  * Real, production INSPECT_TEMPLATE implementation, wired against
- * HeroicSwanMcpClient - which itself only ever reaches the five allowlisted
- * read-only tools (ae_health, ae_list_instances, ae_get_project_info,
- * ae_list_compositions, ae_get_composition) via a TypeScript union type,
- * not a runtime check. There is no method on this class, or on
- * HeroicSwanMcpClient, that can call ae_run_jsx or any other upstream tool.
+ * HeroicSwanMcpClient - which reaches the seven allowlisted read-only
+ * tools (ae_health, ae_list_instances, ae_get_project_info,
+ * ae_list_compositions, ae_get_composition, ae_get_layer, ae_capture_frame)
+ * via a TypeScript union type, not a runtime check, PLUS exactly one
+ * additional, fixed, versioned, read-only JSX script
+ * (buildInspectCompositionPrecompsScript, via
+ * HeroicSwanMcpClient.runFixedInspectionScript - see that method's own
+ * doc comment for why this is still not "arbitrary JSX from inspection").
  *
  * Flow: call the four zero-argument discovery tools (captured for
  * diagnostics regardless of outcome), then attempt to build a real,
  * schema-validated TemplateManifest from their parsed, confirmed-shape
- * content plus one bounded ae_get_composition call per discovered
- * composition. Any failure along that path (a tool call, a parse, or
- * hashing the real source .aep - CLAUDE.md Safety Rule 8) falls back to
- * a RawInspectionCapture instead of guessing or crashing - see
- * docs/TEMPLATE-INSPECTOR.md.
+ * content plus one bounded ae_get_composition call AND one bounded
+ * composition-precomps script call per discovered composition (the
+ * latter is what makes isNestedOnlyReferenced/parentCompositionIds real,
+ * evidence-based facts instead of a permanent false/[] stub - client-
+ * facing UX redesign, "LIVE UX ACCEPTANCE FAILED" follow-up). Any failure
+ * along the manifest-building path (a tool call, a parse, or hashing the
+ * real source .aep - CLAUDE.md Safety Rule 8) falls back to a
+ * RawInspectionCapture instead of guessing or crashing - see
+ * docs/TEMPLATE-INSPECTOR.md. A precomps-script failure for one
+ * composition never falls back to a raw capture by itself - it only
+ * means that ONE composition's own precomp facts stay unknown, exactly
+ * like an ae_get_composition detail failure already does.
  */
 const DISCOVERY_TOOLS: readonly AllowedInspectionTool[] = [
   "ae_health",
@@ -176,6 +189,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       const truncatedCompositionCount = parsedList.value.length - discovered.length;
 
       const details: (CompositionDetail | null)[] = [];
+      const precompFacts: ({ layerIndex: number; sourceCompositionId: string }[] | null)[] = [];
       for (const summary of discovered) {
         const call = await captureOneTool(client, "ae_get_composition", {
           comp_index: summary.index,
@@ -183,6 +197,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         });
         const parsedDetail = call.ok ? parseCompositionDetail(call.content) : null;
         details.push(parsedDetail && parsedDetail.ok ? parsedDetail.value : null);
+        precompFacts.push(await fetchPrecompFacts(client, summary));
       }
 
       const facts = buildProjectFacts({
@@ -192,7 +207,8 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         projectSha256: hashResult.value.sha256,
         aeVersion,
         discovered,
-        details
+        details,
+        precompFacts
       });
 
       let manifest: TemplateManifest;
@@ -239,6 +255,41 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       await client.close();
     }
   }
+}
+
+const precompScriptResultSchema = z.union([
+  z.object({ ok: z.literal(true), precompLayers: z.array(z.object({ layerIndex: z.number(), layerName: z.string(), sourceCompositionId: z.string() })) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/**
+ * Best-effort per-composition precomp-reference facts (client-facing UX
+ * redesign, "LIVE UX ACCEPTANCE FAILED" follow-up) - returns `null` (never
+ * throws) on ANY failure (transport, tool-reported error, envelope parse,
+ * schema mismatch, or the script's own typed failureReason), exactly like
+ * a failed ae_get_composition detail call already does. A `null` here
+ * only means THIS ONE composition's own children stay unknown to
+ * build-project-facts.ts's nesting computation - it never blocks the
+ * manifest or any other composition's own facts.
+ */
+async function fetchPrecompFacts(
+  client: HeroicSwanMcpClient,
+  summary: CompositionSummary
+): Promise<{ layerIndex: number; sourceCompositionId: string }[] | null> {
+  const script = buildInspectCompositionPrecompsScript(summary.index, summary.name);
+  const result = await client.runFixedInspectionScript(script);
+  if (!result.ok) {
+    return null;
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return null;
+  }
+  const parsed = precompScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success || !parsed.data.ok) {
+    return null;
+  }
+  return parsed.data.precompLayers.map((layer) => ({ layerIndex: layer.layerIndex, sourceCompositionId: layer.sourceCompositionId }));
 }
 
 async function captureOneTool(

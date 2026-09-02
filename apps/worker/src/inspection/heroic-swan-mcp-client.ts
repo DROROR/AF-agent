@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { FixedJsxScript } from "../execution/jsx-templates.js";
 
 /**
  * Real, upstream-confirmed transport for HeroicSwan/after-effects-mcp's MCP
@@ -143,6 +144,41 @@ export class HeroicSwanMcpClient {
     }
     try {
       const result = await this.client.callTool({ name, arguments: args }, undefined, { timeout: this.timeoutMs });
+      if (result.isError) {
+        return { ok: false, error: { code: "TOOL_ERROR", message: extractErrorText(result.content) } };
+      }
+      return { ok: true, content: result.content };
+    } catch (error) {
+      return {
+        ok: false,
+        error: { code: "TRANSPORT_ERROR", message: error instanceof Error ? error.message : String(error) }
+      };
+    }
+  }
+
+  /**
+   * The ONE exception to this client's "seven read-only tools" allowlist
+   * above: `ae_run_jsx` is itself a genuinely unrestricted "unsafe"
+   * channel at the ae-mcp wire level (see jsx-templates.ts's own module
+   * doc comment - its `FixedJsxScript` brand, not this client, is the
+   * actual safety boundary). This method can only ever be called with a
+   * `FixedJsxScript` - a nominally-branded string only jsx-templates.ts
+   * can construct - so this client still can never send arbitrary/ad-hoc
+   * JSX, only the one script body TypeScript resolved this call with.
+   * Used ONLY for INSPECT_TEMPLATE's own read-only composition-nesting
+   * facts (see heroic-swan-template-inspector.ts and
+   * buildInspectCompositionPrecompsScript) - never for any mutation, and
+   * reuses this SAME connection rather than opening a second one.
+   */
+  async runFixedInspectionScript(script: FixedJsxScript): Promise<ToolCallResult> {
+    if (!this.client) {
+      return {
+        ok: false,
+        error: { code: "NOT_CONNECTED", message: "connect() must succeed before calling a tool" }
+      };
+    }
+    try {
+      const result = await this.client.callTool({ name: "ae_run_jsx", arguments: { code: script, mode: "unsafe" } }, undefined, { timeout: this.timeoutMs });
       if (result.isError) {
         return { ok: false, error: { code: "TOOL_ERROR", message: extractErrorText(result.content) } };
       }

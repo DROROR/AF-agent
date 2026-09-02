@@ -136,6 +136,71 @@ describe("buildProjectFacts", () => {
     expect(facts.compositions.map((c) => c.name)).toEqual(["Comp B", "Comp A"]);
   });
 
+  it("computes real isNestedOnlyReferenced/parentCompositionIds from precompFacts - client-facing UX redesign, LIVE UX ACCEPTANCE FAILED follow-up", () => {
+    const detailAWithPrecomp: CompositionDetail = {
+      ...detailA,
+      layers: [
+        ...(detailA.layers ?? []),
+        { index: 3, name: "Nested Comp B Layer", inPointSeconds: 0, outPointSeconds: 5, nullLayer: false }
+      ]
+    };
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA, summaryB],
+      details: [detailAWithPrecomp, null],
+      precompFacts: [[{ layerIndex: 3, sourceCompositionId: "idx-7" }], []]
+    });
+    const compA = facts.compositions.find((c) => c.compositionId === "comp-42");
+    const compB = facts.compositions.find((c) => c.compositionId === "idx-7");
+    expect(compB?.isNestedOnlyReferenced).toBe(true);
+    expect(compB?.parentCompositionIds).toEqual(["comp-42"]);
+    expect(compA?.isNestedOnlyReferenced).toBe(false);
+    expect(compA?.parentCompositionIds).toEqual([]);
+  });
+
+  it("excludes a confirmed precomp-reference layer from the composition's own layers - it is structural, never an editable placeholder candidate", () => {
+    const detailAWithPrecomp: CompositionDetail = {
+      ...detailA,
+      layers: [
+        ...(detailA.layers ?? []),
+        { index: 3, name: "Nested Comp B Layer", inPointSeconds: 0, outPointSeconds: 5, nullLayer: false }
+      ]
+    };
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA],
+      details: [detailAWithPrecomp],
+      precompFacts: [[{ layerIndex: 3, sourceCompositionId: "idx-7" }]]
+    });
+    const layerNames = facts.compositions[0]?.layers.map((l) => l.name) ?? [];
+    expect(layerNames).toEqual(["Text Layer"]);
+    expect(layerNames).not.toContain("Nested Comp B Layer");
+  });
+
+  it("a null precompFacts entry for one composition (failed/never attempted) never affects another composition's own real nesting facts", () => {
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA, summaryB],
+      details: [detailA, null],
+      precompFacts: [null, [{ layerIndex: 1, sourceCompositionId: "comp-42" }]]
+    });
+    const compA = facts.compositions.find((c) => c.compositionId === "comp-42");
+    expect(compA?.isNestedOnlyReferenced).toBe(true);
+    expect(compA?.parentCompositionIds).toEqual(["idx-7"]);
+  });
+
   it("leaves fonts/footage/missingFootage/pluginReferences honestly empty - not determinable from this tool set", () => {
     const facts = buildProjectFacts({
       templateId: "tmpl-1",

@@ -1,9 +1,9 @@
 "use client";
 
 import type { ReactElement } from "react";
-import type { AssetDto, MappingSuggestion, WorkerDto } from "@dyo/schemas";
+import type { AssetDto, MappingSuggestion } from "@dyo/schemas";
 import type { RealScene } from "../lib/real-scene-grouping";
-import { useScenePreview, type ScenePreviewState, type UseScenePreviewResult } from "../lib/use-scene-preview";
+import type { ScenePreviewEntry, ScenePreviewState } from "../lib/use-scene-preview-queue";
 import { assetFileUrl, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -29,7 +29,7 @@ function deriveCardStatus(
   if (hasGenuineReview) {
     return "needsChoice";
   }
-  if (previewState === "checking") {
+  if (previewState === "checking" || previewState === "queued") {
     return "analyzing";
   }
   if (previewState === "generating") {
@@ -38,17 +38,11 @@ function deriveCardStatus(
   if (isStale) {
     return "outdated";
   }
-  return approvalState === "READY_FOR_APPROVAL" || approvalState === "APPROVED"
-    ? "ready"
-    : "needsChoice";
+  return approvalState === "READY_FOR_APPROVAL" || approvalState === "APPROVED" ? "ready" : "needsChoice";
 }
 
 function primaryMapping(realScene: RealScene) {
-  return (
-    realScene.scenePlan.mappings.find((m) => m.selectedAssetId || m.text) ??
-    realScene.scenePlan.mappings[0] ??
-    null
-  );
+  return realScene.scenePlan.mappings.find((m) => m.selectedAssetId || m.text) ?? realScene.scenePlan.mappings[0] ?? null;
 }
 
 /**
@@ -62,18 +56,18 @@ function primaryMapping(realScene: RealScene) {
 function PreviewBeforeAfter({
   projectId,
   realScene,
-  scenePreview,
+  previewEntry,
   asset,
   mappingText
 }: {
   projectId: string;
   realScene: RealScene;
-  scenePreview: UseScenePreviewResult;
+  previewEntry: ScenePreviewEntry;
   asset: AssetDto | null;
   mappingText: string | null;
 }): ReactElement {
   const { t } = useLocale();
-  const hasOriginal = scenePreview.preview !== null;
+  const hasOriginal = previewEntry.preview !== null;
   const hasPlanned = asset !== null || mappingText !== null;
 
   if (!hasOriginal && !hasPlanned) {
@@ -88,13 +82,9 @@ function PreviewBeforeAfter({
     <div className="scene-card__preview scene-card__preview--split" data-split={hasOriginal && hasPlanned}>
       {hasOriginal ? (
         <div className="scene-card__preview-pane">
-          <img
-            src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)}
-            alt={realScene.sceneName}
-            className="scene-card__preview-media"
-          />
+          <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={realScene.sceneName} className="scene-card__preview-media" />
           <span className="scene-card__preview-badge">{t.simpleScenes.aePreviewLabel}</span>
-          {scenePreview.isStale ? <p className="scene-card__preview-hint">{t.simpleScenes.outdatedPreviewHint}</p> : null}
+          {previewEntry.isStale ? <p className="scene-card__preview-hint">{t.simpleScenes.outdatedPreviewHint}</p> : null}
         </div>
       ) : null}
       {hasPlanned ? (
@@ -118,67 +108,57 @@ export interface SceneCardProps {
   projectId: string;
   realScene: RealScene;
   assets: AssetDto[] | null;
-  workers: WorkerDto[] | null;
+  previewEntry: ScenePreviewEntry;
   pendingSuggestions: MappingSuggestion[];
   suggestionsBusy: boolean;
   onEdit: () => void;
+  onRegeneratePreview: () => void;
   onAcceptSuggestion: (suggestion: MappingSuggestion) => void;
   onRejectSuggestion: (suggestion: MappingSuggestion) => void;
 }
 
 /**
- * One real, user-facing scene card (client-facing UX redesign, section B/C
- * + "M. VISUAL PREVIEWS ARE MANDATORY"). Never shows a raw AE layer name,
- * confidence percentage, or Worker job name in this Simple Mode view - see
- * useScenePreview.ts for the simple client-facing preview state machine.
+ * One real, user-facing scene card (client-facing UX redesign, section
+ * B/C + "M. VISUAL PREVIEWS ARE MANDATORY" + the "LIVE UX ACCEPTANCE
+ * FAILED" section 6 follow-up). Never shows a raw AE layer name,
+ * confidence percentage, or Worker job name in this Simple Mode view.
+ * Preview generation is automatic (see use-scene-preview-queue.ts, owned
+ * by the parent SimpleScenesView) - this card never dispatches on its
+ * own; "Regenerate Preview" (Advanced details only) is the one manual
+ * escape hatch, for a failed or stale preview.
  */
 export function SceneCard({
   projectId,
   realScene,
   assets,
-  workers,
+  previewEntry,
   pendingSuggestions,
   suggestionsBusy,
   onEdit,
+  onRegeneratePreview,
   onAcceptSuggestion,
   onRejectSuggestion
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
-  const scenePreview = useScenePreview(
-    projectId,
-    realScene.scenePlan.id,
-    realScene.scenePlan.updatedAt,
-    workers
-  );
   const mapping = primaryMapping(realScene);
-  const asset = mapping?.selectedAssetId
-    ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null)
-    : null;
+  const asset = mapping?.selectedAssetId ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null) : null;
   const hasGenuineReview = pendingSuggestions.length > 0;
-  const status = deriveCardStatus(
-    hasGenuineReview,
-    scenePreview.state,
-    scenePreview.isStale,
-    realScene.scenePlan.approvalState
-  );
+  const status = deriveCardStatus(hasGenuineReview, previewEntry.state, previewEntry.isStale, realScene.scenePlan.approvalState);
+  const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
 
   return (
     <Card className="scene-card">
       <div className="scene-card__header">
         <h3>{realScene.sceneName}</h3>
-        <span className={`status-badge status-badge--${STATUS_TONE[status]}`}>
-          {t.simpleScenes.status[status]}
-        </span>
+        <span className={`status-badge status-badge--${STATUS_TONE[status]}`}>{t.simpleScenes.status[status]}</span>
       </div>
 
-      <PreviewBeforeAfter projectId={projectId} realScene={realScene} scenePreview={scenePreview} asset={asset} mappingText={mapping?.text ?? null} />
+      <PreviewBeforeAfter projectId={projectId} realScene={realScene} previewEntry={previewEntry} asset={asset} mappingText={mapping?.text ?? null} />
 
       <dl className="scene-card__facts">
         <div>
           <dt>{t.simpleScenes.screenLabel}</dt>
-          <dd>
-            {asset ? (asset.label ?? asset.originalFilename) : t.simpleScenes.noAssetAssigned}
-          </dd>
+          <dd>{asset ? (asset.label ?? asset.originalFilename) : t.simpleScenes.noAssetAssigned}</dd>
         </div>
         <div>
           <dt>{t.simpleScenes.textLabel}</dt>
@@ -187,30 +167,18 @@ export function SceneCard({
         <div>
           <dt>{t.simpleScenes.durationLabel}</dt>
           <dd>
-            {realScene.scenePlan.finalDuration !== null
-              ? t.simpleScenes.durationSeconds(realScene.scenePlan.finalDuration)
-              : t.simpleScenes.durationUnset}
+            {realScene.scenePlan.finalDuration !== null ? t.simpleScenes.durationSeconds(realScene.scenePlan.finalDuration) : t.simpleScenes.durationUnset}
           </dd>
         </div>
       </dl>
 
-      {scenePreview.errorMessage ? (
+      {previewEntry.errorMessage ? (
         <p className="scene-card__error">
-          {t.simpleScenes.previewErrorPrefix} {scenePreview.errorMessage}
+          {t.simpleScenes.previewErrorPrefix} {previewEntry.errorMessage}
         </p>
       ) : null}
 
       <div className="scene-card__actions">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={scenePreview.state === "generating"}
-          onClick={() => scenePreview.requestPreview()}
-        >
-          {scenePreview.state === "generating"
-            ? t.simpleScenes.generatingPreviewAction
-            : t.simpleScenes.previewSceneAction}
-        </Button>
         <Button size="sm" variant="ghost" onClick={onEdit}>
           {t.simpleScenes.editAction}
         </Button>
@@ -220,50 +188,26 @@ export function SceneCard({
         <div className="scene-card__review-queue">
           <h4>{t.simpleScenes.reviewQueueTitle}</h4>
           {pendingSuggestions.map((suggestion) => {
-            const suggestedAsset = suggestion.suggestedAssetId
-              ? ((assets ?? []).find((a) => a.id === suggestion.suggestedAssetId) ?? null)
-              : null;
+            const suggestedAsset = suggestion.suggestedAssetId ? ((assets ?? []).find((a) => a.id === suggestion.suggestedAssetId) ?? null) : null;
             return (
               <div key={suggestion.id} className="scene-card__review-item">
                 {suggestion.suggestedText ? (
                   <>
-                    <p className="scene-card__review-current">
-                      {t.simpleScenes.currentTextLabel(mapping?.text ?? "")}
-                    </p>
-                    <p className="scene-card__review-suggested">
-                      {t.simpleScenes.suggestedTextLabel(suggestion.suggestedText)}
-                    </p>
+                    <p className="scene-card__review-current">{t.simpleScenes.currentTextLabel(mapping?.text ?? "")}</p>
+                    <p className="scene-card__review-suggested">{t.simpleScenes.suggestedTextLabel(suggestion.suggestedText)}</p>
                   </>
                 ) : suggestedAsset ? (
                   suggestedAsset.mediaKind === "VIDEO" ? (
-                    <video
-                      src={assetFileUrl(projectId, suggestedAsset.id)}
-                      className="scene-card__review-thumb"
-                      muted
-                    />
+                    <video src={assetFileUrl(projectId, suggestedAsset.id)} className="scene-card__review-thumb" muted />
                   ) : (
-                    <img
-                      src={assetFileUrl(projectId, suggestedAsset.id)}
-                      alt=""
-                      className="scene-card__review-thumb"
-                    />
+                    <img src={assetFileUrl(projectId, suggestedAsset.id)} alt="" className="scene-card__review-thumb" />
                   )
                 ) : null}
                 <div className="scene-card__review-actions">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={suggestionsBusy}
-                    onClick={() => onRejectSuggestion(suggestion)}
-                  >
+                  <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={() => onRejectSuggestion(suggestion)}>
                     {t.simpleScenes.keepOriginalAction}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={suggestionsBusy}
-                    onClick={() => onAcceptSuggestion(suggestion)}
-                  >
+                  <Button size="sm" variant="primary" disabled={suggestionsBusy} onClick={() => onAcceptSuggestion(suggestion)}>
                     {t.simpleScenes.useSuggestionAction}
                   </Button>
                 </div>
@@ -287,6 +231,9 @@ export function SceneCard({
             </div>
           ) : null}
         </dl>
+        <Button size="sm" variant="secondary" disabled={!canRegenerate} onClick={onRegeneratePreview}>
+          {t.simpleScenes.regeneratePreviewAction}
+        </Button>
       </details>
     </Card>
   );

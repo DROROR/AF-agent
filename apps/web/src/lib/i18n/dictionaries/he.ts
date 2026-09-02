@@ -751,6 +751,7 @@ export const he: Dictionary = {
     noAssetAssigned: "עדיין לא הוקצה נכס",
     previewSceneAction: "תצוגה מקדימה של הסצנה",
     generatingPreviewAction: "יוצר…",
+    regeneratePreviewAction: "יצירת תצוגה מקדימה מחדש",
     editAction: "עריכה",
     advancedDetailsToggle: "פרטים מתקדמים",
     plannedPreviewLabel: "תצוגה מקדימה מתוכננת — עדיין לא עובדה ב-After Effects",

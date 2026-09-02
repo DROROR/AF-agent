@@ -23,8 +23,11 @@ const request = { templateId: "tmpl-1", sourceProjectPath: "/copies/test.aep" };
  * real stdio - matching heroic-swan-mcp-client.test.ts's approach), so
  * these tests exercise HeroicSwanTemplateInspector's actual behavior, not
  * a mocked transport. Also registers ae_run_jsx and ae_get_composition -
- * proving the inspector never calls either, even though a hostile/buggy
- * server that offers them cannot make it do so.
+ * proving the inspector never calls either in THIS raw-capture scenario
+ * (ae_list_compositions here deliberately returns a malformed shape, so
+ * the per-composition loop - the only place either is now ever called
+ * from - is never reached; see writeRealShapeFakeServer below for the
+ * success-path tests that DO exercise both).
  */
 async function writeFakeServer(aeMcpPath: string, options: { oversized?: boolean; toolError?: boolean } = {}): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
@@ -185,8 +188,25 @@ describe("HeroicSwanTemplateInspector - real spawned MCP server, not mocked", ()
  * project names/paths are used anywhere here. ae_get_composition
  * dispatches on the real confirmed `comp_index` argument, matching
  * upstream's `resolveComp()` (host-scripts/ae-mcp-methods.jsx).
+ *
+ * Also registers ae_run_jsx, mimicking the real upstream host's own
+ * double-JSON-envelope response ({result: "<script's own JSON string>"} -
+ * see unwrap-jsx-result.ts) - dispatches on which composition's index the
+ * script text targets (buildInspectCompositionPrecompsScript interpolates
+ * `app.project.item(<index>)` directly into the script body, so this
+ * fixture greps for that substring rather than needing a real inputSchema
+ * round-trip for `code`). By default NEITHER composition reports any
+ * precomp layers (every pre-existing test in this file keeps assuming
+ * both Comp A and Comp B are ordinary, non-nested scenes) -
+ * `nestBIntoA: true` opts a test into Comp A reporting Comp B as a
+ * nested precomp layer instead; `precompFailsForIndex` makes one
+ * composition's own script call fail, to prove that failure never blocks
+ * the rest of the manifest.
  */
-async function writeRealShapeFakeServer(aeMcpPath: string, options: { compGetFailsForIndex?: number } = {}): Promise<void> {
+async function writeRealShapeFakeServer(
+  aeMcpPath: string,
+  options: { compGetFailsForIndex?: number; precompFailsForIndex?: number; nestBIntoA?: boolean } = {}
+): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
   const sdkEsmRoot = join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
   await writeFile(
@@ -256,6 +276,20 @@ async function writeRealShapeFakeServer(aeMcpPath: string, options: { compGetFai
       };
     }
     return { isError: true, content: [{ type: "text", text: "unexpected comp_index in test fixture" }] };
+  });
+
+  server.registerTool("ae_run_jsx", { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } }, async (args) => {
+    var scriptResult;
+    if (args.code.indexOf("app.project.item(" + ${JSON.stringify(options.precompFailsForIndex ?? -1)} + ")") !== -1) {
+      scriptResult = JSON.stringify({ ok: false, failureReason: "simulated precomp script failure" });
+    } else if (args.code.indexOf("app.project.item(3)") !== -1) {
+      scriptResult = JSON.stringify({ ok: true, precompLayers: ${options.nestBIntoA ? `[{ layerIndex: 1, layerName: "Nested Comp B Layer", sourceCompositionId: "comp-99" }]` : "[]"} });
+    } else if (args.code.indexOf("app.project.item(7)") !== -1) {
+      scriptResult = JSON.stringify({ ok: true, precompLayers: [] });
+    } else {
+      scriptResult = JSON.stringify({ ok: false, failureReason: "unexpected script target in test fixture" });
+    }
+    return { content: [{ type: "text", text: JSON.stringify({ result: scriptResult }) }] };
   });
 
   const transport = new StdioServerTransport();
@@ -376,5 +410,42 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     // Comp B's detail succeeded independently of Comp A's failure.
     const sceneB = manifest.scenes.find((s) => s.compositionId === "comp-99");
     expect(sceneB).toBeDefined();
+  });
+
+  it("computes real isNestedOnlyReferenced/parentCompositionIds from the composition-precomps script - client-facing UX redesign, LIVE UX ACCEPTANCE FAILED follow-up", async () => {
+    await writeRealShapeFakeServer(dir, { nestBIntoA: true });
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+
+    expect(result.kind).toBe("manifest");
+    const manifest = result.response.manifest;
+    const compA = manifest.compositions.find((c) => c.compositionId === "comp-42");
+    const compB = manifest.compositions.find((c) => c.compositionId === "comp-99");
+    // Comp A's own layers reference Comp B as a precomp - Comp B is real,
+    // evidence-based nested content, never guessed from its name.
+    expect(compB?.isNestedOnlyReferenced).toBe(true);
+    expect(compB?.parentCompositionIds).toEqual(["comp-42"]);
+    // Comp A itself is never referenced by anything - it stays a real top-level composition.
+    expect(compA?.isNestedOnlyReferenced).toBe(false);
+    expect(compA?.parentCompositionIds).toEqual([]);
+  });
+
+  it("a failed precomps-script call for one composition never blocks the manifest - that composition's own nesting facts simply stay false/[]", async () => {
+    await writeRealShapeFakeServer(dir, { precompFailsForIndex: 3 });
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+
+    expect(result.kind).toBe("manifest");
+    const manifest = result.response.manifest;
+    // Comp A's own precomps call failed - Comp B never gets a parent from it, but the manifest still builds successfully.
+    const compB = manifest.compositions.find((c) => c.compositionId === "comp-99");
+    expect(compB?.isNestedOnlyReferenced).toBe(false);
+    expect(compB?.parentCompositionIds).toEqual([]);
   });
 });

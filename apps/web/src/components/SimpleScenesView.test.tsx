@@ -221,7 +221,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     expect(screen.getAllByText("Track every workout").length).toBeGreaterThan(0);
   });
 
-  it("Preview Scene auto-dispatches the real minimal-intent job and auto-updates to the captured preview once ready - no manual refresh, no Jobs page", async () => {
+  it("automatically dispatches the real minimal-intent job on page load (no click needed) and auto-updates to the captured preview once ready - no manual refresh, no Jobs page", async () => {
     const capturedAt = new Date().toISOString();
     stubWorkspace({
       extra: {
@@ -278,9 +278,8 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     });
     renderView();
     await screen.findByRole("heading", { name: "App Features" });
-    fireEvent.click(screen.getAllByRole("button", { name: "Preview Scene" })[0]!);
 
-    await screen.findByText("Preview generating…", {}, { timeout: 2000 });
+    await screen.findByText("Preview generating…", {}, { timeout: 5000 });
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
     const dispatchCall = fetchMock.mock.calls.find((call: unknown[]) => call[0] === "/api/jobs");
     const [, init] = dispatchCall as [string, RequestInit];
@@ -299,4 +298,161 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       { timeout: 10_000 }
     );
   }, 20_000);
+
+  it(
+    "queues previews across multiple real scenes and dispatches them ONE AT A TIME - never a second concurrent dispatch, respecting Worker maxConcurrency=1 (section 6)",
+    async () => {
+      const capturedAtA = new Date().toISOString();
+      const capturedAtB = new Date().toISOString();
+      const twoIndependentScenesManifest = {
+        ...manifestFixture(),
+        compositions: [
+          {
+            compositionId: "comp-a",
+            aeProjectItemIndex: 1,
+            name: "Scene A",
+            widthPx: 1920,
+            heightPx: 1080,
+            durationSeconds: 4,
+            frameRate: 30,
+            isNestedOnlyReferenced: false,
+            parentCompositionIds: []
+          },
+          {
+            compositionId: "comp-b",
+            aeProjectItemIndex: 2,
+            name: "Scene B",
+            widthPx: 1920,
+            heightPx: 1080,
+            durationSeconds: 4,
+            frameRate: 30,
+            isNestedOnlyReferenced: false,
+            parentCompositionIds: []
+          }
+        ]
+      };
+      stubWorkspace({
+        manifest: twoIndependentScenesManifest,
+        scenes: [
+          sceneFixture({ id: "scene-a", manifestCompositionId: "comp-a", compositionName: "Scene A", mappings: [] }),
+          sceneFixture({ id: "scene-b", manifestCompositionId: "comp-b", compositionName: "Scene B", mappings: [] })
+        ],
+        extra: {
+          "/api/dashboard/status": {
+            status: 200,
+            body: {
+              api: "ok",
+              database: "ok",
+              workers: [
+                {
+                  workerId: "11111111-1111-1111-1111-111111111111",
+                  name: "Client PC",
+                  status: "ONLINE",
+                  aeStatus: "ONLINE",
+                  mcpStatus: "ONLINE",
+                  capabilities: ["INSPECT_SCENE_EVIDENCE"],
+                  currentJobId: null,
+                  maxConcurrency: 1,
+                  lastHeartbeatAt: new Date().toISOString()
+                }
+              ]
+            }
+          },
+          [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-a/preview-status`]: [
+            { status: 200, body: { preview: null } },
+            {
+              status: 200,
+              body: {
+                preview: {
+                  id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                  projectId: PROJECT_ID,
+                  manifestCompositionId: "comp-a",
+                  sourceProjectSha256: "a".repeat(64),
+                  filename: "scene-preview-Scene_A.png",
+                  mimeType: "image/png",
+                  byteSize: 42,
+                  capturedAt: capturedAtA,
+                  createdAt: capturedAtA
+                }
+              }
+            }
+          ],
+          [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-b/preview-status`]: [
+            { status: 200, body: { preview: null } },
+            {
+              status: 200,
+              body: {
+                preview: {
+                  id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                  projectId: PROJECT_ID,
+                  manifestCompositionId: "comp-b",
+                  sourceProjectSha256: "a".repeat(64),
+                  filename: "scene-preview-Scene_B.png",
+                  mimeType: "image/png",
+                  byteSize: 42,
+                  capturedAt: capturedAtB,
+                  createdAt: capturedAtB
+                }
+              }
+            }
+          ],
+          "/api/jobs": {
+            status: 201,
+            body: {
+              jobId: "33333333-3333-3333-3333-333333333333",
+              workerId: "11111111-1111-1111-1111-111111111111",
+              operation: "INSPECT_SCENE_EVIDENCE",
+              status: "QUEUED",
+              createdAt: new Date().toISOString()
+            }
+          }
+        }
+      });
+      renderView();
+      await screen.findByRole("heading", { name: "Scene A" });
+      await screen.findByRole("heading", { name: "Scene B" });
+
+      const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+      const dispatchCallCount = () => fetchMock.mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
+
+      // Exactly one scene dispatches first - never both at once.
+      await waitFor(() => expect(dispatchCallCount()).toBe(1), { timeout: 5000 });
+      expect(screen.getAllByText("Preview generating…")).toHaveLength(1);
+
+      // The other scene stays queued (not "Preview generating…") until the first one finishes.
+      await waitFor(
+        () => {
+          expect(dispatchCallCount()).toBe(2);
+        },
+        { timeout: 10_000 }
+      );
+
+      // Both eventually reach a real, AE-sourced preview.
+      await waitFor(
+        () => {
+          expect(screen.getAllByText("After Effects preview")).toHaveLength(2);
+        },
+        { timeout: 10_000 }
+      );
+    },
+    30_000
+  );
+
+  it("a failed automatic preview (no Worker online) exposes a simple Regenerate Preview retry - never a Jobs/Queue page or internal job wording", async () => {
+    stubWorkspace({
+      extra: {
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } }
+      }
+    });
+    renderView();
+    await screen.findByRole("heading", { name: "App Features" });
+
+    await screen.findByText(/No computer is online to generate this preview right now\./, {}, { timeout: 5000 });
+    const regenerateButton = screen.getByRole("button", { name: "Regenerate Preview" }) as HTMLButtonElement;
+    expect(regenerateButton.disabled).toBe(false);
+
+    expect(screen.queryByText(/\bJobs\b/)).toBeNull();
+    expect(screen.queryByText(/\bQueue\b/)).toBeNull();
+    expect(screen.queryByText(/INSPECT_SCENE_EVIDENCE/)).toBeNull();
+  });
 });

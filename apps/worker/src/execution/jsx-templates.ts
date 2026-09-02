@@ -484,6 +484,95 @@ export function buildInspectRenderCapabilitiesScript(): FixedJsxScript {
 }
 
 /**
+ * READ-ONLY composition-nesting inspection (client-facing UX redesign,
+ * "LIVE UX ACCEPTANCE FAILED" follow-up: Simple Mode was showing every
+ * raw composition - Logo, Placeholder_1..13, Text 01/02/03, Phone_Comp,
+ * Scene_XX - as its own "scene"). ae-mcp's own built-in read-only tools
+ * never expose a layer's source composition (see
+ * heroic-swan-template-inspector.ts's own doc comment on why
+ * isNestedOnlyReferenced/parentCompositionIds previously defaulted to
+ * false/[] with no real evidence available at all), so - exactly like
+ * buildInspectRenderCapabilitiesScript - this is a FIXED, reviewed,
+ * versioned script sent through the same `ae_run_jsx` "unsafe" channel
+ * EXECUTE_FRAME already uses, never an arbitrary one. Purely read-only:
+ * it never assigns any project property and never calls
+ * app.project.save() - wrapped in beginUndoGroup/endUndoGroup only to
+ * match every other script in this file's own convention, not because
+ * anything here needs to be undoable.
+ *
+ * For each layer in the target composition, `layer.source` is a real,
+ * documented, stable AVLayer property; when the layer's source is itself
+ * a CompItem (an `instanceof CompItem` check - the SAME real API this
+ * file's own resolveComp-style lookups already use, just checked against
+ * a layer's source instead of a project item), that layer is a precomp/
+ * nested-composition reference, and `layer.source.id` is AE's own
+ * persistent composition id - the SAME identity build-project-facts.ts
+ * already prefers for compositionId (`comp-${detail.compId}`), so a
+ * result here composes directly with the rest of the manifest with no
+ * separate identity-reconciliation step. A single layer whose `.source`
+ * cannot be read is skipped (honestly omitted, never guessed) rather than
+ * failing the whole composition's result.
+ *
+ * UNVERIFIED against a real AE installation (no Windows/AE access in this
+ * environment) - `layer.source`/`CompItem`/`.id` are extremely stable,
+ * long-documented ExtendScript APIs (the same category of API this file's
+ * OTHER scripts already rely on and that has held up against real AE),
+ * but this specific script must still be confirmed against a real
+ * client's project before its output is trusted as fact - see the
+ * client-facing UX redesign report's own PRODUCTION_HEALTH note. Fails
+ * closed (typed failureReason) on any unexpected error - never fabricates
+ * a nesting relationship.
+ */
+export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const script = `app.beginUndoGroup(${JSON.stringify("DYO INSPECT_COMPOSITION_PRECOMPS")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
+      });
+    } else {
+      var __precompLayers = [];
+      for (var __i = 1; __i <= __comp.numLayers; __i++) {
+        try {
+          var __layer = __comp.layer(__i);
+          if (__layer.source && (__layer.source instanceof CompItem)) {
+            __precompLayers.push({ layerIndex: __layer.index, layerName: __layer.name, sourceCompositionId: "comp-" + __layer.source.id });
+          }
+        } catch (__layerReadError) {
+          // A single unreadable layer never fails the whole composition's
+          // result - it is simply not reported as a precomp reference.
+        }
+      }
+      __result = JSON.stringify({ ok: true, precompLayers: __precompLayers });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * The single entry point every caller must use - dispatches on the
  * operation's own `type` (already a closed, Zod-validated discriminated
  * union), so adding a new SceneEditOperationType without a corresponding

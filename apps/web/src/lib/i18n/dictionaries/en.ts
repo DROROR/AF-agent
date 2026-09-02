@@ -761,6 +761,7 @@ export const en = {
     noAssetAssigned: "No asset assigned yet",
     previewSceneAction: "Preview Scene",
     generatingPreviewAction: "Generating…",
+    regeneratePreviewAction: "Regenerate Preview",
     editAction: "Edit",
     advancedDetailsToggle: "Advanced details",
     plannedPreviewLabel: "Planned preview — not yet rendered in After Effects",
