@@ -272,6 +272,90 @@ function Wait-Until {
   return [bool](& $Condition)
 }
 
+# Defined early (before Step 1) since $InstallDir is already known from this
+# script's own parameters - both the update's own verification AND the
+# final success/rollback summaries all read from this same path.
+$logPath = Join-Path $InstallDir "logs\worker.log"
+
+function Get-FreshLogContent {
+  if (-not (Test-Path $logPath)) { return "" }
+  # Read-only, shared access - never interferes with the worker process
+  # that is actively appending to this same file.
+  $stream = [System.IO.File]::Open($logPath, 'Open', 'Read', [System.IO.FileShare]::ReadWrite)
+  try {
+    $reader = New-Object System.IO.StreamReader($stream)
+    return $reader.ReadToEnd()
+  } finally {
+    $stream.Close()
+  }
+}
+
+function Test-DyoWorkerTaskActionHealthy {
+  param([string]$TaskName)
+  try {
+    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    $actions = @($t.Actions)
+    if ($actions.Count -eq 0) { return $false }
+    return -not [string]::IsNullOrWhiteSpace($actions[0].Execute)
+  } catch {
+    return $false
+  }
+}
+
+function Register-DyoWorkerTaskDefinition {
+  param([string]$TaskName, [string]$SupervisorLauncher, [string]$InstallDir, [switch]$Force)
+  # powershell.exe -WindowStyle Hidden, never run-worker.bat directly - see
+  # this script's own header comment on the real 2026-08-30 incident this
+  # fixes (a visible, session-attached console let an external
+  # console-control event kill the worker with no restart).
+  $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$SupervisorLauncher`"" `
+    -WorkingDirectory $InstallDir
+  $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+  $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+  $taskSettings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -MultipleInstances IgnoreNew
+  $description = "Runs the DYO Video Worker automatically when $env:USERNAME logs into Windows. Installed/updated by DYO-Worker-Final-Update.ps1 - safe to remove via DYO-Worker-Uninstall.bat."
+  $forceArg = @{}
+  if ($Force) { $forceArg = @{ Force = $true } }
+  Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
+    -Description $description -ErrorAction Stop @forceArg | Out-Null
+}
+
+function Set-DyoWorkerScheduledTaskRecovery {
+  <#
+  Ensures the "DYO Video Worker" Scheduled Task has our known-good
+  Action/Trigger/Principal/Settings. Never throws - every Task Scheduler
+  cmdlet call is wrapped, so a pre-existing legacy task with a corrupted
+  or null/empty Execute path can never abort the caller or leave the
+  worker with no recoverable task at all. Returns $true only once the
+  resulting task is independently VERIFIED healthy (a real, non-empty
+  Execute path) - $false means both recovery attempts failed, which the
+  caller treats as "log a warning, continue anyway".
+  #>
+  param([string]$TaskName, [string]$SupervisorLauncher, [string]$InstallDir)
+
+  # Attempt 1: -Force overwrites an existing task (including a legacy one
+  # with a corrupted/null Execute path) in one atomic call.
+  try {
+    Register-DyoWorkerTaskDefinition -TaskName $TaskName -SupervisorLauncher $SupervisorLauncher -InstallDir $InstallDir -Force
+    if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
+  } catch {}
+
+  # Attempt 2: a legacy/corrupted task occasionally resists -Force alone -
+  # explicitly remove it first (best-effort), then register fresh.
+  try {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Register-DyoWorkerTaskDefinition -TaskName $TaskName -SupervisorLauncher $SupervisorLauncher -InstallDir $InstallDir
+    if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
+  } catch {}
+
+  return $false
+}
+
 Write-Host "================================================"
 Write-Host "  DYO Windows Worker - FINAL Update"
 Write-Host "================================================"
@@ -415,328 +499,410 @@ if (-not $stopped) {
 }
 Write-CheckResult $true "DYO Worker fully stopped (verified no matching worker process is still running)"
 
-# ---- Step 3: replace only the program files - .env is never touched ----
+# ---- Step 2b: back up the currently-installed program files BEFORE touching anything ----
+#
+# Real safety requirement: if the new build somehow starts but never
+# genuinely proves itself healthy (a subtle regression, not just a
+# transient network blip), the replace step below would otherwise have
+# already overwritten the previous, known-working program files with
+# nothing left to restore. This backup is taken AFTER the old process is
+# confirmed stopped (so nothing is still writing to the files being
+# copied) and BEFORE any replacement happens, and is independently
+# verified non-empty before the script proceeds - never trusted to have
+# simply "worked" because Copy-Item did not throw. See Invoke-WorkerRollback
+# below for how this is restored if the update's own health gate fails.
 Write-Host ""
-Write-Host "Updating DYO Worker program files..."
-Copy-Item -Path (Join-Path $sourceApp "*") -Destination $InstallDir -Recurse -Force -Exclude ".env"
-Write-CheckResult $true "Updated DYO Worker program files"
-
-foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles)) {
-  if (-not (Test-Path (Join-Path $InstallDir $relativeFile))) {
-    Write-Host "[NEEDS ATTENTION] $relativeFile was not found on disk after the copy."
-    Write-Host "The update did not complete correctly. Please re-run this update, or contact DYO."
-    exit 1
-  }
-}
-Write-CheckResult $true "Confirmed new render/execute-scene-edit/render-upload/supervisor program files exist on disk"
-
-Write-Host "Checking runtime dependencies (only needs internet access if something is missing)..."
-Push-Location $InstallDir
-& npm install --omit=dev --no-audit --no-fund *>$null
-$npmExitCode = $LASTEXITCODE
-Pop-Location
-if ($npmExitCode -ne 0) {
-  Write-Host "[NEEDS ATTENTION] Installing dependencies failed."
-  Write-Host "Check your internet connection and re-run DYO-Worker-Final-Update.bat."
+Write-Host "Backing up current program files before updating (for automatic rollback if needed)..."
+$BackupRoot = Join-Path $WorkRoot "backups"
+New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
+$BackupDir = Join-Path $BackupRoot ("worker-app-pre-update-" + (Get-Date -Format "yyyyMMddHHmmss"))
+New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+Copy-Item -Path (Join-Path $InstallDir "*") -Destination $BackupDir -Recurse -Force -ErrorAction Stop
+if (-not (Test-Path (Join-Path $BackupDir "dist\index.js"))) {
+  Write-Host "[NEEDS ATTENTION] The pre-update backup does not contain dist\index.js - refusing to proceed."
+  Write-Host "No program files have been changed. Nothing was updated. Contact DYO if this repeats."
+  Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
   exit 1
 }
-Write-CheckResult $true "Runtime dependencies are up to date"
+Write-CheckResult $true "Backed up current program files" $BackupDir
 
-# Points at the just-updated run-worker-supervisor.ps1 (shipped inside
-# worker-app/, already copied into $InstallDir by Step 3 above) - the same
-# HIDDEN supervisor launcher DYO-Worker-Setup.ps1/DYO-Worker-Repair.ps1
-# point the task at (never run-worker.bat directly - see this script's own
-# header comment on the real 2026-08-30 incident this fixes). Resolved
-# here, after the copy, so a fresh task recreated below (missing-task case)
-# points at the CURRENT install, not a stale or nonexistent path.
-$supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"
-if (-not (Test-Path $supervisorLauncher)) {
-  Write-Host "[NEEDS ATTENTION] run-worker-supervisor.ps1 is missing from the installed files after the update."
-  Write-Host "Re-download the full DYO Worker FINAL update package and try again, or contact DYO."
-  exit 1
-}
-
-# ---- Step 3b: refresh the Scheduled Task's automatic-recovery settings ----
-#
-# CONFIRMED BUG (real client machine, 2026-08-28): a legacy Scheduled Task
-# - one registered by a much older Setup.ps1 revision, or otherwise
-# degraded over time - can have a NULL or EMPTY Action.Execute path. The
-# very first version of this refresh step called Unregister-ScheduledTask
-# then Register-ScheduledTask as two separate calls with no error
-# handling at all: against a legacy task like that, one of those calls can
-# throw, and since $ErrorActionPreference = "Stop" is set at the top of
-# this script, an uncaught throw here aborted the ENTIRE update immediately
-# - after Step 2 had already stopped the old process, so DYO Worker was
-# left fully stopped with no restart attempted at all (Step 5, which owns
-# starting it, was never reached).
-#
-# Fixed by Set-DyoWorkerScheduledTaskRecovery below: every Task Scheduler
-# cmdlet call is wrapped so nothing here can throw an uncaught error, it
-# tries two independent recovery strategies before giving up, and it
-# VERIFIES the resulting task's own Action.Execute is real (non-null,
-# non-empty) rather than trusting that Register-ScheduledTask succeeding
-# alone means the task is actually healthy. If recovery still cannot be
-# confirmed after both attempts, this step logs a clear warning and the
-# script CONTINUES to Step 5 regardless - refreshing these settings is a
-# reliability improvement, never a precondition for restarting DYO Worker
-# today. Same Action/Trigger/Principal identity as always (same
-# run-worker.bat path, same Windows user, same AtLogon trigger) - only the
-# Settings block (and the recovery from a corrupted legacy Action) is new.
-Write-Host ""
-Write-Host "Refreshing automatic-recovery settings on the existing Scheduled Task..."
-
-function Test-DyoWorkerTaskActionHealthy {
-  param([string]$TaskName)
+# The commit this backup represents, if known - read from the CURRENTLY
+# INSTALLED BUILD_INFO.json (an install predating this field, e.g. from
+# the very first Setup.ps1 revision, simply will not have one; rollback
+# below still works either way, it just cannot assert a specific expected
+# commit for the restored build in that case).
+$PreviousCommit = $null
+$previousBuildInfoPath = Join-Path $BackupDir "BUILD_INFO.json"
+if (Test-Path $previousBuildInfoPath) {
   try {
-    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-    $actions = @($t.Actions)
-    if ($actions.Count -eq 0) { return $false }
-    return -not [string]::IsNullOrWhiteSpace($actions[0].Execute)
-  } catch {
+    $previousBuildInfo = Get-Content $previousBuildInfoPath -Raw | ConvertFrom-Json
+    if ($previousBuildInfo.commit -match '^[0-9a-f]{40}$') {
+      $PreviousCommit = $previousBuildInfo.commit
+    }
+  } catch {}
+}
+
+# ==== Steps 3-5: replace program files, refresh task, restart, and verify ====
+# Wrapped in a function (rather than the previous top-level script flow) so
+# a health-gate failure triggers automatic rollback to the backup just
+# taken above, instead of leaving the machine with the old process already
+# stopped and the new one broken/unverified/unchecked. Every failure path
+# below sets $script:FailureReason (a short, one-sentence summary safe to
+# show in the rollback report) in addition to printing the SAME detailed
+# [NEEDS ATTENTION] guidance the pre-rollback version of this script
+# already printed, and returns $false instead of calling exit 1 directly -
+# exit 1 is now reserved for genuinely-unrecoverable pre-flight failures
+# (Step 1/backup, above) where nothing has been changed yet and there is
+# nothing to roll back.
+$script:FailureReason = $null
+$script:HeartbeatSucceeded = $false
+$script:PidConfirmed = $false
+$script:RunningCommit = $null
+
+function Invoke-WorkerUpdateAndVerify {
+  # ---- Step 3: replace only the program files - .env is never touched ----
+  Write-Host ""
+  Write-Host "Updating DYO Worker program files..."
+  Copy-Item -Path (Join-Path $sourceApp "*") -Destination $InstallDir -Recurse -Force -Exclude ".env"
+  Write-CheckResult $true "Updated DYO Worker program files"
+
+  foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles)) {
+    if (-not (Test-Path (Join-Path $InstallDir $relativeFile))) {
+      Write-Host "[NEEDS ATTENTION] $relativeFile was not found on disk after the copy."
+      Write-Host "The update did not complete correctly. Please re-run this update, or contact DYO."
+      $script:FailureReason = "A new program file was missing after copying ($relativeFile)"
+      return $false
+    }
+  }
+  Write-CheckResult $true "Confirmed new render/execute-scene-edit/render-upload/supervisor program files exist on disk"
+
+  Write-Host "Checking runtime dependencies (only needs internet access if something is missing)..."
+  Push-Location $InstallDir
+  & npm install --omit=dev --no-audit --no-fund *>$null
+  $npmExitCode = $LASTEXITCODE
+  Pop-Location
+  if ($npmExitCode -ne 0) {
+    Write-Host "[NEEDS ATTENTION] Installing dependencies failed."
+    Write-Host "Check your internet connection and re-run DYO-Worker-Final-Update.bat."
+    $script:FailureReason = "Installing runtime dependencies (npm install) failed"
     return $false
   }
-}
+  Write-CheckResult $true "Runtime dependencies are up to date"
 
-function Register-DyoWorkerTaskDefinition {
-  param([string]$TaskName, [string]$SupervisorLauncher, [string]$InstallDir, [switch]$Force)
-  # powershell.exe -WindowStyle Hidden, never run-worker.bat directly - see
-  # this script's own header comment on the real 2026-08-30 incident this
-  # fixes (a visible, session-attached console let an external
-  # console-control event kill the worker with no restart).
-  $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$SupervisorLauncher`"" `
-    -WorkingDirectory $InstallDir
-  $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
-  $taskPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-  $taskSettings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-    -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -MultipleInstances IgnoreNew
-  $description = "Runs the DYO Video Worker automatically when $env:USERNAME logs into Windows. Installed/updated by DYO-Worker-Final-Update.ps1 - safe to remove via DYO-Worker-Uninstall.bat."
-  $forceArg = @{}
-  if ($Force) { $forceArg = @{ Force = $true } }
-  Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings `
-    -Description $description -ErrorAction Stop @forceArg | Out-Null
-}
-
-function Set-DyoWorkerScheduledTaskRecovery {
-  <#
-  Ensures the "DYO Video Worker" Scheduled Task has our known-good
-  Action/Trigger/Principal/Settings. Never throws - every Task Scheduler
-  cmdlet call is wrapped, so a pre-existing legacy task with a corrupted
-  or null/empty Execute path can never abort the caller or leave the
-  worker with no recoverable task at all. Returns $true only once the
-  resulting task is independently VERIFIED healthy (a real, non-empty
-  Execute path) - $false means both recovery attempts failed, which the
-  caller treats as "log a warning, continue anyway" (see this function's
-  own call site's doc comment for why that is the correct behavior here).
-  #>
-  param([string]$TaskName, [string]$SupervisorLauncher, [string]$InstallDir)
-
-  # Attempt 1: -Force overwrites an existing task (including a legacy one
-  # with a corrupted/null Execute path) in one atomic call - avoids ever
-  # calling Unregister-ScheduledTask against a possibly-malformed legacy
-  # task definition at all.
-  try {
-    Register-DyoWorkerTaskDefinition -TaskName $TaskName -SupervisorLauncher $SupervisorLauncher -InstallDir $InstallDir -Force
-    if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
-  } catch {}
-
-  # Attempt 2: a legacy/corrupted task occasionally resists -Force alone -
-  # explicitly remove it first (best-effort; SilentlyContinue because it
-  # may already be gone or already broken), then register fresh. Same
-  # recovery sequence DYO-Worker-Repair.ps1 already uses successfully.
-  try {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    Register-DyoWorkerTaskDefinition -TaskName $TaskName -SupervisorLauncher $SupervisorLauncher -InstallDir $InstallDir
-    if (Test-DyoWorkerTaskActionHealthy -TaskName $TaskName) { return $true }
-  } catch {}
-
-  return $false
-}
-
-$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -SupervisorLauncher $supervisorLauncher -InstallDir $InstallDir
-if ($taskRefreshOk -and $taskWasMissing) {
-  Write-CheckResult $true "Automatic-startup task recreated (same worker identity, hardened recovery settings - no repair package needed)"
-} elseif ($taskRefreshOk) {
-  Write-CheckResult $true "Automatic-recovery settings refreshed (restarts automatically after a crash, no duplicate instances, same identity)"
-} elseif ($taskWasMissing) {
-  Write-Host "[NEEDS ATTENTION] The automatic-startup task was missing and could not be recreated after two attempts."
-  Write-Host "Still attempting to start DYO Worker directly below - if that also fails, please run"
-  Write-Host "DYO-Worker-Repair.bat (the full repair), or contact DYO."
-} else {
-  Write-Host "[NEEDS ATTENTION] Could not confirm the Scheduled Task's recovery settings after two recovery attempts."
-  Write-Host "Continuing anyway - this does not stop today's update. DYO Worker will still be"
-  Write-Host "restarted below with whatever task definition is currently in place. Contact DYO"
-  Write-Host "to fully repair the Scheduled Task's automatic-recovery policy separately."
-}
-
-# ---- Step 4: guarantee a clean log slate before restarting ----
-$logPath = Join-Path $InstallDir "logs\worker.log"
-if (Test-Path $logPath) {
-  $preUpdateBackup = Join-Path $InstallDir ("logs\worker.log.pre-update-" + (Get-Date -Format "yyyyMMddHHmmss"))
-  Move-Item -Path $logPath -Destination $preUpdateBackup -Force
-}
-
-function Get-FreshLogContent {
-  if (-not (Test-Path $logPath)) { return "" }
-  # Read-only, shared access - never interferes with the worker process
-  # that is actively appending to this same file.
-  $stream = [System.IO.File]::Open($logPath, 'Open', 'Read', [System.IO.FileShare]::ReadWrite)
-  try {
-    $reader = New-Object System.IO.StreamReader($stream)
-    return $reader.ReadToEnd()
-  } finally {
-    $stream.Close()
+  $supervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"
+  if (-not (Test-Path $supervisorLauncher)) {
+    Write-Host "[NEEDS ATTENTION] run-worker-supervisor.ps1 is missing from the installed files after the update."
+    Write-Host "Re-download the full DYO Worker FINAL update package and try again, or contact DYO."
+    $script:FailureReason = "run-worker-supervisor.ps1 missing after the update"
+    return $false
   }
-}
 
-# ---- Step 5: restart DYO Worker, and PROVE the update actually took effect ----
-Write-Host ""
-Write-Host "Restarting DYO Worker with the updated program files..."
+  # ---- Step 3b: refresh the Scheduled Task's automatic-recovery settings ----
+  Write-Host ""
+  Write-Host "Refreshing automatic-recovery settings on the existing Scheduled Task..."
+  $taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -SupervisorLauncher $supervisorLauncher -InstallDir $InstallDir
+  if ($taskRefreshOk -and $taskWasMissing) {
+    Write-CheckResult $true "Automatic-startup task recreated (same worker identity, hardened recovery settings - no repair package needed)"
+  } elseif ($taskRefreshOk) {
+    Write-CheckResult $true "Automatic-recovery settings refreshed (restarts automatically after a crash, no duplicate instances, same identity)"
+  } elseif ($taskWasMissing) {
+    Write-Host "[NEEDS ATTENTION] The automatic-startup task was missing and could not be recreated after two attempts."
+    Write-Host "Still attempting to start DYO Worker directly below - if that also fails, please run"
+    Write-Host "DYO-Worker-Repair.bat (the full repair), or contact DYO."
+  } else {
+    Write-Host "[NEEDS ATTENTION] Could not confirm the Scheduled Task's recovery settings after two recovery attempts."
+    Write-Host "Continuing anyway - this does not stop today's update. DYO Worker will still be"
+    Write-Host "restarted below with whatever task definition is currently in place. Contact DYO"
+    Write-Host "to fully repair the Scheduled Task's automatic-recovery policy separately."
+  }
 
-# Cleared BEFORE starting the task - a freshly-started supervisor checks
-# this flag before its very first spawn attempt, so it must already be
-# gone by the time Start-ScheduledTask below runs, or the new supervisor
-# would wrongly refuse to start the worker at all.
-Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
+  # ---- Step 4: guarantee a clean log slate before restarting ----
+  if (Test-Path $logPath) {
+    $preUpdateBackup = Join-Path $InstallDir ("logs\worker.log.pre-update-" + (Get-Date -Format "yyyyMMddHHmmss"))
+    Move-Item -Path $logPath -Destination $preUpdateBackup -Force
+  }
 
-# -ErrorAction SilentlyContinue: if the Scheduled Task refresh above could
-# not be confirmed AND somehow left no task registered at all (the one
-# truly worst-case outcome of the legacy-task recovery above), this must
-# never throw an uncaught error here - it falls through to the same
-# $started/PID-diff check below either way, which correctly reports the
-# real outcome and prints the existing, already-clear NEEDS ATTENTION
-# message rather than an unhandled PowerShell stack trace.
-Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-$started = Wait-Until -TimeoutSeconds 8 -PollSeconds 1 -Condition {
-  $newPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
-  ($newPids | Where-Object { $oldPids -notcontains $_ }).Count -gt 0
-}
-if (-not $started) {
-  # A stale IgnoreNew flag on Task Scheduler's own side (distinct from the
-  # process-level race already closed above) is rare but possible - one
-  # extra explicit start attempt before treating this as a real failure.
+  # ---- Step 5: restart DYO Worker, and PROVE the update actually took effect ----
+  Write-Host ""
+  Write-Host "Restarting DYO Worker with the updated program files..."
+
+  # Cleared BEFORE starting the task - a freshly-started supervisor checks
+  # this flag before its very first spawn attempt.
+  Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
+
   Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  $started = Wait-Until -TimeoutSeconds 20 -PollSeconds 1 -Condition {
+  $started = Wait-Until -TimeoutSeconds 8 -PollSeconds 1 -Condition {
     $newPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
     ($newPids | Where-Object { $oldPids -notcontains $_ }).Count -gt 0
   }
-}
-# A failed PID-diff check does NOT hard-fail the update on its own -
-# real client incident, 2026-08-30: a worker was genuinely running,
-# ONLINE, and heartbeating the whole time, but a process-matching
-# regression (fixed above/in spawn-worker-child.ts) meant this exact
-# check could never see it, so a perfectly healthy update was reported as
-# failed. PID-diff remains the FIRST and preferred signal (it is checked,
-# above, before anything else) - but the log-content checks immediately
-# below (a fresh startup line, all seven capabilities, the exact expected
-# commit, and a heartbeat/retry) are independent, deeper ground truth:
-# if ALL of those also confirm success, that is not weaker evidence than
-# a PID match, it is stronger (it proves the exact right build is
-# running and actually communicating with DYO). Only if BOTH the PID
-# check AND those log-content checks fail is this treated as a real
-# failure - see the still-present exit 1 calls in each check below.
-$pidConfirmed = $started
-if (-not $pidConfirmed) {
-  Write-Host "[NEEDS ATTENTION] Could not confirm a new DYO Worker process by PID after restart."
-  Write-Host "Continuing to check the worker's own log content directly - a real, healthy,"
-  Write-Host "heartbeating worker with unconfirmed PID is a known possible process-matching gap,"
-  Write-Host "not necessarily a real failure. This will still stop below if the log itself does"
-  Write-Host "not show a genuine, correctly-built, connected worker."
-} else {
-  Write-CheckResult $true "A genuinely new DYO Worker process is running (PID differs from before)"
-}
-
-# Capabilities/build-commit live in the process's own "worker starting" log
-# line (index.ts logs it BEFORE the heartbeat loop even starts) - checking
-# it here, independent of whether a heartbeat has succeeded yet, means a
-# real network hiccup during THIS update never blocks verifying the update
-# itself actually took effect (item 7: "do not falsely call a temporary
-# heartbeat delay an installation failure").
-Write-Host "Waiting for the new process to log its startup line (up to 15 seconds)..."
-$startupLogged = Wait-Until -TimeoutSeconds 15 -PollSeconds 1 -Condition {
-  (Get-FreshLogContent) -match '"msg":"worker starting"'
-}
-if (-not $startupLogged) {
-  Write-Host "[NEEDS ATTENTION] The new DYO Worker process is running, but never logged its own"
-  Write-Host "startup line within 15 seconds. Check logs\worker.log directly - this usually means"
-  Write-Host "a configuration problem (see .env) rather than a network issue. Contact DYO if unclear."
-  exit 1
-}
-Write-CheckResult $true "New process logged its own startup line"
-
-Write-Host "Waiting for a real heartbeat attempt from the new process (up to 30 seconds)..."
-$heartbeatSucceeded = Wait-Until -TimeoutSeconds 30 -PollSeconds 2 -Condition {
-  (Get-FreshLogContent) -match '"msg":"heartbeat succeeded"'
-}
-$newContent = Get-FreshLogContent
-
-if ($heartbeatSucceeded) {
-  Write-CheckResult $true "New process sent a real successful heartbeat"
-} else {
-  # Not yet succeeded is not automatically a failure - a real retry attempt
-  # with a logged, understandable reason means the worker is alive and
-  # actively trying, which is exactly the self-healing behavior this
-  # package exists to guarantee (it will connect the moment the API/network
-  # is reachable, with no client action needed). Only genuine SILENCE - no
-  # attempt logged at all - is treated as an install failure below.
-  $retrying = $newContent -match '"msg":"heartbeat failed, will retry"' -or $newContent -match "NEEDS_ATTENTION: DYO API rejected"
-  if ($retrying) {
-    Write-CheckResult $true "New process has not connected yet but is actively retrying (see logs\worker.log for the reason) - this is expected to resolve on its own"
-  } else {
-    Write-Host "[NEEDS ATTENTION] The new DYO Worker process started, but neither a successful"
-    Write-Host "heartbeat NOR a logged retry attempt was observed within 30 seconds. Check your"
-    Write-Host "internet connection, then check logs\worker.log directly before assuming this"
-    Write-Host "update failed - this specific combination usually means the process itself is"
-    Write-Host "not behaving as expected, not just a slow network."
-    exit 1
+  if (-not $started) {
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $started = Wait-Until -TimeoutSeconds 20 -PollSeconds 1 -Condition {
+      $newPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
+      ($newPids | Where-Object { $oldPids -notcontains $_ }).Count -gt 0
+    }
   }
+  $pidConfirmed = $started
+  $script:PidConfirmed = $pidConfirmed
+  if (-not $pidConfirmed) {
+    Write-Host "[NEEDS ATTENTION] Could not confirm a new DYO Worker process by PID after restart."
+    Write-Host "Continuing to check the worker's own log content directly - a real, healthy,"
+    Write-Host "heartbeating worker with unconfirmed PID is a known possible process-matching gap,"
+    Write-Host "not necessarily a real failure. This will still trigger automatic rollback below if"
+    Write-Host "the log itself does not show a genuine, correctly-built, connected worker."
+  } else {
+    Write-CheckResult $true "A genuinely new DYO Worker process is running (PID differs from before)"
+  }
+
+  Write-Host "Waiting for the new process to log its startup line (up to 15 seconds)..."
+  $startupLogged = Wait-Until -TimeoutSeconds 15 -PollSeconds 1 -Condition {
+    (Get-FreshLogContent) -match '"msg":"worker starting"'
+  }
+  if (-not $startupLogged) {
+    Write-Host "[NEEDS ATTENTION] The new DYO Worker process is running, but never logged its own"
+    Write-Host "startup line within 15 seconds. Check logs\worker.log directly - this usually means"
+    Write-Host "a configuration problem (.env) rather than a network issue."
+    $script:FailureReason = "New process never logged its own startup line within 15 seconds"
+    return $false
+  }
+  Write-CheckResult $true "New process logged its own startup line"
+
+  # Requires TWO real, successful heartbeats - not just one, and never
+  # merely "retrying". A single lucky heartbeat, or a process that starts
+  # but cannot keep a stable connection, both self-heal below via automatic
+  # rollback instead of being reported as a false success. The window
+  # (90 seconds) comfortably covers several real HEARTBEAT_INTERVAL_MS
+  # cycles (15s default) with margin for real network latency.
+  Write-Host "Waiting for TWO real, successful heartbeats from the new process (up to 90 seconds -"
+  Write-Host "proves an ongoing healthy connection, not just a lucky first attempt)..."
+  $heartbeatLinePattern = '\{[^{}]*"msg":"heartbeat succeeded"[^{}]*\}'
+  $heartbeatsOk = Wait-Until -TimeoutSeconds 90 -PollSeconds 3 -Condition {
+    $matchCount = ([regex]::Matches((Get-FreshLogContent), $heartbeatLinePattern)).Count
+    $matchCount -ge 2
+  }
+  $newContent = Get-FreshLogContent
+  $heartbeatLines = [regex]::Matches($newContent, $heartbeatLinePattern)
+  $script:HeartbeatSucceeded = $heartbeatsOk
+
+  if (-not $heartbeatsOk) {
+    Write-Host "[NEEDS ATTENTION] Did not observe two real, successful heartbeats within 90 seconds"
+    Write-Host "(found $($heartbeatLines.Count)). Check your internet connection and logs\worker.log."
+    $script:FailureReason = "Fewer than two real heartbeats succeeded within 90 seconds (found $($heartbeatLines.Count))"
+    return $false
+  }
+  Write-CheckResult $true "Two or more real, successful heartbeats confirmed" ("$($heartbeatLines.Count) heartbeats observed")
+
+  # AE ONLINE / MCP ONLINE / maxConcurrency - read directly from the MOST
+  # RECENT successful heartbeat's own structured log fields (already sent
+  # to DYO on every heartbeat - see apps/worker/src/index.ts's
+  # logHeartbeatEvent), never guessed or assumed from the process merely
+  # running.
+  $latestHeartbeatLine = $heartbeatLines[$heartbeatLines.Count - 1].Value
+  $aeOnline = $latestHeartbeatLine -match '"aeStatus":"ONLINE"'
+  $mcpOnline = $latestHeartbeatLine -match '"mcpStatus":"ONLINE"'
+  if (-not ($aeOnline -and $mcpOnline)) {
+    Write-Host "[NEEDS ATTENTION] Latest heartbeat does not report both AE and MCP ONLINE:"
+    Write-Host "  $latestHeartbeatLine"
+    Write-Host "This often just means After Effects is not open yet - open it and wait a minute,"
+    Write-Host "or re-run this update once it is."
+    $script:FailureReason = "Latest heartbeat does not report both AE and MCP as ONLINE"
+    return $false
+  }
+  Write-CheckResult $true "Latest heartbeat reports AE ONLINE and MCP ONLINE"
+
+  $maxConcurrencyOk = $latestHeartbeatLine -match '"maxConcurrency":1\b'
+  if (-not $maxConcurrencyOk) {
+    Write-Host "[NEEDS ATTENTION] Latest heartbeat does not report the expected maxConcurrency (1)."
+    $script:FailureReason = "Latest heartbeat does not report the expected maxConcurrency (1)"
+    return $false
+  }
+  Write-CheckResult $true "Latest heartbeat reports the expected maxConcurrency (1)"
+
+  $expectedCapabilities = @("CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE", "INSPECT_RENDER_CAPABILITIES", "EXECUTE_FRAME", "RENDER", "CREATE_PREVIEW")
+  $missingCapabilities = $expectedCapabilities | Where-Object { $newContent -notmatch [regex]::Escape($_) }
+  if (($newContent -match '"msg":"worker starting"') -and ($missingCapabilities.Count -eq 0)) {
+    Write-CheckResult $true "Worker capabilities include all seven" ($expectedCapabilities -join ", ")
+  } else {
+    Write-Host "[NEEDS ATTENTION] Could not confirm all seven capabilities ($($expectedCapabilities -join ', '))"
+    Write-Host "in the new process's own startup log line. The process is running and heartbeating,"
+    Write-Host "but this update may not have taken effect correctly."
+    $script:FailureReason = "Could not confirm all seven expected capabilities in the startup log"
+    return $false
+  }
+
+  $commitMatch = [regex]::Match($newContent, '"commit":"([0-9a-f]{7,40})"')
+  if (-not $commitMatch.Success) {
+    Write-Host "[NEEDS ATTENTION] No build/version marker (BUILD_INFO commit) was found in the"
+    Write-Host "new process's own startup log line. Everything else checks out, but this update"
+    Write-Host "package cannot prove which build is now running."
+    $script:FailureReason = "No BUILD_INFO commit marker found in the startup log"
+    return $false
+  }
+  $runningCommit = $commitMatch.Groups[1].Value
+  $script:RunningCommit = $runningCommit
+  if ($runningCommit -ne $ExpectedCommit) {
+    Write-Host "[NEEDS ATTENTION] The running build's commit ($runningCommit) does not match"
+    Write-Host "this exact FINAL update package's expected commit ($ExpectedCommit)."
+    Write-Host "The program files were copied, but something is not the exact final build."
+    $script:FailureReason = "Running commit ($runningCommit) does not match the expected commit ($ExpectedCommit)"
+    return $false
+  }
+  Write-CheckResult $true "Running the exact final build" ("commit " + $runningCommit)
+
+  return $true
 }
 
-$expectedCapabilities = @("CHECK_HEALTH", "INSPECT_TEMPLATE", "INSPECT_SCENE_EVIDENCE", "INSPECT_RENDER_CAPABILITIES", "EXECUTE_FRAME", "RENDER", "CREATE_PREVIEW")
-$missingCapabilities = $expectedCapabilities | Where-Object { $newContent -notmatch [regex]::Escape($_) }
-if (($newContent -match '"msg":"worker starting"') -and ($missingCapabilities.Count -eq 0)) {
-  Write-CheckResult $true "Worker capabilities include all seven" ($expectedCapabilities -join ", ")
+# ==== Automatic rollback - restores the pre-update backup and proves it is
+# healthy again, so a failed update never leaves the machine with no
+# runnable worker. Same maintenance-flag discipline as the main update
+# (set before stopping, cleared only once the restored worker is running
+# again) so the supervisor's own self-healing never races this restore. ====
+function Invoke-WorkerRollback {
+  param([string]$Reason)
+
+  Write-Host ""
+  Write-Host "================================================"
+  Write-Host "  UPDATE FAILED - ROLLING BACK AUTOMATICALLY"
+  Write-Host "================================================"
+  Write-Host "Reason: $Reason"
+  Write-Host ""
+  Write-Host "Restoring the previous, known-working DYO Worker build from the backup taken"
+  Write-Host "before this update started. Your DYO Worker identity/credentials/config are"
+  Write-Host "never touched by this - only program files are being restored."
+  Write-Host ""
+
+  New-Item -ItemType Directory -Force -Path (Split-Path $MaintenanceFlagPath -Parent) | Out-Null
+  Set-Content -Path $MaintenanceFlagPath -Value (Get-Date -Format "o") -Force
+
+  Write-Host "Stopping the failed new DYO Worker process..."
+  $currentTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($currentTask -and $currentTask.State -eq "Running") {
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  }
+  $rollbackOldPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
+  $stoppedForRollback = Wait-Until -TimeoutSeconds 20 -PollSeconds 1 -Condition {
+    (Get-DyoWorkerProcesses).Count -eq 0
+  }
+  if (-not $stoppedForRollback) {
+    Get-DyoWorkerProcesses | ForEach-Object {
+      try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  Write-Host "Restoring program files from backup: $BackupDir"
+  try {
+    Copy-Item -Path (Join-Path $BackupDir "*") -Destination $InstallDir -Recurse -Force -Exclude ".env" -ErrorAction Stop
+  } catch {
+    Write-Host "[NEEDS ATTENTION] Restoring the backup itself failed: $($_.Exception.Message)"
+    Write-Host "DYO Worker program files may now be in a mixed/inconsistent state."
+    Write-Host "Run DYO-Worker-Recover.bat now, or contact DYO immediately - do not close this window."
+    Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
+    return $false
+  }
+  Write-CheckResult $true "Restored previous program files from backup"
+
+  $rollbackSupervisorLauncher = Join-Path $InstallDir "run-worker-supervisor.ps1"
+  if (Test-Path $rollbackSupervisorLauncher) {
+    Set-DyoWorkerScheduledTaskRecovery -TaskName $TaskName -SupervisorLauncher $rollbackSupervisorLauncher -InstallDir $InstallDir | Out-Null
+  }
+
+  if (Test-Path $logPath) {
+    $rollbackLogBackup = Join-Path $InstallDir ("logs\worker.log.pre-rollback-" + (Get-Date -Format "yyyyMMddHHmmss"))
+    Move-Item -Path $logPath -Destination $rollbackLogBackup -Force
+  }
+
+  Write-Host "Restarting the restored (previous) DYO Worker build..."
+  Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  $rollbackStarted = Wait-Until -TimeoutSeconds 20 -PollSeconds 1 -Condition {
+    $newPids = @((Get-DyoWorkerProcesses) | Select-Object -ExpandProperty ProcessId)
+    ($newPids | Where-Object { $rollbackOldPids -notcontains $_ }).Count -gt 0
+  }
+  if (-not $rollbackStarted) {
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
+  }
+
+  Write-Host "Waiting for the restored process to confirm a real heartbeat (up to 45 seconds)..."
+  $rollbackHeartbeatOk = Wait-Until -TimeoutSeconds 45 -PollSeconds 3 -Condition {
+    (Get-FreshLogContent) -match '"msg":"heartbeat succeeded"'
+  }
+  $rollbackContent = Get-FreshLogContent
+  $rollbackProcessRunning = (Get-DyoWorkerProcesses).Count -gt 0
+
+  if (-not ($rollbackProcessRunning -and $rollbackHeartbeatOk)) {
+    Write-Host "[NEEDS ATTENTION] The restored previous build did not come back up and heartbeat"
+    Write-Host "within the expected time. DYO Worker may not be running at all right now."
+    Write-Host "Run DYO-Worker-Recover.bat now, or contact DYO immediately."
+    return $false
+  }
+
+  if ($PreviousCommit) {
+    $rollbackCommitMatch = [regex]::Match($rollbackContent, '"commit":"([0-9a-f]{7,40})"')
+    if ($rollbackCommitMatch.Success -and $rollbackCommitMatch.Groups[1].Value -ne $PreviousCommit) {
+      Write-Host "[NEEDS ATTENTION] The restored build's commit does not match the pre-update commit."
+      Write-Host "DYO Worker is running and heartbeating, but this needs DYO's attention."
+      return $false
+    }
+  }
+
+  Write-CheckResult $true "Restored DYO Worker is running and heartbeating again (previous known-working build)"
+  return $true
+}
+
+$updateOk = Invoke-WorkerUpdateAndVerify
+
+if ($updateOk) {
+  Write-Host ""
+  Write-Host "================================================"
+  Write-Host "  Update complete"
+  Write-Host "================================================"
+  $heartbeatSummary = "at least two real confirmed heartbeats"
+  $processConfirmationSummary = if ($script:PidConfirmed) { "a genuinely new process (confirmed by PID)" } else { "a genuinely running process (confirmed by its own fresh log content - PID could not be independently confirmed this time, see above)" }
+  Write-Host "DYO Worker is running the complete AE execution and render delivery pipeline,"
+  Write-Host "with $processConfirmationSummary, $heartbeatSummary, AE and MCP both confirmed"
+  Write-Host "ONLINE, the expected maxConcurrency, the exact expected final build commit, and"
+  Write-Host "every new program file verified present on disk - using the same DYO Worker"
+  Write-Host "identity this computer already had. No new registration was created. Automatic-"
+  Write-Host "recovery settings on the Scheduled Task were refreshed, so an ordinary future"
+  Write-Host "crash restarts DYO Worker on its own - no reboot or manual re-run of this update"
+  Write-Host "should be needed for that. No After Effects project was opened, changed,"
+  Write-Host "rendered, or otherwise run against by this update."
+  Write-Host ""
+  Write-Host "A pre-update backup of the previous build remains at:"
+  Write-Host "  $BackupDir"
+  Write-Host "(safe to delete once you are satisfied this update is working well)."
+  Write-Host ""
+  Write-Host "Latest status:"
+  Get-Content -Path $logPath -Tail 5 | ForEach-Object { Write-Host "  $_" }
+  exit 0
+}
+
+$rollbackOk = Invoke-WorkerRollback -Reason $script:FailureReason
+
+Write-Host ""
+Write-Host "================================================"
+if ($rollbackOk) {
+  Write-Host "  UPDATE FAILED - ROLLED BACK SAFELY"
+  Write-Host "================================================"
+  Write-Host "The new build ($ExpectedCommit) did not pass its post-update health check:"
+  Write-Host "  $($script:FailureReason)"
+  Write-Host ""
+  Write-Host "DYO Worker has been automatically restored to its previous, known-working build"
+  Write-Host "and is confirmed running and heartbeating again. Your DYO Worker identity,"
+  Write-Host "credentials, and configuration were never changed. Nothing was left broken."
+  Write-Host "Contact DYO with this message before trying the update again."
+  exit 1
 } else {
-  Write-Host "[NEEDS ATTENTION] Could not confirm all seven capabilities ($($expectedCapabilities -join ', '))"
-  Write-Host "in the new process's own startup log line. The process is running and heartbeating,"
-  Write-Host "but this update may not have taken effect correctly. Contact DYO."
+  Write-Host "  UPDATE FAILED - AUTOMATIC ROLLBACK COULD NOT BE FULLY VERIFIED"
+  Write-Host "================================================"
+  Write-Host "The new build did not pass its post-update health check, and this script could"
+  Write-Host "not fully confirm the previous build was restored and healthy either."
+  Write-Host ""
+  Write-Host "DO NOT ASSUME DYO WORKER IS RUNNING. Run DYO-Worker-Recover.bat now (in this same"
+  Write-Host "folder) - it restores the last known-working backup without asking for a"
+  Write-Host "registration code or changing any credentials/configuration. Contact DYO"
+  Write-Host "immediately if that does not resolve it."
   exit 1
 }
-
-$commitMatch = [regex]::Match($newContent, '"commit":"([0-9a-f]{7,40})"')
-if (-not $commitMatch.Success) {
-  Write-Host "[NEEDS ATTENTION] No build/version marker (BUILD_INFO commit) was found in the"
-  Write-Host "new process's own startup log line. Everything else checks out, but this update"
-  Write-Host "package cannot prove which build is now running. Contact DYO."
-  exit 1
-}
-$runningCommit = $commitMatch.Groups[1].Value
-if ($runningCommit -ne $ExpectedCommit) {
-  Write-Host "[NEEDS ATTENTION] The running build's commit ($runningCommit) does not match"
-  Write-Host "this exact FINAL update package's expected commit ($ExpectedCommit)."
-  Write-Host "The program files were copied, but something is not the exact final build."
-  Write-Host "Contact DYO before relying on this as the final release."
-  exit 1
-}
-Write-CheckResult $true "Running the exact final build" ("commit " + $runningCommit)
-
-Write-Host ""
-Write-Host "================================================"
-Write-Host "  Update complete"
-Write-Host "================================================"
-$heartbeatSummary = if ($heartbeatSucceeded) { "a real confirmed heartbeat" } else { "a genuine active retry attempt (not yet connected, but self-recovering - see logs\worker.log)" }
-$processConfirmationSummary = if ($pidConfirmed) { "a genuinely new process (confirmed by PID)" } else { "a genuinely running process (confirmed by its own fresh log content - PID could not be independently confirmed this time, see above)" }
-Write-Host "DYO Worker is running the complete AE execution and render delivery pipeline,"
-Write-Host "with $processConfirmationSummary, $heartbeatSummary, the"
-Write-Host "exact expected final build commit, and every new program file verified present on"
-Write-Host "disk - using the same DYO Worker identity this computer already had. No new"
-Write-Host "registration was created. Automatic-recovery settings on the Scheduled Task were"
-Write-Host "refreshed, so an ordinary future crash restarts DYO Worker on its own - no reboot"
-Write-Host "or manual re-run of this update should be needed for that. No After Effects"
-Write-Host "project was opened, changed, rendered, or otherwise run against by this update."
-Write-Host ""
-Write-Host "Latest status:"
-Get-Content -Path $logPath -Tail 5 | ForEach-Object { Write-Host "  $_" }

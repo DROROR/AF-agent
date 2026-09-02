@@ -62,7 +62,12 @@ function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void
   switch (event.type) {
     case "heartbeat_succeeded":
       logger.info(
-        { status: event.worker.status, aeStatus: event.worker.aeStatus, mcpStatus: event.worker.mcpStatus },
+        {
+          status: event.worker.status,
+          aeStatus: event.worker.aeStatus,
+          mcpStatus: event.worker.mcpStatus,
+          maxConcurrency: event.worker.maxConcurrency
+        },
         "heartbeat succeeded"
       );
       return;

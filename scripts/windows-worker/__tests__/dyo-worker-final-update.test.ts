@@ -195,9 +195,9 @@ describe("DYO-Worker-Final-Update.ps1 verifies every new capability file, both b
     const secondCheckIdx = updateScript.indexOf("foreach ($relativeFile in ($NewCapabilityFiles + $NewSupervisorFiles))", copyIdx);
     expect(copyIdx).toBeGreaterThan(-1);
     expect(secondCheckIdx).toBeGreaterThan(copyIdx);
-    const block = updateScript.slice(secondCheckIdx, secondCheckIdx + 400);
+    const block = updateScript.slice(secondCheckIdx, secondCheckIdx + 500);
     expect(block).toMatch(/Join-Path \$InstallDir \$relativeFile/);
-    expect(block).toMatch(/exit 1/);
+    expect(block).toMatch(/return \$false/);
   });
 });
 
@@ -249,35 +249,71 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
 
   it("verifies the new process logged its own startup line before checking anything heartbeat-related", () => {
     const startupIdx = updateScript.indexOf("$startupLogged = Wait-Until");
-    const heartbeatIdx = updateScript.indexOf("$heartbeatSucceeded = Wait-Until");
+    const heartbeatIdx = updateScript.indexOf("$heartbeatsOk = Wait-Until");
     expect(startupIdx).toBeGreaterThan(-1);
     expect(heartbeatIdx).toBeGreaterThan(startupIdx);
     const startupBlock = updateScript.slice(startupIdx, heartbeatIdx);
     expect(startupBlock).toMatch(/worker starting/);
     expect(startupBlock).toMatch(/if \(-not \$startupLogged\)/);
-    expect(startupBlock).toMatch(/exit 1/);
+    expect(startupBlock).toMatch(/return \$false/);
   });
 
-  it("accepts either a real successful heartbeat OR a genuinely logged retry attempt as success - never fails the install over a temporary delay", () => {
-    const idx = updateScript.indexOf("$heartbeatSucceeded = Wait-Until");
+  it("hardening: requires TWO real, successful heartbeats (not one, and not merely a logged retry attempt) before the update can pass - real fix so a single lucky heartbeat or a flapping connection can never be reported as healthy", () => {
+    const idx = updateScript.indexOf("$heartbeatsOk = Wait-Until");
     expect(idx).toBeGreaterThan(-1);
-    expect(updateScript).toMatch(/heartbeat succeeded/);
-    const block = updateScript.slice(idx, idx + 1200);
-    expect(block).toMatch(/if \(\$heartbeatSucceeded\)/);
-    expect(block).toMatch(/\$retrying = \$newContent -match '"msg":"heartbeat failed, will retry"' -or \$newContent -match "NEEDS_ATTENTION: DYO API rejected"/);
-    expect(block).toMatch(/if \(\$retrying\)/);
+    const declIdx = updateScript.indexOf("$heartbeatLinePattern = ");
+    expect(declIdx).toBeGreaterThan(-1);
+    expect(declIdx).toBeLessThan(idx);
+    const declBlock = updateScript.slice(declIdx, idx);
+    expect(declBlock).toMatch(/heartbeat succeeded/);
+    const block = updateScript.slice(idx, idx + 500);
+    expect(block).toMatch(/-ge 2/);
+    // The old "a genuinely logged retry attempt also counts as success"
+    // leniency is gone - a health gate is only as strong as what it
+    // accepts, and a retry line proves nothing about AE/MCP/capabilities.
+    expect(updateScript).not.toMatch(/\$retrying/);
+    expect(updateScript).not.toMatch(/heartbeat failed, will retry/);
   });
 
-  it("only fails the install on genuine silence - no heartbeat success AND no logged retry attempt at all", () => {
-    const idx = updateScript.indexOf("$retrying = $newContent");
+  it("real regex actually requires 2+ matches against sample log content, not just a heuristic string check", () => {
+    const patternMatch = /\$heartbeatLinePattern\s*=\s*'([^']+)'/.exec(updateScript);
+    expect(patternMatch?.[1], "$heartbeatLinePattern not found").toBeTruthy();
+    const pattern = new RegExp(patternMatch![1]!, "g");
+    const oneHeartbeat = 'noise\n{"level":30,"msg":"heartbeat succeeded","status":"ONLINE"}\nmore noise';
+    const twoHeartbeats = `${oneHeartbeat}\n{"level":30,"msg":"heartbeat succeeded","status":"ONLINE"}`;
+    expect([...oneHeartbeat.matchAll(pattern)].length).toBe(1);
+    expect([...twoHeartbeats.matchAll(pattern)].length).toBe(2);
+  });
+
+  it("returns $false (not exit 1) on a heartbeat-count failure, since this is inside the rollback-wrapped verification function", () => {
+    const idx = updateScript.indexOf("if (-not $heartbeatsOk) {");
     expect(idx).toBeGreaterThan(-1);
-    const block = updateScript.slice(idx, idx + 1000);
-    expect(block).toMatch(/\} else \{/);
-    expect(block).toMatch(/exit 1/);
-    expect(block).toMatch(/neither a successful/i);
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/\$script:FailureReason\s*=/);
+    expect(block).toMatch(/return \$false/);
+    expect(block).not.toMatch(/exit 1/);
   });
 
-  it("verifies all seven capabilities (CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME, RENDER, CREATE_PREVIEW) all appear in the new process's own startup log line, and STOPs if not", () => {
+  it("hardening: checks the LATEST heartbeat's own aeStatus/mcpStatus fields report ONLINE, not just that a heartbeat happened at all", () => {
+    const idx = updateScript.indexOf("$aeOnline = $latestHeartbeatLine");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 800);
+    expect(block).toMatch(/"aeStatus":"ONLINE"/);
+    expect(block).toMatch(/"mcpStatus":"ONLINE"/);
+    expect(block).toMatch(/return \$false/);
+    expect(block).not.toMatch(/exit 1/);
+  });
+
+  it("hardening: checks the latest heartbeat reports the expected maxConcurrency (1) - proves the single-job-at-a-time guarantee is actually observed on this exact running process, not merely assumed", () => {
+    const idx = updateScript.indexOf("$maxConcurrencyOk = $latestHeartbeatLine");
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/"maxConcurrency":1/);
+    expect(block).toMatch(/return \$false/);
+    expect(block).not.toMatch(/exit 1/);
+  });
+
+  it("verifies all seven capabilities (CHECK_HEALTH, INSPECT_TEMPLATE, INSPECT_SCENE_EVIDENCE, INSPECT_RENDER_CAPABILITIES, EXECUTE_FRAME, RENDER, CREATE_PREVIEW) all appear in the new process's own startup log line, and returns $false if not", () => {
     const declIdx = updateScript.indexOf("$expectedCapabilities = @(");
     expect(declIdx).toBeGreaterThan(-1);
     const declBlock = updateScript.slice(declIdx, declIdx + 200);
@@ -293,14 +329,16 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
     expect(idx).toBeGreaterThan(-1);
     const block = updateScript.slice(idx, idx + 700);
     expect(block).toMatch(/missingCapabilities\.Count -eq 0/);
-    expect(block).toMatch(/exit 1/);
+    expect(block).toMatch(/return \$false/);
+    expect(block).not.toMatch(/exit 1/);
   });
 
   it("requires the running build's commit to match the exact expected final commit, not just any commit marker", () => {
     const compareIdx = updateScript.indexOf("if ($runningCommit -ne $ExpectedCommit)");
     expect(compareIdx).toBeGreaterThan(-1);
-    const block = updateScript.slice(compareIdx, compareIdx + 400);
-    expect(block).toMatch(/exit 1/);
+    const block = updateScript.slice(compareIdx, compareIdx + 600);
+    expect(block).toMatch(/return \$false/);
+    expect(block).not.toMatch(/exit 1/);
   });
 
   it("real production bug: $ExpectedCommit is NEVER a hand-maintained literal - it must be read from this same package's own worker-app/BUILD_INFO.json, so it can never drift out of sync with the program files it ships alongside", () => {
@@ -331,7 +369,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
 
   it('never prints "Update complete" before every verification step above has already passed', () => {
     const completeIdx = updateScript.indexOf("Update complete");
-    const heartbeatCheckIdx = updateScript.indexOf("$heartbeatSucceeded = Wait-Until");
+    const heartbeatCheckIdx = updateScript.indexOf("$heartbeatsOk = Wait-Until");
     const capabilityCheckIdx = updateScript.indexOf('$newContent -match \'"msg":"worker starting"\'');
     const buildInfoCheckIdx = updateScript.indexOf("$commitMatch = [regex]::Match");
     const exactCommitCheckIdx = updateScript.indexOf("if ($runningCommit -ne $ExpectedCommit)");
@@ -511,7 +549,13 @@ describe("DYO-Worker-Final-Update.ps1 auto-repairs a completely missing Schedule
     expect(envIdx).toBeGreaterThan(-1);
     expect(taskIdx).toBeGreaterThan(envIdx);
     const recoveryIdx = updateScript.indexOf("function Set-DyoWorkerScheduledTaskRecovery");
-    const recoveryEndIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
+    // Scoped to the function's own body (up to the next top-level banner
+    // that starts the main script flow), not all the way to its call
+    // site - hardening moved the function definition earlier in the file,
+    // ahead of Step 1/2/backup code that legitimately mentions ".env" for
+    // unrelated reasons (the .env existence check, the -Exclude ".env" on
+    // both the main copy and the backup copy).
+    const recoveryEndIdx = updateScript.indexOf('Write-Host "================================================"', recoveryIdx);
     const recoveryBlock = updateScript.slice(recoveryIdx, recoveryEndIdx);
     expect(recoveryBlock).not.toMatch(/Set-Content|\.env/);
   });
@@ -553,9 +597,11 @@ describe("DYO-Worker-Final-Update.ps1 auto-repairs a completely missing Schedule
     const callIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
     expect(defIdx, "$supervisorLauncher definition not found - Set-DyoWorkerScheduledTaskRecovery would be called with an undefined path").toBeGreaterThan(-1);
     expect(callIdx).toBeGreaterThan(defIdx);
-    const block = updateScript.slice(defIdx, defIdx + 400);
+    const block = updateScript.slice(defIdx, defIdx + 500);
     expect(block).toMatch(/if \(-not \(Test-Path \$supervisorLauncher\)\)/);
-    expect(block).toMatch(/exit 1/);
+    // Inside Invoke-WorkerUpdateAndVerify (hardening) - returns $false so a
+    // missing supervisor file triggers automatic rollback, never a bare exit.
+    expect(block).toMatch(/return \$false/);
   });
 
   it("task gets started after update: Step 5's restart/PID verification is unconditional - it never checks $taskWasMissing, so a recreated task is started and verified exactly like a pre-existing one", () => {
@@ -631,9 +677,17 @@ describe("DYO-Worker-Final-Update.ps1 sets/clears the maintenance flag so the su
   });
 
   it("clears the flag BEFORE Start-ScheduledTask in Step 5 - never after, so the freshly-started supervisor does not see a stale maintenance state", () => {
-    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue");
-    const startIdx = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue");
-    expect(clearIdx).toBeGreaterThan(-1);
+    // Hardening added an EARLIER "Remove-Item ...MaintenanceFlagPath" on the
+    // genuinely-safe pre-backup abort path (Step 2b) - that one is
+    // unrelated to Step 5's restart and is verified separately in the
+    // backup describe block above, so this looks specifically for the
+    // occurrence inside Invoke-WorkerUpdateAndVerify (after its own
+    // definition begins).
+    const fnIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
+    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue", fnIdx);
+    const startIdx = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue", fnIdx);
+    expect(fnIdx).toBeGreaterThan(-1);
+    expect(clearIdx).toBeGreaterThan(fnIdx);
     expect(startIdx).toBeGreaterThan(clearIdx);
   });
 
@@ -641,7 +695,7 @@ describe("DYO-Worker-Final-Update.ps1 sets/clears the maintenance flag so the su
     const setIdx = updateScript.indexOf("Set-Content -Path $MaintenanceFlagPath");
     const copyIdx = updateScript.indexOf("Copy-Item -Path (Join-Path $sourceApp");
     const refreshIdx = updateScript.indexOf("$taskRefreshOk = Set-DyoWorkerScheduledTaskRecovery");
-    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue");
+    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue", refreshIdx);
     expect(setIdx).toBeGreaterThan(-1);
     expect(copyIdx).toBeGreaterThan(setIdx);
     expect(refreshIdx).toBeGreaterThan(copyIdx);
@@ -684,11 +738,11 @@ describe("DYO-Worker-Final-Update.ps1 does not hard-fail on a PID-diff miss alon
     expect(startupWaitIdx).toBeGreaterThan(startedIdx);
   });
 
-  it("still exits nonzero if the log-content checks ALSO fail to confirm a startup line - PID-diff failing does not silently become an automatic pass", () => {
+  it("still fails (returns $false, triggering automatic rollback) if the log-content checks ALSO fail to confirm a startup line - PID-diff failing does not silently become an automatic pass", () => {
     const idx = updateScript.indexOf('if (-not $startupLogged) {');
     expect(idx).toBeGreaterThan(-1);
     const block = updateScript.slice(idx, idx + 500);
-    expect(block).toMatch(/exit 1/);
+    expect(block).toMatch(/return \$false/);
   });
 
   it("still requires all seven capabilities AND the exact expected commit even when PID was not confirmed - never a weaker bar", () => {
@@ -696,15 +750,194 @@ describe("DYO-Worker-Final-Update.ps1 does not hard-fail on a PID-diff miss alon
     const commitIdx = updateScript.indexOf('$commitMatch = [regex]::Match');
     expect(capIdx).toBeGreaterThan(-1);
     expect(commitIdx).toBeGreaterThan(capIdx);
-    expect(updateScript.slice(capIdx, capIdx + 900)).toMatch(/exit 1/);
-    expect(updateScript.slice(commitIdx, commitIdx + 700)).toMatch(/exit 1/);
+    expect(updateScript.slice(capIdx, capIdx + 900)).toMatch(/return \$false/);
+    expect(updateScript.slice(commitIdx, commitIdx + 700)).toMatch(/return \$false/);
   });
 
   it("the final summary is honest about which confirmation actually happened (PID vs log-content only)", () => {
-    const idx = updateScript.indexOf("$processConfirmationSummary = if ($pidConfirmed)");
+    const idx = updateScript.indexOf("$processConfirmationSummary = if ($script:PidConfirmed)");
     expect(idx).toBeGreaterThan(-1);
     const block = updateScript.slice(idx, idx + 400);
     expect(block).toMatch(/confirmed by PID/);
     expect(block).toMatch(/PID could not be independently confirmed/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 hardening: backs up the current install before touching anything (never leaves the machine with no runnable worker)", () => {
+  it("creates a timestamped backup directory under WorkRoot\\backups AFTER the old process is confirmed stopped, and BEFORE the program-file replacement copy", () => {
+    const stoppedIdx = updateScript.indexOf('Write-CheckResult $true "DYO Worker fully stopped');
+    const backupIdx = updateScript.indexOf("$BackupDir = Join-Path $BackupRoot");
+    const replaceCopyIdx = updateScript.indexOf('Copy-Item -Path (Join-Path $sourceApp "*")');
+    expect(stoppedIdx).toBeGreaterThan(-1);
+    expect(backupIdx).toBeGreaterThan(stoppedIdx);
+    expect(replaceCopyIdx).toBeGreaterThan(backupIdx);
+    expect(updateScript).toMatch(/\$BackupRoot = Join-Path \$WorkRoot "backups"/);
+    expect(updateScript).toMatch(/worker-app-pre-update-/);
+  });
+
+  it("independently verifies the backup is non-empty (contains dist\\index.js) rather than trusting Copy-Item did not throw", () => {
+    const idx = updateScript.indexOf('if (-not (Test-Path (Join-Path $BackupDir "dist\\index.js")))');
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/exit 1/);
+    expect(block).toMatch(/Remove-Item -Path \$MaintenanceFlagPath/);
+  });
+
+  it("a failed backup verification is a genuinely safe abort - nothing has been changed yet, so it clears the maintenance flag and exits rather than rolling back (there is nothing to roll back to)", () => {
+    const idx = updateScript.indexOf('if (-not (Test-Path (Join-Path $BackupDir "dist\\index.js")))');
+    const block = updateScript.slice(idx, idx + 400);
+    expect(block).toMatch(/No program files have been changed/);
+  });
+
+  it("captures the backup's own previous commit (if known) from its BUILD_INFO.json, for rollback to cross-check against later", () => {
+    expect(updateScript).toMatch(/\$PreviousCommit = \$null/);
+    expect(updateScript).toMatch(/\$previousBuildInfoPath = Join-Path \$BackupDir "BUILD_INFO\.json"/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 hardening: wraps the risky replace/verify sequence so a health-gate failure triggers automatic rollback instead of exiting broken", () => {
+  it("defines Invoke-WorkerUpdateAndVerify (returns $true/$false) and Invoke-WorkerRollback (params: Reason)", () => {
+    expect(updateScript).toMatch(/function Invoke-WorkerUpdateAndVerify\s*\{/);
+    expect(updateScript).toMatch(/function Invoke-WorkerRollback\s*\{/);
+    const rollbackIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(rollbackIdx, rollbackIdx + 200);
+    expect(block).toMatch(/param\(\[string\]\$Reason\)/);
+  });
+
+  it("calls Invoke-WorkerUpdateAndVerify exactly once at top level, and branches to Invoke-WorkerRollback only when it returns $false", () => {
+    const callIdx = updateScript.indexOf("$updateOk = Invoke-WorkerUpdateAndVerify");
+    expect(callIdx).toBeGreaterThan(-1);
+    const ifIdx = updateScript.indexOf("if ($updateOk) {", callIdx);
+    expect(ifIdx).toBeGreaterThan(callIdx);
+    const rollbackCallIdx = updateScript.indexOf("$rollbackOk = Invoke-WorkerRollback -Reason $script:FailureReason");
+    expect(rollbackCallIdx).toBeGreaterThan(ifIdx);
+  });
+
+  it("every failure path inside Invoke-WorkerUpdateAndVerify sets $script:FailureReason before returning $false, so the rollback report is never blank", () => {
+    const fnIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
+    const endIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(fnIdx, endIdx);
+    const returnFalseCount = (block.match(/return \$false/g) ?? []).length;
+    const setReasonCount = (block.match(/\$script:FailureReason\s*=/g) ?? []).length;
+    expect(returnFalseCount).toBeGreaterThanOrEqual(4);
+    expect(setReasonCount).toBe(returnFalseCount);
+  });
+
+  it("no bare top-level exit 1 remains inside Invoke-WorkerUpdateAndVerify - only the genuinely pre-backup preflight steps (Step 1/backup) are still allowed to exit directly", () => {
+    const fnIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
+    const endIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(fnIdx, endIdx);
+    expect(block).not.toMatch(/exit 1/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 hardening: automatic rollback restores the pre-update backup and independently re-verifies health", () => {
+  it("sets the maintenance flag again before stopping the failed new process, mirroring the main update's own discipline", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(idx, idx + 1200);
+    expect(block).toMatch(/Set-Content -Path \$MaintenanceFlagPath/);
+    const setIdx = block.indexOf("Set-Content -Path $MaintenanceFlagPath");
+    const stopIdx = block.indexOf("Stopping the failed new DYO Worker process");
+    expect(stopIdx).toBeGreaterThan(setIdx);
+  });
+
+  it("restores program files FROM the backup directory, excluding .env, same as the main update never touches .env", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(idx, idx + 3000);
+    expect(block).toMatch(/Copy-Item -Path \(Join-Path \$BackupDir "\*"\) -Destination \$InstallDir -Recurse -Force -Exclude "\.env"/);
+  });
+
+  it("wraps the restore itself in try/catch - a failed restore is reported distinctly and clears the maintenance flag rather than leaving it stuck forever", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(idx, idx + 3000);
+    const copyRestoreIdx = block.indexOf('Copy-Item -Path (Join-Path $BackupDir "*")');
+    expect(copyRestoreIdx).toBeGreaterThan(-1);
+    const tryIdx = block.lastIndexOf("try {", copyRestoreIdx);
+    expect(tryIdx).toBeGreaterThan(-1);
+    const catchBlock = block.slice(copyRestoreIdx, copyRestoreIdx + 700);
+    expect(catchBlock).toMatch(/\} catch \{/);
+    expect(catchBlock).toMatch(/Remove-Item -Path \$MaintenanceFlagPath -Force -ErrorAction SilentlyContinue/);
+    expect(catchBlock).toMatch(/return \$false/);
+    expect(catchBlock).toMatch(/DYO-Worker-Recover\.bat/);
+  });
+
+  it("requires a real, independently-verified heartbeat from the restored build before ever reporting rollback success - never claims success from Copy-Item/Start-ScheduledTask not throwing", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(idx, idx + 5000);
+    expect(block).toMatch(/\$rollbackHeartbeatOk = Wait-Until/);
+    expect(block).toMatch(/"msg":"heartbeat succeeded"/);
+    expect(block).toMatch(/if \(-not \(\$rollbackProcessRunning -and \$rollbackHeartbeatOk\)\)/);
+    const failIdx = block.indexOf("if (-not ($rollbackProcessRunning -and $rollbackHeartbeatOk))");
+    const failBlock = block.slice(failIdx, failIdx + 400);
+    expect(failBlock).toMatch(/return \$false/);
+    expect(failBlock).toMatch(/DYO-Worker-Recover\.bat/);
+  });
+
+  it("clears the maintenance flag on the SUCCESS path only after Start-ScheduledTask is called for the restored build - never left set forever on a successful rollback", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const clearIdx = updateScript.indexOf("Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue", idx);
+    const startIdx = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue", clearIdx - 5);
+    expect(clearIdx).toBeGreaterThan(idx);
+    expect(startIdx).toBeGreaterThanOrEqual(clearIdx);
+  });
+
+  it("returns $true only once the restored worker is confirmed running and heartbeating, and cross-checks the restored commit against the backup's own recorded commit when known", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(idx, idx + 5000);
+    expect(block).toMatch(/if \(\$PreviousCommit\) \{/);
+    expect(block).toMatch(/Restored DYO Worker is running and heartbeating again/);
+    expect(block).toMatch(/return \$true/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 hardening: the maintenance flag is never left permanently set, across every real exit path", () => {
+  it("success path: flag is cleared inside Invoke-WorkerUpdateAndVerify before Start-ScheduledTask, and the top-level success branch never re-sets it", () => {
+    const fnIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
+    const fnEndIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const block = updateScript.slice(fnIdx, fnEndIdx);
+    expect(block).toMatch(/Remove-Item -Path \$MaintenanceFlagPath -Force -ErrorAction SilentlyContinue/);
+  });
+
+  it("rollback-success path: the flag is cleared inside Invoke-WorkerRollback's own success path (verified above) - the top-level rollback-success branch never needs to touch it again", () => {
+    const topIdx = updateScript.indexOf("$rollbackOk = Invoke-WorkerRollback");
+    const topBlock = updateScript.slice(topIdx, topIdx + 2000);
+    // The top-level orchestration itself never sets/clears the flag a
+    // second time - that responsibility lives entirely inside the
+    // functions above, so there is exactly one owner for this discipline.
+    expect(topBlock).not.toMatch(/MaintenanceFlagPath/);
+  });
+
+  it("rollback-failure path: even when Invoke-WorkerRollback itself returns $false, its own restore-failure branch already cleared the flag before returning - never silently left set with no runnable worker AND a stuck flag", () => {
+    const idx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const restoreFailIdx = updateScript.indexOf("[NEEDS ATTENTION] Restoring the backup itself failed", idx);
+    expect(restoreFailIdx).toBeGreaterThan(idx);
+    const block = updateScript.slice(restoreFailIdx, restoreFailIdx + 400);
+    expect(block).toMatch(/Remove-Item -Path \$MaintenanceFlagPath -Force -ErrorAction SilentlyContinue/);
+    expect(block).toMatch(/return \$false/);
+  });
+});
+
+describe("DYO-Worker-Final-Update.ps1 hardening: the final report never claims success it did not verify, and points to one-click recovery when rollback itself is unverified", () => {
+  it("prints a distinct ROLLED BACK SAFELY message on successful rollback, including the real failure reason", () => {
+    const idx = updateScript.indexOf('Write-Host "  UPDATE FAILED - ROLLED BACK SAFELY"');
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 800);
+    expect(block).toMatch(/\$script:FailureReason/);
+    expect(block).toMatch(/never changed/);
+  });
+
+  it("prints a distinct, more urgent message and points to DYO-Worker-Recover.bat when the rollback itself could not be fully verified - never conflates the two outcomes", () => {
+    const idx = updateScript.indexOf('Write-Host "  UPDATE FAILED - AUTOMATIC ROLLBACK COULD NOT BE FULLY VERIFIED"');
+    expect(idx).toBeGreaterThan(-1);
+    const block = updateScript.slice(idx, idx + 600);
+    expect(block).toMatch(/DO NOT ASSUME DYO WORKER IS RUNNING/);
+    expect(block).toMatch(/DYO-Worker-Recover\.bat/);
+  });
+
+  it("both failure branches exit nonzero", () => {
+    const rolledBackIdx = updateScript.indexOf('Write-Host "  UPDATE FAILED - ROLLED BACK SAFELY"');
+    const unverifiedIdx = updateScript.indexOf('Write-Host "  UPDATE FAILED - AUTOMATIC ROLLBACK COULD NOT BE FULLY VERIFIED"');
+    expect(updateScript.slice(rolledBackIdx, unverifiedIdx)).toMatch(/exit 1/);
+    expect(updateScript.slice(unverifiedIdx)).toMatch(/exit 1/);
   });
 });
