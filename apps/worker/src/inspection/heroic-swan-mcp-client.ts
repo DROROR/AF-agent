@@ -169,8 +169,17 @@ export class HeroicSwanMcpClient {
    * facts (see heroic-swan-template-inspector.ts and
    * buildInspectCompositionPrecompsScript) - never for any mutation, and
    * reuses this SAME connection rather than opening a second one.
+   *
+   * `timeoutMsOverride` (2026-09-03, real production incident): lets ONE
+   * specific call use a different timeout than this client's own default
+   * (`this.timeoutMs`), without changing that default for every other
+   * call on the same connection - see OPEN_PROJECT_TIMEOUT_MS in
+   * heroic-swan-template-inspector.ts, the one real caller of this. The
+   * MCP SDK's own `callTool` already accepts a per-call `{ timeout }`
+   * option; this simply exposes it for this one method rather than
+   * introducing a second client instance/connection.
    */
-  async runFixedInspectionScript(script: FixedJsxScript): Promise<ToolCallResult> {
+  async runFixedInspectionScript(script: FixedJsxScript, timeoutMsOverride?: number): Promise<ToolCallResult> {
     if (!this.client) {
       return {
         ok: false,
@@ -178,7 +187,11 @@ export class HeroicSwanMcpClient {
       };
     }
     try {
-      const result = await this.client.callTool({ name: "ae_run_jsx", arguments: { code: script, mode: "unsafe" } }, undefined, { timeout: this.timeoutMs });
+      const result = await this.client.callTool(
+        { name: "ae_run_jsx", arguments: { code: script, mode: "unsafe" } },
+        undefined,
+        { timeout: timeoutMsOverride ?? this.timeoutMs }
+      );
       if (result.isError) {
         return { ok: false, error: { code: "TOOL_ERROR", message: extractErrorText(result.content) } };
       }

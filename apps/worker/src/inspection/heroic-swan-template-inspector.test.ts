@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeroicSwanTemplateInspector } from "./heroic-swan-template-inspector.js";
 import type { ManifestInspectionResult, RawInspectionCapture } from "./template-inspector.js";
+import { buildOpenProjectScript } from "../execution/jsx-templates.js";
 
 let dir: string;
 
@@ -820,5 +821,339 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     const compB = manifest.compositions.find((c) => c.compositionId === "comp-99");
     expect(compB?.isNestedOnlyReferenced).toBe(false);
     expect(compB?.parentCompositionIds).toEqual([]);
+  });
+});
+
+/**
+ * Single-open + poll-not-reopen reliability fix (2026-09-03, real
+ * production incident #3): a real client trace proved app.open() itself
+ * can genuinely exceed the ordinary 15s MCP timeout, that the OLD generic
+ * P1 retry wrapper then re-issued app.open() on every one of 3
+ * consecutive timeouts, and that AE was STILL on "Untitled"/null ~48
+ * minutes later (proven via a live, read-only CHECK_HEALTH dispatch) -
+ * not "the open worked but the response was slow." This fake server lets
+ * a test drive that exact scenario deterministically and fast:
+ * `openHangs: true` makes the open-project ae_run_jsx call never respond
+ * within any reasonable test timeout (so the client's own configured
+ * timeoutMs always fires first, exactly like the real -32001 timeout);
+ * `healthSequence` scripts what ae_health reports on each successive
+ * call (1-indexed - call 1 is always `inspect()`'s own upfront
+ * reuse-check call, never a poll call), the last entry repeating once
+ * exhausted; `healthDelayFromCall`/`healthDelayCount` make a specific
+ * range of calls additionally delay past the client's mcpTimeoutMs first
+ * (simulating a real transient MCP timeout DURING polling specifically,
+ * which callWithTransientRetry already retries within a single poll
+ * iteration).
+ */
+async function writeOpenPollFakeServer(
+  aeMcpPath: string,
+  sourceProjectPath: string,
+  options: {
+    openHangs?: boolean;
+    healthSequence?: ("null" | "target" | "wrong")[];
+    /** 1-indexed ae_health call number to start delaying from - defaults to never delaying. Lets a test target a POLL call specifically, distinct from the very first (index 1) call, which is always `inspect()`'s own upfront reuse-check call, never a poll call. */
+    healthDelayFromCall?: number;
+    /** How many consecutive calls, starting at healthDelayFromCall, delay past the client's own timeout. */
+    healthDelayCount?: number;
+    wrongPath?: string;
+  } = {}
+): Promise<void> {
+  await mkdir(join(aeMcpPath, "dist"), { recursive: true });
+  const sdkEsmRoot = join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
+  const sequence = options.healthSequence ?? ["target"];
+  const healthDelayFromCall = options.healthDelayFromCall ?? 1;
+  const healthDelayCount = options.healthDelayCount ?? 0;
+  const wrongPath = options.wrongPath ?? "C:\\DYO-Agent\\some-other-unrelated-project.aep";
+  await writeFile(
+    join(aeMcpPath, "dist", "index.js"),
+    `
+(async () => {
+  const { McpServer } = await import(${JSON.stringify(join(sdkEsmRoot, "server", "mcp.js"))});
+  const { StdioServerTransport } = await import(${JSON.stringify(join(sdkEsmRoot, "server", "stdio.js"))});
+  const { z } = await import(${JSON.stringify(join(process.cwd(), "node_modules", "zod", "index.js"))});
+  const { writeFileSync } = await import("node:fs");
+
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  const server = new McpServer({ name: "fake-ae-mcp-open-poll", version: "0.0.0" });
+  const openScriptCallsFile = ${JSON.stringify(join(aeMcpPath, "open-script-calls.txt"))};
+
+  const sequence = ${JSON.stringify(sequence)};
+  const healthDelayFromCall = ${JSON.stringify(healthDelayFromCall)};
+  const healthDelayCount = ${JSON.stringify(healthDelayCount)};
+  const sourceProjectPath = ${JSON.stringify(sourceProjectPath)};
+  const wrongPath = ${JSON.stringify(wrongPath)};
+  let healthCalls = 0;
+  let openScriptCalls = 0;
+
+  server.registerTool("ae_health", { description: "d" }, async () => {
+    healthCalls++;
+    if (healthCalls >= healthDelayFromCall && healthCalls < healthDelayFromCall + healthDelayCount) {
+      await sleep(999999);
+    }
+    const idx = Math.min(healthCalls - 1, sequence.length - 1);
+    const entry = sequence[idx];
+    const projectPath = entry === "target" ? sourceProjectPath : entry === "wrong" ? wrongPath : null;
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        connected: true, ae_running: true,
+        health: { connected: true, aeVersion: "26.3x87", projectOpen: entry !== "null", projectName: entry === "null" ? "Untitled" : "fixture", projectPath: projectPath }
+      }) }]
+    };
+  });
+
+  server.registerTool("ae_list_instances", { description: "d" }, async () => ({
+    content: [{ type: "text", text: JSON.stringify({ instances: [{ instanceId: "default", aeVersion: "26.3x87" }] }) }]
+  }));
+  server.registerTool("ae_get_project_info", { description: "d" }, async () => ({
+    content: [{ type: "text", text: JSON.stringify({ name: "fixture", path: sourceProjectPath, bitsPerChannel: 8, numItems: 1, compositions: [] }) }]
+  }));
+  // Deliberately malformed - the point of these tests is projectOpenEvidence
+  // alone, not a full manifest build (see writeFakeServer's own precedent).
+  server.registerTool("ae_list_compositions", { description: "d" }, async () => ({
+    content: [{ type: "text", text: JSON.stringify([{ some_unconfirmed_field: "value" }]) }]
+  }));
+  server.registerTool("ae_get_composition", { description: "d" }, async () => ({
+    content: [{ type: "text", text: "should never be called" }]
+  }));
+
+  server.registerTool(
+    "ae_run_jsx",
+    { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } },
+    async (args) => {
+      const openMatch = /new File\\((".*?")\\)/.exec(args.code);
+      if (openMatch) {
+        openScriptCalls++;
+        // Written synchronously, BEFORE any hang below, and persisted to
+        // disk (not just in-memory) - the inspector kills this whole
+        // child process once its own client-side timeout fires, so an
+        // in-memory-only counter (or an MCP tool exposing it) would be
+        // unobservable once that happens. This file survives the kill.
+        writeFileSync(openScriptCallsFile, String(openScriptCalls), "utf8");
+        if (${JSON.stringify(Boolean(options.openHangs))}) {
+          await sleep(999999);
+        }
+        const openedPath = JSON.parse(openMatch[1]);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { openedPath, openedName: "fixture" } }) }) }]
+        };
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: false, failureReason: "unexpected script target in test fixture" }) }) }] };
+    }
+  );
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+})();
+`,
+    "utf8"
+  );
+}
+
+describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-03, real production incident #3)", () => {
+  // Generous (not razor-thin) margins - real spawn/dynamic-import connect()
+  // overhead and full-test-suite parallel CPU contention have both proven,
+  // earlier in this same file's own P1 retry tests, capable of pushing a
+  // too-tight timeout into real (not just simulated) flakiness.
+  const FAST_MCP_TIMEOUT_MS = 1500;
+  const FAST_OPEN_OPTIONS = { timeoutMs: 800, pollBudgetMs: 3000, pollIntervalMs: 300 };
+  const FAST_RETRY_OPTIONS = { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } };
+  const HANG_TEST_TIMEOUT_MS = 20_000;
+
+  function fastInspector(): HeroicSwanTemplateInspector {
+    return new HeroicSwanTemplateInspector({
+      aeMcpPath: dir,
+      mcpTimeoutMs: FAST_MCP_TIMEOUT_MS,
+      openProjectOptions: FAST_OPEN_OPTIONS,
+      retryOptions: FAST_RETRY_OPTIONS
+    });
+  }
+
+  it("1. target already open -> zero app.open calls", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    await writeOpenPollFakeServer(dir, sourceProjectPath, { healthSequence: ["target"] });
+
+    const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+    expect(result.projectOpenEvidence?.reused).toBe(true);
+    expect(result.projectOpenEvidence?.matched).toBe(true);
+  });
+
+  it("2. different/Untitled project -> exactly one app.open call, which completes normally -> success", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    await writeOpenPollFakeServer(dir, sourceProjectPath, { healthSequence: ["null"], openHangs: false });
+
+    const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+    expect(result.projectOpenEvidence?.reused).toBe(false);
+    expect(result.projectOpenEvidence?.matched).toBe(true);
+    expect(result.projectOpenEvidence?.actualOpenedPath).toBe(sourceProjectPath);
+    const callCount = await readFile(join(dir, "open-script-calls.txt"), "utf8");
+    expect(callCount).toBe("1");
+  });
+
+  it(
+    "3. app.open times out but health polling later reports the exact target -> success",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      // Call 1 (inspect()'s own upfront reuse-check) reports null/Untitled -
+      // not reused, so the single app.open() attempt runs (and hangs).
+      // Poll call 2 still reports null (AE genuinely still loading); poll
+      // call 3 onward reports the real target - simulating the open
+      // finishing on its own after the client had already given up
+      // waiting on that one abandoned request.
+      await writeOpenPollFakeServer(dir, sourceProjectPath, { openHangs: true, healthSequence: ["null", "null", "target"] });
+
+      const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+      expect(result.projectOpenEvidence?.reused).toBe(false);
+      expect(result.projectOpenEvidence?.matched).toBe(true);
+      expect(result.projectOpenEvidence?.actualOpenedPath).toBe(sourceProjectPath);
+    },
+    HANG_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "4. app.open times out and projectPath stays null -> fails closed after the bounded polling budget",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      await writeOpenPollFakeServer(dir, sourceProjectPath, { openHangs: true, healthSequence: ["null"] });
+
+      const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+      expect(result.projectOpenEvidence?.matched).toBe(false);
+      expect(result.projectOpenEvidence?.actualOpenedPath).toBeNull();
+      expect(result.projectOpenEvidence?.note).toMatch(/timed out and the target project never appeared within the bounded polling budget/);
+      expect(result.projectOpenEvidence?.note).toMatch(/no app\.open\(\) retry was attempted/);
+    },
+    HANG_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "5. app.open times out and projectPath becomes a different, wrong file -> fails closed immediately, never treated as success",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      await writeOpenPollFakeServer(dir, sourceProjectPath, { openHangs: true, healthSequence: ["wrong"] });
+
+      const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+      expect(result.projectOpenEvidence?.matched).toBe(false);
+      expect(result.projectOpenEvidence?.actualOpenedPath).toBe("C:\\DYO-Agent\\some-other-unrelated-project.aep");
+      expect(result.projectOpenEvidence?.note).toMatch(/does not exactly match the requested sourceProjectPath/);
+    },
+    HANG_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "6. a transient health-polling timeout, then the target appears -> success within budget",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      // Call 1 (upfront reuse-check) reports null - not reused, single
+      // app.open() attempt hangs. The FIRST poll's own health call (call 2)
+      // itself times out - a real, separate transient MCP failure DURING
+      // polling - callWithTransientRetry's own retry (already used for
+      // every ordinary read-only call) absorbs it within that same poll
+      // iteration, and the very next underlying attempt (call 3) succeeds,
+      // reporting the target already open.
+      await writeOpenPollFakeServer(dir, sourceProjectPath, {
+        openHangs: true,
+        healthSequence: ["null", "target"],
+        healthDelayFromCall: 2,
+        healthDelayCount: 1
+      });
+
+      const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+      expect(result.projectOpenEvidence?.matched).toBe(true);
+      expect(result.projectOpenEvidence?.actualOpenedPath).toBe(sourceProjectPath);
+    },
+    HANG_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "7. exactly one app.open invocation even across the timeout -> poll path (never a second app.open call)",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      await writeOpenPollFakeServer(dir, sourceProjectPath, { openHangs: true, healthSequence: ["null", "null", "target"] });
+
+      const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+      expect(result.projectOpenEvidence?.matched).toBe(true);
+
+      // The fake server writes this file, synchronously, on every real
+      // ae_run_jsx invocation whose code matches the open-project script -
+      // written to disk (not just in-memory) so it survives the child
+      // process being killed once the inspector's own timeout fires,
+      // proving the real server-side call count, not just what the client
+      // happened to observe (which a race could make misleading).
+      const callCount = await readFile(join(dir, "open-script-calls.txt"), "utf8");
+      expect(callCount).toBe("1");
+    },
+    HANG_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "8. no save operation is ever invoked, whether the open succeeds immediately or via the timeout -> poll path",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      // Static confirmation - the generated script never references save at all.
+      const script = buildOpenProjectScript(sourceProjectPath);
+      expect(script).not.toContain(".save(");
+
+      // The fixture's own ae_run_jsx handler never defines or calls a
+      // "save" operation at all (see writeOpenPollFakeServer above) - if
+      // buildOpenProjectScript's generated JSX ever called
+      // app.project.save(), there is nothing here to make that call
+      // silently succeed, so any such regression would surface as an
+      // unexpected script/process failure in this same test run instead
+      // of a clean pass.
+      await writeOpenPollFakeServer(dir, sourceProjectPath, { openHangs: true, healthSequence: ["target"] });
+      const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+      expect(result.projectOpenEvidence?.matched).toBe(true);
+    },
+    HANG_TEST_TIMEOUT_MS
+  );
+
+  it("9. dialog suppression is still always released, even when the open call itself times out (proven at the buildOpenProjectScript unit level - see jsx-templates.test.ts's own dedicated describe block for the full behavioral proof, including a real vm-executed timeout/exception scenario)", () => {
+    const sourceProjectPath = "C:\\DYO-Agent\\copy\\template.aep";
+    const script = buildOpenProjectScript(sourceProjectPath);
+    expect(script).toContain("app.beginSuppressDialogs();");
+    expect(script).toContain("app.endSuppressDialogs(false);");
+    const beginIndex = script.indexOf("app.beginSuppressDialogs();");
+    const finallyIndex = script.indexOf("app.endSuppressDialogs(false);");
+    expect(beginIndex).toBeLessThan(finallyIndex);
+  });
+
+  it("10. normal MCP discovery retry behavior remains unchanged - a transient ae_list_instances timeout still retries and succeeds, unaffected by the OPEN_PROJECT-specific timeout/poll path", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    await writeOpenPollFakeServer(dir, sourceProjectPath, { healthSequence: ["target"] });
+
+    const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+    // Reused (health already showed the target) - ordinary discovery
+    // tools still ran afterward exactly as before this fix.
+    expect(result.projectOpenEvidence?.reused).toBe(true);
+    expect(result.toolCalls.map((c) => c.tool)).toContain("ae_list_instances");
+  });
+
+  it("11. structural invariant: ensureTargetProjectOpen's app.open() call is never routed through callWithTransientRetry - only a single direct client.runFixedInspectionScript call", async () => {
+    const source = await readFile(new URL("./heroic-swan-template-inspector.ts", import.meta.url), "utf8");
+    const fnStart = source.indexOf("async function ensureTargetProjectOpen(");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnEnd = source.indexOf("\nfunction rawCaptureFor(", fnStart);
+    const fnBody = source.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+    // The open call itself is a bare client.runFixedInspectionScript(...)
+    // - never wrapped in callWithTransientRetry, which is the generic
+    // path that would silently re-fire app.open() on a timeout.
+    expect(fnBody).toContain("client.runFixedInspectionScript(script, timeoutMs)");
+    expect(fnBody).not.toMatch(/callWithTransientRetry\(\s*[\s\S]*?client\.runFixedInspectionScript\(script/);
   });
 });
