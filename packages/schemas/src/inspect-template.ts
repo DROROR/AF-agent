@@ -82,6 +82,28 @@ export const inspectionToolCallCaptureSchema = z.object({
 export type InspectionToolCallCapture = z.infer<typeof inspectionToolCallCaptureSchema>;
 
 /**
+ * P0 fix (2026-09-03, real production incident): proof that AE actually
+ * had the REQUESTED sourceProjectPath open - not just whatever project
+ * happened to already be open - before any manifest facts were read. A
+ * real client attempt proved AE can have an unrelated project open (e.g.
+ * "Untitled", projectPath: null); INSPECT_TEMPLATE now actively verifies
+ * this rather than assuming it. `matched` is the one field future
+ * acceptance checks should read: true only when `actualOpenedPath`
+ * (AE's own self-reported, re-queried path after the open attempt - or
+ * the path it already had open, if reused) exactly canonically equals
+ * `requestedPath`. `reused: true` means AE already had exactly the right
+ * file open and no open call was made at all.
+ */
+export const projectOpenEvidenceSchema = z.object({
+  requestedPath: z.string(),
+  actualOpenedPath: z.string().nullable(),
+  reused: z.boolean(),
+  matched: z.boolean(),
+  note: z.string().optional()
+});
+export type ProjectOpenEvidence = z.infer<typeof projectOpenEvidenceSchema>;
+
+/**
  * Fallback INSPECT_TEMPLATE result for when a real TemplateManifest could
  * not honestly be built - mirrors template-inspector.ts's own
  * RawInspectionCapture. A job whose persisted `result` has this shape must
@@ -89,7 +111,10 @@ export type InspectionToolCallCapture = z.infer<typeof inspectionToolCallCapture
  * (worker-side job-dispatcher.ts, or a dashboard client parsing a
  * SUCCEEDED... in practice a FAILED job's `result`) - see
  * inspectTemplateResultSchema below, the shared contract both sides parse
- * against.
+ * against. `projectOpenEvidence` is present only when the P0 open/verify
+ * step itself ran and is the reason this fell back to a raw capture
+ * (`matched: false`) - absent when the fallback happened for an unrelated
+ * reason (e.g. a later discovery tool failure, an invalid sourceProjectPath).
  */
 export const rawInspectionCaptureSchema = z.object({
   kind: z.literal("raw_capture"),
@@ -98,7 +123,8 @@ export const rawInspectionCaptureSchema = z.object({
   jobId: z.string().optional(),
   capturedAt: z.string(),
   toolCalls: z.array(inspectionToolCallCaptureSchema),
-  note: z.string()
+  note: z.string(),
+  projectOpenEvidence: projectOpenEvidenceSchema.optional()
 });
 export type RawInspectionCapture = z.infer<typeof rawInspectionCaptureSchema>;
 
@@ -106,11 +132,16 @@ export type RawInspectionCapture = z.infer<typeof rawInspectionCaptureSchema>;
  * A finalized, schema-validated TemplateManifest result - mirrors
  * template-inspector.ts's own ManifestInspectionResult. `response` is the
  * exact same shape inspectTemplateResponseSchema validates.
+ * `projectOpenEvidence` is always present here (`matched: true`) - a
+ * manifest is never built unless the P0 open/verify step already
+ * succeeded, so this is durable proof, persisted alongside the manifest
+ * itself, that the Worker really did inspect the intended AEP.
  */
 export const manifestInspectionResultSchema = z.object({
   kind: z.literal("manifest"),
   response: inspectTemplateResponseSchema,
-  diagnostics: z.array(inspectionToolCallCaptureSchema)
+  diagnostics: z.array(inspectionToolCallCaptureSchema),
+  projectOpenEvidence: projectOpenEvidenceSchema
 });
 export type ManifestInspectionResult = z.infer<typeof manifestInspectionResultSchema>;
 

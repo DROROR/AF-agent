@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   // docs/TEMPLATE-INSPECTOR.md. Always safe to construct even with no
   // AE_MCP_PATH configured: inspect() reports a typed unavailable capture
   // rather than crashing or fabricating a result.
-  const templateInspector = new HeroicSwanTemplateInspector({ aeMcpPath: env.aeMcpPath });
+  const templateInspector = new HeroicSwanTemplateInspector({ aeMcpPath: env.aeMcpPath, logger: workerLogger });
 
   // Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B) -
   // same "safe to construct with no AE_MCP_PATH" contract as above.

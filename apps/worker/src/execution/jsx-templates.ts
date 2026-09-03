@@ -486,6 +486,71 @@ export function buildSaveProjectScript(): FixedJsxScript {
 }
 
 /**
+ * P0 fix (2026-09-03, real production incident): opens a specific target
+ * .aep as AE's active project. INSPECT_TEMPLATE previously only ever
+ * queried whatever project happened to already be open in AE (see
+ * heroic-swan-template-inspector.ts's own doc comment on why) - a real
+ * client attempt proved this unsafe: AE had an unrelated "Untitled"
+ * project open (projectPath: null, an 87-item leftover project), and
+ * inspection would have silently queried THAT instead of the real
+ * requested template had the two real discovery calls not also timed
+ * out. This is a project-level operation (no per-layer target), so it
+ * does not use `wrapScript`'s per-layer boilerplate.
+ *
+ * Deliberately does NOT touch the PREVIOUSLY open project before
+ * switching - no `app.project.dirty = false`, no save, no close call of
+ * its own. If that previous project has unsaved changes, AE's own
+ * `app.open()` may show its native "save changes?" dialog - a real,
+ * acknowledged risk this script does not attempt to suppress (there is
+ * no ExtendScript API to do so without risking silently discarding real
+ * unsaved work, exactly what CLAUDE.md's safety rules exist to prevent).
+ * If that happens, this call simply blocks until the caller's own MCP
+ * timeout fires, is classified a transient TRANSPORT_ERROR exactly like
+ * any other stuck-modal call, retried a bounded number of times by
+ * retry-transient-mcp-call.ts, and finally fails closed with a clear
+ * reason - never silently proceeds against the wrong project, never
+ * hangs indefinitely.
+ *
+ * Never calls app.project.save() on its own. sourceProjectPath must
+ * already be a COPY of the source .aep - inspectTemplateRequestSchema's
+ * own existing contract, unchanged by this fix; this script has no way
+ * to enforce that itself, it only ever opens exactly the path it is
+ * given. The caller (heroic-swan-template-inspector.ts) independently
+ * re-reads app.project.file after this call and fails the whole
+ * inspection closed if it does not exactly match the requested path -
+ * this script's own report is evidence, never trusted blindly.
+ */
+export function buildOpenProjectScript(sourceProjectPath: string): FixedJsxScript {
+  const pathLiteral = JSON.stringify(sourceProjectPath);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_TEMPLATE: ensure target project open")});
+  var __result = null;
+  try {
+    var __targetFile = new File(${pathLiteral});
+    var __opened = app.open(__targetFile);
+    if (!__opened) {
+      __result = JSON.stringify({ ok: false, failureReason: "app.open() did not return an opened project" });
+    } else {
+      __result = JSON.stringify({
+        ok: true,
+        resultingValue: {
+          openedPath: app.project && app.project.file ? app.project.file.fsName : null,
+          openedName: app.project ? app.project.name : null
+        }
+      });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * READ-ONLY render-capability inspection (render-delivery phase section
  * 10 - INSPECT_RENDER_CAPABILITIES) - preparing for the final Windows
  * Worker package. There is no allowlisted read-only ae-mcp tool that

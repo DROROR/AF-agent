@@ -182,7 +182,19 @@ describe("inspectTemplateResponseSchema", () => {
 
   describe("inspectTemplateResultSchema - the REAL persisted job.result shape", () => {
     it("accepts a kind:'manifest' envelope wrapping a valid response - the real shape a SUCCEEDED INSPECT_TEMPLATE job persists (job 7e6db3a6)", () => {
-      const persisted = { kind: "manifest" as const, response: validResponse(), diagnostics: [] };
+      const persisted = {
+        kind: "manifest" as const,
+        response: validResponse(),
+        diagnostics: [],
+        // P0 fix (2026-09-03): a manifest result always carries proof the
+        // requested project was actually open - see projectOpenEvidenceSchema.
+        projectOpenEvidence: {
+          requestedPath: "/copies/t1.aep",
+          actualOpenedPath: "/copies/t1.aep",
+          reused: true,
+          matched: true
+        }
+      };
       const parsed = inspectTemplateResultSchema.parse(persisted);
       expect(parsed.kind).toBe("manifest");
       if (parsed.kind === "manifest") {

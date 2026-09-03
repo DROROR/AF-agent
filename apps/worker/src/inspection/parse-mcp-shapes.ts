@@ -146,6 +146,36 @@ export function parseAeVersionFromHealth(content: unknown): ParseResult<string |
   return { ok: true, value: version };
 }
 
+/** Which project AE currently has open, per ae_health's own real confirmed shape (health.projectOpen/projectName/projectPath - confirmed 2026-09-03 from a real client-machine INSPECT_TEMPLATE job's captured ae_health output, the same real job that proved AE can have an unrelated project open, e.g. an "Untitled" project with projectPath: null). Used by heroic-swan-template-inspector.ts's P0 fix to decide whether the requested sourceProjectPath must be opened before inspecting - never guessed from projectName alone, since an untitled/unsaved project has no real path at all. */
+export interface CurrentProjectInfo {
+  projectOpen: boolean;
+  projectPath: string | null;
+  projectName: string | null;
+}
+
+export function parseCurrentProjectFromHealth(content: unknown): ParseResult<CurrentProjectInfo> {
+  const parsed = parseJsonTextContent(content);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  const raw = parsed.value;
+  if (!isRecord(raw)) {
+    return { ok: false, reason: "expected an object" };
+  }
+  const health = isRecord(raw["health"]) ? raw["health"] : null;
+  if (!health) {
+    return { ok: false, reason: "no health object present" };
+  }
+  return {
+    ok: true,
+    value: {
+      projectOpen: health["projectOpen"] === true,
+      projectPath: typeof health["projectPath"] === "string" ? health["projectPath"] : null,
+      projectName: typeof health["projectName"] === "string" ? health["projectName"] : null
+    }
+  };
+}
+
 /**
  * Real confirmed shape of one entry in ae_get_composition's nested
  * `layers` array. `compSummary` always calls `layerSummary(layer, false)`

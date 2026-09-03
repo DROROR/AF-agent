@@ -207,7 +207,20 @@ describe("NewProjectWizard", () => {
               // The REAL persisted shape (job 7e6db3a6-9918-46ff-9b54-00731bb9ee0f) -
               // a kind:"manifest" envelope wrapping {manifest, summary} under
               // .response, never the bare {manifest, summary} shape alone.
-              result: { kind: "manifest", response: { manifest: manifest(), summary: inspectionSummary() }, diagnostics: [] },
+              result: {
+                kind: "manifest",
+                response: { manifest: manifest(), summary: inspectionSummary() },
+                diagnostics: [],
+                // P0 fix (2026-09-03): a manifest result always carries proof
+                // the requested project was actually open - see
+                // projectOpenEvidenceSchema.
+                projectOpenEvidence: {
+                  requestedPath: "/copies/t1.aep",
+                  actualOpenedPath: "/copies/t1.aep",
+                  reused: true,
+                  matched: true
+                }
+              },
               error: null,
               checkpoint: null,
               createdAt: new Date().toISOString(),

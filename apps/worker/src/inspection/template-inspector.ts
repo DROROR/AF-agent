@@ -33,13 +33,30 @@ export interface RawToolCallCapture {
 }
 
 /**
+ * P0 fix (2026-09-03, real production incident): proof that AE actually
+ * had the REQUESTED sourceProjectPath open before any manifest facts were
+ * read - mirrors packages/schemas/src/inspect-template.ts's own
+ * projectOpenEvidenceSchema (kept as a separate local interface, same
+ * convention as RawToolCallCapture/ManifestInspectionResult below).
+ */
+export interface ProjectOpenEvidence {
+  requestedPath: string;
+  actualOpenedPath: string | null;
+  reused: boolean;
+  matched: boolean;
+  note?: string;
+}
+
+/**
  * Fallback INSPECT_TEMPLATE result for when a real TemplateManifest
- * cannot honestly be built: any of the four discovery tool calls failed
- * or returned something that doesn't match the confirmed shape
- * (parse-mcp-shapes.ts), or the real source .aep at sourceProjectPath
- * could not be hashed (CLAUDE.md Safety Rule 8). Captures exactly what
- * the read-only tools actually returned instead of forcing it into a
- * guessed mapping - never a crash, never a fabricated manifest.
+ * cannot honestly be built: the P0 open/verify step could not confirm the
+ * requested project was actually open, any of the four discovery tool
+ * calls failed or returned something that doesn't match the confirmed
+ * shape (parse-mcp-shapes.ts), or the real source .aep at
+ * sourceProjectPath could not be hashed (CLAUDE.md Safety Rule 8).
+ * Captures exactly what the read-only tools actually returned instead of
+ * forcing it into a guessed mapping - never a crash, never a fabricated
+ * manifest.
  */
 export interface RawInspectionCapture {
   kind: "raw_capture";
@@ -49,6 +66,8 @@ export interface RawInspectionCapture {
   capturedAt: string;
   toolCalls: RawToolCallCapture[];
   note: string;
+  /** Present only when the P0 open/verify step itself ran and is the reason for this fallback - see ProjectOpenEvidence's own doc comment. */
+  projectOpenEvidence?: ProjectOpenEvidence;
 }
 
 /**
@@ -58,11 +77,15 @@ export interface RawInspectionCapture {
  * of the four top-level tool calls this was built from - never required
  * by any consumer of `response`, kept only so a human/operator can see
  * exactly what ae-mcp returned if the built manifest ever looks wrong.
+ * `projectOpenEvidence` is always present here with `matched: true` - a
+ * manifest is never built unless the P0 open/verify step already
+ * succeeded.
  */
 export interface ManifestInspectionResult {
   kind: "manifest";
   response: InspectTemplateResponse;
   diagnostics: RawToolCallCapture[];
+  projectOpenEvidence: ProjectOpenEvidence;
 }
 
 export type InspectTemplateResult = RawInspectionCapture | ManifestInspectionResult;
