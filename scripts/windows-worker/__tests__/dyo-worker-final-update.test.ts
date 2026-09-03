@@ -315,7 +315,7 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
     });
 
     it("$AeMcpHealthWindowSeconds is a named, script-level constant (not a bare inline literal) that the polling loop and every failure message actually reference", () => {
-      expect(updateScript).toMatch(/\$AeMcpHealthWindowSeconds = 90/);
+      expect(updateScript).toMatch(/\$AeMcpHealthWindowSeconds = 360/);
       const pollIdx = updateScript.indexOf("$healthOk = Wait-Until -TimeoutSeconds $AeMcpHealthWindowSeconds");
       expect(pollIdx).toBeGreaterThan(-1);
     });
@@ -412,6 +412,119 @@ describe("DYO-Worker-Final-Update.ps1 fixes the IgnoreNew restart race with real
       expect(block).toMatch(/capability\/concurrency mismatch/);
       expect(block).toMatch(/return \$false/);
       expect(block).not.toMatch(/exit 1/);
+    });
+  });
+
+  describe("hardening follow-up #2 (2026-09-03, real second incident): 90s was still too short - widened to 360s from real preserved client log evidence (worker.log.pre-recover-20260902154412, a real ~320-second MCP UNKNOWN stretch on the restored known-working build)", () => {
+    function extractHeartbeatLinePattern(): RegExp {
+      const match = /\$heartbeatLinePattern\s*=\s*'([^']+)'/.exec(updateScript);
+      expect(match?.[1], "$heartbeatLinePattern not found").toBeTruthy();
+      return new RegExp(match![1]!, "g");
+    }
+
+    function parseHeartbeatLine(line: string): { aeOnline: boolean; mcpOnline: boolean; maxConcurrency: number | null } {
+      const aeStatus = /"aeStatus":"([^"]+)"/.exec(line)?.[1] ?? null;
+      const mcpStatus = /"mcpStatus":"([^"]+)"/.exec(line)?.[1] ?? null;
+      const maxConcurrencyMatch = /"maxConcurrency":(\d+)/.exec(line);
+      return {
+        aeOnline: aeStatus === "ONLINE",
+        mcpOnline: mcpStatus === "ONLINE",
+        maxConcurrency: maxConcurrencyMatch ? Number(maxConcurrencyMatch[1]) : null
+      };
+    }
+
+    function heartbeatLineAtTime(timeMs: number, aeStatus: string, mcpStatus: string, maxConcurrency = 1): string {
+      return `{"level":30,"time":${timeMs},"msg":"heartbeat succeeded","status":"ONLINE","aeStatus":"${aeStatus}","mcpStatus":"${mcpStatus}","maxConcurrency":${maxConcurrency}}`;
+    }
+
+    /**
+     * The exact real timestamps from worker.log.pre-recover-20260902154412
+     * (commit 237eaaeafa501806c66e999798746ad2a4d8ac2b, the restored
+     * known-working build) for its longest observed MCP UNKNOWN stretch -
+     * 14 consecutive real heartbeats, AE ONLINE throughout (this build
+     * never reported MCP OFFLINE in the preserved log, only ONLINE/
+     * UNKNOWN), spanning a genuine 320241ms before the next heartbeat
+     * finally reports MCP ONLINE again. Real per-heartbeat spacing during
+     * this stretch runs ~23.3s (longer than the ~16.5s healthy cadence -
+     * the blocking MCP probe subprocess itself stretches the heartbeat
+     * cycle), which is why this fixture uses the literal real timestamps
+     * rather than a synthetic constant interval.
+     */
+    const REAL_MCP_UNKNOWN_STRETCH_TIMESTAMPS = [
+      1788371560191, 1788371583482, 1788371606780, 1788371630081, 1788371653365, 1788371676667, 1788371700015,
+      1788371723298, 1788371746608, 1788371769914, 1788371793210, 1788371816550, 1788371839843, 1788371863140
+    ];
+    const REAL_MCP_RECOVERY_TIMESTAMP = 1788371880432;
+
+    it("scenario: known-working Worker stays MCP UNKNOWN for a real ~320-second stretch (the exact 14 real heartbeats from worker.log.pre-recover-20260902154412), then ONLINE => update succeeds", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = [
+        ...REAL_MCP_UNKNOWN_STRETCH_TIMESTAMPS.map((t) => heartbeatLineAtTime(t, "ONLINE", "UNKNOWN")),
+        heartbeatLineAtTime(REAL_MCP_RECOVERY_TIMESTAMP, "ONLINE", "ONLINE")
+      ].join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.length).toBe(15);
+      // Real elapsed span of this exact fixture matches the real log's own
+      // measured duration (320241ms) - not an arbitrary round number.
+      const realSpanMs = REAL_MCP_RECOVERY_TIMESTAMP - REAL_MCP_UNKNOWN_STRETCH_TIMESTAMPS[0]!;
+      expect(realSpanMs).toBe(320241);
+      const healthy = lines.filter((l) => l.aeOnline && l.mcpOnline);
+      expect(healthy.length).toBe(1);
+      // The exact bug this fixture regression-guards: the OLD 90-second
+      // window could never have observed this recovery at all - the real
+      // UNKNOWN stretch alone already spans more than 3x that window
+      // before MCP ever reports ONLINE again.
+      expect(realSpanMs).toBeGreaterThan(90_000 * 3);
+      // The NEW 360-second window comfortably covers the real recovery.
+      expect(realSpanMs).toBeLessThan(360_000);
+    });
+
+    it("scenario: MCP UNKNOWN for the entire final bounded window with no eventual ONLINE => still no healthy heartbeat found (widening the window never fabricates a success the real log never reached)", () => {
+      const pattern = extractHeartbeatLinePattern();
+      // The same real 14-heartbeat UNKNOWN stretch, but MCP never recovers
+      // at all within it - no trailing ONLINE heartbeat appended.
+      const content = REAL_MCP_UNKNOWN_STRETCH_TIMESTAMPS.map((t) => heartbeatLineAtTime(t, "ONLINE", "UNKNOWN")).join("\n");
+      const parsed = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(parsed.length).toBe(14);
+      expect(parsed.some((l) => l.mcpOnline)).toBe(false);
+      expect(parsed.some((l) => l.aeOnline && l.mcpOnline)).toBe(false);
+    });
+
+    it("scenario: MCP OFFLINE (not merely UNKNOWN) for the whole window, AE healthy throughout => no healthy heartbeat found, real rollback-triggering condition", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = REAL_MCP_UNKNOWN_STRETCH_TIMESTAMPS.slice(0, 5)
+        .map((t) => heartbeatLineAtTime(t, "ONLINE", "OFFLINE"))
+        .join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.length).toBe(5);
+      expect(lines.every((l) => l.aeOnline)).toBe(true);
+      expect(lines.some((l) => l.mcpOnline)).toBe(false);
+      expect(lines.some((l) => l.aeOnline && l.mcpOnline)).toBe(false);
+    });
+
+    it("scenario: AE OFFLINE for the whole window, MCP healthy throughout => no healthy heartbeat found, real rollback-triggering condition", () => {
+      const pattern = extractHeartbeatLinePattern();
+      const content = REAL_MCP_UNKNOWN_STRETCH_TIMESTAMPS.slice(0, 5)
+        .map((t) => heartbeatLineAtTime(t, "OFFLINE", "ONLINE"))
+        .join("\n");
+      const lines = [...content.matchAll(pattern)].map((m) => parseHeartbeatLine(m[0]));
+      expect(lines.length).toBe(5);
+      expect(lines.every((l) => l.mcpOnline)).toBe(true);
+      expect(lines.some((l) => l.aeOnline)).toBe(false);
+      expect(lines.some((l) => l.aeOnline && l.mcpOnline)).toBe(false);
+    });
+
+    it("360 seconds clears the real proven ~320-second maximum with real margin, without being an arbitrary/unjustified value", () => {
+      const windowMatch = /\$AeMcpHealthWindowSeconds = (\d+)/.exec(updateScript);
+      expect(windowMatch?.[1]).toBeTruthy();
+      const windowSeconds = Number(windowMatch![1]);
+      const realObservedMaxSeconds = 320.2;
+      expect(windowSeconds).toBeGreaterThan(realObservedMaxSeconds);
+      // Real margin is deliberate and modest (roughly 10-15%), not padded
+      // arbitrarily far past the evidence.
+      const marginSeconds = windowSeconds - realObservedMaxSeconds;
+      expect(marginSeconds).toBeGreaterThan(20);
+      expect(marginSeconds).toBeLessThan(80);
     });
   });
 

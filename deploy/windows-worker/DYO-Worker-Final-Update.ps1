@@ -663,9 +663,35 @@ $script:DiagnosticsDir = $null
 # Bounded window this gate polls for a fresh heartbeat reporting BOTH AE
 # ONLINE and MCP ONLINE at once (see the real-incident doc comment further
 # below, at the polling loop itself, for why this is a window rather than
-# a single snapshot). Comfortably covers many real heartbeat cycles with
-# margin for the MCP health probe's own 8-second subprocess timeout.
-$AeMcpHealthWindowSeconds = 90
+# a single snapshot).
+#
+# REAL INCIDENT #2 (2026-09-03): a SECOND real client-machine update
+# (build 75cd9599, already running the 90-second bounded-window fix below)
+# still rolled back with "MCP never became ONLINE within 90 seconds",
+# proving 90 seconds was itself still too short - not just the original
+# single-snapshot bug. Proven from the client's own preserved pre-recover
+# worker.log (worker.log.pre-recover-20260902154412, the restored/known-
+# working build 237eaaeafa501806c66e999798746ad2a4d8ac2b's real ~16-hour
+# session immediately after that rollback): this exact worker/machine/AE/
+# ae-mcp combination genuinely produces recurring mcpStatus:"UNKNOWN"
+# stretches during confirmed-healthy, uninterrupted operation - never
+# resolving to OFFLINE, always eventually returning to ONLINE on their
+# own - with a real observed maximum of ~320 seconds (several separate
+# stretches independently measured at 86-320 seconds from that same log).
+# `git diff` between 237eaaea...and 75cd9599 touches zero files under
+# apps/worker/src/health/ - the MCP probe itself (heroic-swan-mcp-
+# adapter.ts's per-heartbeat `node <ae-mcp>/dist/index.js health` spawn,
+# 8-second subprocess timeout, no caching) is byte-identical between the
+# restored build and the build that failed the second time, so build
+# 75cd9599 almost certainly hit this exact same real, recurring pattern.
+# 360 seconds (6 minutes) clears the proven ~320-second maximum with a
+# real margin (~40 seconds / ~12%) - still requires AE ONLINE and MCP
+# ONLINE on the SAME real heartbeat, still requires at least two real
+# heartbeats, and a machine that genuinely never gets there within this
+# window still fails and rolls back exactly as before - this only widens
+# how long the gate is willing to wait, per proven real evidence of how
+# long this specific real recovery pattern actually takes, never a guess.
+$AeMcpHealthWindowSeconds = 360
 
 function Invoke-WorkerUpdateAndVerify {
   # ---- Step 3: replace only the program files - .env is never touched ----
@@ -802,6 +828,13 @@ function Invoke-WorkerUpdateAndVerify {
   # never gets there within the window still fails and rolls back exactly
   # as before. It only stops a transient, early UNKNOWN from being treated
   # as the final word.
+  #
+  # WIDENED (2026-09-03, REAL INCIDENT #2): 90 seconds was still too short
+  # for real recurring MCP UNKNOWN stretches proven up to ~320 seconds long
+  # on this real machine - see $AeMcpHealthWindowSeconds's own doc comment
+  # above for the full evidence trail (real preserved client log, git-diff
+  # proof the MCP probe itself is unchanged between the failed and restored
+  # builds). Same non-weakening guarantee as above, just a longer window.
   Write-Host "Waiting for a fresh heartbeat reporting AE ONLINE and MCP ONLINE (up to $AeMcpHealthWindowSeconds seconds -"
   Write-Host "an early UNKNOWN right after restart is expected and is not itself a failure)..."
   $heartbeatLinePattern = '\{[^{}]*"msg":"heartbeat succeeded"[^{}]*\}'
