@@ -1,11 +1,14 @@
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import type { SceneEditOperation } from "@dyo/schemas";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   buildOperationScript,
   buildSaveProjectScript,
   buildInspectRenderCapabilitiesScript,
-  buildInspectCompositionPrecompsScript
+  buildInspectCompositionPrecompsScript,
+  buildOpenProjectScript
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -423,5 +426,186 @@ describe("BUILD_REELS_COMPOSITION (native Reels, 2026-08-29 closure requirement)
 
   it("is deterministic - the same operation always produces byte-identical JSX", () => {
     expect(buildOperationScript(5, "Scene 01", op())).toBe(buildOperationScript(5, "Scene 01", op()));
+  });
+});
+
+/**
+ * Modal-safe target-project open (2026-09-03, real production incident): a
+ * real client attempt showed AE presenting a native "19 files are missing
+ * since you last saved this project" modal while opening the target
+ * project - this leaves AE technically ONLINE (the MCP bridge process is
+ * alive) while blocking all further scripting/MCP calls, surfacing as
+ * repeated -32001 timeouts. `buildOpenProjectScript` now scopes
+ * `app.beginSuppressDialogs()`/`app.endSuppressDialogs(false)` tightly
+ * around ONLY the `app.open()` call itself.
+ *
+ * Runs the REAL built script (via runFixedScriptWithoutNativeJson, the
+ * same harness every other script in this file uses) against a fake
+ * `app`/`File` object model that records every AE API call in order, so
+ * these tests prove real *behavior* (call ordering, suppression always
+ * released, no save ever attempted) rather than only asserting on the
+ * script's source text.
+ */
+describe("buildOpenProjectScript (modal-safe target project open, 2026-09-03)", () => {
+  const REQUESTED_PATH = "C:\\DYO-Agent\\copy\\White App Promo.aep";
+
+  /**
+   * Fake ExtendScript-like `app`/`File` object model, constructed as
+   * source text (see runFixedScriptWithoutNativeJson's own doc comment on
+   * why) so it runs natively inside the same vm realm as the script under
+   * test. Every `app.*` call the script under test can make is recorded,
+   * in order, into `__calls` - the one thing these tests assert on to
+   * prove real suppression/open/save behavior, not just the script's own
+   * source text. `openBehavior` "success" opens `openedPath` (defaults to
+   * REQUESTED_PATH - the honest, no-mismatch case); "returns-false"
+   * simulates `app.open()` returning without opening anything; "throws"
+   * simulates `app.open()` itself throwing (e.g. a genuinely unexpected
+   * AE-side error, distinct from a suppressed dialog).
+   */
+  function buildFakeAppSetup(
+    options: { openBehavior?: "success" | "returns-false" | "throws"; openedPath?: string } = {}
+  ): string {
+    const openBehavior = options.openBehavior ?? "success";
+    const openedPath = options.openedPath ?? REQUESTED_PATH;
+    return `
+      function File(path) { this.fsName = path; }
+      var __calls = [];
+      var app = {
+        beginUndoGroup: function () { __calls.push("beginUndoGroup"); },
+        endUndoGroup: function () { __calls.push("endUndoGroup"); },
+        beginSuppressDialogs: function () { __calls.push("beginSuppressDialogs"); },
+        endSuppressDialogs: function (alert) { __calls.push("endSuppressDialogs:" + alert); },
+        project: null,
+        open: function (file) {
+          __calls.push("open:" + file.fsName);
+          ${
+            openBehavior === "throws"
+              ? `throw new Error("simulated AE-side open failure");`
+              : openBehavior === "returns-false"
+                ? `return false;`
+                : `
+          app.project = {
+            file: { fsName: ${JSON.stringify(openedPath)} },
+            name: "fixture",
+            save: function () { __calls.push("SAVE_CALLED"); }
+          };
+          return true;`
+          }
+        }
+      };
+    `;
+  }
+
+  /** Runs the script and returns both its own JSON result AND the ordered call log - see buildFakeAppSetup's own doc comment. */
+  function runOpenScript(setup: string): { result: { ok: boolean; failureReason?: string; resultingValue?: { openedPath: string | null; openedName: string | null } }; calls: string[] } {
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(setup, context);
+    const raw = vm.runInContext(`(new Function("args", ${JSON.stringify(buildOpenProjectScript(REQUESTED_PATH))}))()`, context) as string;
+    const calls = vm.runInContext("__calls", context) as string[];
+    return { result: JSON.parse(raw), calls };
+  }
+
+  it("suppresses dialogs (including an expected missing-footage warning) tightly around ONLY app.open() - no manual client interaction is required or possible", () => {
+    const { result, calls } = runOpenScript(buildFakeAppSetup());
+    expect(result.ok).toBe(true);
+    expect(result.resultingValue?.openedPath).toBe(REQUESTED_PATH);
+    // Dialog suppression is active for the entire, and only the, duration
+    // of the open call - begun immediately before it, ended immediately
+    // after - so ANY dialog AE would show while opening (a missing-footage
+    // warning included) is suppressed by construction; there is no window
+    // where a dialog could appear and block, and nothing left for a human
+    // to click through.
+    expect(calls).toEqual(["beginUndoGroup", "beginSuppressDialogs", `open:${REQUESTED_PATH}`, "endSuppressDialogs:false", "endUndoGroup"]);
+  });
+
+  it("dialog suppression always ends after a successful open", () => {
+    const { calls } = runOpenScript(buildFakeAppSetup());
+    expect(calls.filter((c) => c.indexOf("endSuppressDialogs") === 0)).toEqual(["endSuppressDialogs:false"]);
+    // Suppression is released immediately, before endUndoGroup/return -
+    // never left engaged for the rest of the script or beyond it.
+    expect(calls.indexOf("endSuppressDialogs:false")).toBeLessThan(calls.indexOf("endUndoGroup"));
+  });
+
+  it("dialog suppression always ends even when app.open() itself throws", () => {
+    const { result, calls } = runOpenScript(buildFakeAppSetup({ openBehavior: "throws" }));
+    // The real deterministic failure is never hidden by suppression - it
+    // is still reported exactly like any other unexpected error.
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toMatch(/simulated AE-side open failure/);
+    // The inner try/finally around app.open() still ran its finally
+    // clause even though app.open() threw - suppression is never left
+    // engaged after an exception.
+    expect(calls).toContain("endSuppressDialogs:false");
+    expect(calls.indexOf("beginSuppressDialogs")).toBeLessThan(calls.indexOf("endSuppressDialogs:false"));
+    expect(calls).toContain("endUndoGroup");
+  });
+
+  it("reports app.open() returning false as a clear, typed failure - and never touches save", () => {
+    const { result, calls } = runOpenScript(buildFakeAppSetup({ openBehavior: "returns-false" }));
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toMatch(/did not return an opened project/);
+    expect(calls).toContain("endSuppressDialogs:false");
+    expect(calls).not.toContain("SAVE_CALLED");
+  });
+
+  it("no save operation is ever executed, on either a successful or a failed open", () => {
+    const success = runOpenScript(buildFakeAppSetup());
+    expect(success.calls).not.toContain("SAVE_CALLED");
+    const failure = runOpenScript(buildFakeAppSetup({ openBehavior: "returns-false" }));
+    expect(failure.calls).not.toContain("SAVE_CALLED");
+    // Static confirmation too - the script text itself never references save.
+    const script = buildOpenProjectScript(REQUESTED_PATH);
+    expect(script).not.toContain(".save(");
+  });
+
+  it("when AE actually opens a different project than requested, the script still honestly reports the REAL opened path - never the requested path blindly (the caller, heroic-swan-template-inspector.ts, is the layer that fails this closed - see its own P0 regression tests)", () => {
+    const { result } = runOpenScript(buildFakeAppSetup({ openedPath: "C:\\DYO-Agent\\some-other-project.aep" }));
+    expect(result.ok).toBe(true);
+    expect(result.resultingValue?.openedPath).toBe("C:\\DYO-Agent\\some-other-project.aep");
+    expect(result.resultingValue?.openedPath).not.toBe(REQUESTED_PATH);
+  });
+
+  it("scopes dialog suppression in its OWN try/finally, nested inside (and narrower than) the script's outer beginUndoGroup/try/finally", () => {
+    const script = buildOpenProjectScript(REQUESTED_PATH);
+    expect(script).toContain("app.beginSuppressDialogs();");
+    expect(script).toContain("app.endSuppressDialogs(false);");
+    // Never suppressed with the "show a summary alert afterward" flag -
+    // that would just reintroduce a blocking modal.
+    expect(script).not.toContain("app.endSuppressDialogs(true)");
+    const beginIndex = script.indexOf("app.beginSuppressDialogs();");
+    const openIndex = script.indexOf("__opened = app.open(");
+    const innerFinallyIndex = script.indexOf("app.endSuppressDialogs(false);");
+    expect(beginIndex).toBeLessThan(openIndex);
+    expect(openIndex).toBeLessThan(innerFinallyIndex);
+    // Suppression's own try/finally is nested strictly inside the outer
+    // beginUndoGroup try block - never engaged before beginUndoGroup, and
+    // the outer finally (endUndoGroup) always runs after it too.
+    const outerTryIndex = script.indexOf("try {");
+    const outerFinallyIndex = script.lastIndexOf("} finally {");
+    expect(outerTryIndex).toBeLessThan(beginIndex);
+    expect(innerFinallyIndex).toBeLessThan(outerFinallyIndex);
+  });
+
+  it("is a bare function BODY wrapped in beginUndoGroup/try/finally/endUndoGroup like every other script, and is deterministic", () => {
+    const script = buildOpenProjectScript(REQUESTED_PATH);
+    expect(script).not.toMatch(/^\s*\(function\s*\(/);
+    expect(script.trim().endsWith("return __result;")).toBe(true);
+    expect(script).toContain("app.beginUndoGroup(");
+    expect(script).toContain("app.endUndoGroup();");
+    expect(buildOpenProjectScript(REQUESTED_PATH)).toBe(buildOpenProjectScript(REQUESTED_PATH));
+  });
+});
+
+describe("no other allowlisted script can leave AE blocked by an unsuppressed dialog (2026-09-03 modal-safety invariant)", () => {
+  it("app.open() is called from exactly one reviewed place in this file - buildOpenProjectScript's own suppressed call - never from any other script builder", () => {
+    const sourceUrl = new URL("../jsx-templates.ts", import.meta.url);
+    const source = readFileSync(fileURLToPath(sourceUrl), "utf8");
+    // Matches only a REAL call with an argument (app.open(<something>)) -
+    // deliberately excludes the zero-arg `app.open()` form, which only
+    // ever appears in doc-comment prose and in this script's own
+    // failureReason string, never as an actual call.
+    const matches = source.match(/\bapp\.open\([^)]/g) ?? [];
+    expect(matches).toHaveLength(1);
   });
 });

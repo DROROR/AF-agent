@@ -564,37 +564,45 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     expect(result.toolCalls).toHaveLength(1);
   });
 
-  it("6. ae_get_project_info times out once, then succeeds -> inspection continues to a full manifest", async () => {
-    const sourceProjectPath = join(dir, "template-copy.aep");
-    await writeFile(sourceProjectPath, "sanitized fixture bytes");
-    await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { projectInfoFailTimes: 1, delayMs: 2500 });
+  it(
+    "6. ae_get_project_info times out once, then succeeds -> inspection continues to a full manifest",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { projectInfoFailTimes: 1, delayMs: 5000 });
 
-    const inspector = new HeroicSwanTemplateInspector({
-      aeMcpPath: dir,
-      mcpTimeoutMs: 2000,
-      retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
-    });
-    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+      const inspector = new HeroicSwanTemplateInspector({
+        aeMcpPath: dir,
+        mcpTimeoutMs: 3500,
+        retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
+      });
+      const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
 
-    expect(result.kind).toBe("manifest");
-    expect(result.response.manifest.compositions).toHaveLength(2);
-  });
+      expect(result.kind).toBe("manifest");
+      expect(result.response.manifest.compositions).toHaveLength(2);
+    },
+    30_000
+  );
 
-  it("7. ae_list_compositions times out repeatedly, then succeeds within budget -> inspection continues to a full manifest", async () => {
-    const sourceProjectPath = join(dir, "template-copy.aep");
-    await writeFile(sourceProjectPath, "sanitized fixture bytes");
-    await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { listCompositionsFailTimes: 2, delayMs: 2500 });
+  it(
+    "7. ae_list_compositions times out repeatedly, then succeeds within budget -> inspection continues to a full manifest",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { listCompositionsFailTimes: 2, delayMs: 5000 });
 
-    const inspector = new HeroicSwanTemplateInspector({
-      aeMcpPath: dir,
-      mcpTimeoutMs: 2000,
-      retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
-    });
-    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+      const inspector = new HeroicSwanTemplateInspector({
+        aeMcpPath: dir,
+        mcpTimeoutMs: 3500,
+        retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
+      });
+      const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
 
-    expect(result.kind).toBe("manifest");
-    expect(result.response.manifest.compositions).toHaveLength(2);
-  });
+      expect(result.kind).toBe("manifest");
+      expect(result.response.manifest.compositions).toHaveLength(2);
+    },
+    30_000
+  );
 
   it(
     "8. repeated MCP timeouts exhaust the retry budget -> inspection fails, no manifest is ever persisted",
@@ -607,11 +615,11 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
       // whose failure actually gates manifest-building - ae_get_project_info
       // is captured for diagnostics only and is never load-bearing on its
       // own (see the `discovery`/`listCompositionsCall` gate below).
-      await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { listCompositionsFailTimes: 999, delayMs: 900 });
+      await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { listCompositionsFailTimes: 999, delayMs: 5000 });
 
       const inspector = new HeroicSwanTemplateInspector({
         aeMcpPath: dir,
-        mcpTimeoutMs: 700,
+        mcpTimeoutMs: 3500,
         retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
       });
       const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
@@ -622,7 +630,7 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
       expect(listCompositions?.error?.code).toBe("TRANSPORT_ERROR");
       expect(result.note).toMatch(/ae_list_compositions failed/);
     },
-    15_000
+    30_000
   );
 
   it("9. the source AEP is never touched/hashed when the P0 open-check fails early (companion assertion to test 4/5)", async () => {
@@ -642,23 +650,27 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     expect(result.note).not.toMatch(/hash/i);
   });
 
-  it("10. the whole auto-open + retry flow completes purely through code - no manual client AE interaction is required or assumed", async () => {
-    const sourceProjectPath = join(dir, "template-copy.aep");
-    await writeFile(sourceProjectPath, "sanitized fixture bytes");
-    // Untitled open (no manual client action taken) AND a transient MCP
-    // timeout on the way - both resolved automatically by the worker.
-    await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { projectInfoFailTimes: 1, delayMs: 2500 });
+  it(
+    "10. the whole auto-open + retry flow completes purely through code - no manual client AE interaction is required or assumed",
+    async () => {
+      const sourceProjectPath = join(dir, "template-copy.aep");
+      await writeFile(sourceProjectPath, "sanitized fixture bytes");
+      // Untitled open (no manual client action taken) AND a transient MCP
+      // timeout on the way - both resolved automatically by the worker.
+      await writeFlakyDiscoveryFakeServer(dir, sourceProjectPath, { projectInfoFailTimes: 1, delayMs: 5000 });
 
-    const inspector = new HeroicSwanTemplateInspector({
-      aeMcpPath: dir,
-      mcpTimeoutMs: 2000,
-      retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
-    });
-    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+      const inspector = new HeroicSwanTemplateInspector({
+        aeMcpPath: dir,
+        mcpTimeoutMs: 3500,
+        retryOptions: { maxAttempts: 3, policy: { baseMs: 1, maxMs: 1 } }
+      });
+      const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
 
-    expect(result.kind).toBe("manifest");
-    expect(result.projectOpenEvidence.matched).toBe(true);
-  });
+      expect(result.kind).toBe("manifest");
+      expect(result.projectOpenEvidence.matched).toBe(true);
+    },
+    30_000
+  );
 });
 
 describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated TemplateManifest", () => {

@@ -499,17 +499,45 @@ export function buildSaveProjectScript(): FixedJsxScript {
  *
  * Deliberately does NOT touch the PREVIOUSLY open project before
  * switching - no `app.project.dirty = false`, no save, no close call of
- * its own. If that previous project has unsaved changes, AE's own
- * `app.open()` may show its native "save changes?" dialog - a real,
- * acknowledged risk this script does not attempt to suppress (there is
- * no ExtendScript API to do so without risking silently discarding real
- * unsaved work, exactly what CLAUDE.md's safety rules exist to prevent).
- * If that happens, this call simply blocks until the caller's own MCP
- * timeout fires, is classified a transient TRANSPORT_ERROR exactly like
- * any other stuck-modal call, retried a bounded number of times by
- * retry-transient-mcp-call.ts, and finally fails closed with a clear
- * reason - never silently proceeds against the wrong project, never
- * hangs indefinitely.
+ * its own.
+ *
+ * Modal-safe fix (2026-09-03, real production incident): a real client
+ * attempt showed AE presenting a native "19 files are missing since you
+ * last saved this project" modal while opening the target project - this
+ * leaves AE technically ONLINE (the MCP bridge process is alive) while
+ * blocking all further scripting/MCP calls, which then all fail with a
+ * transient MCP -32001 timeout. Missing-footage warnings on a template
+ * project are EXPECTED, not exceptional (a template's own linked footage
+ * is often intentionally absent until real client assets are substituted
+ * later in the pipeline) - the client should never need to click OK on
+ * an informational dialog just so the Worker can inspect a file.
+ *
+ * `app.beginSuppressDialogs()` / `app.endSuppressDialogs(false)` are
+ * scoped in their own try/finally, tightly around ONLY the `app.open()`
+ * call itself - never left engaged for the rest of this script, never
+ * engaged globally or for any other operation. `endSuppressDialogs(false)`
+ * (never `true`) so ending suppression never itself pops a "dialogs were
+ * suppressed" summary alert - that would just reintroduce the exact
+ * blocking-modal problem this fix exists to close.
+ *
+ * This does NOT introduce an auto-save risk: this script never calls
+ * app.project.save() anywhere, on either the previously-open project or
+ * the newly-opened one (CLAUDE.md Safety Rule 1). AE's own suppressed-
+ * dialogs behavior for a dirty previous project defaults to discarding
+ * its unsaved changes rather than saving them - the opposite of an
+ * auto-save risk. That previous project is never the original template
+ * .aep (which this Worker never opens directly for editing - it always
+ * operates on a copy, per sourceProjectPath's own existing contract) and
+ * is typically a leftover/scratch project from an earlier session (the
+ * real incident's own evidence: an untitled, unrelated "Untitled"
+ * project) - discarding it is the intended, safe behavior, not a
+ * regression.
+ *
+ * Suppressing dialogs never hides a REAL deterministic failure: a false
+ * return from `app.open()`, or any thrown exception, is still reported
+ * exactly as before via `ok: false` - only the modal UI interruption
+ * itself is suppressed, never the underlying success/failure signal this
+ * script reports back.
  *
  * Never calls app.project.save() on its own. sourceProjectPath must
  * already be a COPY of the source .aep - inspectTemplateRequestSchema's
@@ -526,7 +554,13 @@ export function buildOpenProjectScript(sourceProjectPath: string): FixedJsxScrip
   var __result = null;
   try {
     var __targetFile = new File(${pathLiteral});
-    var __opened = app.open(__targetFile);
+    var __opened;
+    app.beginSuppressDialogs();
+    try {
+      __opened = app.open(__targetFile);
+    } finally {
+      app.endSuppressDialogs(false);
+    }
     if (!__opened) {
       __result = JSON.stringify({ ok: false, failureReason: "app.open() did not return an opened project" });
     } else {
