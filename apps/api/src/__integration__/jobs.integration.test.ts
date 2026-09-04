@@ -1291,3 +1291,93 @@ describe("RENDER report -> render_artifacts persistence (full real HTTP cycle)",
     expect(await harness.renderArtifactRepository.listByProject(projectId)).toEqual([]);
   });
 });
+
+/**
+ * P3/P4/P5 stuck-job root-cause investigation (2026-09-04): job c19a2fb9
+ * stayed RUNNING after the client installed build bf680f0, and the
+ * production API log showed zero requests to this route - ever. This
+ * proves the DEPLOYED route itself (real Fastify registration, real
+ * DrizzleJobRepository/DrizzlePg-compatible DB, not InMemoryJobRepository)
+ * behaves exactly as apps/worker's own reconcileAbandonedJobs expects -
+ * see apps/worker/src/runtime/reconcile-abandoned-jobs.wire.test.ts for
+ * the matching worker-side proof against a real HTTP server.
+ */
+describe("GET /api/workers/:workerId/jobs/active", () => {
+  it("rejects a missing worker token", async () => {
+    const { workerId } = await registerAndHeartbeatWorker(harness.app);
+    const response = await harness.app.inject({ method: "GET", url: `/api/workers/${workerId}/jobs/active` });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("returns an empty list when nothing is active", async () => {
+    const { workerId, workerToken } = await registerAndHeartbeatWorker(harness.app);
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/workers/${workerId}/jobs/active`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ jobs: [] });
+  });
+
+  it("returns a job left RUNNING by a worker process that never reported its own outcome - the real 2026-09-04 incident shape", async () => {
+    const { workerId, workerToken } = await registerAndHeartbeatWorker(harness.app, 1);
+    await harness.jobRepository.create({ id: randomUUID(), workerId, operation: "INSPECT_TEMPLATE", payload: {} }, new Date());
+    const claimResponse = await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    const jobId = claimResponse.json().job.jobId as string;
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "RUNNING" }
+    });
+
+    const response = await harness.app.inject({
+      method: "GET",
+      url: `/api/workers/${workerId}/jobs/active`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { jobs: Array<{ jobId: string; status: string }> };
+    expect(body.jobs).toHaveLength(1);
+    expect(body.jobs[0]?.jobId).toBe(jobId);
+    expect(body.jobs[0]?.status).toBe("RUNNING");
+  });
+
+  it("the job found via this route can be reconciled through the EXISTING /report endpoint - no new mutation path was added", async () => {
+    const { workerId, workerToken } = await registerAndHeartbeatWorker(harness.app, 1);
+    await harness.jobRepository.create({ id: randomUUID(), workerId, operation: "INSPECT_TEMPLATE", payload: {} }, new Date());
+    const claimResponse = await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/claim`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    const jobId = claimResponse.json().job.jobId as string;
+    await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "RUNNING" }
+    });
+
+    const reportResponse = await harness.app.inject({
+      method: "POST",
+      url: `/api/workers/${workerId}/jobs/${jobId}/report`,
+      headers: { authorization: `Bearer ${workerToken}` },
+      payload: { status: "FAILED", error: { code: "ABANDONED_RECONCILED", message: "reconciled by a fresh worker process" } }
+    });
+    expect(reportResponse.statusCode).toBe(200);
+
+    const activeAfter = await harness.app.inject({
+      method: "GET",
+      url: `/api/workers/${workerId}/jobs/active`,
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    expect(activeAfter.json()).toEqual({ jobs: [] });
+  });
+});
