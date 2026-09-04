@@ -136,7 +136,7 @@ describe("DYO-Worker-Final-Update.ps1 never registers a new worker identity", ()
   });
 });
 
-describe("DYO-Worker-Final-Update.ps1 never modifies .env, never touches ae-mcp/AE/aerender at all", () => {
+describe("DYO-Worker-Final-Update.ps1 never modifies .env, never SPAWNS/INVOKES ae-mcp/AE/aerender itself (it now safely STOPS an existing leftover ae-mcp process - see the dedicated describe block below)", () => {
   it("never writes to, rewrites, or deletes the .env file - only checks it exists", () => {
     expect(updateScript).not.toMatch(/Set-Content[^\n]*\$envPath/);
     expect(updateScript).not.toMatch(/Remove-Item[^\n]*\$envPath/);
@@ -168,6 +168,135 @@ describe("DYO-Worker-Final-Update.ps1 never modifies .env, never touches ae-mcp/
 
   it("never opens, reads, or references any After Effects project path", () => {
     expect(updateCodeBody).not.toMatch(/\.aep\b/i);
+  });
+});
+
+/**
+ * ONE-CLICK stuck-job recovery, final release rule (2026-09-04): this is
+ * the LAST client package - no further client-side setup step is ever
+ * introduced again - so the ae-mcp-ownership cleanup previously only in
+ * the separate DYO-Worker-Recover.ps1 is now folded directly into this
+ * updater, identical matching logic, so a single DYO-Worker-Final-Update.bat
+ * run alone is sufficient (no old extracted folder, no Recover.bat first).
+ * See scripts/windows-worker/__tests__/dyo-worker-recover.test.ts for the
+ * original, still-separately-maintained proof this same logic is correct
+ * in Recover.ps1 too.
+ */
+describe("DYO-Worker-Final-Update.ps1 terminates only this computer's own leftover ae-mcp process before touching any program files (2026-09-04 one-click release)", () => {
+  it("reads AE_MCP_PATH from this computer's own .env, never hardcodes or guesses a path", () => {
+    expect(updateScript).toMatch(/function Get-DyoConfiguredAeMcpPath/);
+    const idx = updateScript.indexOf("function Get-DyoConfiguredAeMcpPath");
+    const block = updateScript.slice(idx, idx + 700);
+    expect(block).toMatch(/AE_MCP_PATH/);
+    expect(block).toMatch(/Join-Path \$InstallDir "\.env"/);
+  });
+
+  it("matches an ae-mcp process only by BOTH its exact configured dist\\index.js path AND the serve subcommand - never the worker's own entrypoint pattern", () => {
+    expect(updateScript).toMatch(/function Test-IsDyoAeMcpCommandLine/);
+    const idx = updateScript.indexOf("function Test-IsDyoAeMcpCommandLine");
+    const block = updateScript.slice(idx, idx + 600);
+    expect(block).toMatch(/\[regex\]::Escape/);
+    expect(block).toMatch(/dist\\index\.js/);
+    expect(block).toMatch(/serve/);
+    expect(block).not.toMatch(/WorkerEntrypointPattern/);
+    expect(block).not.toMatch(/WorkerEnvArgPattern/);
+  });
+
+  it("the ae-mcp cleanup check runs AFTER the Worker is confirmed stopped and BEFORE the pre-update backup/any program-file change - proven by source order, not just presence", () => {
+    const workerStoppedIdx = updateScript.indexOf('"DYO Worker fully stopped (verified no matching worker process is still running)"');
+    const aeMcpCheckIdx = updateScript.indexOf("Checking for a leftover ae-mcp process");
+    const backupIdx = updateScript.indexOf("Step 2b: back up the currently-installed program files");
+    expect(workerStoppedIdx).toBeGreaterThan(-1);
+    expect(aeMcpCheckIdx).toBeGreaterThan(-1);
+    expect(backupIdx).toBeGreaterThan(-1);
+    expect(aeMcpCheckIdx).toBeGreaterThan(workerStoppedIdx);
+    expect(backupIdx).toBeGreaterThan(aeMcpCheckIdx);
+  });
+
+  it("only ever targets ae-mcp processes discovered via Get-DyoAeMcpProcesses (PID-scoped Stop-Process), never a blanket taskkill or Stop-Process by name", () => {
+    const idx = updateScript.indexOf("Checking for a leftover ae-mcp process");
+    const backupIdx = updateScript.indexOf("Step 2b: back up the currently-installed program files");
+    const block = updateScript.slice(idx, backupIdx);
+    expect(block).toMatch(/Stop-Process -Id \$_\.ProcessId -Force/);
+    expect(block).not.toMatch(/taskkill/i);
+    expect(block).not.toMatch(/Stop-Process -Name/);
+  });
+
+  it("never references AfterFX, aerender, or a .aep path anywhere in the ae-mcp cleanup block", () => {
+    const idx = updateScript.indexOf("Checking for a leftover ae-mcp process");
+    const backupIdx = updateScript.indexOf("Step 2b: back up the currently-installed program files");
+    const block = updateScript.slice(idx, backupIdx);
+    expect(block).not.toMatch(/AfterFX/i);
+    expect(block).not.toMatch(/aerender/i);
+    expect(block).not.toMatch(/\.aep\b/i);
+    expect(block).not.toMatch(/\.save\(/);
+  });
+
+  it("if a leftover ae-mcp process cannot be confirmed stopped, the update exits nonzero WITHOUT taking the pre-update backup or copying any new files - the new Worker is never installed or started", () => {
+    const idx = updateScript.indexOf("Could not confirm ae-mcp process(es)");
+    expect(idx).toBeGreaterThan(-1);
+    const backupIdx = updateScript.indexOf("Step 2b: back up the currently-installed program files");
+    expect(idx).toBeLessThan(backupIdx); // the failure path is strictly before any file is ever touched
+    const block = updateScript.slice(idx, idx + 900);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("the cleanup-failure exit path deliberately leaves the maintenance flag SET (never cleared) - the supervisor cannot auto-respawn a Worker into a still-uncertain AE state either, only a human clearing it after investigating starts anything again", () => {
+    const idx = updateScript.indexOf("Could not confirm ae-mcp process(es)");
+    const block = updateScript.slice(idx, idx + 500);
+    expect(block).not.toMatch(/Remove-Item -Path \$MaintenanceFlagPath/);
+  });
+
+  it("proceeds normally (no exit) when no AE_MCP_PATH is configured or no leftover process is found - the normal, unaffected case on every ordinary update", () => {
+    expect(updateScript).toMatch(/No AE_MCP_PATH configured in \.env - nothing to check/);
+    expect(updateScript).toMatch(/No leftover ae-mcp process found/);
+  });
+
+  it("this whole block never touches worker-credentials.json or writes to .env, same guarantee as the rest of the script", () => {
+    const idx = updateScript.indexOf("Checking for a leftover ae-mcp process");
+    const backupIdx = updateScript.indexOf("Step 2b: back up the currently-installed program files");
+    const block = updateScript.slice(idx, backupIdx);
+    expect(block).not.toMatch(/worker-credentials/);
+    expect(block).not.toMatch(/Set-Content[^\n]*\.env/);
+  });
+
+  it("P5: unrelated node/ae-mcp processes are never targeted - the matcher requires the exact configured AE_MCP_PATH substring, so a DIFFERENT ae-mcp install path (e.g. another product's own dist/index.js serve) cannot match", () => {
+    // Mirrors the real matcher logic: [regex]::Escape(Join-Path $AeMcpPath "dist\index.js") + "serve".
+    function isDyoAeMcpCommandLine(commandLine: string, configuredAeMcpPath: string): boolean {
+      const escaped = configuredAeMcpPath.replace(/\\/g, "\\\\").replace(/[.*+?^${}()|[\]]/g, "\\$&");
+      const pathPattern = new RegExp(`${escaped}\\\\dist\\\\index\\.js`);
+      return pathPattern.test(commandLine) && /\bserve\b/.test(commandLine);
+    }
+    const configured = "C:\\DYO-Agent\\ae-mcp";
+    expect(isDyoAeMcpCommandLine('node "C:\\DYO-Agent\\ae-mcp\\dist\\index.js" serve', configured)).toBe(true);
+    // A different install's own ae-mcp (or anything else entirely) at a different path must never match.
+    expect(isDyoAeMcpCommandLine('node "C:\\SomeOtherApp\\ae-mcp\\dist\\index.js" serve', configured)).toBe(false);
+    expect(isDyoAeMcpCommandLine('node "C:\\DYO-Agent\\app\\dist\\index.js" --env-file=.env', configured)).toBe(false);
+    expect(isDyoAeMcpCommandLine('notepad.exe C:\\Users\\client\\Desktop\\notes.txt', configured)).toBe(false);
+  });
+
+  it("one-click updater succeeds end-to-end: the full step order is stop -> confirm ae-mcp gone -> backup -> install new files -> restart -> verify health/commit, with no step skippable", () => {
+    const stopIdx = updateScript.indexOf('"DYO Worker fully stopped (verified no matching worker process is still running)"');
+    const aeMcpIdx = updateScript.indexOf("Checking for a leftover ae-mcp process");
+    const backupIdx = updateScript.indexOf("Step 2b: back up the currently-installed program files");
+    const updateAndVerifyDefIdx = updateScript.indexOf("function Invoke-WorkerUpdateAndVerify");
+    const updateAndVerifyCallIdx = updateScript.indexOf("$updateOk = Invoke-WorkerUpdateAndVerify");
+    [stopIdx, aeMcpIdx, backupIdx, updateAndVerifyDefIdx, updateAndVerifyCallIdx].forEach((i) => expect(i).toBeGreaterThan(-1));
+    expect(aeMcpIdx).toBeGreaterThan(stopIdx);
+    expect(backupIdx).toBeGreaterThan(aeMcpIdx);
+    expect(updateAndVerifyCallIdx).toBeGreaterThan(updateAndVerifyDefIdx);
+    expect(updateAndVerifyCallIdx).toBeGreaterThan(backupIdx);
+  });
+
+  it("rollback remains safe and unaffected: Invoke-WorkerRollback is still defined and still the sole failure path after a failed health/commit verification - the new ae-mcp step never intercepts or replaces it", () => {
+    const rollbackDefIdx = updateScript.indexOf("function Invoke-WorkerRollback");
+    const rollbackCallIdx = updateScript.indexOf("$rollbackOk = Invoke-WorkerRollback -Reason");
+    expect(rollbackDefIdx).toBeGreaterThan(-1);
+    expect(rollbackCallIdx).toBeGreaterThan(rollbackDefIdx);
+    // The ae-mcp cleanup block itself must never appear inside the rollback function's own body -
+    // rollback restores a prior backup and restarts it; it must never re-run the pre-install ae-mcp gate.
+    const rollbackBody = updateScript.slice(rollbackDefIdx, updateScript.indexOf("\n}", rollbackCallIdx));
+    expect(rollbackBody).not.toMatch(/Get-DyoAeMcpProcesses/);
   });
 });
 

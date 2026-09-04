@@ -262,6 +262,48 @@ function Get-DyoWorkerProcesses {
     Where-Object { Test-IsDyoWorkerCommandLine -CommandLine $_.CommandLine }
 }
 
+# 2026-09-04 ONE-CLICK stuck-job recovery (final release rule: this is the
+# LAST client package - no further client-side setup step is ever
+# introduced again, so the ae-mcp-ownership cleanup previously only in the
+# separate DYO-Worker-Recover.ps1 is folded in here too, identical logic,
+# so a single DYO-Worker-Final-Update.bat run alone is now sufficient).
+# Reads AE_MCP_PATH from THIS computer's own .env (never assumed/guessed)
+# so the matcher below is anchored to exactly this install's own
+# configured ae-mcp directory - never a generic "any ae-mcp-looking
+# process" match that could touch something unrelated.
+function Get-DyoConfiguredAeMcpPath {
+  param([string]$InstallDir)
+  $envPath = Join-Path $InstallDir ".env"
+  if (-not (Test-Path $envPath)) { return $null }
+  $line = Get-Content $envPath -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*AE_MCP_PATH\s*=' } | Select-Object -First 1
+  if (-not $line) { return $null }
+  $value = ($line -replace '^\s*AE_MCP_PATH\s*=\s*', '').Trim().Trim('"')
+  if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+  return $value
+}
+
+# Matches ONLY a node.exe process whose own command line is
+# "<AeMcpPath>\dist\index.js serve" (the one fixed invocation
+# HeroicSwanMcpClient itself ever spawns - see
+# apps/worker/src/inspection/heroic-swan-mcp-client.ts) - never DYO
+# Worker's own process (a different entrypoint, already matched
+# separately by Test-IsDyoWorkerCommandLine above) and never any other
+# node.exe on this machine, by construction: both the exact configured
+# path AND the "serve" subcommand must be present.
+function Test-IsDyoAeMcpCommandLine {
+  param([string]$CommandLine, [string]$AeMcpPath)
+  if ([string]::IsNullOrEmpty($CommandLine) -or [string]::IsNullOrEmpty($AeMcpPath)) { return $false }
+  $escapedPath = [regex]::Escape((Join-Path $AeMcpPath "dist\index.js"))
+  return ($CommandLine -match $escapedPath) -and ($CommandLine -match '\bserve\b')
+}
+
+function Get-DyoAeMcpProcesses {
+  param([string]$AeMcpPath)
+  if ([string]::IsNullOrEmpty($AeMcpPath)) { return @() }
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { Test-IsDyoAeMcpCommandLine -CommandLine $_.CommandLine -AeMcpPath $AeMcpPath }
+}
+
 function Wait-Until {
   param([scriptblock]$Condition, [int]$TimeoutSeconds, [int]$PollSeconds = 1)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -597,6 +639,50 @@ if (-not $stopped) {
   exit 1
 }
 Write-CheckResult $true "DYO Worker fully stopped (verified no matching worker process is still running)"
+
+# ---- Step 2a: confirm this computer's own ae-mcp bridge process is
+# stopped too (2026-09-04 ONE-CLICK stuck-job recovery - see this script's
+# own header comment: this is the LAST client package, so the cleanup
+# previously only in the separate DYO-Worker-Recover.ps1 now runs here
+# too). After Effects itself is NEVER touched, closed, or asked to save
+# anything; only the ae-mcp bridge process DYO Worker itself spawns is
+# ever a candidate, and only when its own command line matches this exact
+# computer's configured AE_MCP_PATH. Runs BEFORE anything else is
+# touched - if this cannot be confirmed, the update refuses to proceed
+# (no backup taken, no files replaced, no new process started) and
+# deliberately leaves the maintenance flag set so the supervisor cannot
+# auto-respawn a worker into a still-uncertain AE state either; only a
+# human clearing it after investigating starts anything again. ----
+Write-Host ""
+Write-Host "Checking for a leftover ae-mcp process from a job that may have been stuck..."
+$aeMcpPath = Get-DyoConfiguredAeMcpPath -InstallDir $InstallDir
+if (-not $aeMcpPath) {
+  Write-CheckResult $true "No AE_MCP_PATH configured in .env - nothing to check"
+} else {
+  $aeMcpProcesses = @(Get-DyoAeMcpProcesses -AeMcpPath $aeMcpPath)
+  if ($aeMcpProcesses.Count -eq 0) {
+    Write-CheckResult $true "No leftover ae-mcp process found"
+  } else {
+    $aeMcpPids = @($aeMcpProcesses | Select-Object -ExpandProperty ProcessId)
+    Write-Host "Found $($aeMcpPids.Count) ae-mcp process(es) still running (PID(s): $($aeMcpPids -join ', ')) - stopping..."
+    $aeMcpProcesses | ForEach-Object {
+      try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
+    }
+    $aeMcpStopped = Wait-Until -TimeoutSeconds 10 -PollSeconds 1 -Condition {
+      (Get-DyoAeMcpProcesses -AeMcpPath $aeMcpPath).Count -eq 0
+    }
+    if ($aeMcpStopped) {
+      Write-CheckResult $true "Confirmed leftover ae-mcp process(es) stopped" ("PID(s) " + ($aeMcpPids -join ', '))
+    } else {
+      Write-Host "[NEEDS ATTENTION] Could not confirm ae-mcp process(es) (PID(s) $($aeMcpPids -join ', ')) fully stopped."
+      Write-Host "Refusing to update or restart DYO Worker while that is still unconfirmed - no program files"
+      Write-Host "have been changed, and DYO Worker has been left stopped rather than risk a new job running at"
+      Write-Host "the same time as whatever that leftover process is still doing against After Effects."
+      Write-Host "Contact DYO, or check Task Manager for a remaining node.exe process and end it manually, then re-run this script."
+      exit 1
+    }
+  }
+}
 
 # ---- Step 2b: back up the currently-installed program files BEFORE touching anything ----
 #
