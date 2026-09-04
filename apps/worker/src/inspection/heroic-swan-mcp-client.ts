@@ -34,6 +34,50 @@ import type { FixedJsxScript } from "../execution/jsx-templates.js";
 const SERVE_SUBCOMMAND = "serve";
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+/**
+ * Purely an outer bound on how long this client's own terminate() logs a
+ * "still waiting" outcome before giving up - the real kill sequence lives
+ * entirely inside the MCP SDK's own StdioClientTransport.close() (stdin
+ * end + 2s wait, then SIGTERM + 2s wait, then SIGKILL - see
+ * @modelcontextprotocol/sdk/dist/*\/client/stdio.js), which is already
+ * scoped to exactly the one child process THIS transport spawned. This is
+ * only a safety backstop in case that resolves unexpectedly slowly.
+ */
+const TERMINATE_OUTER_BUDGET_MS = 8_000;
+
+export interface McpChildTerminationLogger {
+  info: (meta: Record<string, unknown>, message: string) => void;
+  warn: (meta: Record<string, unknown>, message: string) => void;
+}
+
+export type McpChildTerminationOutcome =
+  | { outcome: "no_process"; pid: null; reason: string; durationMs: number }
+  | { outcome: "terminated"; pid: number; reason: string; durationMs: number }
+  | { outcome: "unconfirmed"; pid: number; reason: string; durationMs: number };
+
+/** A resource that owns exactly one ae-mcp child process and can prove it stopped - see runtime/job-execution-registry.ts, the one real consumer. */
+export interface McpChildOwner {
+  terminate(reason: string): Promise<McpChildTerminationOutcome>;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Cross-platform (including Windows - libuv implements signal 0 there as a
+ * liveness check via OpenProcess/GetExitCodeProcess, not a real POSIX
+ * signal) liveness probe. Never throws.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const ALLOWED_INSPECTION_TOOLS = [
   "ae_health",
   "ae_list_instances",
@@ -71,6 +115,8 @@ export interface HeroicSwanMcpClientConfig {
   /** ae-mcp's install directory (AE_MCP_PATH) - the CLI script is always exactly `<aeMcpPath>/dist/index.js`, never a separately-configurable path. */
   aeMcpPath: string;
   timeoutMs?: number;
+  /** Optional - only used to log PID/reason/outcome around terminate(). Never required for correct behavior. */
+  logger?: McpChildTerminationLogger;
 }
 
 /** Extracts a human-readable message from an MCP tool-error content array, without assuming a specific shape beyond the documented `{type: "text", text}` block. */
@@ -87,14 +133,23 @@ function extractErrorText(content: unknown): string {
   return "Tool reported an error (no text detail available)";
 }
 
-export class HeroicSwanMcpClient {
+export class HeroicSwanMcpClient implements McpChildOwner {
   private readonly aeMcpPath: string;
   private readonly timeoutMs: number;
+  private readonly logger: McpChildTerminationLogger | undefined;
   private client: Client | null = null;
+  private transport: StdioClientTransport | null = null;
+  private terminating: Promise<McpChildTerminationOutcome> | null = null;
 
   constructor(config: HeroicSwanMcpClientConfig) {
     this.aeMcpPath = config.aeMcpPath;
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.logger = config.logger;
+  }
+
+  /** The PID of the ae-mcp child process this client owns, or null before connect() (or after termination). Only ever refers to a process THIS instance itself spawned. */
+  get pid(): number | null {
+    return this.transport?.pid ?? null;
   }
 
   /** Spawns the one fixed allowlisted command (`node <aeMcpPath>/dist/index.js serve`) and performs the real MCP initialize handshake. Throws on failure - callers decide how to report that. */
@@ -114,18 +169,94 @@ export class HeroicSwanMcpClient {
     // mode - the standard way to drain-and-discard a stream typed only as
     // the base `Stream` (which has no .resume()).
     transport.stderr?.on("data", () => {});
+    // Retained BEFORE the initialize handshake below (2026-09-04 P0 fix):
+    // this client already owns (and can terminate()) the exact process it
+    // just spawned even if that handshake itself never resolves - the
+    // hang does not have to be inside a later callTool() for this to be
+    // able to prove/force it stopped. See job-execution-registry.ts, the
+    // real consumer of this ownership.
+    this.transport = transport;
     const client = new Client({ name: "dyo-video-agent-worker", version: "0.1.0" }, { capabilities: {} });
     await client.connect(transport, { timeout: this.timeoutMs });
     this.client = client;
   }
 
-  /** Closes the transport and terminates the spawned ae-mcp `serve` process. Safe to call even if connect() was never called or already failed. */
+  /** Closes the transport and terminates the spawned ae-mcp `serve` process. Safe to call even if connect() was never called or already failed, and safe to call more than once (idempotent - see terminate()). */
   async close(): Promise<void> {
-    const client = this.client;
-    this.client = null;
-    if (client) {
-      await client.close();
+    await this.terminate("close() called");
+  }
+
+  /**
+   * Idempotent, never throws: ensures the ae-mcp child process this client
+   * owns (and ONLY that process - never any other node.exe/ae-mcp
+   * instance, by construction, since this only ever touches the transport
+   * THIS instance itself spawned) is terminated, with proof.
+   *
+   * Real production gap this closes (2026-09-04, job c19a2fb9 stuck
+   * RUNNING for 20+ minutes): nothing previously retained ownership of - or
+   * could prove the fate of - the ae-mcp subprocess a hung job's
+   * connection had spawned, so killing/restarting only the Worker process
+   * risked orphaning it. This delegates the actual kill sequence to the
+   * MCP SDK's own StdioClientTransport.close() (stdin end + bounded wait,
+   * then SIGTERM + bounded wait, then SIGKILL, all scoped to its own
+   * `_process` field - see @modelcontextprotocol/sdk's client/stdio.js),
+   * then independently verifies via isProcessAlive(pid) rather than just
+   * trusting that call resolved cleanly - "unconfirmed" is reported
+   * honestly rather than assumed.
+   *
+   * Concurrent/repeated calls share one outcome (never re-enters the real
+   * kill sequence twice) - callers (e.g. a watchdog aborting a job AND
+   * that job's own normal `finally { client.close() }` racing each other)
+   * never need to coordinate who "owns" calling this.
+   */
+  async terminate(reason: string): Promise<McpChildTerminationOutcome> {
+    if (this.terminating) {
+      return this.terminating;
     }
+    this.terminating = this.doTerminate(reason);
+    return this.terminating;
+  }
+
+  private async doTerminate(reason: string): Promise<McpChildTerminationOutcome> {
+    const pid = this.pid;
+    const client = this.client;
+    const transport = this.transport;
+    this.client = null;
+    this.transport = null;
+
+    if (!client && !transport) {
+      return { outcome: "no_process", pid: null, reason, durationMs: 0 };
+    }
+
+    const startedAt = Date.now();
+    this.logger?.info({ pid, reason }, "terminating owned ae-mcp child process");
+
+    try {
+      await Promise.race([
+        client ? client.close() : (transport as StdioClientTransport).close(),
+        sleep(TERMINATE_OUTER_BUDGET_MS)
+      ]);
+    } catch (error) {
+      this.logger?.warn(
+        { pid, reason, error: error instanceof Error ? error.message : String(error) },
+        "close() threw while terminating owned ae-mcp child process"
+      );
+    }
+
+    const durationMs = Date.now() - startedAt;
+    if (pid === null) {
+      return { outcome: "no_process", pid: null, reason, durationMs };
+    }
+    const alive = isProcessAlive(pid);
+    const outcome: McpChildTerminationOutcome = alive
+      ? { outcome: "unconfirmed", pid, reason, durationMs }
+      : { outcome: "terminated", pid, reason, durationMs };
+    if (alive) {
+      this.logger?.warn(outcome, "owned ae-mcp child process could not be confirmed stopped within the outer budget");
+    } else {
+      this.logger?.info(outcome, "owned ae-mcp child process confirmed stopped");
+    }
+    return outcome;
   }
 
   /**

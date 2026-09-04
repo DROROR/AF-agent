@@ -205,4 +205,13 @@ export class DrizzleJobRepository implements JobRepository {
     );
     return result.rows.length > 0;
   }
+
+  async listActiveForWorker(workerId: string): Promise<Job[]> {
+    const rows = await this.db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.workerId, workerId), sql`${jobs.status} in ${ACTIVE_JOB_STATUSES}`))
+      .orderBy(jobs.createdAt);
+    return rows.map(toDomain);
+  }
 }

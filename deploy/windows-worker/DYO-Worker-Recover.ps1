@@ -24,13 +24,23 @@
        named worker-app-pre-update-<timestamp>, created automatically
        by DYO-Worker-Final-Update.ps1 before every program-file
        replacement).
-    2. Sets the maintenance flag, stops the current DYO Worker process
-       (After Effects itself is never touched or closed).
-    3. Restores that backup's program files over the current install -
+    2. Sets the maintenance flag, stops the current DYO Worker process.
+    3. Confirms this computer's own ae-mcp bridge process (the one DYO
+       Worker itself spawns to talk to After Effects - NOT After Effects
+       itself, which is never touched, closed, or asked to save anything)
+       is stopped too, so a job that was stuck when this script was run
+       cannot keep running invisibly after Worker restarts (2026-09-04
+       stuck-job recovery). Only a process whose own command line matches
+       this computer's configured AE_MCP_PATH is ever touched - never any
+       other node.exe.
+    4. Restores that backup's program files over the current install -
        .env is never overwritten.
-    4. Refreshes the Scheduled Task's recovery settings and restarts
-       DYO Worker using the existing installed startup mechanism.
-    5. Waits for a real heartbeat, clears the maintenance flag, and
+    5. Refreshes the Scheduled Task's recovery settings and restarts
+       DYO Worker using the existing installed startup mechanism - the
+       restarted Worker automatically reconciles any job it finds still
+       marked active from before this recovery, now that step 3 above has
+       confirmed there is no leftover ae-mcp process still running for it.
+    6. Waits for a real heartbeat, clears the maintenance flag, and
        reports PASS/FAIL clearly - it never claims success it did not
        independently verify.
 
@@ -91,6 +101,43 @@ function Test-IsDyoWorkerCommandLine {
 function Get-DyoWorkerProcesses {
   Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
     Where-Object { Test-IsDyoWorkerCommandLine -CommandLine $_.CommandLine }
+}
+
+# 2026-09-04 stuck-job recovery: reads AE_MCP_PATH from THIS computer's own
+# .env (never assumed/guessed) so the matcher below is anchored to exactly
+# this install's own configured ae-mcp directory - never a generic
+# "any ae-mcp-looking process" match that could touch something unrelated.
+function Get-DyoConfiguredAeMcpPath {
+  param([string]$InstallDir)
+  $envPath = Join-Path $InstallDir ".env"
+  if (-not (Test-Path $envPath)) { return $null }
+  $line = Get-Content $envPath -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\s*AE_MCP_PATH\s*=' } | Select-Object -First 1
+  if (-not $line) { return $null }
+  $value = ($line -replace '^\s*AE_MCP_PATH\s*=\s*', '').Trim().Trim('"')
+  if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+  return $value
+}
+
+# Matches ONLY a node.exe process whose own command line is
+# "<AeMcpPath>\dist\index.js serve" (the one fixed invocation
+# HeroicSwanMcpClient itself ever spawns - see
+# apps/worker/src/inspection/heroic-swan-mcp-client.ts) - never DYO
+# Worker's own process (a different entrypoint, already matched
+# separately by Test-IsDyoWorkerCommandLine above) and never any other
+# node.exe on this machine, by construction: both the exact configured
+# path AND the "serve" subcommand must be present.
+function Test-IsDyoAeMcpCommandLine {
+  param([string]$CommandLine, [string]$AeMcpPath)
+  if ([string]::IsNullOrEmpty($CommandLine) -or [string]::IsNullOrEmpty($AeMcpPath)) { return $false }
+  $escapedPath = [regex]::Escape((Join-Path $AeMcpPath "dist\index.js"))
+  return ($CommandLine -match $escapedPath) -and ($CommandLine -match '\bserve\b')
+}
+
+function Get-DyoAeMcpProcesses {
+  param([string]$AeMcpPath)
+  if ([string]::IsNullOrEmpty($AeMcpPath)) { return @() }
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { Test-IsDyoAeMcpCommandLine -CommandLine $_.CommandLine -AeMcpPath $AeMcpPath }
 }
 
 function Wait-Until {
@@ -239,6 +286,42 @@ if (-not $stopped) {
   Start-Sleep -Seconds 2
 }
 Write-CheckResult $true "DYO Worker stopped"
+
+# ---- Confirm this computer's own ae-mcp bridge process is stopped too
+# (2026-09-04 stuck-job recovery) - After Effects itself is NEVER touched,
+# closed, or asked to save anything; only the ae-mcp bridge process DYO
+# Worker itself spawned is ever a candidate, and only when its own command
+# line matches this exact computer's configured AE_MCP_PATH. ----
+Write-Host ""
+Write-Host "Checking for a leftover ae-mcp process from a job that may have been stuck..."
+$aeMcpPath = Get-DyoConfiguredAeMcpPath -InstallDir $InstallDir
+if (-not $aeMcpPath) {
+  Write-CheckResult $true "No AE_MCP_PATH configured in .env - nothing to check"
+} else {
+  $aeMcpProcesses = @(Get-DyoAeMcpProcesses -AeMcpPath $aeMcpPath)
+  if ($aeMcpProcesses.Count -eq 0) {
+    Write-CheckResult $true "No leftover ae-mcp process found"
+  } else {
+    $aeMcpPids = @($aeMcpProcesses | Select-Object -ExpandProperty ProcessId)
+    Write-Host "Found $($aeMcpPids.Count) ae-mcp process(es) still running (PID(s): $($aeMcpPids -join ', ')) - stopping..."
+    $aeMcpProcesses | ForEach-Object {
+      try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
+    }
+    $aeMcpStopped = Wait-Until -TimeoutSeconds 10 -PollSeconds 1 -Condition {
+      (Get-DyoAeMcpProcesses -AeMcpPath $aeMcpPath).Count -eq 0
+    }
+    if ($aeMcpStopped) {
+      Write-CheckResult $true "Confirmed leftover ae-mcp process(es) stopped" ("PID(s) " + ($aeMcpPids -join ', '))
+    } else {
+      Write-Host "[NEEDS ATTENTION] Could not confirm ae-mcp process(es) (PID(s) $($aeMcpPids -join ', ')) fully stopped."
+      Write-Host "Refusing to restart DYO Worker while that is still unconfirmed - restarting now could let a new"
+      Write-Host "job run at the same time as whatever that leftover process is still doing against After Effects."
+      Write-Host "Contact DYO, or check Task Manager for a remaining node.exe process and end it manually, then re-run this script."
+      Remove-Item -Path $MaintenanceFlagPath -Force -ErrorAction SilentlyContinue
+      exit 1
+    }
+  }
+}
 
 # ---- Restore the backup - .env is never touched ----
 Write-Host ""

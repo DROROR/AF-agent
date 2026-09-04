@@ -1,9 +1,10 @@
 import { stat } from "node:fs/promises";
 import type { SceneEvidenceRequest, ScenePreview } from "@dyo/schemas";
-import { HeroicSwanMcpClient } from "./heroic-swan-mcp-client.js";
+import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
+import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
 
 /**
  * Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B).
@@ -20,9 +21,19 @@ import { hashSourceProject } from "./hash-source-project.js";
  */
 export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector {
   private readonly aeMcpPath: string | undefined;
+  private readonly logger: McpChildTerminationLogger | undefined;
+  private readonly jobExecutionRegistry: JobExecutionRegistry | undefined;
 
-  constructor(config: { aeMcpPath: string | undefined }) {
+  constructor(config: {
+    aeMcpPath: string | undefined;
+    /** Structured logger for terminate() log lines - optional, never required for correct behavior. */
+    logger?: McpChildTerminationLogger;
+    /** Registers the ae-mcp child process this inspect() call owns so a watchdog/shutdown can abort it - optional (omitted in most tests), but MUST be provided in production (see index.ts) for P1/P2's stuck-job recovery to actually reach this call's own MCP client. */
+    jobExecutionRegistry?: JobExecutionRegistry;
+  }) {
     this.aeMcpPath = config.aeMcpPath;
+    this.logger = config.logger;
+    this.jobExecutionRegistry = config.jobExecutionRegistry;
   }
 
   async inspect(request: SceneEvidenceRequest): Promise<SceneEvidenceResult> {
@@ -44,14 +55,34 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       };
     }
 
-    const client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath });
+    const client = new HeroicSwanMcpClient({
+      aeMcpPath: this.aeMcpPath,
+      ...(this.logger !== undefined ? { logger: this.logger } : {})
+    });
+    // Registered BEFORE connect() (2026-09-04 P0/P1 fix) - see
+    // job-execution-registry.ts's own doc comment on why even a hang
+    // during the initial handshake must be abortable, not just a hang
+    // inside a later callTool().
+    const unregister = this.jobExecutionRegistry?.registerMcpOwner(client);
     try {
-      await client.connect();
-    } catch (error) {
-      await client.close();
-      return { kind: "failure", reason: `Could not connect to ae-mcp (${error instanceof Error ? error.message : String(error)})` };
-    }
+      try {
+        await client.connect();
+      } catch (error) {
+        await client.close();
+        return { kind: "failure", reason: `Could not connect to ae-mcp (${error instanceof Error ? error.message : String(error)})` };
+      }
 
+      return await this.runInspection(client, request, hashResult.value.sha256);
+    } finally {
+      unregister?.();
+    }
+  }
+
+  private async runInspection(
+    client: HeroicSwanMcpClient,
+    request: SceneEvidenceRequest,
+    verifiedSourceProjectSha256: string
+  ): Promise<SceneEvidenceResult> {
     try {
       const compResult = await client.callTool("ae_get_composition", {
         comp_index: request.aeProjectItemIndex,
@@ -158,7 +189,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       return {
         kind: "evidence",
         response: {
-          verifiedSourceProjectSha256: hashResult.value.sha256,
+          verifiedSourceProjectSha256,
           manifestCompositionId: request.manifestCompositionId,
           aeProjectItemIndex: request.aeProjectItemIndex,
           compositionName: parsedComp.value.name,

@@ -101,6 +101,16 @@ export class ApiClient {
     throw this.errorForResponse(response, json);
   }
 
+  /** P3/P4 stuck-job recovery (2026-09-04): this worker's own non-terminal jobs, oldest first - see reconcile-abandoned-jobs.ts, the one real caller (worker startup). */
+  async listActiveJobs(workerId: string, workerToken: string): Promise<JobDto[]> {
+    const response = await this.request("GET", `/api/workers/${workerId}/jobs/active`, workerToken);
+    const json = await parseJson(response);
+    if (response.status === 200) {
+      return jobDtoSchema.array().parse((json as { jobs: unknown })?.jobs);
+    }
+    throw this.errorForResponse(response, json);
+  }
+
   async reportJobStatus(
     workerId: string,
     workerToken: string,
@@ -331,6 +341,13 @@ export class ApiClient {
     path: string,
     bearerToken: string,
     body: unknown
+  ): Promise<Response>;
+  private async request(method: "GET", path: string, bearerToken: string): Promise<Response>;
+  private async request(
+    method: "POST" | "GET",
+    path: string,
+    bearerToken: string,
+    body?: unknown
   ): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -341,7 +358,7 @@ export class ApiClient {
           "content-type": "application/json",
           authorization: `Bearer ${bearerToken}`
         },
-        body: JSON.stringify(body),
+        ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
         signal: controller.signal
       });
     } catch (cause) {

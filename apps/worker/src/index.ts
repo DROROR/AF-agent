@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import pino from "pino";
 import { resolveWorkerCredentials } from "./bootstrap.js";
 import { CURRENT_WORKER_CAPABILITIES } from "./domain/operation-allowlist.js";
-import { executeJob, type LatestHealth } from "./domain/job-dispatcher.js";
+import type { LatestHealth } from "./domain/job-dispatcher.js";
+import { executeJobWithWatchdog } from "./domain/job-watchdog.js";
 import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
@@ -27,6 +28,8 @@ import { createProcessLister } from "./infrastructure/process-lister.js";
 import { HeartbeatLoop, type HeartbeatLoopEvent } from "./runtime/heartbeat-loop.js";
 import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
+import { JobExecutionRegistry } from "./runtime/job-execution-registry.js";
+import { reconcileAbandonedJobs } from "./runtime/reconcile-abandoned-jobs.js";
 import { installProcessSafetyNet } from "./runtime/process-safety-net.js";
 import { installSignalHandlers } from "./runtime/signal-handlers.js";
 import { buildHeartbeatPayload } from "./application/build-heartbeat-payload.js";
@@ -132,6 +135,14 @@ async function main(): Promise<void> {
     "worker starting"
   );
 
+  // Single source of truth for "what job is this Worker currently
+  // executing, and which owned ae-mcp child process(es) belong to it" -
+  // see runtime/job-execution-registry.ts's own doc comment (2026-09-04
+  // stuck-job P0/P1/P2 fix). Threaded into every inspector that owns an
+  // MCP connection AND into the watchdog/shutdown paths below, so a hung
+  // job's own owned process can always be found and terminated.
+  const jobExecutionRegistry = new JobExecutionRegistry(workerLogger);
+
   const processLister = createProcessLister();
   // Primary MCP health source: the real HeroicSwan/after-effects-mcp CLI's
   // documented `health` subcommand and exit-code contract (confirmed
@@ -145,11 +156,19 @@ async function main(): Promise<void> {
   // docs/TEMPLATE-INSPECTOR.md. Always safe to construct even with no
   // AE_MCP_PATH configured: inspect() reports a typed unavailable capture
   // rather than crashing or fabricating a result.
-  const templateInspector = new HeroicSwanTemplateInspector({ aeMcpPath: env.aeMcpPath, logger: workerLogger });
+  const templateInspector = new HeroicSwanTemplateInspector({
+    aeMcpPath: env.aeMcpPath,
+    logger: workerLogger,
+    jobExecutionRegistry
+  });
 
   // Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B) -
   // same "safe to construct with no AE_MCP_PATH" contract as above.
-  const sceneEvidenceInspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: env.aeMcpPath });
+  const sceneEvidenceInspector = new HeroicSwanSceneEvidenceInspector({
+    aeMcpPath: env.aeMcpPath,
+    logger: workerLogger,
+    jobExecutionRegistry
+  });
 
   // Real EXECUTE_FRAME mutation/preview implementations - same "safe to
   // construct with no AE_MCP_PATH" contract as the two inspectors above.
@@ -208,16 +227,46 @@ async function main(): Promise<void> {
   // job could ever be attempted (see onEvent below).
   let latestHealth: LatestHealth | null = null;
 
+  // P1 fix (2026-09-04): the in-flight job-cycle promise, tracked (never
+  // fire-and-forget `void`) so (a) triggerJobCycle can refuse to start a
+  // SECOND overlapping cycle if a previous one has not yet settled - real
+  // gap: heartbeat ticks reschedule themselves right after sendHeartbeat
+  // resolves, independent of whether a previously-triggered job cycle is
+  // still running, so nothing previously stopped two cycles from running
+  // concurrently on a job that outlives one heartbeat interval - and (b)
+  // shutdownGracefully can actually wait for it to settle after an abort,
+  // instead of exiting mid-job. maxConcurrency=1 is preserved either way
+  // by dispatch-job.ts's own server-side activeCount gate, but this closes
+  // the same gap at the Worker's own level, defense in depth.
+  let activeJobCyclePromise: Promise<void> | null = null;
+
   // One bounded claim/execute/report attempt per successful heartbeat -
   // never a separate tight polling loop, so job attempts are naturally
   // paced by HEARTBEAT_INTERVAL_MS with no blind retries.
   const triggerJobCycle = (): void => {
-    void runJobCycle({
+    if (activeJobCyclePromise) {
+      workerLogger.info({}, "job cycle already in progress - skipping this heartbeat's trigger");
+      return;
+    }
+    // If a watchdog previously aborted a job but could NOT confirm its
+    // owned ae-mcp process actually stopped, job-watchdog.ts deliberately
+    // leaves the registry's active-job slot set (never endJob()'d) even
+    // though the job cycle promise above has already settled - this
+    // process must refuse to execute anything else until restarted with
+    // confirmed cleanup (see deploy/windows-worker/DYO-Worker-Recover.ps1).
+    if (jobExecutionRegistry.hasActiveJob()) {
+      workerLogger.warn(
+        {},
+        "refusing to start a new job cycle - a previous job's owned MCP process could not be confirmed stopped; this worker needs to be restarted via the recovery script"
+      );
+      return;
+    }
+    const cyclePromise = runJobCycle({
       claimNextJob: () => apiClient.claimNextJob(credentials.workerId, credentials.workerToken),
       reportJobStatus: (jobId, body) =>
         apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
       executeJob: (job) =>
-        executeJob(
+        executeJobWithWatchdog(
           {
             templateInspector,
             sceneEvidenceInspector,
@@ -260,10 +309,15 @@ async function main(): Promise<void> {
             workRoot,
             now: () => new Date()
           },
-          job
+          job,
+          jobExecutionRegistry,
+          workerLogger
         ),
       onEvent: (event) => logJobCycleEvent(workerLogger, event)
+    }).finally(() => {
+      activeJobCyclePromise = null;
     });
+    activeJobCyclePromise = cyclePromise;
   };
 
   const loop = new HeartbeatLoop({
@@ -306,9 +360,28 @@ async function main(): Promise<void> {
 
   installSignalHandlers({
     logger: workerLogger,
-    shutdownGracefully: () => shutdownGracefully(loop, workerLogger),
+    shutdownGracefully: () =>
+      shutdownGracefully({
+        loop,
+        logger: workerLogger,
+        hasActiveJob: () => jobExecutionRegistry.hasActiveJob(),
+        abortActiveJob: (reason) => jobExecutionRegistry.abortActiveJob(reason),
+        getActiveJobCyclePromise: () => activeJobCyclePromise
+      }),
     exit: process.exit.bind(process),
     on: (event, listener) => process.once(event, listener)
+  });
+
+  // P3/P4 (2026-09-04): before this fresh process starts claiming any new
+  // work, reconcile any job the API still shows as non-terminal for this
+  // workerId - left behind by a worker process that crashed/was killed
+  // mid-job without ever reporting its own outcome. See
+  // reconcile-abandoned-jobs.ts's own doc comment on the exact boundary of
+  // what this proves.
+  await reconcileAbandonedJobs({
+    listActiveJobs: () => apiClient.listActiveJobs(credentials.workerId, credentials.workerToken),
+    reportJobStatus: (jobId, body) => apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
+    logger: workerLogger
   });
 
   loop.start();

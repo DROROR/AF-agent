@@ -186,3 +186,82 @@ describe("DYO-Worker-Recover.bat is a thin, no-prompt launcher", () => {
     expect(recoverBat).not.toMatch(/set \/p/i);
   });
 });
+
+/**
+ * P4/P5 (2026-09-04 stuck-job recovery, regression test #11): the recovery
+ * script now also confirms this computer's own ae-mcp bridge process is
+ * stopped (never After Effects itself) before restarting DYO Worker, so a
+ * job that was stuck when this script runs cannot keep executing invisibly
+ * after Worker restarts. These tests prove that addition stays scoped
+ * exactly the same way the existing worker-process matching already is:
+ * one exact command-line signature, never a blanket kill, never touching
+ * credentials/.env/AfterFX itself.
+ */
+describe("DYO-Worker-Recover.ps1 terminates only this computer's own leftover ae-mcp process, never After Effects or an unrelated process", () => {
+  it("reads AE_MCP_PATH from this computer's own .env, never hardcodes or guesses a path", () => {
+    expect(recoverScript).toMatch(/function Get-DyoConfiguredAeMcpPath/);
+    const idx = recoverScript.indexOf("function Get-DyoConfiguredAeMcpPath");
+    const block = recoverScript.slice(idx, idx + 700);
+    expect(block).toMatch(/AE_MCP_PATH/);
+    expect(block).toMatch(/Join-Path \$InstallDir "\.env"/);
+  });
+
+  it("matches an ae-mcp process only by BOTH its exact configured dist\\index.js path AND the serve subcommand - never the worker's own entrypoint pattern", () => {
+    expect(recoverScript).toMatch(/function Test-IsDyoAeMcpCommandLine/);
+    const idx = recoverScript.indexOf("function Test-IsDyoAeMcpCommandLine");
+    const block = recoverScript.slice(idx, idx + 600);
+    expect(block).toMatch(/\[regex\]::Escape/);
+    expect(block).toMatch(/dist\\index\.js/);
+    expect(block).toMatch(/serve/);
+    // Never reuses (or matches the same pattern as) the worker's own
+    // entrypoint matcher - these must stay two distinct signatures so a
+    // Worker process is never mistaken for an ae-mcp process or vice versa.
+    expect(block).not.toMatch(/WorkerEntrypointPattern/);
+    expect(block).not.toMatch(/WorkerEnvArgPattern/);
+  });
+
+  it("only ever targets ae-mcp processes discovered via Get-DyoAeMcpProcesses (PID-scoped Stop-Process), never a blanket taskkill or Stop-Process by name", () => {
+    const idx = recoverScript.indexOf("function Get-DyoAeMcpProcesses");
+    expect(idx).toBeGreaterThan(-1);
+    const stopBlockIdx = recoverScript.indexOf("Checking for a leftover ae-mcp process");
+    expect(stopBlockIdx).toBeGreaterThan(-1);
+    const block = recoverScript.slice(stopBlockIdx, stopBlockIdx + 1500);
+    expect(block).toMatch(/Stop-Process -Id \$_\.ProcessId -Force/);
+    expect(block).not.toMatch(/taskkill/i);
+    expect(block).not.toMatch(/Stop-Process -Name/);
+  });
+
+  it("never references AfterFX, aerender, or opening/saving a project anywhere in the ae-mcp termination block", () => {
+    const stopBlockIdx = recoverScript.indexOf("Checking for a leftover ae-mcp process");
+    const nextSectionIdx = recoverScript.indexOf("Restore the backup", stopBlockIdx);
+    const block = recoverScript.slice(stopBlockIdx, nextSectionIdx);
+    expect(block).not.toMatch(/AfterFX/i);
+    expect(block).not.toMatch(/aerender/i);
+    expect(block).not.toMatch(/\.aep/i);
+    expect(block).not.toMatch(/\.save\(/);
+  });
+
+  it("refuses to continue (exits nonzero, clears the maintenance flag) rather than restarting DYO Worker if a leftover ae-mcp process could not be confirmed stopped", () => {
+    const idx = recoverScript.indexOf("Could not confirm ae-mcp process(es)");
+    expect(idx).toBeGreaterThan(-1);
+    const block = recoverScript.slice(idx, idx + 900);
+    expect(block).toMatch(/Remove-Item -Path \$MaintenanceFlagPath -Force -ErrorAction SilentlyContinue/);
+    expect(block).toMatch(/exit 1/);
+    // This refusal must come BEFORE the backup is restored / worker restarted.
+    const restoreIdx = recoverScript.indexOf('Write-Host "Restoring program files from backup..."');
+    expect(idx).toBeLessThan(restoreIdx);
+  });
+
+  it("proceeds normally (no exit) when no AE_MCP_PATH is configured or no leftover process is found", () => {
+    expect(recoverScript).toMatch(/No AE_MCP_PATH configured in \.env - nothing to check/);
+    expect(recoverScript).toMatch(/No leftover ae-mcp process found/);
+  });
+
+  it("this whole block never touches worker-credentials.json or .env writes, same guarantee as the rest of the script", () => {
+    const stopBlockIdx = recoverScript.indexOf("Checking for a leftover ae-mcp process");
+    const nextSectionIdx = recoverScript.indexOf("Restore the backup", stopBlockIdx);
+    const block = recoverScript.slice(stopBlockIdx, nextSectionIdx);
+    expect(block).not.toMatch(/worker-credentials/);
+    expect(block).not.toMatch(/Set-Content[^\n]*\.env/);
+  });
+});

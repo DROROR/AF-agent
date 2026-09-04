@@ -113,4 +113,14 @@ export interface JobRepository {
   listByCreatedByUserId(userId: string, limit: number): Promise<Job[]>;
   /** True if any job for this project is still non-terminal (QUEUED/CLAIMED/RUNNING/WAITING_FOR_ACTION) - used by delete-project.ts to refuse deleting a project out from under an in-flight worker job. */
   hasNonTerminalJobForProject(projectId: string): Promise<boolean>;
+  /**
+   * Every non-terminal (CLAIMED/RUNNING/WAITING_FOR_ACTION) job currently
+   * assigned to this worker, oldest first - see
+   * list-active-jobs-for-worker.ts. A freshly started worker process (a
+   * new JobExecutionRegistry, tracking nothing) uses this at startup to
+   * discover a job left behind by a worker process that never reported
+   * its own outcome (crashed/killed) - see reconcile-abandoned-job.ts,
+   * P3/P4's stuck-job recovery (2026-09-04).
+   */
+  listActiveForWorker(workerId: string): Promise<Job[]>;
 }

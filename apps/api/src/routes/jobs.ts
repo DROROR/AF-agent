@@ -16,6 +16,7 @@ import { verifyToken } from "../infrastructure/auth/token.js";
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
 import { claimNextJob } from "../application/job/claim-next-job.js";
+import { listActiveJobsForWorker } from "../application/job/list-active-jobs-for-worker.js";
 import { dispatchJob } from "../application/job/dispatch-job.js";
 import { getJobForUser } from "../application/job/get-job-for-user.js";
 import { listJobsForUser } from "../application/job/list-jobs-for-user.js";
@@ -146,6 +147,29 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
       token
     );
     reply.send({ job });
+  });
+
+  /**
+   * P3/P4 stuck-job recovery (2026-09-04): lets a freshly started worker
+   * process discover any job left behind by a worker process that never
+   * reported its own outcome (crashed/killed mid-job), so it can reconcile
+   * it to a terminal state (via the EXISTING /report endpoint below - this
+   * intentionally adds no new way to mutate a job, only to discover one).
+   * Worker-bearer-token authenticated, same channel as claim/report.
+   */
+  app.get("/api/workers/:workerId/jobs/active", async (request, reply) => {
+    const { workerId } = workerIdParamsSchema.parse(request.params);
+    const token = extractBearerToken(request.headers.authorization);
+    if (!token) {
+      throw new UnauthorizedError("Missing worker token");
+    }
+
+    const jobs = await listActiveJobsForWorker(
+      { jobRepository: deps.jobRepository, workerRepository: deps.workerRepository, verifyToken },
+      workerId,
+      token
+    );
+    reply.send({ jobs });
   });
 
   app.post("/api/workers/:workerId/jobs/:jobId/report", async (request, reply) => {

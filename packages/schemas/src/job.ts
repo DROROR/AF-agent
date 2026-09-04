@@ -58,6 +58,25 @@ export const JOB_ERROR_CODES = [
    * but produced no usable manifest, by design, rather than fabricating one.
    */
   "MANIFEST_NOT_BUILT",
+  /**
+   * An operation-level watchdog (apps/worker/src/domain/job-watchdog.ts)
+   * aborted this job because it ran longer than its derived bounded
+   * duration - the worker terminated its own owned ae-mcp child process
+   * before reporting this, so the AE-side operation is confirmed stopped,
+   * never left silently running. See 2026-09-04's stuck-INSPECT_SCENE_EVIDENCE
+   * incident (job c19a2fb9) - the real gap this exists to close.
+   */
+  "WATCHDOG_TIMEOUT",
+  /**
+   * A previously-abandoned job (left RUNNING/CLAIMED/WAITING_FOR_ACTION by
+   * a worker process that never reported its own outcome, e.g. it crashed
+   * or was killed) was reconciled to a terminal state after a freshly
+   * started worker process confirmed it owns no leftover execution for it
+   * - see reconcile-abandoned-jobs.ts. Distinct from WORKER_OFFLINE
+   * (heartbeat-staleness-triggered): this can fire even when the worker's
+   * heartbeat never went stale long enough to trip that sweep.
+   */
+  "ABANDONED_RECONCILED",
   "INTERNAL_ERROR"
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

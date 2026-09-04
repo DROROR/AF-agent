@@ -173,4 +173,10 @@ export class InMemoryJobRepository implements JobRepository {
   async hasNonTerminalJobForProject(projectId: string): Promise<boolean> {
     return [...this.rows.values()].some((job) => job.projectId === projectId && !isJobTerminal(job.status));
   }
+
+  async listActiveForWorker(workerId: string): Promise<Job[]> {
+    return [...this.rows.values()]
+      .filter((job) => job.workerId === workerId && ACTIVE_STATUSES.includes(job.status))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
 }

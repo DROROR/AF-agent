@@ -25,6 +25,7 @@ import { buildInspectCompositionPrecompsScript, buildOpenProjectScript } from ".
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
+import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
 
 /**
  * Real, production INSPECT_TEMPLATE implementation, wired against
@@ -183,6 +184,8 @@ export interface HeroicSwanTemplateInspectorConfig {
   mcpTimeoutMs?: number;
   /** Test-only override for the OPEN_PROJECT-specific timeout/poll budget/poll interval above - production always uses the real constants when this is omitted. */
   openProjectOptions?: OpenProjectOptions;
+  /** Registers the ae-mcp child process this inspect() call owns so a watchdog/shutdown can abort it - optional (omitted in most tests), but should be provided in production (see index.ts). Same P0/P1 stuck-job-recovery mechanism as heroic-swan-scene-evidence-inspector.ts. */
+  jobExecutionRegistry?: JobExecutionRegistry;
 }
 
 export class HeroicSwanTemplateInspector implements TemplateInspector {
@@ -191,6 +194,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
   private readonly retryOptions: TransientRetryOptions | undefined;
   private readonly mcpTimeoutMs: number | undefined;
   private readonly openProjectOptions: OpenProjectOptions | undefined;
+  private readonly jobExecutionRegistry: JobExecutionRegistry | undefined;
 
   constructor(config: HeroicSwanTemplateInspectorConfig) {
     this.aeMcpPath = config.aeMcpPath;
@@ -198,6 +202,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
     this.retryOptions = config.retryOptions;
     this.mcpTimeoutMs = config.mcpTimeoutMs;
     this.openProjectOptions = config.openProjectOptions;
+    this.jobExecutionRegistry = config.jobExecutionRegistry;
   }
 
   async inspect(request: InspectTemplateRequest): Promise<InspectTemplateResult> {
@@ -213,13 +218,21 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       );
     }
 
-    const client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath, ...(this.mcpTimeoutMs !== undefined ? { timeoutMs: this.mcpTimeoutMs } : {}) });
+    const client = new HeroicSwanMcpClient({
+      aeMcpPath: this.aeMcpPath,
+      ...(this.mcpTimeoutMs !== undefined ? { timeoutMs: this.mcpTimeoutMs } : {}),
+      ...(this.logger !== undefined ? { logger: this.logger } : {})
+    });
+    // Registered BEFORE connect() - see heroic-swan-scene-evidence-inspector.ts's
+    // identical pattern and job-execution-registry.ts's own doc comment.
+    const unregister = this.jobExecutionRegistry?.registerMcpOwner(client);
 
     try {
       await client.connect();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await client.close();
+      unregister?.();
       return rawCaptureFor(
         ALL_DISCOVERY_TOOLS.map((tool) => ({
           tool,
@@ -382,6 +395,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       return result;
     } finally {
       await client.close();
+      unregister?.();
     }
   }
 }
