@@ -150,7 +150,7 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("fails closed when the scene's composition has no placeholders to inspect - never dispatches an empty layerIndices request", () => {
+  it("live QA Blocker 2 fix: a composition with zero placeholders still resolves ok - layerIndices: [], with a real frame capture still requested and exact composition identity still included", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan(),
@@ -158,7 +158,48 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
         scenes: [{ sceneId: "scene-a", displayName: null, compositionId: "comp-1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 5, placeholders: [] }]
       })
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload).toEqual({
+      sourceProjectPath: "C:\\vidio agent\\White App Promo (converted).aep",
+      sourceProjectSha256: SHA,
+      manifestCompositionId: "comp-1",
+      aeProjectItemIndex: 5,
+      compositionName: "Scene 01",
+      layerIndices: [],
+      previewTimestampSeconds: 0
+    });
+  });
+
+  it("live QA Blocker 2 fix: a composition with no manifest.scenes entry at all (e.g. isNestedOnlyReferenced at the flat manifest level, promoted to a real scene by the grouping UI) still resolves ok with layerIndices: []", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      // No entry in `scenes` for comp-1 at all - manifestScene resolves to undefined.
+      currentProjectManifest: validManifest({ scenes: [] })
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.layerIndices).toEqual([]);
+    expect(result.payload.manifestCompositionId).toBe("comp-1");
+    expect(result.payload.aeProjectItemIndex).toBe(5);
+    expect(result.payload.compositionName).toBe("Scene 01");
+  });
+
+  it("still fails closed for an unknown scenePlanId or a missing composition even with the placeholder gate removed - identity verification is unrelated and unchanged", () => {
+    const unknownScene = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "does-not-exist",
+      currentPlan: validPlan(),
+      currentProjectManifest: validManifest({ scenes: [] })
+    });
+    expect(unknownScene.ok).toBe(false);
+
+    const missingComposition = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ manifestCompositionId: "comp-gone" })] }),
+      currentProjectManifest: validManifest({ scenes: [] })
+    });
+    expect(missingComposition.ok).toBe(false);
   });
 
   it("dedupes and caps layerIndices at MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST (20), sorted ascending", () => {

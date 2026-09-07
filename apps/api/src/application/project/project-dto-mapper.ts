@@ -8,6 +8,7 @@ export function toProjectDto(project: Project): ProjectDto {
     templateId: project.templateId,
     sourceProjectSha256: project.sourceProjectSha256,
     brandInputs: project.brandInputs ?? DEFAULT_BRAND_INPUTS,
+    sourceWorkerId: project.sourceWorkerId,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString()
   };

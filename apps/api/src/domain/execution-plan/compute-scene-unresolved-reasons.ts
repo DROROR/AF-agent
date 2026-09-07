@@ -2,6 +2,39 @@ import type { PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
 import { classifyStructuralPlaceholder, resolveKeepOriginal } from "../mapping-suggestion/structural-classification.js";
 
 /**
+ * A composition-level failure to fetch real layer detail (ae_get_composition/
+ * ae_get_layer genuinely failed or returned nothing usable) - see
+ * build-execution-plan.ts's own `detailFailure` lookup, which matches a
+ * manifest.unknownItems entry against this exact pattern before ever
+ * recording it as a scene's build-time unresolvedReasons. Reused here
+ * (rather than duplicated) so both the initial build and every later live
+ * recompute apply the identical genuine-failure test.
+ */
+export const DETAIL_UNAVAILABLE_REASON_PATTERN = /did not return usable layer data/;
+
+/**
+ * True when every one of a zero-mappings scene's OWN build-time reasons is
+ * a purely structural fact (e.g. "no placeholder detected in this
+ * composition" / "composition is nested-only - not a candidate top-level
+ * scene") - never a genuine evidence/inspection FAILURE
+ * (DETAIL_UNAVAILABLE_REASON_PATTERN). A scene like this has nothing a
+ * human mapping decision could ever resolve - the client's own approved AI
+ * plan already says to keep such content unchanged - so it is allowed to
+ * count as resolved, exactly like a structural/keep-original PLACEHOLDER
+ * already does via isMappingResolved below (same existing principle,
+ * extended to the zero-mappings case it never previously reached - live QA
+ * Blocker 3 fix, 2026-09-07). This never fabricates a mapping and never
+ * auto-approves the PLAN: approvalState only ever reaches
+ * READY_FOR_APPROVAL, the exact same state a real, fully-mapped scene
+ * reaches - a human still has to click Approve Scenes/Approve Plan. A
+ * scene where even one reason IS a genuine failure stays unresolved -
+ * "we could not inspect the scene" is never treated as "nothing to map".
+ */
+export function isStructurallyResolvedWithNoMappings(reasons: readonly string[]): boolean {
+  return reasons.every((reason) => !DETAIL_UNAVAILABLE_REASON_PATTERN.test(reason));
+}
+
+/**
  * Mapping-review -> execution-plan propagation fix: a real production bug
  * on test22 proved `unresolvedReasons` was populated ONCE at plan-build
  * time from the manifest (build-execution-plan.ts) and then NEVER
@@ -73,13 +106,17 @@ export function computeMappingsUnresolvedReasons(mappings: readonly PlaceholderM
  * Live-recomputes a scene's `unresolvedReasons` from its CURRENT mapping
  * state. A composition-level-only scene (zero detected mappings - either
  * nested-only or no placeholder detected at all) has nothing a mapping
- * decision could ever resolve, so its build-time reason is preserved
- * unchanged (a new INSPECT_TEMPLATE/manifest change is the only thing
- * that can ever change this, out of scope here).
+ * decision could ever resolve. Its build-time reason is preserved
+ * unchanged UNLESS that reason is purely structural (never a genuine
+ * detail/evidence-inspection failure), in which case it now resolves to
+ * genuinely nothing left unresolved (live QA Blocker 3 fix, 2026-09-07 -
+ * see isStructurallyResolvedWithNoMappings's own doc comment). A new
+ * INSPECT_TEMPLATE/manifest change remains the only thing that can ever
+ * add REAL placeholders/mappings back.
  */
 export function computeSceneUnresolvedReasons(scene: ScenePlanEntry): string[] {
   if (scene.mappings.length === 0) {
-    return [...scene.unresolvedReasons];
+    return isStructurallyResolvedWithNoMappings(scene.unresolvedReasons) ? [] : [...scene.unresolvedReasons];
   }
   return computeMappingsUnresolvedReasons(scene.mappings, scene.instructions);
 }

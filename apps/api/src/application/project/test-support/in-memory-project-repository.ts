@@ -12,6 +12,7 @@ export class InMemoryProjectRepository implements ProjectRepository {
       sourceProjectSha256: project.manifest.sourceProject.sha256,
       manifest: project.manifest,
       brandInputs: null,
+      sourceWorkerId: project.sourceWorkerId ?? null,
       createdAt: now,
       updatedAt: now
     };

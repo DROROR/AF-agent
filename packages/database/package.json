@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/run-migrate.ts"
+    "db:migrate": "tsx src/run-migrate.ts",
+    "db:backfill-source-worker-id": "tsx src/backfill-source-worker-id.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.36.1",

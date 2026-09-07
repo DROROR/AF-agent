@@ -24,7 +24,7 @@ import {
   approveFinalPreview,
   requestFinalPreviewChanges
 } from "../lib/projects-api-client";
-import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
+import { resolveProjectWorker } from "../lib/resolve-project-worker";
 
 /**
  * "Preview" tab (final MVP nav, client-facing UX redesign section H) - the
@@ -104,7 +104,7 @@ export function ProjectPreviewTab(): ReactElement | null {
   // never re-chosen (section 8: worker affinity).
   const candidateWorker = activeSession
     ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === activeSession.assignedWorkerId) ?? null
-    : findDispatchableWorker(dashboardStatus?.workers ?? null, "EXECUTE_FRAME");
+    : resolveProjectWorker(dashboardStatus?.workers ?? null, "EXECUTE_FRAME", project.project.sourceWorkerId);
   const workerReady = activeSession ? candidateWorker !== null && candidateWorker.status === "ONLINE" && candidateWorker.currentJobId === null : candidateWorker !== null;
   const canExecute = nextScenePlanId !== null && workerReady;
   // A session pins a specific worker (worker affinity, section 8) - if that
@@ -283,7 +283,16 @@ function FinalPreviewCard({ projectId, session }: { projectId: string; session: 
   }, [projectId, session.id, refreshKey]);
 
   const isFresh = artifact !== null && artifact.workingProjectSha256 === session.latestWorkingProjectSha256;
-  const worker = findDispatchableWorker(dashboardStatus?.workers ?? null, "CREATE_PREVIEW");
+  // Worker affinity fix (live QA Blocker 1): CREATE_PREVIEW is always
+  // dispatched against an existing session, which already pins a specific
+  // worker (assignedWorkerId, itself chosen against the project's own
+  // source-worker affinity at session-creation time - see
+  // create-execution-session.ts). There is no separate candidate-worker
+  // choice to make here; using anything else (e.g. the generic
+  // findDispatchableWorker heuristic) could pick an ONLINE worker that
+  // dispatch-job.ts would then correctly refuse for not matching the
+  // session.
+  const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "CREATE_PREVIEW", currentSession.assignedWorkerId);
 
   async function handleCreatePreview(): Promise<void> {
     setDispatchMessage(null);

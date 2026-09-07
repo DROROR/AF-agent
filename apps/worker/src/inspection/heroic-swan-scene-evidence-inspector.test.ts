@@ -214,6 +214,35 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.response.previewFailureReason).toBeNull();
   });
 
+  it("live QA Blocker 2 fix: a zero-placeholder scene (layerIndices: []) still reaches a real, independently-verified frame capture - layer evidence and frame capture are genuinely independent", async () => {
+    const previewPath = join(dir, "Text_01_no_placeholders.png");
+    await writeFile(previewPath, Buffer.from([1, 2, 3, 4, 5, 6]));
+    await writeFakeServer(dir, { captureShape: "image", previewFilePath: previewPath });
+
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ layerIndices: [], previewTimestampSeconds: 0 }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layers).toEqual([]);
+    expect(result.response.preview).not.toBeNull();
+    expect(result.response.preview?.path).toBe(previewPath);
+    expect(result.response.preview?.bytes).toBe(6);
+    expect(result.response.previewFailureReason).toBeNull();
+    // Exact composition identity is still verified even with no layers requested.
+    expect(result.response.compositionName).toBe("Text 01");
+  });
+
+  it("live QA Blocker 2 fix: a zero-placeholder scene still reports an honest capture failure (never a fabricated preview) when ae_capture_frame itself fails", async () => {
+    await writeFakeServer(dir, { captureShape: "none" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ layerIndices: [], previewTimestampSeconds: 0 }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layers).toEqual([]);
+    expect(result.response.preview).toBeNull();
+    expect(result.response.previewFailureReason).toMatch(/ae_capture_frame failed/);
+  });
+
   it("fails honestly, without spawning a process, when AE_MCP_PATH is not configured", async () => {
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: undefined });
     const result = await inspector.inspect(baseRequest());

@@ -250,6 +250,7 @@ describe("NewProjectWizard", () => {
           templateId: "t1",
           sourceProjectSha256: "a".repeat(64),
           brandInputs: { logoAssetId: null, brandColors: [], textInstructions: null },
+          sourceWorkerId: "44444444-4444-4444-4444-444444444444",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         }

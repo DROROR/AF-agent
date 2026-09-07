@@ -10,21 +10,36 @@ import { Button } from "./ui/Button";
 import { useLocale } from "./LocaleProvider";
 import type { Tone } from "./StatusBadge";
 
-type CardStatus = "ready" | "needsChoice" | "analyzing" | "generating" | "outdated";
+type CardStatus = "ready" | "needsChoice" | "noChangeNeeded" | "analyzing" | "generating" | "outdated";
 
 const STATUS_TONE: Record<CardStatus, Tone> = {
   ready: "positive",
   needsChoice: "info",
+  noChangeNeeded: "positive",
   analyzing: "neutral",
   generating: "neutral",
   outdated: "negative"
 };
 
+/**
+ * `hasNoMappingsToReview` distinguishes a scene that is resolved because it
+ * genuinely has nothing editable (zero placeholders/mappings - the
+ * approved AI plan's own "keep original" intent, see
+ * compute-scene-unresolved-reasons.ts's isStructurallyResolvedWithNoMappings)
+ * from a scene resolved because a real content decision was actually made.
+ * Both reach approvalState READY_FOR_APPROVAL/APPROVED, but only the first
+ * is a "noChangeNeeded" scene - the second is a genuine "ready" scene with
+ * a real mapping behind it (live QA Blocker 3 fix, 2026-09-07). A scene
+ * still stuck UNREVIEWED because of a genuine evidence/inspection FAILURE
+ * (never cleared by that same fix) still falls through to "needsChoice"
+ * here, unchanged - it is not resolved, so it must not look resolved.
+ */
 function deriveCardStatus(
   hasGenuineReview: boolean,
   previewState: ScenePreviewState,
   isStale: boolean,
-  approvalState: RealScene["scenePlan"]["approvalState"]
+  approvalState: RealScene["scenePlan"]["approvalState"],
+  hasNoMappingsToReview: boolean
 ): CardStatus {
   if (hasGenuineReview) {
     return "needsChoice";
@@ -38,7 +53,10 @@ function deriveCardStatus(
   if (isStale) {
     return "outdated";
   }
-  return approvalState === "READY_FOR_APPROVAL" || approvalState === "APPROVED" ? "ready" : "needsChoice";
+  if (approvalState !== "READY_FOR_APPROVAL" && approvalState !== "APPROVED") {
+    return "needsChoice";
+  }
+  return hasNoMappingsToReview ? "noChangeNeeded" : "ready";
 }
 
 function primaryMapping(realScene: RealScene) {
@@ -143,7 +161,8 @@ export function SceneCard({
   const mapping = primaryMapping(realScene);
   const asset = mapping?.selectedAssetId ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null) : null;
   const hasGenuineReview = pendingSuggestions.length > 0;
-  const status = deriveCardStatus(hasGenuineReview, previewEntry.state, previewEntry.isStale, realScene.scenePlan.approvalState);
+  const hasNoMappingsToReview = realScene.scenePlan.mappings.length === 0;
+  const status = deriveCardStatus(hasGenuineReview, previewEntry.state, previewEntry.isStale, realScene.scenePlan.approvalState, hasNoMappingsToReview);
   const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
 
   return (
@@ -158,16 +177,20 @@ export function SceneCard({
       <dl className="scene-card__facts">
         <div>
           <dt>{t.simpleScenes.screenLabel}</dt>
-          <dd>{asset ? (asset.label ?? asset.originalFilename) : t.simpleScenes.noAssetAssigned}</dd>
+          <dd>{asset ? (asset.label ?? asset.originalFilename) : status === "noChangeNeeded" ? t.simpleScenes.originalContentKept : t.simpleScenes.noAssetAssigned}</dd>
         </div>
         <div>
           <dt>{t.simpleScenes.textLabel}</dt>
-          <dd>{mapping?.text ?? t.simpleScenes.noTextLabel}</dd>
+          <dd>{mapping?.text ?? (status === "noChangeNeeded" ? t.simpleScenes.originalTextPreserved : t.simpleScenes.noTextLabel)}</dd>
         </div>
         <div>
           <dt>{t.simpleScenes.durationLabel}</dt>
           <dd>
-            {realScene.scenePlan.finalDuration !== null ? t.simpleScenes.durationSeconds(realScene.scenePlan.finalDuration) : t.simpleScenes.durationUnset}
+            {realScene.scenePlan.finalDuration !== null
+              ? t.simpleScenes.durationSeconds(realScene.scenePlan.finalDuration)
+              : status === "noChangeNeeded"
+                ? t.simpleScenes.originalTimingPreserved
+                : t.simpleScenes.durationUnset}
           </dd>
         </div>
       </dl>

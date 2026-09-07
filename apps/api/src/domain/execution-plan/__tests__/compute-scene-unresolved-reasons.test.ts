@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
-import { computeSceneUnresolvedReasons, isMappingResolved, mappingHasContentDecision } from "../compute-scene-unresolved-reasons.js";
+import {
+  computeSceneUnresolvedReasons,
+  isMappingResolved,
+  isStructurallyResolvedWithNoMappings,
+  mappingHasContentDecision
+} from "../compute-scene-unresolved-reasons.js";
 
 const NOW = "2026-08-26T00:00:00.000Z";
 
@@ -135,8 +140,53 @@ describe("computeSceneUnresolvedReasons - the real propagation fix", () => {
     expect(computeSceneUnresolvedReasons(s)[0]).toContain("1 placeholder(s)");
   });
 
-  it("a composition-level-only scene (zero mappings) preserves its build-time structural reason unchanged - no mapping decision can ever resolve it", () => {
+  it("live QA Blocker 3 fix: a composition-level-only scene (zero mappings) with a purely structural reason resolves to nothing left unresolved - no mapping decision can ever resolve it, and none is fabricated (mappings stays [])", () => {
     const s = scene({ mappings: [], unresolvedReasons: ["no placeholder detected in this composition"] });
-    expect(computeSceneUnresolvedReasons(s)).toEqual(["no placeholder detected in this composition"]);
+    expect(computeSceneUnresolvedReasons(s)).toEqual([]);
+    expect(s.mappings).toEqual([]);
+  });
+
+  it("live QA Blocker 3 fix: the same applies to a nested-only composition's own structural reason", () => {
+    const s = scene({ mappings: [], unresolvedReasons: ["composition is nested-only - not a candidate top-level scene"] });
+    expect(computeSceneUnresolvedReasons(s)).toEqual([]);
+  });
+
+  it("live QA Blocker 3 fail-closed guard: a genuine detail-fetch failure (zero mappings) stays unresolved - 'we could not inspect the scene' is never treated as 'nothing to map'", () => {
+    const s = scene({
+      mappings: [],
+      unresolvedReasons: ["ae_get_composition did not return usable layer data for this composition - only composition-level facts (name/dimensions/duration) are confirmed"]
+    });
+    expect(computeSceneUnresolvedReasons(s)).toEqual([
+      "ae_get_composition did not return usable layer data for this composition - only composition-level facts (name/dimensions/duration) are confirmed"
+    ]);
+  });
+});
+
+describe("isStructurallyResolvedWithNoMappings", () => {
+  it("is true for the generic zero-placeholder reason", () => {
+    expect(isStructurallyResolvedWithNoMappings(["no placeholder detected in this composition"])).toBe(true);
+  });
+
+  it("is true for the nested-only reason", () => {
+    expect(isStructurallyResolvedWithNoMappings(["composition is nested-only - not a candidate top-level scene"])).toBe(true);
+  });
+
+  it("is false for a genuine detail-fetch failure reason - fail-closed", () => {
+    expect(
+      isStructurallyResolvedWithNoMappings(["ae_get_composition did not return usable layer data for this composition"])
+    ).toBe(false);
+  });
+
+  it("is false if even one of several reasons is a genuine failure", () => {
+    expect(
+      isStructurallyResolvedWithNoMappings([
+        "no placeholder detected in this composition",
+        "ae_get_composition did not return usable layer data for this composition"
+      ])
+    ).toBe(false);
+  });
+
+  it("is (vacuously) true for an already-empty reasons list", () => {
+    expect(isStructurallyResolvedWithNoMappings([])).toBe(true);
   });
 });

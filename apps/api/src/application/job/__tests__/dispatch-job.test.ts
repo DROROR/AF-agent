@@ -395,6 +395,103 @@ describe("dispatchJob", () => {
   });
 });
 
+describe("dispatchJob - project worker affinity (live QA Blocker 1)", () => {
+  async function setupHealthyWorkerWithCapability(workerRepository: InMemoryWorkerRepository, name: string) {
+    const workerId = randomUUID();
+    await workerRepository.create({ id: workerId, name, tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] }, FIXED_NOW);
+    await workerRepository.updateHeartbeat(workerId, { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null }, FIXED_NOW);
+    return workerId;
+  }
+
+  it("A: dispatches INSPECT_SCENE_EVIDENCE to the project's own sourceWorkerId even though a second healthy/ONLINE/capable Worker is also registered", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    // Worker A registered first (would win any oldest-first heuristic too),
+    // but the real assertion here is affinity, not registration order.
+    const workerA = await setupHealthyWorkerWithCapability(workerRepository, "Worker A (inspected this project)");
+    await setupHealthyWorkerWithCapability(workerRepository, "Worker B (unrelated, also healthy)");
+    const project = await createProject(
+      { projectRepository, now: () => FIXED_NOW },
+      { name: "P", manifest: manifestWithTextPlaceholder(), sourceWorkerId: workerA }
+    );
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "DRAFT",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: null,
+        approvedBy: null
+      },
+      FIXED_NOW
+    );
+
+    const result = await dispatchJob(
+      deps(jobRepository, workerRepository, FIXED_NOW, projectRepository, executionPlanRepository),
+      { operation: "INSPECT_SCENE_EVIDENCE", workerId: workerA, projectId: project.projectId, scenePlanId: "scene-1" }
+    );
+    expect(result.workerId).toBe(workerA);
+  });
+
+  it("B: rejects INSPECT_SCENE_EVIDENCE dispatched to a different, itself perfectly healthy Worker than the project's sourceWorkerId - never silently uses it", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const workerA = await setupHealthyWorkerWithCapability(workerRepository, "Worker A (inspected this project)");
+    const workerB = await setupHealthyWorkerWithCapability(workerRepository, "Worker B (healthy, but never inspected this project)");
+    const project = await createProject(
+      { projectRepository, now: () => FIXED_NOW },
+      { name: "P", manifest: manifestWithTextPlaceholder(), sourceWorkerId: workerA }
+    );
+
+    await expect(
+      dispatchJob(deps(jobRepository, workerRepository, FIXED_NOW, projectRepository), {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId: workerB,
+        projectId: project.projectId,
+        scenePlanId: "scene-1"
+      })
+    ).rejects.toThrow(PreconditionNotMetError);
+
+    // Never queued a job on Worker B (or anywhere) as a fallback.
+    expect(await jobRepository.hasNonTerminalJobForOperation(workerB, "INSPECT_SCENE_EVIDENCE")).toBe(false);
+  });
+
+  it("preserves today's unrestricted behavior for a project with no recorded sourceWorkerId (null - pre-migration or a real client project)", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const workerB = await setupHealthyWorkerWithCapability(workerRepository, "Worker B");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "DRAFT",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [approvedTextScene()],
+        approvedAt: null,
+        approvedBy: null
+      },
+      FIXED_NOW
+    );
+
+    const result = await dispatchJob(
+      deps(jobRepository, workerRepository, FIXED_NOW, projectRepository, executionPlanRepository),
+      { operation: "INSPECT_SCENE_EVIDENCE", workerId: workerB, projectId: project.projectId, scenePlanId: "scene-1" }
+    );
+    expect(result.workerId).toBe(workerB);
+  });
+});
+
 function manifestWithTextPlaceholder(): TemplateManifest {
   return {
     schemaVersion: SCHEMA_VERSION,

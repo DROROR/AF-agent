@@ -19,7 +19,8 @@ export async function createProject(deps: CreateProjectDeps, request: CreateProj
     {
       id: randomUUID(),
       name: request.name,
-      manifest: request.manifest
+      manifest: request.manifest,
+      sourceWorkerId: request.sourceWorkerId ?? null
     },
     deps.now()
   );

@@ -107,7 +107,7 @@ export function SimpleScenesView(): ReactElement {
 
   const projectId = project?.project.projectId ?? "";
   const realScenes = project && plan ? groupIntoRealScenes(project.manifest, plan.plan.scenePlans) : [];
-  const previewQueue = useScenePreviewQueue(projectId, realScenes, dashboardStatus?.workers ?? null);
+  const previewQueue = useScenePreviewQueue(projectId, realScenes, dashboardStatus?.workers ?? null, project?.project.sourceWorkerId ?? null);
 
   if (!project) {
     return <Skeleton height="1.5rem" />;

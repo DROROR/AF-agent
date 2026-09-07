@@ -19,6 +19,7 @@ import { HelpTooltip } from "./ui/HelpTooltip";
 import { useLocale } from "./LocaleProvider";
 import { dispatchJob, fetchCurrentExecutionSession, renderArtifactFileUrl } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
+import { resolveProjectWorker } from "../lib/resolve-project-worker";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -222,8 +223,12 @@ function VariantConfigCard({
   // (worker affinity, section 8) - never re-chosen the way EXECUTE_FRAME's
   // very first dispatch is.
   const renderWorker = session ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === session.assignedWorkerId) ?? null : null;
-  const renderWorkerOnline = renderWorker !== null && renderWorker.status === "ONLINE" && renderWorker.currentJobId === null;
-  const canRender = currentConfig !== null && !isStale && renderReady && renderWorkerOnline;
+  // Selection precondition consistency (live QA Blocker 1, section 5): the
+  // actual dispatch candidate is health-gated (AE/MCP ONLINE + capability),
+  // not just "status ONLINE and idle" - resolveProjectWorker fails closed
+  // to null rather than ever substituting a different worker.
+  const dispatchableRenderWorker = resolveProjectWorker(dashboardStatus?.workers ?? null, "RENDER", session?.assignedWorkerId ?? null);
+  const canRender = currentConfig !== null && !isStale && renderReady && dispatchableRenderWorker !== null;
   const isKnownWorkerOffline = renderWorker !== null && renderWorker.status !== "ONLINE";
 
   async function handleSave(): Promise<void> {
@@ -241,7 +246,7 @@ function VariantConfigCard({
   }
 
   async function handleRender(): Promise<void> {
-    if (!renderWorker || !session) {
+    if (!dispatchableRenderWorker || !session) {
       return;
     }
     setIsDispatching(true);
@@ -249,7 +254,7 @@ function VariantConfigCard({
     setDispatchSuccess(null);
     const result = await dispatchJob({
       operation: "RENDER",
-      workerId: renderWorker.workerId,
+      workerId: dispatchableRenderWorker.workerId,
       projectId,
       executionSessionId: session.id,
       variant
@@ -356,7 +361,7 @@ function VariantConfigCard({
 
           {currentConfig && !isStale && !renderReady ? (
             <EmptyState title={t.projectWorkspace.renderSettings.sessionNotReadyTitle} description={t.projectWorkspace.renderSettings.sessionNotReadyDescription} />
-          ) : currentConfig && !isStale && renderReady && !renderWorkerOnline ? (
+          ) : currentConfig && !isStale && renderReady && !dispatchableRenderWorker ? (
             isKnownWorkerOffline ? (
               <EmptyState title={t.jobDispatch.workerOfflineTitle} description={t.jobDispatch.workerOfflineDescription} />
             ) : (

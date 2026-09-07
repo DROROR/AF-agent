@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SceneEvidencePreviewDto, WorkerDto } from "@dyo/schemas";
 import { dispatchJob, fetchSceneEvidencePreviewStatus } from "./projects-api-client";
-import { findDispatchableWorker } from "./find-dispatchable-worker";
+import { resolveProjectWorker } from "./resolve-project-worker";
 import type { RealScene } from "./real-scene-grouping";
 
 /**
@@ -53,7 +53,12 @@ function sleep(ms: number): Promise<void> {
  * place). A read (status check) is cheap and safe to run for every scene
  * up front; only a genuine generate/dispatch is ever queued.
  */
-export function useScenePreviewQueue(projectId: string, realScenes: RealScene[], workers: WorkerDto[] | null): UseScenePreviewQueueResult {
+export function useScenePreviewQueue(
+  projectId: string,
+  realScenes: RealScene[],
+  workers: WorkerDto[] | null,
+  sourceWorkerId: string | null
+): UseScenePreviewQueueResult {
   const [entries, setEntries] = useState<Map<string, ScenePreviewEntry>>(new Map());
   const entriesRef = useRef(entries);
   const workersRef = useRef(workers);
@@ -79,7 +84,7 @@ export function useScenePreviewQueue(projectId: string, realScenes: RealScene[],
 
   const dispatchAndPoll = useCallback(
     async (scenePlanId: string, runId: number): Promise<void> => {
-      const worker = findDispatchableWorker(workersRef.current, "INSPECT_SCENE_EVIDENCE");
+      const worker = resolveProjectWorker(workersRef.current, "INSPECT_SCENE_EVIDENCE", sourceWorkerId);
       if (!worker) {
         updateEntry(scenePlanId, { state: "idle", errorMessage: "No computer is online to generate this preview right now." });
         return;
@@ -107,7 +112,7 @@ export function useScenePreviewQueue(projectId: string, realScenes: RealScene[],
         errorMessage: "Preview is taking longer than expected. Please try again."
       });
     },
-    [projectId, updateEntry]
+    [projectId, sourceWorkerId, updateEntry]
   );
 
   const drainQueue = useCallback(

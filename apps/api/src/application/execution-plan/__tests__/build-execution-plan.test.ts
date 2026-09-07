@@ -92,7 +92,38 @@ describe("buildScenePlans", () => {
     const scenePlans = buildScenePlans(syntheticManifest(), fixedNow);
     const nested = scenePlans.find((s) => s.manifestCompositionId === "comp-nested");
     expect(nested?.use).toBe(false);
-    expect(nested?.unresolvedReasons).toEqual(["composition is nested-only - not a candidate top-level scene"]);
+  });
+
+  it("live QA Blocker 3 fix: a nested-only composition's own structural reason is never a genuine failure, so it resolves to nothing left unresolved and READY_FOR_APPROVAL - never fabricating a mapping (mappings stays [])", () => {
+    const scenePlans = buildScenePlans(syntheticManifest(), fixedNow);
+    const nested = scenePlans.find((s) => s.manifestCompositionId === "comp-nested");
+    expect(nested?.mappings).toEqual([]);
+    expect(nested?.unresolvedReasons).toEqual([]);
+    expect(nested?.approvalState).toBe("READY_FOR_APPROVAL");
+  });
+
+  it("live QA Blocker 3 fix: a composition with a manifest.scenes entry but genuinely zero placeholders (no matching unknownItems failure) resolves to nothing left unresolved and READY_FOR_APPROVAL", () => {
+    const manifest = syntheticManifest({
+      compositions: [
+        { compositionId: "comp-empty", aeProjectItemIndex: 9, name: "Scene Empty", widthPx: 1920, heightPx: 1080, durationSeconds: 4, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+      ],
+      scenes: [{ sceneId: "scene-empty", displayName: null, compositionId: "comp-empty", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 4, placeholders: [] }],
+      unknownItems: []
+    });
+    const scenePlans = buildScenePlans(manifest, fixedNow);
+    const sceneEmpty = scenePlans.find((s) => s.manifestCompositionId === "comp-empty");
+    expect(sceneEmpty?.mappings).toEqual([]);
+    expect(sceneEmpty?.unresolvedReasons).toEqual([]);
+    expect(sceneEmpty?.approvalState).toBe("READY_FOR_APPROVAL");
+  });
+
+  it("live QA Blocker 3 fail-closed guard: a genuine detail-fetch FAILURE (matches DETAIL_UNAVAILABLE_REASON_PATTERN via manifest.unknownItems) stays unresolved and UNREVIEWED - never treated as 'nothing to map'", () => {
+    const scenePlans = buildScenePlans(syntheticManifest(), fixedNow);
+    const sceneB = scenePlans.find((s) => s.manifestCompositionId === "comp-no-detail");
+    expect(sceneB?.unresolvedReasons).toEqual([
+      "ae_get_composition did not return usable layer data for this composition - only composition-level facts (name/dimensions/duration) are confirmed"
+    ]);
+    expect(sceneB?.approvalState).toBe("UNREVIEWED");
   });
 
   it("defaults a real candidate scene to included (use: true)", () => {
@@ -158,9 +189,12 @@ describe("buildScenePlans", () => {
     expect(scenePlansA[0]?.id).not.toBe(scenePlansB[0]?.id);
   });
 
-  it("initializes every scene as UNREVIEWED - no scene is pre-approved by the deterministic builder", () => {
+  it("initializes a scene as UNREVIEWED whenever it genuinely still needs a human decision (a real, unclassified placeholder, or a genuine detail-fetch failure) - never pre-approved by the deterministic builder", () => {
     const scenePlans = buildScenePlans(syntheticManifest(), fixedNow);
-    expect(scenePlans.every((s) => s.approvalState === "UNREVIEWED")).toBe(true);
+    const sceneA = scenePlans.find((s) => s.manifestCompositionId === "comp-detailed");
+    const sceneB = scenePlans.find((s) => s.manifestCompositionId === "comp-no-detail");
+    expect(sceneA?.approvalState).toBe("UNREVIEWED");
+    expect(sceneB?.approvalState).toBe("UNREVIEWED");
   });
 
   it("never sets finalDuration - always null until a human sets it", () => {

@@ -1,8 +1,6 @@
 import type { PlaceholderMapping, Placeholder, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { deterministicId } from "../../domain/execution-plan/deterministic-id.js";
-import { computeMappingsUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
-
-const DETAIL_UNAVAILABLE_REASON_PATTERN = /did not return usable layer data/;
+import { computeMappingsUnresolvedReasons, DETAIL_UNAVAILABLE_REASON_PATTERN } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
 
 function buildMapping(placeholder: Placeholder, timestamp: string): PlaceholderMapping {
   return {
@@ -62,12 +60,22 @@ export function buildScenePlans(manifest: TemplateManifest, now: () => Date = ()
     // that couldn't possibly exist yet.
     let unresolvedReasons: string[];
     if (!scene) {
-      unresolvedReasons = ["composition is nested-only - not a candidate top-level scene"];
+      // "nested-only" is a structural fact only, never a genuine inspection
+      // failure - resolves to nothing left unresolved (live QA Blocker 3
+      // fix, 2026-09-07). Never fabricates a mapping: `mappings` stays `[]`
+      // either way; this only changes whether the scene still needs a
+      // human decision.
+      unresolvedReasons = [];
     } else if (placeholders.length === 0) {
       const detailFailure = manifest.unknownItems.find(
         (u) => u.context === composition.name && DETAIL_UNAVAILABLE_REASON_PATTERN.test(u.reason)
       );
-      unresolvedReasons = [detailFailure ? detailFailure.reason : "no placeholder detected in this composition"];
+      // A genuine detail-fetch failure stays unresolved, fail-closed,
+      // unchanged. A composition that genuinely has zero placeholders (no
+      // failure) now resolves - reusing the same structural/keep-original
+      // principle isMappingResolved already applies per-mapping, extended
+      // here to the zero-mappings case (live QA Blocker 3 fix, 2026-09-07).
+      unresolvedReasons = detailFailure ? [detailFailure.reason] : [];
     } else {
       unresolvedReasons = computeMappingsUnresolvedReasons(mappings, null);
     }

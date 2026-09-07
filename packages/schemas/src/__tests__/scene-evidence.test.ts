@@ -64,8 +64,9 @@ describe("sceneEvidenceRequestSchema", () => {
     expect(() => sceneEvidenceRequestSchema.parse(validRequest())).not.toThrow();
   });
 
-  it("rejects a request with zero layerIndices", () => {
-    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ layerIndices: [] }))).toThrow();
+  it("accepts a request with zero layerIndices - a composition with no editable placeholders can still get a real frame capture (live QA Blocker 2 fix)", () => {
+    const parsed = sceneEvidenceRequestSchema.parse(validRequest({ layerIndices: [] }));
+    expect(parsed.layerIndices).toEqual([]);
   });
 
   it("rejects a request with more than 20 layerIndices - bounded result", () => {

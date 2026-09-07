@@ -1,4 +1,4 @@
-import type { DispatchJobRequest, DispatchJobResponse } from "@dyo/schemas";
+import { AE_MCP_DEPENDENT_CAPABILITIES, type DispatchJobRequest, type DispatchJobResponse } from "@dyo/schemas";
 import { isHeartbeatStale } from "../../domain/worker/rules.js";
 import { canClaimAnotherJob } from "../../domain/job/rules.js";
 import type { JobRepository } from "../../domain/job/types.js";
@@ -34,16 +34,6 @@ export interface DispatchJobDeps {
   now: () => Date;
   staleAfterMs: number;
 }
-
-/** Every operation whose worker execution touches ae-mcp/AE at all - never dispatched unless the worker's most recent heartbeat confirmed both ONLINE. CHECK_HEALTH is deliberately exempt (its whole purpose is diagnosing a disagreement in that exact status). */
-const AE_MCP_DEPENDENT_OPERATIONS = new Set<DispatchJobRequest["operation"]>([
-  "INSPECT_TEMPLATE",
-  "INSPECT_SCENE_EVIDENCE",
-  "INSPECT_RENDER_CAPABILITIES",
-  "EXECUTE_FRAME",
-  "CREATE_PREVIEW",
-  "RENDER"
-]);
 
 /**
  * The one production-safe entry point that turns a dashboard operator's
@@ -87,7 +77,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
   if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, deps.staleAfterMs)) {
     throw new WorkerOfflineError(worker.id);
   }
-  if (AE_MCP_DEPENDENT_OPERATIONS.has(request.operation)) {
+  if (AE_MCP_DEPENDENT_CAPABILITIES.has(request.operation)) {
     if (worker.aeStatus !== "ONLINE") {
       throw new PreconditionNotMetError(
         `Worker ${worker.id} reports After Effects status "${worker.aeStatus}", not ONLINE`
@@ -119,6 +109,21 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     !project
   ) {
     throw new ProjectNotFoundError(request.projectId);
+  }
+
+  // Worker affinity fix (live QA Blocker 1): a project's AE-dependent jobs
+  // must run on the exact real Worker that inspected its source AEP
+  // (project.sourceWorkerId), never silently on a different ONLINE/capable
+  // Worker. EXECUTE_FRAME/CREATE_PREVIEW/RENDER are already transitively
+  // covered (their execution session was only ever created against this
+  // same Worker - see create-execution-session.ts's own check), but this
+  // is checked directly here too as the one place INSPECT_SCENE_EVIDENCE
+  // dispatches without an execution session. Null sourceWorkerId (no
+  // recorded provenance) keeps today's unrestricted behavior unchanged.
+  if (project && project.sourceWorkerId !== null && worker.id !== project.sourceWorkerId) {
+    throw new PreconditionNotMetError(
+      `Project ${project.id} was inspected by Worker ${project.sourceWorkerId} - Worker ${worker.id} cannot run ${request.operation} for it`
+    );
   }
 
   // Duplicate-dispatch check first (a more specific signal than plain

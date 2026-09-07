@@ -8,6 +8,8 @@ export interface Project {
   manifest: TemplateManifest;
   /** Null until a human sets it - the application layer maps this to DEFAULT_BRAND_INPUTS at the DTO boundary rather than every repository having to know that default. */
   brandInputs: ProjectBrandInputs | null;
+  /** Worker affinity fix (live QA Blocker 1) - see packages/database/src/schema.ts's own `sourceWorkerId` doc comment. Null for a project with no recorded provenance. */
+  sourceWorkerId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -16,6 +18,8 @@ export interface NewProject {
   id: string;
   name: string;
   manifest: TemplateManifest;
+  /** Real provenance from the request that created this project - see create-project.ts. Never verified against a live Worker here; that happens at dispatch time (create-execution-session.ts / dispatch-job.ts). Optional (defaults to null) so existing test/fixture callers that predate this field don't all need updating. */
+  sourceWorkerId?: string | null;
 }
 
 /**

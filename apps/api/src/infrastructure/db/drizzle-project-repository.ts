@@ -10,6 +10,7 @@ function toDomain(row: ProjectRow): Project {
     sourceProjectSha256: row.sourceProjectSha256,
     manifest: row.manifest,
     brandInputs: row.brandInputs ?? null,
+    sourceWorkerId: row.sourceWorkerId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -31,6 +32,7 @@ export class DrizzleProjectRepository implements ProjectRepository {
         sourceProjectSha256: project.manifest.sourceProject.sha256,
         manifest: project.manifest,
         brandInputs: null,
+        sourceWorkerId: project.sourceWorkerId ?? null,
         createdAt: now,
         updatedAt: now
       })

@@ -46,7 +46,8 @@ export const sceneEvidenceRequestSchema = z
     aeProjectItemIndex: z.number().int().positive(),
     /** The composition's expected real AE name (as last observed) - the inspector confirms the resolved composition's own name matches this before reporting evidence, so a stale/wrong aeProjectItemIndex is never silently reported as fact about the wrong composition. */
     compositionName: z.string().min(1),
-    layerIndices: z.array(z.number().int().positive()).min(1).max(MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST),
+    /** Empty when the composition has no editable placeholders (or none were classified) - a real representative frame can still be captured via previewTimestampSeconds below regardless (live QA Blocker 2 fix, 2026-09-07; see resolve-inspect-scene-evidence-dispatch.ts's own doc comment). Backward-compatible widening: every request that previously required at least one index remains valid. */
+    layerIndices: z.array(z.number().int().positive()).max(MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST),
     /** When set, captures exactly one read-only preview frame at this timestamp via ae_capture_frame. Optional: evidence can be gathered without a preview. */
     previewTimestampSeconds: z.number().nonnegative().nullable().default(null)
   })

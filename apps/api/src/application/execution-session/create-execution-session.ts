@@ -40,6 +40,20 @@ export async function createExecutionSession(deps: CreateExecutionSessionDeps, p
     throw new ProjectNotFoundError(projectId);
   }
 
+  // Worker affinity fix (live QA Blocker 1): this project's own AEP was
+  // inspected by a specific real Worker (project.sourceWorkerId) - every
+  // AE-dependent job for it, starting here, must run on that exact Worker.
+  // Fail closed: never silently substitute a different (even ONLINE,
+  // capable) Worker just because the caller asked for one. Null means no
+  // provenance was ever recorded (a pre-migration project, or one genuinely
+  // created without it) - such a project keeps today's unrestricted
+  // behavior.
+  if (project.sourceWorkerId !== null && workerId !== project.sourceWorkerId) {
+    throw new PreconditionNotMetError(
+      `Project ${projectId} was inspected by Worker ${project.sourceWorkerId} - Worker ${workerId} cannot start an execution session for it`
+    );
+  }
+
   const plan = await deps.executionPlanRepository.findCurrentByProjectId(projectId);
   if (!plan) {
     throw new ExecutionPlanNotFoundError(projectId);

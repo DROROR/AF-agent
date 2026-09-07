@@ -7,7 +7,7 @@ import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { dispatchJob } from "../lib/projects-api-client";
-import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
+import { resolveProjectWorker } from "../lib/resolve-project-worker";
 import { isSafeToBulkAccept } from "../lib/safe-bulk-accept";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -120,7 +120,7 @@ export function MappingAssistantPanel(): ReactElement | null {
   async function handleImproveAccuracy(scenePlanId: string): Promise<void> {
     setImprovingSceneId(scenePlanId);
     setImproveMessage(null);
-    const worker = findDispatchableWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE");
+    const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", project?.project.sourceWorkerId ?? null);
     if (!worker) {
       setImprovingSceneId(null);
       setImproveMessage({ sceneId: scenePlanId, text: t.mappingAssistant.editingComputerOffline, isError: true });

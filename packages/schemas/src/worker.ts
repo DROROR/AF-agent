@@ -85,6 +85,28 @@ export const WORKER_CAPABILITIES = [
 export type WorkerCapability = (typeof WORKER_CAPABILITIES)[number];
 export const workerCapabilitySchema = z.enum(WORKER_CAPABILITIES);
 
+/**
+ * Every capability whose real execution touches ae-mcp/AE at all - the
+ * single shared source of truth for "this dispatch/selection needs the
+ * Worker's AE and MCP to both be ONLINE right now", reused by BOTH
+ * apps/api/src/application/job/dispatch-job.ts's own server-side
+ * precondition gate (which used to keep a private, duplicate copy of this
+ * exact list) and apps/web/src/lib/find-dispatchable-worker.ts's
+ * client-side candidate selection (live QA Blocker 1 fix, section 5 -
+ * "selection precondition consistency": a worker the browser calls
+ * dispatchable must not be one dispatch-job.ts immediately refuses).
+ * CHECK_HEALTH is deliberately exempt - its whole purpose is diagnosing a
+ * disagreement in that exact status.
+ */
+export const AE_MCP_DEPENDENT_CAPABILITIES = new Set<WorkerCapability>([
+  "INSPECT_TEMPLATE",
+  "INSPECT_SCENE_EVIDENCE",
+  "INSPECT_RENDER_CAPABILITIES",
+  "EXECUTE_FRAME",
+  "CREATE_PREVIEW",
+  "RENDER"
+]);
+
 export const registerWorkerRequestSchema = z.object({
   name: z.string().trim().min(1).max(200),
   maxConcurrency: z.number().int().positive().max(64).default(1),

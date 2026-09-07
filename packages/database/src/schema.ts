@@ -227,6 +227,24 @@ export const projects = pgTable("projects", {
   manifest: jsonb("manifest").notNull().$type<TemplateManifest>(),
   /** Client's own brand inputs (logo asset reference, colors, text instructions) - null for a project that hasn't set any yet; the application layer maps null to DEFAULT_BRAND_INPUTS rather than requiring a DB-level jsonb default. Never DYO's own permanent brand rules (see project.ts's own doc comment). */
   brandInputs: jsonb("brand_inputs").$type<ProjectBrandInputs>(),
+  /**
+   * Worker affinity fix (live QA Blocker 1, 2026-09-07) - the real Worker
+   * whose successful INSPECT_TEMPLATE dispatch produced this project's own
+   * manifest (real provenance, threaded through from create-project.ts's
+   * own request - never a heuristic, never a hostname/date guess). Null
+   * for a project created before this column existed, or if that
+   * provenance was ever genuinely unavailable - such a project falls back
+   * to the existing generic dispatchable-worker selection, unchanged.
+   * When set, every AE-dependent project-scoped dispatch (INSPECT_SCENE_EVIDENCE
+   * directly, EXECUTE_FRAME/CREATE_PREVIEW/RENDER transitively via the one
+   * Worker an execution session ever pins - see create-execution-session.ts)
+   * is required to use exactly this Worker, and fails closed - never
+   * silently substitutes a different one - when it is unavailable.
+   * ON DELETE SET NULL: deleting the Worker row must never delete the
+   * project; it just loses its recorded affinity, the same fail-open-to-
+   * "no affinity yet" state a pre-migration project already has.
+   */
+  sourceWorkerId: uuid("source_worker_id").references(() => workers.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

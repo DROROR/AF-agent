@@ -94,7 +94,21 @@ describe("MappingAssistantPanel - Improve AI accuracy", () => {
           body: {
             api: "ok",
             database: "ok",
-            workers: [{ workerId: "11111111-1111-1111-1111-111111111111", name: "Client PC", status: "ONLINE", aeStatus: "ONLINE", mcpStatus: "ONLINE", capabilities: ["INSPECT_SCENE_EVIDENCE"], currentJobId: null, maxConcurrency: 1, lastHeartbeatAt: new Date().toISOString() }]
+            workers: [
+              {
+                workerId: "11111111-1111-1111-1111-111111111111",
+                name: "Client PC",
+                status: "ONLINE",
+                aeStatus: "ONLINE",
+                mcpStatus: "ONLINE",
+                aeAvailability: "ONLINE",
+                mcpAvailability: "ONLINE",
+                capabilities: ["INSPECT_SCENE_EVIDENCE"],
+                currentJobId: null,
+                maxConcurrency: 1,
+                lastHeartbeatAt: new Date().toISOString()
+              }
+            ]
           }
         },
         "/api/jobs": {

@@ -798,6 +798,7 @@ export const he: Dictionary = {
     status: {
       ready: "מוכן",
       needsChoice: "דורש את בחירתכם",
+      noChangeNeeded: "לא נדרשת התאמת תוכן",
       analyzing: "מנתח…",
       generating: "התצוגה המקדימה נוצרת…",
       outdated: "התצוגה המקדימה לא עדכנית"
@@ -809,6 +810,9 @@ export const he: Dictionary = {
     durationSeconds: (seconds: number): string => `${seconds.toFixed(1)} שניות`,
     durationUnset: "עדיין לא הוגדר",
     noAssetAssigned: "עדיין לא הוקצה נכס",
+    originalContentKept: "התוכן המקורי נשמר",
+    originalTextPreserved: "הטקסט המקורי נשמר",
+    originalTimingPreserved: "התזמון המקורי נשמר",
     previewSceneAction: "תצוגה מקדימה של הסצנה",
     generatingPreviewAction: "יוצר…",
     regeneratePreviewAction: "יצירת תצוגה מקדימה מחדש",

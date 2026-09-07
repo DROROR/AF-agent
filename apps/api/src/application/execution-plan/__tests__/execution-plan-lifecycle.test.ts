@@ -76,10 +76,25 @@ function manifest(sha256 = "a".repeat(64)): TemplateManifest {
   };
 }
 
-/** No placeholders at all - build-execution-plan.ts's real logic leaves this scene's unresolvedReasons non-empty, matching the real White App Promo plan's current state (every scene still unresolved). */
+/**
+ * A real, undecided placeholder (classification "unknown" - never
+ * confidently resolved to a known type) - build-execution-plan.ts's real
+ * logic leaves this scene's unresolvedReasons non-empty, since a human
+ * genuinely still has to decide what to do with it. Deliberately NOT a
+ * zero-placeholder scene: live QA Blocker 3 fix (2026-09-07) correctly
+ * resolves that case now (see compute-scene-unresolved-reasons.ts's own
+ * isStructurallyResolvedWithNoMappings) - this fixture exists specifically
+ * to prove a GENUINE pending decision still blocks approval, unchanged.
+ */
 function unresolvedManifest(sha256 = "a".repeat(64)): TemplateManifest {
   const base = manifest(sha256);
-  return { ...base, scenes: base.scenes.map((scene) => ({ ...scene, placeholders: [] })) };
+  return {
+    ...base,
+    scenes: base.scenes.map((scene) => ({
+      ...scene,
+      placeholders: scene.placeholders.map((placeholder) => ({ ...placeholder, placeholderType: "unknown" as const, editable: false }))
+    }))
+  };
 }
 
 async function setup(manifestForProject: TemplateManifest = manifest()) {

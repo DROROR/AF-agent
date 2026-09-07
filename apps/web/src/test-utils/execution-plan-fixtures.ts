@@ -26,15 +26,17 @@ export function manifestFixture() {
   };
 }
 
-export function projectDtoFixture() {
+export function projectDtoFixture(overrides: Record<string, unknown> = {}) {
   return {
     projectId: PROJECT_ID,
     name: "White App Promo",
     templateId: "tmpl-1",
     sourceProjectSha256: SOURCE_SHA,
     brandInputs: { logoAssetId: null, brandColors: [], textInstructions: null },
+    sourceWorkerId: null,
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    ...overrides
   };
 }
 

@@ -158,10 +158,25 @@ async function createProjectViaApi(manifestOverride: TemplateManifest = manifest
   return response.json().projectId;
 }
 
-/** No placeholders at all - build-execution-plan.ts's real logic leaves this scene's unresolvedReasons non-empty, matching the real White App Promo plan's current state. */
+/**
+ * A real, undecided placeholder (classification "unknown") - a human
+ * genuinely still has to decide what to do with it, so build-execution-
+ * plan.ts's real logic leaves this scene's unresolvedReasons non-empty.
+ * Deliberately NOT a zero-placeholder scene: live QA Blocker 3 fix
+ * (2026-09-07) correctly resolves that case now (see
+ * compute-scene-unresolved-reasons.ts's own
+ * isStructurallyResolvedWithNoMappings) - this fixture exists specifically
+ * to prove a GENUINE pending decision still blocks approval, unchanged.
+ */
 function unresolvedManifest(): TemplateManifest {
   const base = manifest();
-  return { ...base, scenes: base.scenes.map((scene) => ({ ...scene, placeholders: [] })) };
+  return {
+    ...base,
+    scenes: base.scenes.map((scene) => ({
+      ...scene,
+      placeholders: scene.placeholders.map((placeholder) => ({ ...placeholder, placeholderType: "unknown" as const, editable: false }))
+    }))
+  };
 }
 
 describe("POST /api/projects", () => {

@@ -148,7 +148,12 @@ export function NewProjectWizard(): ReactElement {
     if (!inspectionResult) return;
     setIsCreatingProject(true);
     setCreateProjectError(null);
-    const result = await createProject({ name: name.trim(), manifest: inspectionResult.manifest });
+    // Worker affinity fix (live QA Blocker 1): job.workerId is the real
+    // Worker whose successful INSPECT_TEMPLATE dispatch produced this exact
+    // inspectionResult (set from the dispatch response itself, see
+    // handleInspect above) - never the raw `workerId` dropdown state, which
+    // could have been changed since that dispatch happened.
+    const result = await createProject({ name: name.trim(), manifest: inspectionResult.manifest, sourceWorkerId: job?.workerId ?? null });
     setIsCreatingProject(false);
     if (!result.ok) {
       setCreateProjectError(result.message);

@@ -808,6 +808,7 @@ export const en = {
     status: {
       ready: "Ready",
       needsChoice: "Needs your choice",
+      noChangeNeeded: "No content matching required",
       analyzing: "Analyzing…",
       generating: "Preview generating…",
       outdated: "Preview outdated"
@@ -819,6 +820,9 @@ export const en = {
     durationSeconds: (seconds: number): string => `${seconds.toFixed(1)} sec`,
     durationUnset: "Not set yet",
     noAssetAssigned: "No asset assigned yet",
+    originalContentKept: "Original content kept",
+    originalTextPreserved: "Original text preserved",
+    originalTimingPreserved: "Original timing preserved",
     previewSceneAction: "Preview Scene",
     generatingPreviewAction: "Generating…",
     regeneratePreviewAction: "Regenerate Preview",
