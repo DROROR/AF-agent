@@ -4,11 +4,13 @@ import { useEffect, useState, type ReactElement } from "react";
 import type { ExecutionSessionDto, FullPreviewArtifactDto } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
+import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { VideoArtifactPlayer } from "./ui/VideoArtifactPlayer";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
+import { LockedStepNotice } from "./LockedStepNotice";
 import { useLocale } from "./LocaleProvider";
 import {
   dispatchJob,
@@ -39,6 +41,7 @@ export function ProjectPreviewTab(): ReactElement | null {
   const { t } = useLocale();
   const { project, plan } = useProjectWorkspaceContext();
   const { data: dashboardStatus } = useDashboardStatusContext();
+  const { mode } = useWorkspaceMode();
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [dispatchSuccess, setDispatchSuccess] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
@@ -66,7 +69,13 @@ export function ProjectPreviewTab(): ReactElement | null {
   }
 
   if (!plan) {
-    return (
+    return mode === "simple" ? (
+      <LockedStepNotice
+        projectId={project.project.projectId}
+        title={t.projectWorkspace.lockedStep.preview.title}
+        description={t.projectWorkspace.lockedStep.preview.description}
+      />
+    ) : (
       <Card>
         <EmptyState title={t.projectWorkspace.noPlanTitle} description={t.projectWorkspace.noPlanDescription} />
       </Card>

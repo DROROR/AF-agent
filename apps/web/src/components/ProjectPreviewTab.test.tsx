@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectPreviewTab } from "./ProjectPreviewTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
+import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
@@ -24,9 +25,11 @@ afterEach(() => {
 function renderPreview(): void {
   renderWithLocale(
     <DashboardStatusProvider>
-      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-        <ProjectPreviewTab />
-      </ProjectWorkspaceProvider>
+      <WorkspaceModeProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <ProjectPreviewTab />
+        </ProjectWorkspaceProvider>
+      </WorkspaceModeProvider>
     </DashboardStatusProvider>
   );
 }
@@ -303,5 +306,39 @@ describe("ProjectPreviewTab - Final Preview", () => {
     fireEvent.click(approveButton);
     await waitFor(() => expect((screen.getByRole("button", { name: "Approved" }) as HTMLButtonElement).disabled).toBe(true));
     expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Live QA fix (CASE C, "Do not let users freely jump into a dead page"):
+ * a Simple Mode client reaching this tab before any execution plan exists
+ * (e.g. by direct URL entry) must see an honest, actionable message with a
+ * way back to the guided stepper - never the bare "No execution plan yet"
+ * dead end. Advanced Mode keeps the raw technical empty state unchanged.
+ */
+describe("ProjectPreviewTab - locked before a plan exists (live QA fix)", () => {
+  function stubNoPlan(): void {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 404, body: { error: { code: "EXECUTION_PLAN_NOT_FOUND", message: "none", requestId: "r1" } } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+  }
+
+  it("Simple Mode shows an actionable locked notice with a return-to-current-step action, never 'No execution plan yet'", async () => {
+    stubNoPlan();
+    renderPreview();
+
+    await screen.findByText("First Preview isn't available yet");
+    expect(screen.queryByText("No execution plan yet")).toBeNull();
+    expect(screen.getByRole("link", { name: "Return to current step" })).not.toBeNull();
+  });
+
+  it("Advanced Mode keeps the raw technical empty state unchanged", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubNoPlan();
+    renderPreview();
+
+    await screen.findByText("No execution plan yet");
   });
 });

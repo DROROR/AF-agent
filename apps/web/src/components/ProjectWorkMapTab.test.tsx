@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkMapTab } from "./ProjectWorkMapTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
@@ -36,9 +37,11 @@ function stubWorkspace(
 
 function renderWorkMap(locale: "en" | "he" = "en"): void {
   renderWithLocale(
-    <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <ProjectWorkMapTab />
-    </ProjectWorkspaceProvider>,
+    <WorkspaceModeProvider>
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <ProjectWorkMapTab />
+      </ProjectWorkspaceProvider>
+    </WorkspaceModeProvider>,
     { locale }
   );
 }
@@ -166,6 +169,80 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     fireEvent.click(advancedToggle);
     expect(screen.getByText("c1", { exact: false })).not.toBeNull();
     expect(screen.getByText("asset-1", { exact: false })).not.toBeNull();
+  });
+});
+
+/**
+ * Live QA fix (CASE A / CASE B / CASE H, "Simple Mode must never expose raw
+ * AE structure unless essential for an action the user must take"): a
+ * manifest with real nested-only compositions (isNestedOnlyReferenced) and
+ * a Work Map entry per composition - the exact real shape a "one entry per
+ * manifest composition" AI draft produces - must collapse to ONE scene
+ * card per real top-level scene in Simple Mode, never one row per raw
+ * composition, while Advanced Mode keeps showing every single entry
+ * unfiltered (never loses technical capability).
+ */
+describe("ProjectWorkMapTab - Simple Mode scene filtering (live QA fix)", () => {
+  function manifestWithNestedComps() {
+    const base = manifestFixture();
+    const nested = [0, 1, 2].map((i) => ({
+      compositionId: `nested-${i}`,
+      aeProjectItemIndex: i + 2,
+      name: `Pre-comp ${i}`,
+      widthPx: 1920,
+      heightPx: 1080,
+      durationSeconds: 2,
+      frameRate: 30,
+      isNestedOnlyReferenced: true,
+      parentCompositionIds: ["c1"]
+    }));
+    return { ...base, compositions: [...base.compositions, ...nested] };
+  }
+
+  function entriesOnePerComposition() {
+    return [
+      workMapEntryFixture({ id: "e-main", sourceCompositionId: "c1", desiredAssetId: "asset-1" }),
+      ...[0, 1, 2].map((i) => workMapEntryFixture({ id: `e-nested-${i}`, sourceCompositionId: `nested-${i}` }))
+    ];
+  }
+
+  it("CASE A/B: Simple Mode shows exactly 1 scene card (never a row per raw nested composition), a plain-language summary, and the no-editable-placeholders notice", async () => {
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, entriesOnePerComposition()) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithNestedComps() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    // The 1 real top-level scene (c1 / "Scene 01") is shown as its own card.
+    expect(screen.getByText("Scene 01")).not.toBeNull();
+    // None of the 3 nested-only compositions ever appear as their own card.
+    expect(screen.queryByText("Pre-comp 0")).toBeNull();
+    expect(screen.queryByText("Pre-comp 1")).toBeNull();
+    expect(screen.queryByText("Pre-comp 2")).toBeNull();
+    // The plain-language "what AI found" summary reflects the real manifest facts.
+    expect(screen.getByText(/1 main scene/)).not.toBeNull();
+    expect(screen.getByText(/3 supporting nested compositions/)).not.toBeNull();
+    // CASE B: manifestFixture's own scene has zero editable placeholders - the
+    // honest plain-language notice must appear, never a bare "—".
+    expect(
+      screen.getByText("AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.")
+    ).not.toBeNull();
+  });
+
+  it("CASE H: Advanced Mode still shows every raw entry, including nested-only compositions - full technical capability preserved", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, entriesOnePerComposition()) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithNestedComps() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByText("Scene 01")).not.toBeNull();
+    expect(screen.getByText("Pre-comp 0")).not.toBeNull();
+    expect(screen.getByText("Pre-comp 1")).not.toBeNull();
+    expect(screen.getByText("Pre-comp 2")).not.toBeNull();
   });
 });
 

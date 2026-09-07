@@ -4,10 +4,12 @@ import { useEffect, useState, type ReactElement } from "react";
 import { RENDER_OUTPUT_VARIANTS, type ExecutionSessionDto, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
+import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
+import { LockedStepNotice } from "./LockedStepNotice";
 import { useLocale } from "./LocaleProvider";
 import { dispatchJob, fetchCurrentExecutionSession } from "../lib/projects-api-client";
 import { FinalOutputsCard } from "./ProjectRenderSettingsTab";
@@ -28,6 +30,7 @@ import { FinalOutputsCard } from "./ProjectRenderSettingsTab";
 export function ProjectExportTab(): ReactElement | null {
   const { t } = useLocale();
   const { project, plan } = useProjectWorkspaceContext();
+  const { mode } = useWorkspaceMode();
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
 
   const projectIdForEffect = project?.project.projectId ?? null;
@@ -51,7 +54,13 @@ export function ProjectExportTab(): ReactElement | null {
   }
 
   if (!plan) {
-    return (
+    return mode === "simple" ? (
+      <LockedStepNotice
+        projectId={project.project.projectId}
+        title={t.projectWorkspace.lockedStep.export.title}
+        description={t.projectWorkspace.lockedStep.export.description}
+      />
+    ) : (
       <Card>
         <EmptyState title={t.projectWorkspace.noPlanTitle} description={t.projectWorkspace.noPlanDescription} />
       </Card>

@@ -426,12 +426,12 @@ export const en = {
       status: { complete: "Complete", inProgress: "In progress", locked: "Locked", ready: "Ready" },
       steps: {
         upload: { title: "Upload", description: "Your template and assets are uploaded and ready." },
-        tellClaude: { title: "Tell Claude", description: "Describe your video in plain language and let Claude draft a plan." },
-        reviewPlan: { title: "Review Plan", description: "Check the scenes, content, text and timing Claude prepared for your video." },
-        sceneMappings: { title: "Mappings", description: "Review each scene's suggested content, then approve the plan to continue." },
+        tellClaude: { title: "AI Plan", description: "AI is planning how to use your template and content." },
+        reviewPlan: { title: "Review AI Plan", description: "Check the scenes, content, text and timing AI prepared for your video." },
+        sceneMappings: { title: "Match Your Content", description: "Review each scene's suggested content, then approve the plan to continue." },
         firstPreview: { title: "First Preview", description: "Create a first designed frame and approve it before the rest of the video is built." },
         finalPreview: { title: "Final Preview", description: "Review the finished scenes - order, text, assets, timing and branding - before rendering." },
-        render: { title: "Render", description: "Render the final Landscape and Reels videos and download them." }
+        render: { title: "Export Video", description: "Render the final Landscape and Reels videos and download them." }
       }
     },
     tabs: {
@@ -443,6 +443,10 @@ export const en = {
       workMap: "Work Map",
       revisions: "Revisions",
       renderSettings: "Render Settings"
+    },
+    tabLockedHint: {
+      preview: "Locked until mappings are approved",
+      export: "Locked until Final Preview is approved"
     },
     header: {
       sourceProject: "Source project",
@@ -459,6 +463,17 @@ export const en = {
     noPlanTitle: "No execution plan yet",
     noPlanDescription:
       "Create an execution plan from the inspected template before mapping assets, text, timing, and scene decisions.",
+    lockedStep: {
+      returnToCurrentStepAction: "Return to current step",
+      preview: {
+        title: "First Preview isn't available yet",
+        description: "Your AI Plan must be approved and content matched before First Preview is available."
+      },
+      export: {
+        title: "Export isn't available yet",
+        description: "Your Final Preview must be approved before Export is available."
+      }
+    },
     createPlanAction: "Create Execution Plan",
     creatingPlan: "Creating…",
     createPlanFailedTitle: "Could not create the execution plan",
@@ -664,7 +679,29 @@ export const en = {
       noContent: "—",
       editAction: "Edit",
       tellAiAgainAction: "Tell AI again",
-      advancedDetailsToggle: "Advanced details"
+      advancedDetailsToggle: "Advanced details",
+      simple: {
+        summaryTitle: "AI found",
+        summaryScenes: (n: number): string => `${n} main scene${n === 1 ? "" : "s"}`,
+        summarySupporting: (n: number): string => `${n} supporting nested composition${n === 1 ? "" : "s"}`,
+        summaryUnresolved: (n: number): string => `${n} unresolved item${n === 1 ? "" : "s"}`,
+        planTitle: "Plan",
+        planPreserve: "Preserve the original template animation",
+        planUseMain: "Use the main scene as the final sequence",
+        planKeepPrecomps: "Keep supporting precomps internal",
+        planReplaceSafe: "Replace only safely mapped content",
+        noPlaceholdersNotice:
+          "AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.",
+        thumbnailPlaceholder: "Scene visual will be generated after mapping",
+        replaceWithLabel: "Will use",
+        noReplacementPlanned: "No content replacement planned for this scene - DYO will keep the original animation.",
+        textLabel: "Text",
+        noEditableText: "No editable text detected",
+        timingLabel: "Timing",
+        usesOriginalTiming: "Uses the template's original timing",
+        durationSuffix: (n: number): string => `${n}s`,
+        editPlanAction: "Edit Plan"
+      }
     },
     picker: {
       assetNoneOption: "No asset",

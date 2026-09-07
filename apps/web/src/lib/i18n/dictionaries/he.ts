@@ -419,12 +419,12 @@ export const he: Dictionary = {
       status: { complete: "הושלם", inProgress: "בתהליך", locked: "נעול", ready: "מוכן" },
       steps: {
         upload: { title: "העלאה", description: "התבנית והנכסים שלכם הועלו ומוכנים." },
-        tellClaude: { title: "ספרו ל-Claude", description: "תארו את הווידאו שלכם בשפה פשוטה ותנו ל-Claude לנסח תוכנית." },
-        reviewPlan: { title: "בדיקת התוכנית", description: "בדקו את הסצנות, התוכן, הטקסט והתזמון שהכין Claude לווידאו שלכם." },
-        sceneMappings: { title: "מיפויים", description: "בדקו את התוכן המוצע לכל סצנה, ואז אשרו את התוכנית כדי להמשיך." },
+        tellClaude: { title: "תוכנית בינה מלאכותית", description: "הבינה המלאכותית מתכננת כיצד להשתמש בתבנית ובתוכן שלכם." },
+        reviewPlan: { title: "בדיקת תוכנית הבינה המלאכותית", description: "בדקו את הסצנות, התוכן, הטקסט והתזמון שהבינה המלאכותית הכינה לווידאו שלכם." },
+        sceneMappings: { title: "התאמת התוכן שלכם", description: "בדקו את התוכן המוצע לכל סצנה, ואז אשרו את התוכנית כדי להמשיך." },
         firstPreview: { title: "תצוגה מקדימה ראשונה", description: "צרו פריים מעוצב ראשון ואשרו אותו לפני שנבנה שאר הווידאו." },
         finalPreview: { title: "תצוגה מקדימה סופית", description: "בדקו את הסצנות המוגמרות - סדר, טקסט, נכסים, תזמון ומיתוג - לפני הרינדור." },
-        render: { title: "רינדור", description: "רנדרו את סרטוני הלנדסקייפ והרילס הסופיים והורידו אותם." }
+        render: { title: "ייצוא הווידאו", description: "רנדרו את סרטוני הלנדסקייפ והרילס הסופיים והורידו אותם." }
       }
     },
     tabs: {
@@ -436,6 +436,10 @@ export const he: Dictionary = {
       workMap: "מפת עבודה",
       revisions: "גרסאות",
       renderSettings: "הגדרות רינדור"
+    },
+    tabLockedHint: {
+      preview: "נעול עד שהמיפויים יאושרו",
+      export: "נעול עד שהתצוגה המקדימה הסופית תאושר"
     },
     header: {
       sourceProject: "פרויקט מקור",
@@ -451,6 +455,17 @@ export const he: Dictionary = {
     notFoundDescription: "פרויקט זה אינו קיים, או שאין לכם עוד גישה אליו.",
     noPlanTitle: "אין עדיין תוכנית ביצוע",
     noPlanDescription: "צרו תוכנית ביצוע מהתבנית שנבדקה לפני מיפוי נכסים, טקסט, תזמון והחלטות סצנה.",
+    lockedStep: {
+      returnToCurrentStepAction: "חזרה לשלב הנוכחי",
+      preview: {
+        title: "התצוגה המקדימה הראשונה עדיין לא זמינה",
+        description: "יש לאשר את תוכנית הבינה המלאכותית ולהתאים תוכן לפני שהתצוגה המקדימה הראשונה זמינה."
+      },
+      export: {
+        title: "הייצוא עדיין לא זמין",
+        description: "יש לאשר את התצוגה המקדימה הסופית לפני שהייצוא זמין."
+      }
+    },
     createPlanAction: "צור תוכנית ביצוע",
     creatingPlan: "יוצר…",
     createPlanFailedTitle: "לא ניתן היה ליצור את תוכנית הביצוע",
@@ -655,7 +670,29 @@ export const he: Dictionary = {
       noContent: "—",
       editAction: "עריכה",
       tellAiAgainAction: "לספר לבינה המלאכותית שוב",
-      advancedDetailsToggle: "פרטים מתקדמים"
+      advancedDetailsToggle: "פרטים מתקדמים",
+      simple: {
+        summaryTitle: "הבינה המלאכותית מצאה",
+        summaryScenes: (n: number): string => `${n} סצנות ראשיות`,
+        summarySupporting: (n: number): string => `${n} קומפוזיציות מקוננות תומכות`,
+        summaryUnresolved: (n: number): string => `${n} פריטים לא פתורים`,
+        planTitle: "תוכנית",
+        planPreserve: "שימור אנימציית התבנית המקורית",
+        planUseMain: "שימוש בסצנה הראשית כרצף הסופי",
+        planKeepPrecomps: "שמירת קומפוזיציות המשנה התומכות פנימיות",
+        planReplaceSafe: "החלפה רק של תוכן שמופה בבטחה",
+        noPlaceholdersNotice:
+          "הבינה המלאכותית בדקה את התבנית הזו אך לא זיהתה פלייסהולדרים ניתנים לעריכה סטנדרטיים. DYO יכולה לשמר את האנימציה והמבנה המקונן המקוריים, אך החלפות אוטומטיות יבוצעו רק כאשר מיפוי בטוח מאושר.",
+        thumbnailPlaceholder: "התצוגה החזותית של הסצנה תיווצר לאחר המיפוי",
+        replaceWithLabel: "ישמש",
+        noReplacementPlanned: "לא מתוכננת החלפת תוכן לסצנה זו - DYO תשמור על האנימציה המקורית.",
+        textLabel: "טקסט",
+        noEditableText: "לא זוהה טקסט ניתן לעריכה",
+        timingLabel: "תזמון",
+        usesOriginalTiming: "משתמש בתזמון המקורי של התבנית",
+        durationSuffix: (n: number): string => `${n} שניות`,
+        editPlanAction: "עריכת התוכנית"
+      }
     },
     picker: {
       assetNoneOption: "ללא נכס",

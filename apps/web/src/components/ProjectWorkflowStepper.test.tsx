@@ -54,19 +54,19 @@ function renderStepper(): void {
 }
 
 describe("ProjectWorkflowStepper", () => {
-  it('shows "Step 2 of 7 — Tell Claude" as current for a fresh project with no Work Map yet', async () => {
+  it('shows "Step 2 of 7 — AI Plan" as current for a fresh project with no Work Map yet', async () => {
     stubWorkspace();
     renderStepper();
-    await screen.findByText("Step 2 of 7 — Tell Claude");
-    screen.getByText("Describe your video in plain language and let Claude draft a plan.");
+    await screen.findByText("Step 2 of 7 — AI Plan");
+    screen.getByText("AI is planning how to use your template and content.");
   });
 
   it("locks every step after the current one - a locked step is never a clickable link", async () => {
     stubWorkspace();
     renderStepper();
-    await screen.findByText("Step 2 of 7 — Tell Claude");
+    await screen.findByText("Step 2 of 7 — AI Plan");
 
-    const renderStep = screen.getByText("Render").closest("li");
+    const renderStep = screen.getByText("Export Video").closest("li");
     expect(renderStep?.querySelector("a")).toBeNull();
     expect(renderStep?.getAttribute("data-state")).toBe("locked");
   });
@@ -74,21 +74,21 @@ describe("ProjectWorkflowStepper", () => {
   it("marks Upload complete and shows a real link (not locked) for the current step", async () => {
     stubWorkspace();
     renderStepper();
-    await screen.findByText("Step 2 of 7 — Tell Claude");
+    await screen.findByText("Step 2 of 7 — AI Plan");
 
     const uploadStep = screen.getByText("Upload").closest("li");
     expect(uploadStep?.getAttribute("data-state")).toBe("complete");
 
-    const tellClaudeStep = screen.getByText("Tell Claude").closest("li");
+    const tellClaudeStep = screen.getByText("AI Plan").closest("li");
     expect(tellClaudeStep?.querySelector("a")).not.toBeNull();
   });
 
-  it("advances past Tell Claude and Review Plan once a real Work Map and execution plan exist", async () => {
+  it("advances past AI Plan and Review Plan once a real Work Map and execution plan exist", async () => {
     stubWorkspace({
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } }
     });
     renderStepper();
-    await screen.findByText("Step 4 of 7 — Mappings");
+    await screen.findByText("Step 4 of 7 — Match Your Content");
   });
 
   it("Scene Mappings only completes once the plan is APPROVED, not merely created", async () => {
@@ -113,11 +113,11 @@ describe("ProjectWorkflowStepper", () => {
     renderStepper();
     await screen.findByText("Step 6 of 7 — Final Preview");
 
-    const renderStep = screen.getByText("Render").closest("li");
+    const renderStep = screen.getByText("Export Video").closest("li");
     expect(renderStep?.getAttribute("data-state")).toBe("locked");
   });
 
-  it("reaches the final Render step once every real prerequisite is satisfied", async () => {
+  it("reaches the final Export Video step once every real prerequisite is satisfied", async () => {
     const scene = sceneFixture({ id: "scene-1", use: true, approvalState: "APPROVED", unresolvedReasons: [] });
     stubWorkspace({
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
@@ -129,6 +129,6 @@ describe("ProjectWorkflowStepper", () => {
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture()] } }
     });
     renderStepper();
-    await screen.findByText("Step 7 of 7 — Render");
+    await screen.findByText("Step 7 of 7 — Export Video");
   });
 });

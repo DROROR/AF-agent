@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { ProjectResponse, WorkMapEntry } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { useWorkMap } from "../lib/use-work-map";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { Card, CardHeader } from "./ui/Card";
@@ -14,6 +15,7 @@ import { Select } from "./ui/Select";
 import { Skeleton } from "./ui/Skeleton";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
+import { SimpleWorkMapPlanView } from "./SimpleWorkMapPlanView";
 import { useLocale } from "./LocaleProvider";
 
 interface RowForm {
@@ -96,6 +98,7 @@ type ViewMode = "tellAi" | "planPreview" | "manualForm";
 function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const projectId = project.project.projectId;
   const { t } = useLocale();
+  const { mode } = useWorkspaceMode();
   const { workMap, isLoading, error, isStale, refetch, save, createAiDraft } = useWorkMap(projectId);
   const { assets } = useProjectAssets(projectId);
   const [rows, setRows] = useState<RowForm[]>([]);
@@ -250,6 +253,8 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
         <p>{t.workMapTab.planPreview.description}</p>
         {entries.length === 0 ? (
           <EmptyState title={t.workMapTab.emptyTitle} description={t.workMapTab.emptyDescription} />
+        ) : mode === "simple" ? (
+          <SimpleWorkMapPlanView manifest={project.manifest} entries={entries} assets={assets} onEditPlan={() => setViewMode("manualForm")} />
         ) : (
           <div className="work-map-plan-preview" role="table">
             <div className="work-map-plan-preview__header" role="row">
