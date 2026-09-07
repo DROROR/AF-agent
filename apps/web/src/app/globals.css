@@ -567,8 +567,8 @@ select:focus-visible,
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  max-width: 84rem;
   width: 100%;
+  min-height: 0;
 }
 
 @media (max-width: 900px) {
@@ -2923,4 +2923,54 @@ a.workflow-stepper__step:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 96px;
+}
+
+/* ==========================================================================
+   Jobs page - fixed to the viewport below the topbar so the job history
+   table (not the whole document) owns the scroll, avoiding a second,
+   redundant page-level scrollbar underneath the already-sticky topbar.
+   ========================================================================== */
+
+.jobs-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: calc(100vh - var(--topbar-height) - (var(--space-6) * 2));
+  min-height: 0;
+}
+
+.jobs-active-line {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.jobs-history-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jobs-history-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.jobs-history-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface);
+  z-index: 1;
+}
+
+@media (max-width: 900px) {
+  .jobs-page {
+    height: auto;
+    min-height: calc(100vh - var(--topbar-height) - (var(--space-6) * 2));
+  }
 }

@@ -17,7 +17,7 @@ function JobHistorySection(): ReactElement {
   const { jobs, isLoading, error } = useJobHistory();
 
   return (
-    <Card>
+    <Card className="jobs-history-card">
       <div className="card__header">
         <h2>{t.jobs.historyTitle}</h2>
         <p>{t.jobs.historyDescription}</p>
@@ -29,7 +29,7 @@ function JobHistorySection(): ReactElement {
       ) : !jobs || jobs.length === 0 ? (
         <EmptyState title={t.jobs.historyEmptyTitle} description={t.jobs.historyEmptyDescription} />
       ) : (
-        <div className="table-scroll">
+        <div className="table-scroll jobs-history-scroll">
           <table>
             <caption className="visually-hidden">{t.jobs.historyTableCaption}</caption>
             <thead>
@@ -75,28 +75,28 @@ export function JobsPage(): ReactElement {
 
   if (isInitialLoading) {
     return (
-      <>
+      <div className="jobs-page">
         <PageHeader title={t.jobs.title} description={t.jobs.description} />
         <Card>
           <Skeleton height="1.5rem" />
         </Card>
-      </>
+      </div>
     );
   }
 
   if (!data) {
     return (
-      <>
+      <div className="jobs-page">
         <PageHeader title={t.jobs.title} description={t.jobs.description} />
         <ErrorState title={t.jobs.unavailableTitle} description={lastError ?? t.common.unavailableFallback} />
-      </>
+      </div>
     );
   }
 
   const activeJobs = data.workers === null ? null : computeOverviewMetrics(data.workers).activeJobs;
 
   return (
-    <>
+    <div className="jobs-page">
       <PageHeader title={t.jobs.title} description={t.jobs.description} />
       {lastError ? (
         <p role="status" className="stale-notice">
@@ -104,15 +104,22 @@ export function JobsPage(): ReactElement {
         </p>
       ) : null}
 
-      <Card>
-        <div className="card__header">
-          <h2>{t.jobs.currentlyActive}</h2>
-        </div>
-        {activeJobs === null ? (
+      {activeJobs === null ? (
+        <Card>
+          <div className="card__header">
+            <h2>{t.jobs.currentlyActive}</h2>
+          </div>
           <ErrorState title={t.jobs.workerDataUnavailableTitle} description={t.jobs.workerDataUnavailableDescription} />
-        ) : activeJobs.length === 0 ? (
-          <EmptyState title={t.jobs.emptyTitle} description={t.jobs.emptyDescription} />
-        ) : (
+        </Card>
+      ) : activeJobs.length === 0 ? (
+        <p className="jobs-active-line" role="status">
+          {t.jobs.emptyTitle}
+        </p>
+      ) : (
+        <Card>
+          <div className="card__header">
+            <h2>{t.jobs.currentlyActive}</h2>
+          </div>
           <div className="table-scroll">
             <table>
               <caption className="visually-hidden">{t.jobs.tableCaption}</caption>
@@ -134,10 +141,10 @@ export function JobsPage(): ReactElement {
               </tbody>
             </table>
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
 
       <JobHistorySection />
-    </>
+    </div>
   );
 }
