@@ -215,7 +215,10 @@ async function main(): Promise<void> {
   const fullPreviewUploader = new HeroicSwanFullPreviewUploader(apiClient, credentials.workerId, credentials.workerToken);
   // Same reasoning - uploading an already-captured scene-evidence preview
   // frame only needs this worker's own credentials, never ae-mcp/aerender.
-  const sceneEvidencePreviewUploader = new HeroicSwanSceneEvidencePreviewUploader(apiClient, credentials.workerId, credentials.workerToken);
+  // workerLogger (the same real, worker.log-piped logger every other
+  // component here already uses) is threaded through so a failure here is
+  // never silent again (live QA regression, 2026-09-07).
+  const sceneEvidencePreviewUploader = new HeroicSwanSceneEvidencePreviewUploader(apiClient, credentials.workerId, credentials.workerToken, workerLogger);
   // Same reasoning - MAP_FOOTAGE's asset delivery only needs this worker's
   // own credentials, never ae-mcp/aerender.
   const assetDownloadClient = new HeroicSwanAssetDownloadClient(apiClient, credentials.workerId, credentials.workerToken);
@@ -307,7 +310,8 @@ async function main(): Promise<void> {
               }
             },
             workRoot,
-            now: () => new Date()
+            now: () => new Date(),
+            logger: workerLogger
           },
           job,
           jobExecutionRegistry,

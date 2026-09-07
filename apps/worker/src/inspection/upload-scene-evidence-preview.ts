@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ApiClient } from "../infrastructure/api-client.js";
+import { ApiResponseError } from "../errors/worker-error.js";
 
 export interface UploadSceneEvidencePreviewParams {
   jobId: string;
@@ -10,6 +11,16 @@ export interface UploadSceneEvidencePreviewParams {
 export type UploadSceneEvidencePreviewResult = { ok: true } | { ok: false; reason: string };
 
 const PREVIEW_MIME_TYPE = "image/png";
+
+/**
+ * Minimal, pino-compatible logging surface - see job-dispatcher.ts's own
+ * JobDispatcherLogger doc comment (same rationale, same shape). Never
+ * logs workerToken/credentials.
+ */
+export interface SceneEvidencePreviewUploadLogger {
+  info(details: Record<string, unknown>, message: string): void;
+  warn(details: Record<string, unknown>, message: string): void;
+}
 
 /**
  * Bounded retry around ONLY the local file read, never the HTTP upload
@@ -40,20 +51,41 @@ function errorCodeOf(error: unknown): string {
   return "UNKNOWN";
 }
 
-/** Throws the LAST attempt's own error (with every earlier attempt simply discarded - only the final failure is ever reported) once every attempt has failed. */
-async function readCapturedPreviewWithRetry(filePath: string): Promise<{ buffer: Buffer; attempts: number }> {
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function readCapturedPreviewWithRetry(
+  params: UploadSceneEvidencePreviewParams,
+  logger: SceneEvidencePreviewUploadLogger
+): Promise<{ buffer: Buffer; attempts: number }> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= READ_RETRY_ATTEMPTS; attempt++) {
     try {
-      const buffer = await readFile(filePath);
+      const buffer = await readFile(params.filePath);
+      logger.info({ jobId: params.jobId, filePath: params.filePath, stage: "read-success", attempt }, "[scene-evidence-preview-upload] local preview file read succeeded");
       return { buffer, attempts: attempt };
     } catch (error) {
       lastError = error;
+      logger.warn(
+        {
+          jobId: params.jobId,
+          filePath: params.filePath,
+          stage: "read-failed",
+          attempt,
+          errorCode: errorCodeOf(error),
+          errorMessage: errorMessageOf(error)
+        },
+        "[scene-evidence-preview-upload] local preview file read attempt failed"
+      );
       if (attempt < READ_RETRY_ATTEMPTS) {
         await sleep(READ_RETRY_DELAY_MS);
       }
     }
   }
+  // Every attempt failed - re-thrown as-is (the LAST attempt's own real
+  // error) so the caller below can build one final, complete reason/log
+  // line from it; every earlier attempt's error was already logged above.
   throw lastError;
 }
 
@@ -66,7 +98,13 @@ async function readCapturedPreviewWithRetry(filePath: string): Promise<{ buffer:
  * exists and is non-empty, then calls the real, worker-authenticated
  * upload endpoint. Best-effort: a failure here is caught by the caller
  * (job-dispatcher.ts) and never fails the whole INSPECT_SCENE_EVIDENCE
- * job - the structural layer facts remain valid either way.
+ * job - the structural layer facts remain valid either way. Every stage
+ * (read-start/read-success/read-failed/http-start/http-success/
+ * http-failed) is logged via the injected structured logger (the SAME
+ * mechanism index.ts's own workerLogger already uses, proven to reach
+ * worker.log - see supervisor/spawn-worker-child.ts's stdout/stderr
+ * piping) so a real failure is never silent again (live QA regression,
+ * 2026-09-07: a real captured preview vanished with zero trace anywhere).
  */
 export interface SceneEvidencePreviewUploader {
   upload(params: UploadSceneEvidencePreviewParams): Promise<UploadSceneEvidencePreviewResult>;
@@ -76,43 +114,51 @@ export class HeroicSwanSceneEvidencePreviewUploader implements SceneEvidencePrev
   constructor(
     private readonly apiClient: ApiClient,
     private readonly workerId: string,
-    private readonly workerToken: string
+    private readonly workerToken: string,
+    private readonly logger: SceneEvidencePreviewUploadLogger
   ) {}
 
   async upload(params: UploadSceneEvidencePreviewParams): Promise<UploadSceneEvidencePreviewResult> {
+    this.logger.info({ jobId: params.jobId, filePath: params.filePath, stage: "read-start" }, "[scene-evidence-preview-upload] starting local preview file read");
+
     let fileBuffer: Buffer;
     try {
-      const read = await readCapturedPreviewWithRetry(params.filePath);
+      const read = await readCapturedPreviewWithRetry(params, this.logger);
       fileBuffer = read.buffer;
     } catch (error) {
-      const reason = `could not read captured scene-evidence preview file after ${READ_RETRY_ATTEMPTS} attempt(s) [${errorCodeOf(error)}]: ${error instanceof Error ? error.message : String(error)}`;
-      logUploadFailure(params, reason);
+      const reason = `could not read captured scene-evidence preview file after ${READ_RETRY_ATTEMPTS} attempt(s) [${errorCodeOf(error)}]: ${errorMessageOf(error)}`;
+      this.logger.warn(
+        {
+          jobId: params.jobId,
+          filePath: params.filePath,
+          stage: "read-failed",
+          attempts: READ_RETRY_ATTEMPTS,
+          errorCode: errorCodeOf(error),
+          errorMessage: errorMessageOf(error)
+        },
+        "[scene-evidence-preview-upload] exhausted local preview file read retries - upload not attempted"
+      );
       return { ok: false, reason };
     }
 
+    this.logger.info({ jobId: params.jobId, filePath: params.filePath, stage: "http-start" }, "[scene-evidence-preview-upload] starting API upload");
     try {
       await this.apiClient.uploadSceneEvidencePreview(this.workerId, this.workerToken, params.jobId, fileBuffer, path.basename(params.filePath), PREVIEW_MIME_TYPE);
+      this.logger.info({ jobId: params.jobId, filePath: params.filePath, stage: "http-success" }, "[scene-evidence-preview-upload] API upload succeeded");
       return { ok: true };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logUploadFailure(params, reason);
+      const reason = errorMessageOf(error);
+      this.logger.warn(
+        {
+          jobId: params.jobId,
+          filePath: params.filePath,
+          stage: "http-failed",
+          httpStatus: error instanceof ApiResponseError ? error.statusCode : undefined,
+          errorMessage: reason
+        },
+        "[scene-evidence-preview-upload] API upload failed"
+      );
       return { ok: false, reason };
     }
   }
-}
-
-/**
- * This upload is deliberately non-fatal to the INSPECT_SCENE_EVIDENCE job
- * (see this file's own doc comment) - but a silent, unlogged failure here
- * means a real captured preview can vanish between the Worker's own disk
- * and the dashboard with zero trace anywhere (the exact gap a live QA run
- * hit, 2026-09-07: job succeeded, file existed locally with real bytes,
- * but nothing - not the API's own request log, not this Worker's own
- * log - ever recorded that an upload was even attempted). jobId/path/
- * reason (which, for a read failure, already carries the attempt count
- * and OS error code - see readCapturedPreviewWithRetry above) are the
- * facts needed to diagnose it after the fact.
- */
-function logUploadFailure(params: UploadSceneEvidencePreviewParams, reason: string): void {
-  console.error(`[scene-evidence-preview-upload] failed jobId=${params.jobId} path=${params.filePath} reason=${reason}`);
 }

@@ -35,6 +35,17 @@ export interface JobExecutionResult {
   error?: JobError;
 }
 
+/**
+ * Minimal, pino-compatible logging surface - never couples this domain
+ * module to the pino package itself, only to the two structured-logging
+ * calls it needs. A real pino.Logger (or its own .child()) satisfies this
+ * structurally with no adapter required - see index.ts's own workerLogger.
+ */
+export interface JobDispatcherLogger {
+  info(details: Record<string, unknown>, message: string): void;
+  warn(details: Record<string, unknown>, message: string): void;
+}
+
 /** The most recently server-confirmed AE/MCP health, or null before the first successful heartbeat - see index.ts. */
 export interface LatestHealth {
   aeStatus: AeStatus;
@@ -70,6 +81,17 @@ export interface JobDispatcherDeps {
   fullPreviewUploader: FullPreviewUploader;
   workRoot: string;
   now: () => Date;
+  /**
+   * Optional (never required - every existing test fixture predates this
+   * field and stays valid unchanged) - when provided, this module's own
+   * calls into a dependency it does not otherwise log around (currently
+   * just sceneEvidencePreviewUploader below) report their real outcome
+   * here, so a non-fatal {ok:false} is never silently discarded at this
+   * call site - live QA regression, 2026-09-07: a real preview upload
+   * failure was previously invisible both here and inside the uploader
+   * itself.
+   */
+  logger?: JobDispatcherLogger;
 }
 
 /**
@@ -252,9 +274,19 @@ async function runInspectSceneEvidence(deps: JobDispatcherDeps, job: JobDto): Pr
     // SceneEvidenceResponse.preview's own doc comment: "a failed preview
     // never fails the whole evidence result"). An upload failure here is
     // never surfaced as a job failure - the structural layer facts this
-    // job exists to report remain valid and useful either way.
+    // job exists to report remain valid and useful either way. The
+    // result is still captured and logged (never discarded) - live QA
+    // regression, 2026-09-07 - though the uploader's own structured
+    // logging (upload-scene-evidence-preview.ts) already carries the
+    // full stage-by-stage detail; this is the CALLER's own confirmation
+    // that it saw the outcome.
     if (result.response.preview) {
-      await deps.sceneEvidencePreviewUploader.upload({ jobId: job.jobId, filePath: result.response.preview.path });
+      const uploadResult = await deps.sceneEvidencePreviewUploader.upload({ jobId: job.jobId, filePath: result.response.preview.path });
+      if (uploadResult.ok) {
+        deps.logger?.info({ jobId: job.jobId }, "scene-evidence preview upload succeeded");
+      } else {
+        deps.logger?.warn({ jobId: job.jobId, reason: uploadResult.reason }, "scene-evidence preview upload failed - job still SUCCEEDED (non-fatal)");
+      }
     }
     return { status: "SUCCEEDED", result: result.response };
   } catch (cause) {

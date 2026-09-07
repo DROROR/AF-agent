@@ -421,6 +421,86 @@ describe("executeJob - INSPECT_SCENE_EVIDENCE", () => {
     expect(result.result).toBe(evidenceResult.response);
     expect(upload).toHaveBeenCalledTimes(1);
   });
+
+  // Live QA regression (2026-09-07): a real preview upload failure was
+  // previously invisible both inside the uploader AND at this call site
+  // (the returned {ok:false, reason} was simply never looked at). The
+  // upload staying non-fatal to the job is unchanged - what changes is
+  // that the caller now logs the real outcome rather than discarding it.
+  it("logs (never silently discards) a failed preview upload result via the optional logger, while the job still SUCCEEDS (non-fatal)", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        aeProjectItemIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: { path: "/work-root/session-1/preview.png", capturedAtSeconds: 0 },
+        previewFailureReason: null,
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const upload = vi.fn().mockResolvedValue({ ok: false, reason: "network error" });
+    const warn = vi.fn();
+    const info = vi.fn();
+    const job = sceneEvidenceJob();
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect }, sceneEvidencePreviewUploader: { upload }, logger: { info, warn } }),
+      job
+    );
+    expect(result.status).toBe("SUCCEEDED");
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ jobId: job.jobId, reason: "network error" }), expect.any(String));
+  });
+
+  it("logs a successful preview upload result via the optional logger too", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        aeProjectItemIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: { path: "/work-root/session-1/preview.png", capturedAtSeconds: 0 },
+        previewFailureReason: null,
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const upload = vi.fn().mockResolvedValue({ ok: true });
+    const warn = vi.fn();
+    const info = vi.fn();
+    const job = sceneEvidenceJob();
+    const result = await executeJob(
+      healthyDeps({ sceneEvidenceInspector: { inspect }, sceneEvidencePreviewUploader: { upload }, logger: { info, warn } }),
+      job
+    );
+    expect(result.status).toBe("SUCCEEDED");
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ jobId: job.jobId }), expect.any(String));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("never throws when no logger is provided at all (optional dependency - every existing fixture predates this field)", async () => {
+    const evidenceResult = {
+      kind: "evidence" as const,
+      response: {
+        verifiedSourceProjectSha256: "a".repeat(64),
+        manifestCompositionId: "comp-275",
+        aeProjectItemIndex: 14,
+        compositionName: "Text 01",
+        layers: [],
+        preview: { path: "/work-root/session-1/preview.png", capturedAtSeconds: 0 },
+        previewFailureReason: null,
+        capturedAt: "2026-08-26T00:00:00.000Z"
+      }
+    };
+    const inspect = vi.fn().mockResolvedValue(evidenceResult);
+    const upload = vi.fn().mockResolvedValue({ ok: false, reason: "network error" });
+    const result = await executeJob(healthyDeps({ sceneEvidenceInspector: { inspect }, sceneEvidencePreviewUploader: { upload } }), sceneEvidenceJob());
+    expect(result.status).toBe("SUCCEEDED");
+  });
 });
 
 describe("executeJob - EXECUTE_FRAME", () => {
