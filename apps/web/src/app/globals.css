@@ -3041,6 +3041,12 @@ a.workflow-stepper__step:hover {
   font-size: 1rem;
 }
 
+.plan-card__composition-name {
+  margin: 2px 0 0;
+  font-size: 0.74rem;
+  color: var(--color-text-faint);
+}
+
 .plan-card__thumbnail-placeholder {
   display: flex;
   align-items: center;

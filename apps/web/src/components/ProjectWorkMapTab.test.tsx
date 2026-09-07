@@ -20,6 +20,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
 function stubWorkspace(
@@ -147,7 +148,11 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    expect(screen.getByText("Scene 01")).not.toBeNull();
+    // Client-friendly cleanup pass: "Main Scene" is the primary title -
+    // the raw composition name ("Scene 01") only ever appears as subtle
+    // secondary metadata, never the heading itself.
+    expect(screen.getByText("Main Scene")).not.toBeNull();
+    expect(screen.getByText(/Template composition: Scene 01/)).not.toBeNull();
     expect(screen.getByText("login-demo.mp4")).not.toBeNull();
     expect(screen.getByText("Hello world")).not.toBeNull();
     // The raw asset id is never in the DEFAULT (non-advanced) content -
@@ -214,8 +219,11 @@ describe("ProjectWorkMapTab - Simple Mode scene filtering (live QA fix)", () => 
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    // The 1 real top-level scene (c1 / "Scene 01") is shown as its own card.
-    expect(screen.getByText("Scene 01")).not.toBeNull();
+    // The 1 real top-level scene (c1 / "Scene 01") is shown as its own card,
+    // titled client-friendly "Main Scene" - the raw composition name only
+    // ever appears as subtle secondary metadata.
+    expect(screen.getByText("Main Scene")).not.toBeNull();
+    expect(screen.getByText(/Template composition: Scene 01/)).not.toBeNull();
     // None of the 3 nested-only compositions ever appear as their own card.
     expect(screen.queryByText("Pre-comp 0")).toBeNull();
     expect(screen.queryByText("Pre-comp 1")).toBeNull();
@@ -260,7 +268,10 @@ describe("ProjectWorkMapTab - manual form remains fully available and functional
 
     renderWorkMap();
     await screen.findByText("Your Video Plan");
-    fireEvent.click(screen.getByRole("button", { name: "Add details manually" }));
+    // Simple Mode's own wording for this exact same manualForm-toggle
+    // action (client-facing UX cleanup pass) - "Add details manually" is
+    // still the Advanced Mode label, unchanged (see the dedicated test below).
+    fireEvent.click(screen.getByRole("button", { name: "Edit Plan" }));
 
     const textField = (await screen.findByLabelText("Desired text")) as HTMLInputElement;
     expect(textField.value).toBe("Hello world");
@@ -285,7 +296,7 @@ describe("ProjectWorkMapTab - manual form remains fully available and functional
 
     renderWorkMap();
     await screen.findByText("Your Video Plan");
-    fireEvent.click(screen.getByRole("button", { name: "Add details manually" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit Plan" }));
     await screen.findByLabelText("Desired text");
     fireEvent.click(screen.getByRole("button", { name: "Save work map" }));
 
@@ -310,5 +321,128 @@ describe("ProjectWorkMapTab - manual form remains fully available and functional
     stubWorkspace({ status: 200, body: { workMap: null } });
     renderWorkMap("he");
     await screen.findByText("ספרו לבינה המלאכותית מה תרצו");
+  });
+});
+
+/**
+ * Simple Mode AI Plan cleanup pass (live QA follow-up): the raw AE
+ * composition name is never the primary Simple Mode title, empty
+ * "Advanced details" noise never renders, the outdated table-shaped copy
+ * is gone, and the existing "Create Execution Plan" action (never a new
+ * approval mechanism) is exposed as a clear primary action here too.
+ */
+describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
+  function manifestWithRealTemplateName() {
+    const base = manifestFixture();
+    return {
+      ...base,
+      compositions: [{ ...base.compositions[0]!, compositionId: "c1", name: "!Render" }]
+    };
+  }
+
+  it("the raw '!Render' composition name is never the primary Simple Mode title - 'Main Scene' is, with the raw name only as secondary metadata", async () => {
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithRealTemplateName() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    const heading = screen.getByRole("heading", { level: 3 });
+    expect(heading.textContent).toBe("Main Scene");
+    expect(heading.textContent).not.toContain("!Render");
+    expect(screen.getByText(/Template composition: !Render/)).not.toBeNull();
+  });
+
+  it("Advanced Mode still shows the exact raw '!Render' composition name, unchanged", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithRealTemplateName() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByText("!Render")).not.toBeNull();
+  });
+
+  it("does not render 'Advanced details' at all when every entry has no real content decision - the exact live shape (all entries empty)", async () => {
+    const entries = [0, 1, 2].map((i) => workMapEntryFixture({ id: `wm-${i}`, sourceCompositionId: "c1", sourceReference: null, desiredText: null, desiredAssetId: null }));
+    stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, entries) } });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.queryByText("Advanced details")).toBeNull();
+  });
+
+  it("still shows 'Advanced details' with only the entries that carry a real decision, once at least one exists", async () => {
+    const withDecision = workMapEntryFixture({ id: "wm-real", sourceCompositionId: "c1", desiredText: "Checkout screen" });
+    stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [withDecision]) } });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    const toggle = screen.getByText("Advanced details");
+    fireEvent.click(toggle);
+    expect(screen.getByText("wm-real", { exact: false })).not.toBeNull();
+  });
+
+  it("shows the updated, non-table Simple Mode copy - never the old 'edit any row' table wording", async () => {
+    stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByText("Review what AI plans to do with your video. You can edit the scene plan before continuing.")).not.toBeNull();
+    expect(screen.queryByText(/You can edit any row/)).toBeNull();
+  });
+
+  it("Advanced Mode keeps the old row-based description text unchanged", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByText("Review what AI planned for each scene. You can edit any row, or use Scene Mapping to fine-tune it further.")).not.toBeNull();
+  });
+
+  it("Advanced Mode keeps the 'Add details manually' label unchanged - Simple Mode's own 'Edit Plan' wording never leaks into it", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByRole("button", { name: "Add details manually" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit Plan" })).toBeNull();
+  });
+
+  it("shows a clear 'Approve AI Plan' primary action that reuses the EXISTING Create Execution Plan mechanism, and Match Your Content unlocks once it succeeds", async () => {
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: [
+        { status: 404, body: { error: { code: "NOT_FOUND", message: "no execution plan yet", requestId: "r1" } } },
+        { status: 201, body: { plan: planFixture(), sceneTable: [] } }
+      ],
+      [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    const approveButton = screen.getByRole("button", { name: "Approve AI Plan" });
+    fireEvent.click(approveButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
+    });
+    expect(screen.queryByRole("button", { name: "Approve AI Plan" })).toBeNull();
+    expect((screen.getByRole("link", { name: "Continue to Match Your Content" }) as HTMLAnchorElement).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/scenes`);
+  });
+
+  it("shows 'Continue to Match Your Content' immediately, never a duplicate 'Approve AI Plan' button, when a plan already exists", async () => {
+    stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve AI Plan" })).toBeNull();
   });
 });

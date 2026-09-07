@@ -23,21 +23,33 @@ function resolveAssetLabel(entry: WorkMapEntry, assetById: Map<string, AssetDto>
   return asset ? (asset.label ?? asset.originalFilename) : entry.desiredAssetId;
 }
 
-function PlanCard({ entry, sceneNameByCompositionId, assetById, onEditPlan }: {
+function PlanCard({ entry, index, total, sceneNameByCompositionId, assetById, onEditPlan }: {
   entry: WorkMapEntry;
+  index: number;
+  total: number;
   sceneNameByCompositionId: Map<string, string>;
   assetById: Map<string, AssetDto>;
   onEditPlan: () => void;
 }): ReactElement {
   const { t } = useLocale();
   const s = t.workMapTab.planPreview.simple;
-  const sceneName = resolveSceneName(entry, sceneNameByCompositionId, t.workMapTab.planPreview.noContent);
+  // The raw AE composition name ("!Render", "Pre-comp 3", ...) is real,
+  // useful metadata (shown subtly below the title, and Advanced Mode's own
+  // raw grid still shows it as the primary column) - but it is never a
+  // client-friendly PRIMARY title. "Main Scene" / "Scene N" is a plain
+  // ordinal derived only from real, already-filtered card position - never
+  // a name heuristic, never used to decide scene hierarchy (that stays
+  // exactly filterWorkMapEntriesForSimpleMode's isNestedOnlyReferenced
+  // check, unchanged).
+  const compositionName = resolveSceneName(entry, sceneNameByCompositionId, t.workMapTab.planPreview.noContent);
+  const displayTitle = total === 1 ? s.sceneTitleMain : s.sceneTitleNumbered(index + 1);
   const assetLabel = resolveAssetLabel(entry, assetById);
 
   return (
     <Card className="plan-card">
       <div className="plan-card__header">
-        <h3>{sceneName}</h3>
+        <h3>{displayTitle}</h3>
+        <p className="plan-card__composition-name">{s.templateCompositionLabel(compositionName)}</p>
       </div>
 
       <div className="plan-card__thumbnail-placeholder" aria-hidden="true">
@@ -118,8 +130,16 @@ export function SimpleWorkMapPlanView({ manifest, entries, assets, onEditPlan }:
         <EmptyState title={t.workMapTab.emptyTitle} description={t.workMapTab.emptyDescription} />
       ) : (
         <div className="plan-cards-grid">
-          {visibleEntries.map((entry) => (
-            <PlanCard key={entry.id} entry={entry} sceneNameByCompositionId={sceneNameByCompositionId} assetById={assetById} onEditPlan={onEditPlan} />
+          {visibleEntries.map((entry, index) => (
+            <PlanCard
+              key={entry.id}
+              entry={entry}
+              index={index}
+              total={visibleEntries.length}
+              sceneNameByCompositionId={sceneNameByCompositionId}
+              assetById={assetById}
+              onEditPlan={onEditPlan}
+            />
           ))}
         </div>
       )}

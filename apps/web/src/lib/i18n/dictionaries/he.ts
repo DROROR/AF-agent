@@ -672,6 +672,7 @@ export const he: Dictionary = {
       tellAiAgainAction: "לספר לבינה המלאכותית שוב",
       advancedDetailsToggle: "פרטים מתקדמים",
       simple: {
+        description: "בדקו מה הבינה המלאכותית מתכננת לעשות בווידאו שלכם. ניתן לערוך את תוכנית הסצנות לפני שממשיכים.",
         summaryTitle: "הבינה המלאכותית מצאה",
         summaryScenes: (n: number): string => `${n} סצנות ראשיות`,
         summarySupporting: (n: number): string => `${n} קומפוזיציות מקוננות תומכות`,
@@ -684,6 +685,9 @@ export const he: Dictionary = {
         noPlaceholdersNotice:
           "הבינה המלאכותית בדקה את התבנית הזו אך לא זיהתה פלייסהולדרים ניתנים לעריכה סטנדרטיים. DYO יכולה לשמר את האנימציה והמבנה המקונן המקוריים, אך החלפות אוטומטיות יבוצעו רק כאשר מיפוי בטוח מאושר.",
         thumbnailPlaceholder: "התצוגה החזותית של הסצנה תיווצר לאחר המיפוי",
+        sceneTitleMain: "הסצנה הראשית",
+        sceneTitleNumbered: (n: number): string => `סצנה ${n}`,
+        templateCompositionLabel: (name: string): string => `קומפוזיציית התבנית: ${name}`,
         replaceWithLabel: "ישמש",
         noReplacementPlanned: "לא מתוכננת החלפת תוכן לסצנה זו - DYO תשמור על האנימציה המקורית.",
         textLabel: "טקסט",
@@ -691,7 +695,12 @@ export const he: Dictionary = {
         timingLabel: "תזמון",
         usesOriginalTiming: "משתמש בתזמון המקורי של התבנית",
         durationSuffix: (n: number): string => `${n} שניות`,
-        editPlanAction: "עריכת התוכנית"
+        editPlanAction: "עריכת התוכנית",
+        askAiToImproveAction: "בקשו מהבינה המלאכותית לשפר",
+        approvePlanAction: "אישור תוכנית הבינה המלאכותית",
+        approvingPlan: "מאשר…",
+        approvePlanFailedTitle: "לא ניתן היה לאשר את התוכנית",
+        continueToMappingAction: "המשך להתאמת התוכן שלכם"
       }
     },
     picker: {

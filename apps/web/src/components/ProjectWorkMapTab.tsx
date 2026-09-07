@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { ProjectResponse, WorkMapEntry } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { useWorkMap } from "../lib/use-work-map";
 import { useProjectAssets } from "../lib/use-project-assets";
+import { filterMeaningfulWorkMapEntries } from "../lib/simple-work-map-plan";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { ClaudeActionButton } from "./ui/ClaudeActionButton";
@@ -99,6 +101,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const projectId = project.project.projectId;
   const { t } = useLocale();
   const { mode } = useWorkspaceMode();
+  const { plan, createPlan } = useProjectWorkspaceContext();
   const { workMap, isLoading, error, isStale, refetch, save, createAiDraft } = useWorkMap(projectId);
   const { assets } = useProjectAssets(projectId);
   const [rows, setRows] = useState<RowForm[]>([]);
@@ -109,6 +112,24 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const [createPlanError, setCreatePlanError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("tellAi");
   const [hasEnteredPreviewOnce, setHasEnteredPreviewOnce] = useState(false);
+  const [isApprovingPlan, setIsApprovingPlan] = useState(false);
+  const [approvePlanError, setApprovePlanError] = useState<string | null>(null);
+
+  // Reuses the EXACT same execution-plan-creation action SimpleScenesView's
+  // own "Create Execution Plan" button already calls (client-facing UX
+  // simplification follow-up, "Make the Review AI Plan action obvious") -
+  // never a new approval mechanism. Once a plan already exists there is
+  // nothing further to create here; the button becomes a plain link
+  // forward to Match Your Content instead (see the render below).
+  async function handleApprovePlan(): Promise<void> {
+    setIsApprovingPlan(true);
+    setApprovePlanError(null);
+    const result = await createPlan();
+    setIsApprovingPlan(false);
+    if (!result.ok) {
+      setApprovePlanError(result.message ?? null);
+    }
+  }
 
   useEffect(() => {
     // Synchronizes local editable rows from the real work map whenever it
@@ -247,13 +268,19 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
 
   if (viewMode === "planPreview") {
     const entries = workMap?.entries ?? [];
+    const isSimple = mode === "simple";
+    // Simple Mode's "Advanced details" only ever lists an entry that
+    // actually carries a real client-facing decision - a bare composition
+    // reference with nothing chosen yet is not "a real warning/detail",
+    // just noise. Advanced Mode is untouched: it always lists every entry.
+    const advancedDetailEntries = isSimple ? filterMeaningfulWorkMapEntries(entries) : entries;
     return (
       <Card>
         <CardHeader title={t.workMapTab.planPreview.title} />
-        <p>{t.workMapTab.planPreview.description}</p>
+        <p>{isSimple ? t.workMapTab.planPreview.simple.description : t.workMapTab.planPreview.description}</p>
         {entries.length === 0 ? (
           <EmptyState title={t.workMapTab.emptyTitle} description={t.workMapTab.emptyDescription} />
-        ) : mode === "simple" ? (
+        ) : isSimple ? (
           <SimpleWorkMapPlanView manifest={project.manifest} entries={entries} assets={assets} onEditPlan={() => setViewMode("manualForm")} />
         ) : (
           <div className="work-map-plan-preview" role="table">
@@ -282,24 +309,45 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             })}
           </div>
         )}
-        <details className="advanced-details">
-          <summary>{t.workMapTab.planPreview.advancedDetailsToggle}</summary>
-          <ul className="advanced-details__list">
-            {entries.map((entry) => (
-              <li key={entry.id}>
-                <code>{entry.id}</code> · {t.workMapTab.fields.sourceCompositionId}: <code>{entry.sourceCompositionId ?? "null"}</code> ·{" "}
-                {t.workMapTab.fields.desiredAssetId}: <code>{entry.desiredAssetId ?? "null"}</code>
-              </li>
-            ))}
-          </ul>
-        </details>
+
+        {advancedDetailEntries.length > 0 ? (
+          <details className="advanced-details">
+            <summary>{t.workMapTab.planPreview.advancedDetailsToggle}</summary>
+            <ul className="advanced-details__list">
+              {advancedDetailEntries.map((entry) => (
+                <li key={entry.id}>
+                  <code>{entry.id}</code> · {t.workMapTab.fields.sourceCompositionId}: <code>{entry.sourceCompositionId ?? "null"}</code> ·{" "}
+                  {t.workMapTab.fields.desiredAssetId}: <code>{entry.desiredAssetId ?? "null"}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+
+        {isSimple && approvePlanError ? (
+          <ErrorState title={t.workMapTab.planPreview.simple.approvePlanFailedTitle} description={approvePlanError} />
+        ) : null}
+
         <div className="edit-drawer-actions">
           <Button variant="secondary" onClick={() => setViewMode("tellAi")}>
-            {t.workMapTab.planPreview.tellAiAgainAction}
+            {isSimple ? t.workMapTab.planPreview.simple.askAiToImproveAction : t.workMapTab.planPreview.tellAiAgainAction}
           </Button>
-          <Button variant="secondary" onClick={() => setViewMode("manualForm")}>
-            {t.workMapTab.ai.addDetailsManually}
-          </Button>
+          {isSimple ? null : (
+            <Button variant="secondary" onClick={() => setViewMode("manualForm")}>
+              {t.workMapTab.ai.addDetailsManually}
+            </Button>
+          )}
+          {isSimple ? (
+            plan ? (
+              <Link href={`/projects/${projectId}/scenes`} className="btn btn--primary">
+                {t.workMapTab.planPreview.simple.continueToMappingAction}
+              </Link>
+            ) : (
+              <Button variant="primary" disabled={isApprovingPlan} onClick={() => void handleApprovePlan()}>
+                {isApprovingPlan ? t.workMapTab.planPreview.simple.approvingPlan : t.workMapTab.planPreview.simple.approvePlanAction}
+              </Button>
+            )
+          ) : null}
         </div>
       </Card>
     );

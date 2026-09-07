@@ -681,6 +681,7 @@ export const en = {
       tellAiAgainAction: "Tell AI again",
       advancedDetailsToggle: "Advanced details",
       simple: {
+        description: "Review what AI plans to do with your video. You can edit the scene plan before continuing.",
         summaryTitle: "AI found",
         summaryScenes: (n: number): string => `${n} main scene${n === 1 ? "" : "s"}`,
         summarySupporting: (n: number): string => `${n} supporting nested composition${n === 1 ? "" : "s"}`,
@@ -693,6 +694,9 @@ export const en = {
         noPlaceholdersNotice:
           "AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.",
         thumbnailPlaceholder: "Scene visual will be generated after mapping",
+        sceneTitleMain: "Main Scene",
+        sceneTitleNumbered: (n: number): string => `Scene ${n}`,
+        templateCompositionLabel: (name: string): string => `Template composition: ${name}`,
         replaceWithLabel: "Will use",
         noReplacementPlanned: "No content replacement planned for this scene - DYO will keep the original animation.",
         textLabel: "Text",
@@ -700,7 +704,12 @@ export const en = {
         timingLabel: "Timing",
         usesOriginalTiming: "Uses the template's original timing",
         durationSuffix: (n: number): string => `${n}s`,
-        editPlanAction: "Edit Plan"
+        editPlanAction: "Edit Plan",
+        askAiToImproveAction: "Ask AI to Improve",
+        approvePlanAction: "Approve AI Plan",
+        approvingPlan: "Approving…",
+        approvePlanFailedTitle: "Could not approve this plan",
+        continueToMappingAction: "Continue to Match Your Content"
       }
     },
     picker: {

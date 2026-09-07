@@ -47,3 +47,28 @@ export function filterWorkMapEntriesForSimpleMode(entries: WorkMapEntry[], manif
   );
   return entries.filter((entry) => entry.sourceCompositionId === null || !nestedOnlyCompositionIds.has(entry.sourceCompositionId));
 }
+
+/**
+ * True once an entry carries an actual client-facing content decision -
+ * a desired asset, text, instructions, or a real timestamp/duration.
+ * Every schema-valid non-null string field here is already guaranteed
+ * non-empty (workMapEntrySchema's own min(1)); the `.trim()` checks are
+ * defensive only. Drives the Simple Mode "Advanced details" disclosure's
+ * own filtering (never a raw technical dump for a composition nobody has
+ * decided anything about yet) - Advanced Mode never calls this, it always
+ * lists every entry unfiltered.
+ */
+export function hasMeaningfulWorkMapDetail(entry: WorkMapEntry): boolean {
+  return (
+    (entry.desiredAssetId !== null && entry.desiredAssetId.trim() !== "") ||
+    (entry.desiredText !== null && entry.desiredText.trim() !== "") ||
+    (entry.instructions !== null && entry.instructions.trim() !== "") ||
+    entry.assetTimestampSeconds !== null ||
+    entry.desiredDurationSeconds !== null
+  );
+}
+
+/** Simple Mode's own filtered view of which entries are worth listing under "Advanced details" - see hasMeaningfulWorkMapDetail. */
+export function filterMeaningfulWorkMapEntries(entries: WorkMapEntry[]): WorkMapEntry[] {
+  return entries.filter(hasMeaningfulWorkMapDetail);
+}
