@@ -695,6 +695,7 @@ export const he: Dictionary = {
         timingLabel: "תזמון",
         usesOriginalTiming: "משתמש בתזמון המקורי של התבנית",
         durationSuffix: (n: number): string => `${n} שניות`,
+        aiNoteLabel: "הערת בינה מלאכותית:",
         editPlanAction: "עריכת התוכנית",
         askAiToImproveAction: "בקשו מהבינה המלאכותית לשפר",
         approvePlanAction: "אישור תוכנית הבינה המלאכותית",

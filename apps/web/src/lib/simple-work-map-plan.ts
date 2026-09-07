@@ -49,26 +49,18 @@ export function filterWorkMapEntriesForSimpleMode(entries: WorkMapEntry[], manif
 }
 
 /**
- * True once an entry carries an actual client-facing content decision -
- * a desired asset, text, instructions, or a real timestamp/duration.
- * Every schema-valid non-null string field here is already guaranteed
- * non-empty (workMapEntrySchema's own min(1)); the `.trim()` checks are
- * defensive only. Drives the Simple Mode "Advanced details" disclosure's
- * own filtering (never a raw technical dump for a composition nobody has
- * decided anything about yet) - Advanced Mode never calls this, it always
- * lists every entry unfiltered.
+ * True once an entry carries real, non-empty AI instruction text worth
+ * showing a client as a plain-language scene note (e.g. "AI note: Keep
+ * the original template content unchanged..."). Every schema-valid
+ * non-null value here is already guaranteed non-empty
+ * (workMapEntrySchema's own min(1)); the `.trim()` check is defensive
+ * only. Deliberately narrow: `instructions` alone is real client-facing
+ * information (real AI-written text a person can read), unlike a raw
+ * Work Map UUID/composition ID/desiredAssetId value, which Simple Mode
+ * must never expose at all - see PlanCard's own doc comment for where
+ * that content actually surfaces instead of the old raw "Advanced
+ * details" technical list.
  */
-export function hasMeaningfulWorkMapDetail(entry: WorkMapEntry): boolean {
-  return (
-    (entry.desiredAssetId !== null && entry.desiredAssetId.trim() !== "") ||
-    (entry.desiredText !== null && entry.desiredText.trim() !== "") ||
-    (entry.instructions !== null && entry.instructions.trim() !== "") ||
-    entry.assetTimestampSeconds !== null ||
-    entry.desiredDurationSeconds !== null
-  );
-}
-
-/** Simple Mode's own filtered view of which entries are worth listing under "Advanced details" - see hasMeaningfulWorkMapDetail. */
-export function filterMeaningfulWorkMapEntries(entries: WorkMapEntry[]): WorkMapEntry[] {
-  return entries.filter(hasMeaningfulWorkMapDetail);
+export function hasClientFacingInstructions(entry: WorkMapEntry): boolean {
+  return entry.instructions !== null && entry.instructions.trim() !== "";
 }

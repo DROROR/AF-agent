@@ -162,7 +162,19 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     expect(contentCells.length).toBeGreaterThan(0);
   });
 
-  it("keeps the real composition/asset IDs available under Advanced details - never deleted from the data model, just not in the default view", async () => {
+  it("Simple Mode never shows an 'Advanced details' disclosure at all - the raw IDs stay available only in Advanced Mode, never deleted from the data model", async () => {
+    stubWorkspace({
+      status: 200,
+      body: { workMap: workMapFixture({}, [workMapEntryFixture({ id: "wm-entry-1", sourceCompositionId: "c1", desiredAssetId: "asset-1" })]) }
+    });
+    renderWorkMap();
+    await screen.findByText("Your Video Plan");
+
+    expect(screen.queryByText("Advanced details")).toBeNull();
+  });
+
+  it("Advanced Mode still exposes the real composition/asset IDs under Advanced details, unchanged", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace({
       status: 200,
       body: { workMap: workMapFixture({}, [workMapEntryFixture({ id: "wm-entry-1", sourceCompositionId: "c1", desiredAssetId: "asset-1" })]) }
@@ -375,15 +387,13 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     expect(screen.queryByText("Advanced details")).toBeNull();
   });
 
-  it("still shows 'Advanced details' with only the entries that carry a real decision, once at least one exists", async () => {
+  it("never shows 'Advanced details' in Simple Mode even when the entry carries a real content decision - Advanced Mode keeps it, unfiltered", async () => {
     const withDecision = workMapEntryFixture({ id: "wm-real", sourceCompositionId: "c1", desiredText: "Checkout screen" });
     stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [withDecision]) } });
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    const toggle = screen.getByText("Advanced details");
-    fireEvent.click(toggle);
-    expect(screen.getByText("wm-real", { exact: false })).not.toBeNull();
+    expect(screen.queryByText("Advanced details")).toBeNull();
   });
 
   it("shows the updated, non-table Simple Mode copy - never the old 'edit any row' table wording", async () => {
@@ -444,5 +454,117 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     await screen.findByText("Your Video Plan");
     expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Approve AI Plan" })).toBeNull();
+  });
+});
+
+/**
+ * Live QA follow-up (Advanced Details leak): the exact real production
+ * shape found on project d9db52fc-7ff2-4088-b872-8a29a8b5a730 - 51 Work
+ * Map entries (1 real top-level scene + 50 nested-only compositions),
+ * EVERY entry carries real AI-written `instructions` text, and NONE
+ * carries a desiredAssetId/desiredText/assetTimestampSeconds/
+ * desiredDurationSeconds decision. `hasMeaningfulWorkMapDetail` used to
+ * treat `instructions` as "meaningful" and keep all 51 in the raw
+ * "Advanced details" list - exposing 51 Work Map UUIDs/composition IDs/
+ * "desiredAssetId: null" values, a wall of technical noise the old list
+ * format never even displayed the instructions text to justify. Simple
+ * Mode must never show that raw list at all; any real instruction text
+ * belongs on the surviving scene's own card instead.
+ */
+describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructions, zero content decisions)", () => {
+  function fiftyOneCompositionManifest() {
+    const base = manifestFixture();
+    const mainScene = { ...base.compositions[0]!, compositionId: "main-scene", name: "!Render" };
+    const nested = Array.from({ length: 50 }, (_, i) => ({
+      compositionId: `nested-${i}`,
+      aeProjectItemIndex: i + 2,
+      name: `Pre-comp ${i}`,
+      widthPx: 1920,
+      heightPx: 1080,
+      durationSeconds: 2,
+      frameRate: 30,
+      isNestedOnlyReferenced: true,
+      parentCompositionIds: ["main-scene"]
+    }));
+    return { ...base, compositions: [mainScene, ...nested] };
+  }
+
+  const MAIN_SCENE_NOTE = "Primary/main scene - the final render comp. Preserve original structure, timing, transitions and nested compositions exactly as built. No candidate assets were provided, so no asset/text substitutions are made here.";
+  const NESTED_NOTE = "No uploaded assets available to map. Keep original template content unchanged.";
+
+  function fiftyOneEntriesAllWithInstructionsOnly() {
+    return [
+      workMapEntryFixture({
+        id: "e-main",
+        sourceCompositionId: "main-scene",
+        sourceReference: null,
+        desiredAssetId: null,
+        desiredText: null,
+        assetTimestampSeconds: null,
+        desiredDurationSeconds: null,
+        instructions: MAIN_SCENE_NOTE
+      }),
+      ...Array.from({ length: 50 }, (_, i) =>
+        workMapEntryFixture({
+          id: `e-nested-${i}`,
+          sourceCompositionId: `nested-${i}`,
+          sourceReference: null,
+          desiredAssetId: null,
+          desiredText: null,
+          assetTimestampSeconds: null,
+          desiredDurationSeconds: null,
+          instructions: NESTED_NOTE
+        })
+      )
+    ];
+  }
+
+  it("Simple Mode shows no Advanced Details technical wall, and no Work Map UUIDs/composition IDs anywhere on the page", async () => {
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, fiftyOneEntriesAllWithInstructionsOnly()) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: fiftyOneCompositionManifest() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    // No "Advanced details" disclosure at all - not even collapsed.
+    expect(screen.queryByText("Advanced details")).toBeNull();
+    // None of the raw Work Map UUIDs or nested composition IDs ever reach the DOM.
+    expect(document.body.textContent).not.toContain("e-main");
+    expect(document.body.textContent).not.toContain("nested-0");
+    expect(document.body.textContent).not.toContain("main-scene");
+  });
+
+  it("shows the real AI instruction text as a plain-language note on the one surviving Main Scene card", async () => {
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, fiftyOneEntriesAllWithInstructionsOnly()) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: fiftyOneCompositionManifest() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    expect(screen.getByText("Main Scene")).not.toBeNull();
+    expect(screen.getByText(MAIN_SCENE_NOTE, { exact: false })).not.toBeNull();
+    expect(screen.getByText("AI note:")).not.toBeNull();
+    // Only the surviving scene's own note appears - none of the 50 nested
+    // compositions' notes leak in as their own content.
+    expect(screen.queryAllByText(NESTED_NOTE, { exact: false })).toHaveLength(0);
+  });
+
+  it("Advanced Mode still shows the full raw technical data - all 51 entries, composition IDs, and asset IDs", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubWorkspace(
+      { status: 200, body: { workMap: workMapFixture({}, fiftyOneEntriesAllWithInstructionsOnly()) } },
+      { [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: fiftyOneCompositionManifest() } } }
+    );
+    renderWorkMap();
+
+    await screen.findByText("Your Video Plan");
+    const toggle = screen.getByText("Advanced details");
+    fireEvent.click(toggle);
+    expect(document.body.textContent).toContain("e-main");
+    expect(document.body.textContent).toContain("main-scene");
+    expect(document.body.textContent).toContain("nested-0");
+    expect(document.body.textContent).toContain("nested-49");
   });
 });

@@ -704,6 +704,7 @@ export const en = {
         timingLabel: "Timing",
         usesOriginalTiming: "Uses the template's original timing",
         durationSuffix: (n: number): string => `${n}s`,
+        aiNoteLabel: "AI note:",
         editPlanAction: "Edit Plan",
         askAiToImproveAction: "Ask AI to Improve",
         approvePlanAction: "Approve AI Plan",

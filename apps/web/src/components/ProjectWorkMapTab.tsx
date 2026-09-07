@@ -7,7 +7,6 @@ import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { useWorkMap } from "../lib/use-work-map";
 import { useProjectAssets } from "../lib/use-project-assets";
-import { filterMeaningfulWorkMapEntries } from "../lib/simple-work-map-plan";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { ClaudeActionButton } from "./ui/ClaudeActionButton";
@@ -269,11 +268,6 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   if (viewMode === "planPreview") {
     const entries = workMap?.entries ?? [];
     const isSimple = mode === "simple";
-    // Simple Mode's "Advanced details" only ever lists an entry that
-    // actually carries a real client-facing decision - a bare composition
-    // reference with nothing chosen yet is not "a real warning/detail",
-    // just noise. Advanced Mode is untouched: it always lists every entry.
-    const advancedDetailEntries = isSimple ? filterMeaningfulWorkMapEntries(entries) : entries;
     return (
       <Card>
         <CardHeader title={t.workMapTab.planPreview.title} />
@@ -310,11 +304,20 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
           </div>
         )}
 
-        {advancedDetailEntries.length > 0 ? (
+        {/*
+          Simple Mode never renders this - it exposes exactly the raw
+          Work Map UUID / composition ID / desiredAssetId values Simple
+          Mode must never show a client (live QA follow-up). Any real,
+          client-facing AI instruction text now surfaces instead as a
+          plain-language note on the relevant scene card (see
+          SimpleWorkMapPlanView's own PlanCard). Advanced Mode is
+          completely unchanged - still lists every entry, unfiltered.
+        */}
+        {isSimple ? null : (
           <details className="advanced-details">
             <summary>{t.workMapTab.planPreview.advancedDetailsToggle}</summary>
             <ul className="advanced-details__list">
-              {advancedDetailEntries.map((entry) => (
+              {entries.map((entry) => (
                 <li key={entry.id}>
                   <code>{entry.id}</code> · {t.workMapTab.fields.sourceCompositionId}: <code>{entry.sourceCompositionId ?? "null"}</code> ·{" "}
                   {t.workMapTab.fields.desiredAssetId}: <code>{entry.desiredAssetId ?? "null"}</code>
@@ -322,7 +325,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
               ))}
             </ul>
           </details>
-        ) : null}
+        )}
 
         {isSimple && approvePlanError ? (
           <ErrorState title={t.workMapTab.planPreview.simple.approvePlanFailedTitle} description={approvePlanError} />

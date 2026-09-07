@@ -2,7 +2,7 @@
 
 import type { ReactElement } from "react";
 import type { AssetDto, TemplateManifest, WorkMapEntry } from "@dyo/schemas";
-import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder } from "../lib/simple-work-map-plan";
+import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions } from "../lib/simple-work-map-plan";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./EmptyState";
@@ -70,6 +70,22 @@ function PlanCard({ entry, index, total, sceneNameByCompositionId, assetById, on
           <dd>{entry.desiredDurationSeconds !== null ? s.durationSuffix(entry.desiredDurationSeconds) : s.usesOriginalTiming}</dd>
         </div>
       </dl>
+
+      {/*
+        Real, plain-language AI instruction text (e.g. "No uploaded assets
+        available to map. Keep original template content unchanged.") shown
+        verbatim - never rewritten/fabricated - as the client-facing home
+        for this content (live QA follow-up). This replaces the old raw
+        "Advanced details" technical list in Simple Mode, which exposed
+        exactly the Work Map UUID / composition ID / desiredAssetId values
+        Simple Mode must never show a client; Advanced Mode's own list is
+        untouched and still shows those raw fields.
+      */}
+      {hasClientFacingInstructions(entry) ? (
+        <p className="plan-card__note">
+          <strong>{s.aiNoteLabel}</strong> {entry.instructions}
+        </p>
+      ) : null}
 
       <div className="plan-card__actions">
         <Button size="sm" variant="ghost" onClick={onEditPlan}>

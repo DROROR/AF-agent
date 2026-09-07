@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Composition, TemplateManifest, WorkMapEntry } from "@dyo/schemas";
-import {
-  computeSimpleAiPlanSummary,
-  filterMeaningfulWorkMapEntries,
-  filterWorkMapEntriesForSimpleMode,
-  hasAnyEditablePlaceholder,
-  hasMeaningfulWorkMapDetail
-} from "./simple-work-map-plan";
+import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions } from "./simple-work-map-plan";
 
 function composition(overrides: Partial<Composition> = {}): Composition {
   return {
@@ -148,28 +142,18 @@ describe("hasAnyEditablePlaceholder", () => {
   });
 });
 
-describe("hasMeaningfulWorkMapDetail / filterMeaningfulWorkMapEntries", () => {
-  it("is false for an entry with no real content decision - just a bare composition reference", () => {
-    const e = entry({ sourceCompositionId: "nested-1", desiredAssetId: null, desiredText: null, instructions: null, assetTimestampSeconds: null, desiredDurationSeconds: null });
-    expect(hasMeaningfulWorkMapDetail(e)).toBe(false);
+describe("hasClientFacingInstructions", () => {
+  it("is false when there is no instructions text", () => {
+    expect(hasClientFacingInstructions(entry({ instructions: null }))).toBe(false);
   });
 
-  it("is true once any real decision exists - asset, text, instructions, timestamp, or duration", () => {
-    expect(hasMeaningfulWorkMapDetail(entry({ desiredAssetId: "asset-1" }))).toBe(true);
-    expect(hasMeaningfulWorkMapDetail(entry({ desiredText: "Hello" }))).toBe(true);
-    expect(hasMeaningfulWorkMapDetail(entry({ instructions: "Use the client's logo" }))).toBe(true);
-    expect(hasMeaningfulWorkMapDetail(entry({ assetTimestampSeconds: 2 }))).toBe(true);
-    expect(hasMeaningfulWorkMapDetail(entry({ desiredDurationSeconds: 4 }))).toBe(true);
-  });
-
-  it("filters an all-empty entry list down to nothing - the real live-QA shape (51 entries, zero real decisions)", () => {
-    const entries = Array.from({ length: 51 }, (_, i) => entry({ id: `wm-${i}`, sourceCompositionId: `comp-${i}` }));
-    expect(filterMeaningfulWorkMapEntries(entries)).toHaveLength(0);
-  });
-
-  it("keeps only the entries that carry a real decision, dropping the rest", () => {
-    const withDecision = entry({ id: "wm-real", desiredText: "Checkout screen" });
-    const withoutDecision = entry({ id: "wm-empty", sourceCompositionId: "nested-1" });
-    expect(filterMeaningfulWorkMapEntries([withDecision, withoutDecision])).toEqual([withDecision]);
+  it("is true once real instruction text exists, independent of every other field", () => {
+    expect(hasClientFacingInstructions(entry({ instructions: "Keep the original template content unchanged." }))).toBe(true);
+    // The real live-QA shape: instructions present, every content-decision field null.
+    expect(
+      hasClientFacingInstructions(
+        entry({ sourceCompositionId: "nested-1", desiredAssetId: null, desiredText: null, instructions: "No uploaded assets available to map." })
+      )
+    ).toBe(true);
   });
 });
