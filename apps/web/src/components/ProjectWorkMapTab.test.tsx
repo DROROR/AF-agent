@@ -248,6 +248,10 @@ describe("ProjectWorkMapTab - Simple Mode scene filtering (live QA fix)", () => 
     expect(
       screen.getByText("AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.")
     ).not.toBeNull();
+    // The Main Scene card shows its own "AI plans to:" checklist.
+    expect(screen.getByText("AI plans to:")).not.toBeNull();
+    expect(screen.getByText("Preserve original animation")).not.toBeNull();
+    expect(screen.getByText("Preserve original timing")).not.toBeNull();
   });
 
   it("CASE H: Advanced Mode still shows every raw entry, including nested-only compositions - full technical capability preserved", async () => {
@@ -401,7 +405,7 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    expect(screen.getByText("Review what AI plans to do with your video. You can edit the scene plan before continuing.")).not.toBeNull();
+    expect(screen.getByText("AI has prepared your video plan. Review it below, then approve it to continue.")).not.toBeNull();
     expect(screen.queryByText(/You can edit any row/)).toBeNull();
   });
 
@@ -437,6 +441,7 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
+    expect(screen.getByText("Approving this plan unlocks Match Your Content.")).not.toBeNull();
     const approveButton = screen.getByRole("button", { name: "Approve AI Plan" });
     fireEvent.click(approveButton);
 
@@ -445,6 +450,8 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     });
     expect(screen.queryByRole("button", { name: "Approve AI Plan" })).toBeNull();
     expect((screen.getByRole("link", { name: "Continue to Match Your Content" }) as HTMLAnchorElement).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/scenes`);
+    // Once approved, the "unlocks Match Your Content" helper no longer applies.
+    expect(screen.queryByText("Approving this plan unlocks Match Your Content.")).toBeNull();
   });
 
   it("shows 'Continue to Match Your Content' immediately, never a duplicate 'Approve AI Plan' button, when a plan already exists", async () => {

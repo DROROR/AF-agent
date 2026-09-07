@@ -423,7 +423,7 @@ export const en = {
     stepper: {
       ariaLabel: "Video production steps",
       stepOfTotal: (current: number, total: number, title: string): string => `Step ${current} of ${total} — ${title}`,
-      status: { complete: "Complete", inProgress: "In progress", locked: "Locked", ready: "Ready" },
+      status: { complete: "Complete", inProgress: "Current", locked: "Locked", ready: "Ready" },
       steps: {
         upload: { title: "Upload", description: "Your template and assets are uploaded and ready." },
         tellClaude: { title: "AI Plan", description: "AI is planning how to use your template and content." },
@@ -681,23 +681,23 @@ export const en = {
       tellAiAgainAction: "Tell AI again",
       advancedDetailsToggle: "Advanced details",
       simple: {
-        description: "Review what AI plans to do with your video. You can edit the scene plan before continuing.",
+        description: "AI has prepared your video plan. Review it below, then approve it to continue.",
         summaryTitle: "AI found",
         summaryScenes: (n: number): string => `${n} main scene${n === 1 ? "" : "s"}`,
         summarySupporting: (n: number): string => `${n} supporting nested composition${n === 1 ? "" : "s"}`,
         summaryUnresolved: (n: number): string => `${n} unresolved item${n === 1 ? "" : "s"}`,
-        planTitle: "Plan",
-        planPreserve: "Preserve the original template animation",
-        planUseMain: "Use the main scene as the final sequence",
-        planKeepPrecomps: "Keep supporting precomps internal",
-        planReplaceSafe: "Replace only safely mapped content",
         noPlaceholdersNotice:
           "AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.",
-        thumbnailPlaceholder: "Scene visual will be generated after mapping",
+        thumbnailPlaceholder: "Scene preview not generated yet",
         sceneTitleMain: "Main Scene",
         sceneTitleNumbered: (n: number): string => `Scene ${n}`,
         templateCompositionLabel: (name: string): string => `Template composition: ${name}`,
-        replaceWithLabel: "Will use",
+        cardPlanTitle: "AI plans to:",
+        cardPlanPreserveAnimation: "Preserve original animation",
+        cardPlanPreserveTiming: "Preserve original timing",
+        cardPlanKeepConnected: "Keep supporting compositions connected",
+        cardPlanReplaceSafe: "Replace only safely mapped content",
+        replaceWithLabel: "Content",
         noReplacementPlanned: "No content replacement planned for this scene - DYO will keep the original animation.",
         textLabel: "Text",
         noEditableText: "No editable text detected",
@@ -710,6 +710,7 @@ export const en = {
         approvePlanAction: "Approve AI Plan",
         approvingPlan: "Approving…",
         approvePlanFailedTitle: "Could not approve this plan",
+        approvePlanHelper: "Approving this plan unlocks Match Your Content.",
         continueToMappingAction: "Continue to Match Your Content"
       }
     },

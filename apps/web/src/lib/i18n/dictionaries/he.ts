@@ -416,7 +416,7 @@ export const he: Dictionary = {
     stepper: {
       ariaLabel: "שלבי הפקת הווידאו",
       stepOfTotal: (current: number, total: number, title: string): string => `שלב ${current} מתוך ${total} — ${title}`,
-      status: { complete: "הושלם", inProgress: "בתהליך", locked: "נעול", ready: "מוכן" },
+      status: { complete: "הושלם", inProgress: "נוכחי", locked: "נעול", ready: "מוכן" },
       steps: {
         upload: { title: "העלאה", description: "התבנית והנכסים שלכם הועלו ומוכנים." },
         tellClaude: { title: "תוכנית בינה מלאכותית", description: "הבינה המלאכותית מתכננת כיצד להשתמש בתבנית ובתוכן שלכם." },
@@ -672,23 +672,23 @@ export const he: Dictionary = {
       tellAiAgainAction: "לספר לבינה המלאכותית שוב",
       advancedDetailsToggle: "פרטים מתקדמים",
       simple: {
-        description: "בדקו מה הבינה המלאכותית מתכננת לעשות בווידאו שלכם. ניתן לערוך את תוכנית הסצנות לפני שממשיכים.",
+        description: "הבינה המלאכותית הכינה את תוכנית הווידאו שלכם. בדקו אותה למטה, ואז אשרו אותה כדי להמשיך.",
         summaryTitle: "הבינה המלאכותית מצאה",
         summaryScenes: (n: number): string => `${n} סצנות ראשיות`,
         summarySupporting: (n: number): string => `${n} קומפוזיציות מקוננות תומכות`,
         summaryUnresolved: (n: number): string => `${n} פריטים לא פתורים`,
-        planTitle: "תוכנית",
-        planPreserve: "שימור אנימציית התבנית המקורית",
-        planUseMain: "שימוש בסצנה הראשית כרצף הסופי",
-        planKeepPrecomps: "שמירת קומפוזיציות המשנה התומכות פנימיות",
-        planReplaceSafe: "החלפה רק של תוכן שמופה בבטחה",
         noPlaceholdersNotice:
           "הבינה המלאכותית בדקה את התבנית הזו אך לא זיהתה פלייסהולדרים ניתנים לעריכה סטנדרטיים. DYO יכולה לשמר את האנימציה והמבנה המקונן המקוריים, אך החלפות אוטומטיות יבוצעו רק כאשר מיפוי בטוח מאושר.",
-        thumbnailPlaceholder: "התצוגה החזותית של הסצנה תיווצר לאחר המיפוי",
+        thumbnailPlaceholder: "תצוגת הסצנה טרם נוצרה",
         sceneTitleMain: "הסצנה הראשית",
         sceneTitleNumbered: (n: number): string => `סצנה ${n}`,
         templateCompositionLabel: (name: string): string => `קומפוזיציית התבנית: ${name}`,
-        replaceWithLabel: "ישמש",
+        cardPlanTitle: "הבינה המלאכותית מתכננת:",
+        cardPlanPreserveAnimation: "שימור האנימציה המקורית",
+        cardPlanPreserveTiming: "שימור התזמון המקורי",
+        cardPlanKeepConnected: "שמירה על חיבור הקומפוזיציות התומכות",
+        cardPlanReplaceSafe: "החלפה רק של תוכן שמופה בבטחה",
+        replaceWithLabel: "תוכן",
         noReplacementPlanned: "לא מתוכננת החלפת תוכן לסצנה זו - DYO תשמור על האנימציה המקורית.",
         textLabel: "טקסט",
         noEditableText: "לא זוהה טקסט ניתן לעריכה",
@@ -701,6 +701,7 @@ export const he: Dictionary = {
         approvePlanAction: "אישור תוכנית הבינה המלאכותית",
         approvingPlan: "מאשר…",
         approvePlanFailedTitle: "לא ניתן היה לאשר את התוכנית",
+        approvePlanHelper: "אישור התוכנית יפתח את שלב התאמת התוכן שלכם.",
         continueToMappingAction: "המשך להתאמת התוכן שלכם"
       }
     },

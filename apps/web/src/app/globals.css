@@ -2005,12 +2005,15 @@ a.workflow-stepper__step:hover {
 }
 
 .workflow-stepper__item[data-state="locked"] .workflow-stepper__step {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
+  background: var(--color-surface-sunken);
 }
 
 .workflow-stepper__item[data-state="current"] .workflow-stepper__step {
   border-color: var(--brand-primary);
+  background: var(--color-info-bg);
+  box-shadow: 0 0 0 1px var(--brand-primary);
 }
 
 .workflow-stepper__marker {
@@ -2061,6 +2064,11 @@ a.workflow-stepper__step:hover {
   font-size: 0.66rem;
   font-weight: 500;
   color: var(--color-text-muted);
+}
+
+.workflow-stepper__item[data-state="current"] .workflow-stepper__status {
+  color: var(--brand-primary);
+  font-weight: 700;
 }
 
 .workspace-header__facts {
@@ -2999,22 +3007,6 @@ a.workflow-stepper__step:hover {
   font-size: 0.9rem;
 }
 
-.plan-summary__plan-title {
-  margin: 0 0 var(--space-1);
-  font-weight: 650;
-  font-size: 0.86rem;
-}
-
-.plan-summary__list {
-  margin: 0;
-  padding-inline-start: 1.2rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: 0.86rem;
-  color: var(--color-text-muted);
-}
-
 .plan-summary__notice {
   margin: 0;
   padding: var(--space-3) var(--space-4);
@@ -3061,6 +3053,29 @@ a.workflow-stepper__step:hover {
 
 .plan-card__thumbnail-placeholder span {
   font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.plan-card__thumbnail {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+
+.plan-card__checklist-title {
+  margin: 0 0 var(--space-1);
+  font-weight: 650;
+  font-size: 0.84rem;
+}
+
+.plan-card__checklist ul {
+  margin: 0;
+  padding-inline-start: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 0.84rem;
   color: var(--color-text-muted);
 }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkflowStepper } from "./ProjectWorkflowStepper";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
@@ -130,5 +130,60 @@ describe("ProjectWorkflowStepper", () => {
     });
     renderStepper();
     await screen.findByText("Step 7 of 7 — Export Video");
+  });
+});
+
+/**
+ * Final Simple Mode UX pass - stepper clarity. The underlying state
+ * (computeWorkflowSteps, unit-tested in project-workflow-steps.test.ts)
+ * was already correct: Step 2 (AI Plan) complete / Step 3 (Review AI
+ * Plan) current / Step 4 (Match Your Content) locked once a Work Map
+ * draft exists but no execution plan does yet - CASE A/B here confirm
+ * that real state renders with visually distinct complete/current/locked
+ * markup (CASE C), not just correct internal state.
+ */
+describe("ProjectWorkflowStepper - visually distinct Complete/Current/Locked states (final Simple Mode UX pass)", () => {
+  it("CASE A: AI Plan Complete, Review AI Plan Current, Match Your Content Locked - each with a distinct data-state and marker", async () => {
+    stubWorkspace({
+      [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 404, body: { error: { code: "NOT_FOUND", message: "none", requestId: "r1" } } }
+    });
+    renderStepper();
+    await screen.findByText("Step 3 of 7 — Review AI Plan");
+
+    const aiPlanItem = screen.getByText("AI Plan").closest("li")!;
+    expect(aiPlanItem.getAttribute("data-state")).toBe("complete");
+    // A checkmark icon (not a plain digit) marks the complete step.
+    expect(aiPlanItem.querySelector(".workflow-stepper__marker svg")).not.toBeNull();
+
+    const reviewPlanItem = screen.getByText("Review AI Plan").closest("li")!;
+    expect(reviewPlanItem.getAttribute("data-state")).toBe("current");
+    expect(reviewPlanItem.querySelector("a")).not.toBeNull();
+    // CASE C: the current step's own status text is unmistakably "Current".
+    const status = within(reviewPlanItem).getByText("Current");
+    expect(status).not.toBeNull();
+
+    const matchContentItem = screen.getByText("Match Your Content").closest("li")!;
+    expect(matchContentItem.getAttribute("data-state")).toBe("locked");
+    expect(matchContentItem.querySelector("a")).toBeNull();
+    // A lock icon (not a plain digit) marks the locked step.
+    expect(matchContentItem.querySelector(".workflow-stepper__marker svg")).not.toBeNull();
+  });
+
+  it("CASE B: once the execution plan exists, Review AI Plan becomes Complete and Match Your Content becomes Current/unlocked", async () => {
+    stubWorkspace({
+      [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } }
+    });
+    renderStepper();
+    await screen.findByText("Step 4 of 7 — Match Your Content");
+
+    const reviewPlanItem = screen.getByText("Review AI Plan").closest("li")!;
+    expect(reviewPlanItem.getAttribute("data-state")).toBe("complete");
+
+    const matchContentItem = screen.getByText("Match Your Content").closest("li")!;
+    expect(matchContentItem.getAttribute("data-state")).toBe("current");
+    expect(matchContentItem.querySelector("a")).not.toBeNull();
+    expect(within(matchContentItem).getByText("Current")).not.toBeNull();
   });
 });

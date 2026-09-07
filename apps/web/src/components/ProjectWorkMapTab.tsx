@@ -331,6 +331,8 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
           <ErrorState title={t.workMapTab.planPreview.simple.approvePlanFailedTitle} description={approvePlanError} />
         ) : null}
 
+        {isSimple && !plan ? <p className="field__hint">{t.workMapTab.planPreview.simple.approvePlanHelper}</p> : null}
+
         <div className="edit-drawer-actions">
           <Button variant="secondary" onClick={() => setViewMode("tellAi")}>
             {isSimple ? t.workMapTab.planPreview.simple.askAiToImproveAction : t.workMapTab.planPreview.tellAiAgainAction}
