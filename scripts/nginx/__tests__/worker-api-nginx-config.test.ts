@@ -4,23 +4,28 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Live QA regression (2026-09-08 asset-download 404 fix, the THIRD time
- * this exact class of gap has bitten this project - see /jobs/active
- * 2026-09-04 and scene-evidence-preview 2026-09-07 in this same .conf
- * file's own comments): worker-api.dyocourses.com.conf is a manually
- * curated PATH ALLOWLIST, not a catch-all proxy - a real Fastify route
- * correctly registered and reachable directly against 127.0.0.1:4000 can
- * still silently 404 for every real Windows Worker if nobody remembers to
- * add a matching `location` block here too. `npm test` cannot spin up a
- * real nginx process, but it CAN parse this file's own `location` blocks
- * and simulate nginx's real matching precedence (an exact `location =`
- * always wins over any `location ~` regex, regardless of file order;
- * among `location ~` regex blocks, the FIRST one in file order that
- * matches wins; anything matching nothing falls through to the final
+ * Live QA regression - this exact class of gap has now bitten this
+ * project SEVEN separate times across five fixes (see this same .conf
+ * file's own comments): /jobs/active (2026-09-04), scene-evidence-preview
+ * (2026-09-07), assets/:assetId/file (2026-09-08), and - discovered by a
+ * full worker-API-surface audit run specifically because of that last one
+ * - checkpoint/preview/full-preview/artifact (2026-09-08, all four in one
+ * pass). worker-api.dyocourses.com.conf is a manually curated PATH
+ * ALLOWLIST, not a catch-all proxy - a real Fastify route correctly
+ * registered and reachable directly against 127.0.0.1:4000 can still
+ * silently 404 for every real Windows Worker if nobody remembers to add a
+ * matching `location` block here too. `npm test` cannot spin up a real
+ * nginx process, but it CAN parse this file's own `location` blocks and
+ * simulate nginx's real matching precedence (an exact `location =` always
+ * wins over any `location ~` regex, regardless of file order; among
+ * `location ~` regex blocks, the FIRST one in file order that matches
+ * wins; anything matching nothing falls through to the final
  * `location / { return 404; }`) against real, concrete request paths -
  * proving this file's own allowlist actually contains what this repo's
  * worker-facing routes need, not just that the file is syntactically
- * well-formed.
+ * well-formed. Also verifies each upload route's own `client_max_body_size`
+ * against its REAL application-layer ceiling (app.ts's own maxUploadBytes
+ * wiring), so a future silent mismatch there is caught here too.
  */
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -32,9 +37,23 @@ interface ParsedLocation {
   pattern: string;
   methods: string[] | null; // null = no limit_except found (should not happen for a real block)
   regex: RegExp | null; // only for kind: "regex"
+  /** This block's own `client_max_body_size` override in bytes, or null when the block relies on the server-wide 1M default (no override line present). */
+  maxBodyBytes: number | null;
 }
 
-/** Parses every `location = <path> { ... }` / `location ~ <regex> { ... }` block's own path/regex + its `limit_except <METHOD> { deny all; }` line - a real (if intentionally minimal) parse of this file's own actual allowlist, not a hand-copied duplicate of it. */
+/** "10m"/"2g"/"5m" (nginx's own size-suffix syntax) -> real byte count, so tests can assert on actual size relationships rather than string-matching the literal. */
+function parseNginxSize(raw: string): number {
+  const match = /^(\d+)([kKmMgG]?)$/.exec(raw.trim());
+  if (!match) {
+    throw new Error(`Could not parse nginx size literal: "${raw}"`);
+  }
+  const value = Number(match[1]);
+  const unit = (match[2] ?? "").toLowerCase();
+  const multiplier = unit === "g" ? 1024 ** 3 : unit === "m" ? 1024 ** 2 : unit === "k" ? 1024 : 1;
+  return value * multiplier;
+}
+
+/** Parses every `location = <path> { ... }` / `location ~ <regex> { ... }` block's own path/regex + its `limit_except <METHOD> { deny all; }` and `client_max_body_size` lines - a real (if intentionally minimal) parse of this file's own actual allowlist, not a hand-copied duplicate of it. */
 function parseLocations(text: string): ParsedLocation[] {
   const blockPattern = /location\s+(=|~)\s+(\S+)\s*\{([\s\S]*?)\n {4}\}/g;
   const locations: ParsedLocation[] = [];
@@ -45,14 +64,25 @@ function parseLocations(text: string): ParsedLocation[] {
       continue; // the final catch-all, handled separately below
     }
     const methodMatch = /limit_except\s+([A-Z]+)\s*\{\s*deny all;\s*\}/.exec(body);
+    const bodySizeMatch = /client_max_body_size\s+(\S+);/.exec(body);
     locations.push({
       kind: op === "=" ? "exact" : "regex",
       pattern,
       methods: methodMatch ? [methodMatch[1] as string] : null,
-      regex: op === "~" ? new RegExp(pattern) : null
+      regex: op === "~" ? new RegExp(pattern) : null,
+      maxBodyBytes: bodySizeMatch ? parseNginxSize(bodySizeMatch[1] as string) : null
     });
   }
   return locations;
+}
+
+/** Looks up a parsed block by its exact regex pattern text (as written in the .conf file) - used by the size-config tests below, which care about ONE specific block's own override, not just whether some path resolves. */
+function findByPattern(pattern: string): ParsedLocation {
+  const found = locations.find((l) => l.pattern === pattern);
+  if (!found) {
+    throw new Error(`No parsed location block found for pattern: ${pattern}`);
+  }
+  return found;
 }
 
 const locations = parseLocations(confText);
@@ -71,8 +101,8 @@ function resolve(path: string, method: string): { matched: boolean; methodAllowe
 }
 
 describe("worker-api.dyocourses.com.conf - real path allowlist parsed from the actual file", () => {
-  it("parsed at least the 7 expected location blocks - the parser itself is finding real blocks, not silently matching zero", () => {
-    expect(locations.length).toBeGreaterThanOrEqual(7);
+  it("parsed at least the 11 expected location blocks - the parser itself is finding real blocks, not silently matching zero", () => {
+    expect(locations.length).toBeGreaterThanOrEqual(11);
   });
 
   it("still contains the final `location / { return 404; }` catch-all - unrelated paths are never silently proxied", () => {
@@ -99,6 +129,54 @@ describe("worker-api.dyocourses.com.conf - real path allowlist parsed from the a
     });
   });
 
+  describe("the fix: the four routes confirmed missing during live QA are now all proxied, POST-only", () => {
+    const workerId = "accd0a71-dbd6-4a53-8b81-d3fe4609420b";
+    const jobId = "6b09548a-4437-40ad-813f-1680284b7810";
+
+    const routes: { name: string; path: string }[] = [
+      { name: "checkpoint", path: `/api/workers/${workerId}/jobs/${jobId}/checkpoint` },
+      { name: "preview", path: `/api/workers/${workerId}/jobs/${jobId}/preview` },
+      { name: "full-preview", path: `/api/workers/${workerId}/jobs/${jobId}/full-preview` },
+      { name: "artifact", path: `/api/workers/${workerId}/jobs/${jobId}/artifact` }
+    ];
+
+    for (const { name, path } of routes) {
+      it(`POST ${name} is proxied and allowed`, () => {
+        const result = resolve(path, "POST");
+        expect(result.matched, `no location block matched the ${name} path`).toBe(true);
+        expect(result.methodAllowed, `POST is not allowed for ${name}`).toBe(true);
+      });
+
+      it(`GET is rejected for ${name} - every one of these four is a POST-only worker action`, () => {
+        expect(resolve(path, "GET").methodAllowed).toBe(false);
+      });
+    }
+
+    it("preview never accidentally matches the full-preview path (or vice versa) - hex-dash-only jobId/workerId capture groups cannot swallow the letters in \"full-preview\"", () => {
+      const fullPreviewPath = `/api/workers/${workerId}/jobs/${jobId}/full-preview`;
+      const previewLocation = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/preview$");
+      expect(previewLocation.regex!.test(fullPreviewPath), "the /preview block's own regex must never match a full-preview path").toBe(false);
+    });
+
+    it("checkpoint carries no client_max_body_size override - a JSON progress record, covered by the server-wide 1M default", () => {
+      const location = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/checkpoint$");
+      expect(location.maxBodyBytes).toBeNull();
+    });
+
+    it("preview's client_max_body_size (10m) is well above a real single-frame image, but far below the application layer's own 200MB ASSET_MAX_UPLOAD_BYTES ceiling", () => {
+      const location = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/preview$");
+      expect(location.maxBodyBytes).toBe(10 * 1024 * 1024);
+      expect(location.maxBodyBytes).toBeLessThan(200 * 1024 * 1024);
+    });
+
+    it("full-preview and artifact both allow up to 2GB - matching the application layer's own RENDER_ARTIFACT_MAX_UPLOAD_BYTES default for a real rendered video, never silently smaller", () => {
+      const fullPreview = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/full-preview$");
+      const artifact = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/artifact$");
+      expect(fullPreview.maxBodyBytes).toBe(2 * 1024 ** 3);
+      expect(artifact.maxBodyBytes).toBe(2 * 1024 ** 3);
+    });
+  });
+
   describe("unrelated paths still fall through to the 404 catch-all - this is a strict allowlist, never widened", () => {
     const unrelatedPaths = [
       "/api/workers",
@@ -108,7 +186,10 @@ describe("worker-api.dyocourses.com.conf - real path allowlist parsed from the a
       "/etc/passwd",
       "/../../etc/passwd",
       "/api/workers/accd0a71-dbd6-4a53-8b81-d3fe4609420b/jobs/6b09548a-4437-40ad-813f-1680284b7810/assets", // missing /:assetId/file
-      "/api/workers/accd0a71-dbd6-4a53-8b81-d3fe4609420b/jobs/assets/x/file" // missing the jobId segment
+      "/api/workers/accd0a71-dbd6-4a53-8b81-d3fe4609420b/jobs/assets/x/file", // missing the jobId segment
+      "/api/workers/accd0a71-dbd6-4a53-8b81-d3fe4609420b/jobs/6b09548a-4437-40ad-813f-1680284b7810/checkpoints", // plural - not the real route
+      "/api/workers/accd0a71-dbd6-4a53-8b81-d3fe4609420b/jobs/preview", // missing the jobId segment
+      "/api/workers/accd0a71-dbd6-4a53-8b81-d3fe4609420b/jobs/6b09548a-4437-40ad-813f-1680284b7810/artifacts" // plural - not the real route
     ];
     for (const path of unrelatedPaths) {
       it(`"${path}" matches no allowlisted location - falls through to 404`, () => {
