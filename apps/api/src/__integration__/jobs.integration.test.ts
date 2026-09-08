@@ -1056,6 +1056,8 @@ describe("INSPECT_SCENE_EVIDENCE dispatch -> report -> scene evidence persistenc
       layers: [],
       preview: null,
       previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
       capturedAt: new Date().toISOString()
     };
 

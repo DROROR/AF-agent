@@ -8,6 +8,7 @@ import {
   buildSaveProjectScript,
   buildInspectRenderCapabilitiesScript,
   buildInspectCompositionPrecompsScript,
+  buildInspectCompositionLayerDetailsScript,
   buildOpenProjectScript
 } from "../jsx-templates.js";
 
@@ -276,7 +277,8 @@ describe("real production bug fix (2026-09-02): 'JSON is undefined' can never re
     },
     { name: "SAVE_PROJECT", script: buildSaveProjectScript() },
     { name: "INSPECT_RENDER_CAPABILITIES", script: buildInspectRenderCapabilitiesScript() },
-    { name: "INSPECT_COMPOSITION_PRECOMPS", script: buildInspectCompositionPrecompsScript(1, COMP_NAME) }
+    { name: "INSPECT_COMPOSITION_PRECOMPS", script: buildInspectCompositionPrecompsScript(1, COMP_NAME) },
+    { name: "INSPECT_COMPOSITION_LAYER_DETAILS", script: buildInspectCompositionLayerDetailsScript(1, COMP_NAME) }
   ];
 
   it("every script this file builds installs the JSON.stringify shim BEFORE app.beginUndoGroup - so it is guaranteed to exist before any of the script's own logic runs", () => {
@@ -339,6 +341,106 @@ describe("real production bug fix (2026-09-02): 'JSON is undefined' can never re
       context
     ) as string;
     expect(JSON.parse(resultText)).toEqual({ probe: "native-json-still-used" });
+  });
+});
+
+describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-discovery capability)", () => {
+  /**
+   * Fake TextLayer/AVLayer/CompItem object model exercising the exact
+   * classification order the real script relies on (TextLayer checked
+   * BEFORE AVLayer, since TextLayer is itself a subtype of AVLayer in the
+   * real AE DOM) - built natively inside the vm realm, same rationale as
+   * FAKE_RENDER_CAPABILITIES_APP_SETUP above.
+   */
+  const FAKE_LAYER_DETAILS_APP_SETUP = `
+    function CompItem() {}
+    function AVLayer() {}
+    AVLayer.prototype = Object.create(CompItem.prototype);
+    // TextLayer is itself a subtype of AVLayer in the real AE DOM - mirrored
+    // here so "instanceof TextLayer" checked BEFORE "instanceof AVLayer" is
+    // the only thing that keeps a real text layer from being misclassified.
+    function TextLayer() {}
+    TextLayer.prototype = new AVLayer();
+
+    var __precompSource = new CompItem();
+    __precompSource.id = 4242;
+
+    var __textLayer = new TextLayer();
+    __textLayer.index = 1;
+    __textLayer.name = "Hebrew Branding";
+    __textLayer.sourceText = { value: { text: "מבית DYO App" } };
+
+    var __precompLayer = new AVLayer();
+    __precompLayer.index = 2;
+    __precompLayer.name = "Nested Comp Ref";
+    __precompLayer.source = __precompSource;
+
+    var __avLayer = new AVLayer();
+    __avLayer.index = 3;
+    __avLayer.name = "Footage Layer";
+
+    var __shapeLayer = {};
+    __shapeLayer.index = 4;
+    __shapeLayer.name = "Shape Layer";
+
+    var __unreadableLayer = {};
+    __unreadableLayer.index = 5;
+    Object.defineProperty(__unreadableLayer, "name", { get: function () { throw new Error("boom"); } });
+
+    var __fakeComp = new CompItem();
+    __fakeComp.name = ${JSON.stringify(COMP_NAME)};
+    __fakeComp.numLayers = 5;
+    var __layersByIndex = { 1: __textLayer, 2: __precompLayer, 3: __avLayer, 4: __shapeLayer, 5: __unreadableLayer };
+    __fakeComp.layer = function (i) { return __layersByIndex[i]; };
+
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: { item: function (i) { return i === 1 ? __fakeComp : null; } }
+    };
+  `;
+
+  it("classifies TEXT (with real sourceText), PRECOMP (with real sourceCompositionId), AV, and OTHER layers correctly, and skips an unreadable layer without failing the whole result", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({
+      ok: true,
+      layerDetails: [
+        { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null },
+        { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242" },
+        { layerIndex: 3, layerName: "Footage Layer", layerType: "AV", sourceText: null, sourceCompositionId: null },
+        { layerIndex: 4, layerName: "Shape Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null }
+        // layerIndex 5 (__unreadableLayer) is honestly omitted, never guessed.
+      ]
+    });
+  });
+
+  it("verifies the real Hebrew sourceText round-trips through the shim by exact codepoint, not merely visual/string equality - regression guard against RTL-rendering mishaps", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText) as { layerDetails: { sourceText: string | null }[] };
+    const hebrewPrefix = result.layerDetails[0]!.sourceText!.split(" ")[0]!;
+    expect([...hebrewPrefix].map((c) => c.codePointAt(0))).toEqual([0x05de, 0x05d1, 0x05d9, 0x05ea]);
+  });
+
+  it("fails closed with a typed failureReason when the project item index does not resolve to the expected composition name", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, "Wrong Expected Name");
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("Wrong Expected Name");
+  });
+
+  it("is deterministic - the same composition index/name always produces byte-identical JSX", () => {
+    expect(buildInspectCompositionLayerDetailsScript(3, COMP_NAME)).toBe(buildInspectCompositionLayerDetailsScript(3, COMP_NAME));
+  });
+
+  it("never mutates the project - contains no .setSource/.remove()/.sourceText.setValue call", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME);
+    expect(script).not.toMatch(/\.setSource\s*\(/);
+    expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
+    expect(script).not.toMatch(/\.setValue\s*\(/);
   });
 });
 

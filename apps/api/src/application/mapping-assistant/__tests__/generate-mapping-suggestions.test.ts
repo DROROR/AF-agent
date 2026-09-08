@@ -94,6 +94,8 @@ function sceneEvidenceFixture(overrides: Partial<{ verifiedSourceProjectSha256: 
     layers: [],
     preview: null,
     previewFailureReason: null,
+    layerDetails: null,
+    layerDetailsFailureReason: null,
     capturedAt: overrides.capturedAt ?? NOW.toISOString()
   };
 }

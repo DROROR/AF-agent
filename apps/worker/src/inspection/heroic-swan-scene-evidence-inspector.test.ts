@@ -44,7 +44,13 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
  */
 async function writeFakeServer(
   aeMcpPath: string,
-  options: { layerGetFails?: boolean; captureShape?: "image" | "fallback" | "none"; previewFilePath?: string } = {}
+  options: {
+    layerGetFails?: boolean;
+    captureShape?: "image" | "fallback" | "none";
+    previewFilePath?: string;
+    /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
+    runJsxResult?: "success" | "error";
+  } = {}
 ): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
   const sdkEsmRoot = join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
@@ -89,7 +95,16 @@ async function writeFakeServer(
 
   server.registerTool("ae_run_jsx", { description: "d" }, async () => {
     calls.push("ae_run_jsx");
-    return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };
+    ${
+      options.runJsxResult === "success"
+        ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, layerDetails: [
+            { layerIndex: 7, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null },
+            { layerIndex: 8, layerName: "Precomp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-999" }
+          ] }) }) }] };`
+        : options.runJsxResult === "error"
+          ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
+          : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
+    }
   });
 
   const transport = new StdioServerTransport();
@@ -130,14 +145,46 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.reason).toContain("Some Other Scene");
   });
 
-  it("never calls ae_run_jsx, even though the (fake, hostile-capable) server offers it", async () => {
+  it("never calls ae_run_jsx when discoverLayerDetails is not requested, even though the (fake, hostile-capable) server offers it", async () => {
     await writeFakeServer(dir);
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    await inspector.inspect(baseRequest());
+    const result = (await inspector.inspect(baseRequest())) as SceneEvidenceSuccess;
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layerDetails).toBeNull();
+    expect(result.response.layerDetailsFailureReason).toBeNull();
     // No direct hook into the fake server's `calls` array from here (separate
-    // process) - proven instead by HeroicSwanMcpClient's own closed
-    // AllowedInspectionTool union, which has no method to call ae_run_jsx at
-    // all (see heroic-swan-mcp-client.ts).
+    // process) - proven instead by this inspector's own runInspection only
+    // ever reaching fetchLayerDetails (the sole caller of
+    // client.runFixedInspectionScript/ae_run_jsx) behind
+    // `request.discoverLayerDetails === true` - baseRequest() never sets it.
+  });
+
+  it("live-QA generic AE layer-discovery capability: calls ae_run_jsx and returns real layerDetails when discoverLayerDetails is requested", async () => {
+    await writeFakeServer(dir, { runJsxResult: "success" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ discoverLayerDetails: true }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layerDetailsFailureReason).toBeNull();
+    expect(result.response.layerDetails).toEqual([
+      { layerIndex: 7, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null },
+      { layerIndex: 8, layerName: "Precomp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-999" }
+    ]);
+    // Exact codepoint check - never trust visual/terminal RTL rendering.
+    const hebrewPrefix = result.response.layerDetails?.[0]?.sourceText?.split(" ")[0];
+    expect([...(hebrewPrefix ?? "")].map((c) => c.codePointAt(0))).toEqual([0x05de, 0x05d1, 0x05d9, 0x05ea]);
+  });
+
+  it("reports layerDetailsFailureReason (never fabricates layerDetails) when discoverLayerDetails is requested but the underlying ae_run_jsx call fails", async () => {
+    await writeFakeServer(dir, { runJsxResult: "error" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ discoverLayerDetails: true }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layerDetails).toBeNull();
+    expect(result.response.layerDetailsFailureReason).toMatch(/ae_run_jsx failed/);
+    // A failed layer-detail discovery never fails the rest of the evidence result.
+    expect(result.response.layers).toHaveLength(1);
   });
 
   it("rejects (fails honestly) when the source project's current sha256 no longer matches the requested one - never describes a changed project", async () => {

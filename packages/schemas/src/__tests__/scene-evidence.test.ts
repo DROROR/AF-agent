@@ -54,6 +54,8 @@ function validResponse(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
     layers: [validLayer()],
     preview: null,
     previewFailureReason: null,
+    layerDetails: null,
+    layerDetailsFailureReason: null,
     capturedAt: "2026-08-26T00:00:00.000Z",
     ...overrides
   };

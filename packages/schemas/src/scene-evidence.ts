@@ -49,7 +49,26 @@ export const sceneEvidenceRequestSchema = z
     /** Empty when the composition has no editable placeholders (or none were classified) - a real representative frame can still be captured via previewTimestampSeconds below regardless (live QA Blocker 2 fix, 2026-09-07; see resolve-inspect-scene-evidence-dispatch.ts's own doc comment). Backward-compatible widening: every request that previously required at least one index remains valid. */
     layerIndices: z.array(z.number().int().positive()).max(MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST),
     /** When set, captures exactly one read-only preview frame at this timestamp via ae_capture_frame. Optional: evidence can be gathered without a preview. */
-    previewTimestampSeconds: z.number().nonnegative().nullable().default(null)
+    previewTimestampSeconds: z.number().nonnegative().nullable().default(null),
+    /**
+     * Live-QA "generic AE layer-discovery capability" requirement: opt-in
+     * (never required, never on by default - every existing caller/test
+     * that omits this keeps getting exactly the same `layers`/`preview`
+     * behavior as before). When true, the worker ALSO runs the one
+     * additional fixed, versioned, read-only JSX script
+     * (buildInspectCompositionLayerDetailsScript, via the SAME
+     * `runFixedInspectionScript`/ae_run_jsx channel
+     * buildInspectCompositionPrecompsScript already uses for INSPECT_
+     * TEMPLATE's own nesting facts - see that method's own doc comment for
+     * why this is still not "arbitrary JSX") against THIS composition,
+     * reporting real layer TYPE, real `sourceText` for text layers, and
+     * real source-composition identity for precomp/nested-reference
+     * layers - the facts `layers`/LayerEvidence above cannot supply (see
+     * this module's own doc comment). Never composition/template-specific:
+     * this same flag works against any composition in any supported
+     * template's manifest.
+     */
+    discoverLayerDetails: z.boolean().optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
@@ -90,6 +109,30 @@ export const layerEvidenceSchema = z
   .strict();
 export type LayerEvidence = z.infer<typeof layerEvidenceSchema>;
 
+/**
+ * Live-QA "generic AE layer-discovery capability" requirement - one
+ * layer's real, worker-observed classification fact, returned only when
+ * `discoverLayerDetails` was requested (see sceneEvidenceRequestSchema
+ * above). Populated from buildInspectCompositionLayerDetailsScript's own
+ * result, never inferred from a layer's display name.
+ */
+export const LAYER_TYPE_CLASSIFICATIONS = ["TEXT", "PRECOMP", "AV", "OTHER"] as const;
+export type LayerTypeClassification = (typeof LAYER_TYPE_CLASSIFICATIONS)[number];
+export const layerTypeClassificationSchema = z.enum(LAYER_TYPE_CLASSIFICATIONS);
+
+export const layerDetailFactSchema = z
+  .object({
+    layerIndex: z.number().int().positive(),
+    layerName: z.string(),
+    layerType: layerTypeClassificationSchema,
+    /** Real `layer.sourceText.value.text` - only ever non-null when layerType === "TEXT". */
+    sourceText: z.string().nullable(),
+    /** Real `"comp-" + layer.source.id` - only ever non-null when layerType === "PRECOMP". Same identity convention the manifest's own compositionId already uses, so this composes directly with it. */
+    sourceCompositionId: z.string().nullable()
+  })
+  .strict();
+export type LayerDetailFact = z.infer<typeof layerDetailFactSchema>;
+
 export const scenePreviewSchema = z
   .object({
     timestampSeconds: z.number().nonnegative(),
@@ -121,6 +164,10 @@ export const sceneEvidenceResponseSchema = z
     preview: scenePreviewSchema.nullable(),
     /** Present only when a preview was requested but could not be captured - kept distinct from `preview: null` meaning "not requested". */
     previewFailureReason: z.string().nullable(),
+    /** Null whenever discoverLayerDetails was not requested, or the script call failed - a failed layer-detail discovery never fails the whole evidence result (see layerDetailsFailureReason below). Non-null (possibly empty) array on success. */
+    layerDetails: z.array(layerDetailFactSchema).nullable(),
+    /** Present only when discoverLayerDetails was requested but the script call could not complete - kept distinct from `layerDetails: null` meaning "not requested". */
+    layerDetailsFailureReason: z.string().nullable(),
     capturedAt: z.string().datetime()
   })
   .strict();

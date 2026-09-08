@@ -1,10 +1,50 @@
 import { stat } from "node:fs/promises";
-import type { SceneEvidenceRequest, ScenePreview } from "@dyo/schemas";
+import { z } from "zod";
+import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact } from "@dyo/schemas";
+import { layerDetailFactSchema } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
+import { buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
+import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
+
+const layerDetailsScriptResultSchema = z.union([
+  z.object({ ok: z.literal(true), layerDetails: z.array(layerDetailFactSchema) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/**
+ * Live-QA "generic AE layer-discovery capability" requirement. Mirrors
+ * heroic-swan-template-inspector.ts's own fetchPrecompFacts: best-effort,
+ * never throws - a failure here is reported via layerDetailsFailureReason
+ * and never fails the rest of the evidence result (the per-index `layers`
+ * facts and any preview capture remain fully independent).
+ */
+async function fetchLayerDetails(
+  client: HeroicSwanMcpClient,
+  aeProjectItemIndex: number,
+  compositionName: string
+): Promise<{ ok: true; layerDetails: LayerDetailFact[] } | { ok: false; reason: string }> {
+  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName);
+  const result = await client.runFixedInspectionScript(script);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  const parsed = layerDetailsScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success) {
+    return { ok: false, reason: `layer-details script response did not match the expected shape: ${parsed.error.message}` };
+  }
+  if (!parsed.data.ok) {
+    return { ok: false, reason: parsed.data.failureReason };
+  }
+  return { ok: true, layerDetails: parsed.data.layerDetails };
+}
 
 /**
  * Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B).
@@ -186,6 +226,17 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         }
       }
 
+      let layerDetails: LayerDetailFact[] | null = null;
+      let layerDetailsFailureReason: string | null = null;
+      if (request.discoverLayerDetails === true) {
+        const layerDetailsResult = await fetchLayerDetails(client, request.aeProjectItemIndex, parsedComp.value.name);
+        if (layerDetailsResult.ok) {
+          layerDetails = layerDetailsResult.layerDetails;
+        } else {
+          layerDetailsFailureReason = layerDetailsResult.reason;
+        }
+      }
+
       return {
         kind: "evidence",
         response: {
@@ -196,6 +247,8 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           layers,
           preview,
           previewFailureReason,
+          layerDetails,
+          layerDetailsFailureReason,
           capturedAt: new Date().toISOString()
         }
       };

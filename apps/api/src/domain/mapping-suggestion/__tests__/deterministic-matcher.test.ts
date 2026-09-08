@@ -188,6 +188,8 @@ describe("matchDeterministic", () => {
           ],
           preview: null,
           previewFailureReason: null,
+          layerDetails: null,
+          layerDetailsFailureReason: null,
           capturedAt: NOW.toISOString()
         }
       })

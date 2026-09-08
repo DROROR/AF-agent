@@ -750,6 +750,103 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
 }
 
 /**
+ * Generic, template-agnostic, read-only layer-classification script
+ * (live-QA "generic AE layer-discovery capability" requirement - never
+ * hardcodes a composition name/id/layer index, works against ANY
+ * composition passed in). For every layer in the target composition,
+ * classifies it using the same category of stable, long-documented
+ * ExtendScript DOM checks buildInspectCompositionPrecompsScript already
+ * relies on:
+ *   - `layer instanceof TextLayer` (checked FIRST - TextLayer is itself a
+ *     subtype of AVLayer in the AE scripting DOM, so testing AVLayer first
+ *     would misclassify every text layer) => "TEXT", with `sourceText`
+ *     read from the real `layer.sourceText.value.text` (the same object
+ *     model SET_TEXT's own mutation script already writes through - see
+ *     buildSetTextScript above).
+ *   - else `layer.source instanceof CompItem` => "PRECOMP", with
+ *     `sourceCompositionId` set to `"comp-" + layer.source.id` - the exact
+ *     same identity convention buildInspectCompositionPrecompsScript
+ *     already uses, so a result here composes directly with the existing
+ *     manifest composition graph with no separate reconciliation step.
+ *   - else `layer instanceof AVLayer` => "AV".
+ *   - anything else (shape/solid/camera/light/adjustment, or an
+ *     unrecognized layer type) => "OTHER".
+ * A single layer whose properties cannot be read is skipped (honestly
+ * omitted, never guessed) rather than failing the whole composition's
+ * result - same fail-partial-not-fail-closed posture as the precomp
+ * script. Read-only: never calls `.setSource`/`.sourceText.setValue`/
+ * `.remove()` or anything else that could mutate the project.
+ */
+export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_COMPOSITION_LAYER_DETAILS")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
+      });
+    } else {
+      var __layerDetails = [];
+      for (var __i = 1; __i <= __comp.numLayers; __i++) {
+        try {
+          var __layer = __comp.layer(__i);
+          var __layerType = "OTHER";
+          var __sourceText = null;
+          var __sourceCompositionId = null;
+          if (__layer instanceof TextLayer) {
+            __layerType = "TEXT";
+            try {
+              __sourceText = __layer.sourceText.value.text;
+            } catch (__textReadError) {
+              __sourceText = null;
+            }
+          } else if (__layer.source && (__layer.source instanceof CompItem)) {
+            __layerType = "PRECOMP";
+            __sourceCompositionId = "comp-" + __layer.source.id;
+          } else if (__layer instanceof AVLayer) {
+            __layerType = "AV";
+          }
+          __layerDetails.push({
+            layerIndex: __layer.index,
+            layerName: __layer.name,
+            layerType: __layerType,
+            sourceText: __sourceText,
+            sourceCompositionId: __sourceCompositionId
+          });
+        } catch (__layerReadError) {
+          // A single unreadable layer never fails the whole composition's
+          // result - it is simply not reported.
+        }
+      }
+      __result = JSON.stringify({ ok: true, layerDetails: __layerDetails });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * The single entry point every caller must use - dispatches on the
  * operation's own `type` (already a closed, Zod-validated discriminated
  * union), so adding a new SceneEditOperationType without a corresponding

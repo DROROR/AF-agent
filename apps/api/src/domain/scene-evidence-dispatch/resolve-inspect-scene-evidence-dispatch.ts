@@ -11,6 +11,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   currentPlan: InspectSceneEvidenceDispatchPlanSnapshot | null;
   /** The project's CURRENT manifest, freshly read - null if the project doesn't exist. */
   currentProjectManifest: TemplateManifest | null;
+  /** Live-QA "generic AE layer-discovery capability" requirement - forwarded verbatim into the resolved payload's own discoverLayerDetails field. Omitted/false preserves prior behavior exactly. */
+  discoverLayerDetails?: boolean;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -57,7 +59,7 @@ export type ResolveInspectSceneEvidenceDispatchResult =
  * not after.
  */
 export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEvidenceDispatchInput): ResolveInspectSceneEvidenceDispatchResult {
-  const { scenePlanId, currentPlan, currentProjectManifest } = input;
+  const { scenePlanId, currentPlan, currentProjectManifest, discoverLayerDetails } = input;
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project yet" };
@@ -106,7 +108,8 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       // whole evidence result (see SceneEvidenceResponse.preview's own
       // doc comment) - the structural layer facts remain useful on
       // their own either way.
-      previewTimestampSeconds: 0
+      previewTimestampSeconds: 0,
+      ...(discoverLayerDetails === true ? { discoverLayerDetails: true } : {})
     }
   };
 }

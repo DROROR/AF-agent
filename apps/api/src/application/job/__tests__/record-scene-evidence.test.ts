@@ -23,6 +23,8 @@ function baseJob(overrides: Partial<JobDto> = {}): JobDto {
       layers: [],
       preview: null,
       previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
       capturedAt: NOW.toISOString()
     },
     error: null,
@@ -102,6 +104,8 @@ describe("recordSceneEvidenceIfApplicable", () => {
           layers: [],
           preview: null,
           previewFailureReason: null,
+          layerDetails: null,
+          layerDetailsFailureReason: null,
           capturedAt: new Date(NOW.getTime() + 1000).toISOString()
         }
       })

@@ -94,7 +94,17 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * SERVER-RESOLVED from the project's current manifest and execution
        * plan - see resolve-inspect-scene-evidence-dispatch.ts.
        */
-      scenePlanId: z.string().min(1)
+      scenePlanId: z.string().min(1),
+      /**
+       * Live-QA "generic AE layer-discovery capability" requirement -
+       * opt-in intent flag only (never a raw worker payload/path - the
+       * real SceneEvidenceRequest.discoverLayerDetails this becomes is
+       * still entirely server-resolved from trusted state alongside every
+       * other field, see resolve-inspect-scene-evidence-dispatch.ts).
+       * Omitted/false preserves the exact prior INSPECT_SCENE_EVIDENCE
+       * behavior for every existing caller.
+       */
+      discoverLayerDetails: z.boolean().optional()
     })
     .strict(),
   z.object({

@@ -113,6 +113,41 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
     });
   });
 
+  it("live-QA generic AE layer-discovery capability: omits discoverLayerDetails from the payload entirely when not requested - existing callers see byte-identical behavior", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: validManifest()
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.prototype.hasOwnProperty.call(result.payload, "discoverLayerDetails")).toBe(false);
+  });
+
+  it("live-QA generic AE layer-discovery capability: forwards discoverLayerDetails: true into the resolved payload when requested - still fully generic, no composition/template-specific hardcoding involved in resolving it", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: validManifest(),
+      discoverLayerDetails: true
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.discoverLayerDetails).toBe(true);
+  });
+
+  it("live-QA generic AE layer-discovery capability: false is treated the same as omitted - never forwarded as an explicit false", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: validManifest(),
+      discoverLayerDetails: false
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.prototype.hasOwnProperty.call(result.payload, "discoverLayerDetails")).toBe(false);
+  });
+
   it("fails closed when no execution plan exists yet", () => {
     const result = resolveInspectSceneEvidenceDispatch({ scenePlanId: "scene-1", currentPlan: null, currentProjectManifest: validManifest() });
     expect(result.ok).toBe(false);
