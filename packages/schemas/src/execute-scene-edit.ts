@@ -334,7 +334,42 @@ export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSche
  * durable record expected - the on-disk state has diverged from what the
  * API believes happened.
  */
-export const WORKING_COPY_FAILURE_CODES = ["WORKING_COPY_MISSING", "WORKING_COPY_SHA_MISMATCH"] as const;
+/**
+ * Live QA CRITICAL SAFETY FIX (2026-09-08, real incident): a real
+ * EXECUTE_FRAME job saved its mutations over the IMMUTABLE SOURCE .aep
+ * instead of the intended session working copy, because AeEditBridge
+ * mutates "whatever project is currently open in AE" and nothing ever
+ * explicitly opened the working copy first (CLAUDE.md Safety Rule 1
+ * violation). Three new codes close this class of gap, all following the
+ * SAME "never silently continue, mark the session FAILED via the
+ * existing recordExecuteFrameResultIfApplicable wiring" pattern
+ * WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH already use - no new
+ * session-status plumbing needed, only new, more specific reasons a job
+ * (and therefore its session) can be FAILED:
+ *   - WORKING_COPY_NOT_OPENED: the worker could not confirm AE has the
+ *     exact session working-copy path open (the open-project script
+ *     failed, or AE reports a different path than expected) - fails
+ *     BEFORE any operation is ever attempted.
+ *   - SOURCE_PROJECT_MUTATED: the immutable source .aep's own real,
+ *     freshly-read sha256 no longer matches its expected value AFTER this
+ *     job's own operations/save - the exact signal that caught the real
+ *     incident this fix responds to. The single most severe of these
+ *     three - a genuine Safety Rule 1 violation already happened, not
+ *     merely an execution-state inconsistency.
+ *   - WORKING_COPY_UNCHANGED_AFTER_MUTATION: one or more operations
+ *     reported successful completion, but the saved working copy's own
+ *     sha256 is byte-identical to what it was before those operations ran
+ *     - suspicious by construction (a real content mutation should always
+ *     change SOME bytes of a real binary project file) and never treated
+ *     as a legitimate "no-op" success.
+ */
+export const WORKING_COPY_FAILURE_CODES = [
+  "WORKING_COPY_MISSING",
+  "WORKING_COPY_SHA_MISMATCH",
+  "WORKING_COPY_NOT_OPENED",
+  "SOURCE_PROJECT_MUTATED",
+  "WORKING_COPY_UNCHANGED_AFTER_MUTATION"
+] as const;
 export type WorkingCopyFailureCode = (typeof WORKING_COPY_FAILURE_CODES)[number];
 export const workingCopyFailureCodeSchema = z.enum(WORKING_COPY_FAILURE_CODES);
 

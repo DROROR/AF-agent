@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult, WorkingCopyFailureCode } from "@dyo/schemas";
 import { prepareSessionWorkingCopy, type WorkingCopyFailureReason } from "../workspace/working-copy.js";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
+import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
 import { EMPTY_SCENE_EDIT_CHECKPOINT, markFailed, markOperationCompleted, nextPendingOperationIndex } from "./scene-edit-checkpoint.js";
 import type { AeEditBridge } from "./ae-edit-bridge.js";
 import type { PreviewCapture } from "./preview-capture.js";
@@ -96,6 +97,16 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // in this attempt - see jsx-templates.ts's own resultingValue shape for
   // that operation.
   let reelsCompositionBuilt: SceneEditResult["reelsCompositionBuilt"] = null;
+  // Counts operations actually applied to the AE bridge DURING THIS
+  // INVOCATION only - deliberately NOT checkpoint.completedOperationIndices
+  // (which reflects the FULL cumulative history, including operations a
+  // PRIOR attempt already completed and durably checkpointed before this
+  // call even started). The WORKING_COPY_UNCHANGED_AFTER_MUTATION safety
+  // check below must only fire when THIS run itself was expected to
+  // change the working copy's bytes - a duplicate/already-fully-completed
+  // job (pendingIndex is null immediately, the loop below never runs) is
+  // a legitimate no-op resume, not a suspicious "nothing changed" outcome.
+  let operationsAppliedThisRun = 0;
 
   function finish(params: {
     sourceProjectSha256: string;
@@ -140,6 +151,53 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewFramePath: null,
       previewTimestampSeconds: null,
       workingCopyFailureCode: toWorkingCopyFailureCode(workingCopy.reason)
+    });
+  }
+
+  // CRITICAL SAFETY FIX (live QA, 2026-09-08, real incident): the working
+  // copy FILE existing on disk (just verified above) is not the same
+  // thing as AE actually having it OPEN - a real EXECUTE_FRAME job proved
+  // AE can still have a completely different project open (in that case,
+  // the immutable SOURCE .aep itself, left open by an earlier, unrelated
+  // read-only job) and every operation/save below would silently mutate
+  // THAT instead (CLAUDE.md Safety Rule 1 violation). Defense in depth,
+  // belt-and-suspenders with prepareSessionWorkingCopy's own SAME_PATH
+  // check above (which already refuses when the two paths resolve
+  // identically): explicitly re-assert here, via the SAME canonical
+  // Windows path comparison openProject itself uses, that the working
+  // copy is not somehow the source path before ever asking AE to open it.
+  if (windowsPathsEqual(workingCopy.workingProjectPath, request.sourceProjectPath)) {
+    checkpoint = markFailed(
+      checkpoint,
+      `internal error: the derived working-copy path resolves to the same file as the immutable source .aep (${workingCopy.workingProjectPath}) - refusing to proceed`,
+      deps.now()
+    );
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: workingCopy.workingProjectSha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null,
+      workingCopyFailureCode: "WORKING_COPY_NOT_OPENED"
+    });
+  }
+
+  // Never trust "whatever project is currently open in AE" - explicitly
+  // open the session's own real working copy and independently verify
+  // AE's own self-reported path matches it exactly before ANY operation
+  // or save is ever attempted (see AeEditBridge.openProject's own doc
+  // comment for the full rationale - this is the actual fix for the real
+  // incident).
+  const opened = await deps.aeEditBridge.openProject(workingCopy.workingProjectPath);
+  if (!opened.ok) {
+    checkpoint = markFailed(checkpoint, `could not confirm the session working copy is open in After Effects: ${opened.failureReason}`, deps.now());
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: workingCopy.workingProjectSha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null,
+      workingCopyFailureCode: "WORKING_COPY_NOT_OPENED"
     });
   }
 
@@ -196,6 +254,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     // `outcome.ok` above already IS that verification (the AE-side script
     // itself only ever reports ok:true after its mutation actually ran).
     checkpoint = markOperationCompleted(checkpoint, pendingIndex, deps.now());
+    operationsAppliedThisRun++;
 
     if (operation.type === "BUILD_REELS_COMPOSITION") {
       // outcome.resultingValue is `unknown` at this generic layer (every
@@ -266,6 +325,68 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       workingProjectSha256: workingCopy.workingProjectSha256,
       previewFramePath: null,
       previewTimestampSeconds: null
+    });
+  }
+
+  // CRITICAL SAFETY FIX (live QA, 2026-09-08, real incident) - HARD
+  // SOURCE-IMMUTABILITY GUARD: independently re-hash the immutable
+  // source .aep from disk RIGHT NOW, never trust the value this job was
+  // dispatched with as still true. This is the exact, real check that
+  // caught the actual incident (via a separate, manual INSPECT_SCENE_EVIDENCE
+  // re-hash after the fact) - now built into every EXECUTE_FRAME job
+  // itself, immediately after save, before any further AE operation
+  // (preview capture) or any report of success is even considered. If
+  // the source's own bytes changed at ANY point during this job's own
+  // execution - regardless of why - this fails hard and permanently: the
+  // resulting job failure carries workingCopyFailureCode
+  // "SOURCE_PROJECT_MUTATED", which recordExecuteFrameResultIfApplicable
+  // (apps/api) already marks the whole execution session FAILED for
+  // (the exact same wiring WORKING_COPY_MISSING/SHA_MISMATCH already use)
+  // - never silently retryable, section 11's "start a new execution
+  // session" is the only way forward.
+  const sourceHashAfter = await hashSourceProject(request.sourceProjectPath);
+  if (!sourceHashAfter.ok || sourceHashAfter.value.sha256 !== request.sourceProjectSha256) {
+    checkpoint = markFailed(
+      checkpoint,
+      "CRITICAL SAFETY VIOLATION (SOURCE_PROJECT_MUTATED): the immutable source .aep no longer matches its expected sha256 " +
+        `after this job's own operations/save${sourceHashAfter.ok ? ` (now ${sourceHashAfter.value.sha256}, expected ${request.sourceProjectSha256})` : ` (could not be re-verified: ${sourceHashAfter.reason})`} - ` +
+        "the source project may have been overwritten. Refusing to report success, refusing to capture or upload any preview. " +
+        "Stop immediately - do not render or export from this session.",
+      deps.now()
+    );
+    return finish({
+      sourceProjectSha256: request.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: savedHash.value.sha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null,
+      workingCopyFailureCode: "SOURCE_PROJECT_MUTATED"
+    });
+  }
+
+  // WORKING COPY VERIFICATION: prove real edits actually landed on disk -
+  // a mutation job that applied one or more operations DURING THIS RUN
+  // (operationsAppliedThisRun, never the full cumulative checkpoint
+  // history - see that variable's own doc comment) but whose saved
+  // working copy is byte-identical to what it was BEFORE those operations
+  // ran is suspicious by construction (a genuine content change to a real
+  // binary .aep should always alter some bytes) and must never be
+  // reported as a success.
+  if (operationsAppliedThisRun > 0 && savedHash.value.sha256 === workingCopy.workingProjectSha256) {
+    checkpoint = markFailed(
+      checkpoint,
+      `SAFETY CHECK FAILED (WORKING_COPY_UNCHANGED_AFTER_MUTATION): ${operationsAppliedThisRun} operation(s) reported successful ` +
+        "completion in this run, but the saved working copy's own sha256 is unchanged from before those operations ran " +
+        `(${savedHash.value.sha256}) - the mutation may not have actually been persisted. Refusing to report success.`,
+      deps.now()
+    );
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: savedHash.value.sha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null,
+      workingCopyFailureCode: "WORKING_COPY_UNCHANGED_AFTER_MUTATION"
     });
   }
 

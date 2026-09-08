@@ -170,9 +170,95 @@ describe("HeroicSwanAeEditBridge.saveProject", () => {
   });
 });
 
+describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-09-08 real incident)", () => {
+  const WORKING_COPY_PATH = "C:\\DYO-Agent\\execution-sessions\\session-1\\working-copy.aep";
+
+  it("returns ok:true with the confirmed opened path when AE's own self-reported path matches exactly", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: WORKING_COPY_PATH, openedName: "working-copy.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(result).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
+    expect(fake.lastScript).toContain("app.open(");
+  });
+
+  it("case-insensitive, separator-normalized match still succeeds - the same real Windows path reported with different casing/slashes", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: "c:\\dyo-agent\\execution-sessions\\session-1\\WORKING-COPY.AEP", openedName: "working-copy.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("fails closed - never proceeds - when AE reports a DIFFERENT project is open (the exact real incident: the immutable source, not the working copy)", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: "C:\\DYO-Agent\\copies\\dro-template-converted.aep", openedName: "dro-template-converted.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failureReason).toContain("dro-template-converted.aep");
+    expect(result.failureReason).toContain("not the requested working copy");
+  });
+
+  it("fails closed when AE reports no project open at all after the open attempt", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: null, openedName: null } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("surfaces the open-project script's own typed failure (e.g. app.open() returned false) without throwing", async () => {
+    const fake = new FakeMutationClient({ ok: true, content: hostRunJsxContent({ ok: false, failureReason: "app.open() did not return an opened project" }) });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(result).toEqual({ ok: false, failureReason: "app.open() did not return an opened project" });
+  });
+
+  it("fails closed on a malformed resultingValue shape rather than crashing or guessing", async () => {
+    const fake = new FakeMutationClient({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { somethingElse: true } }) });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failureReason).toContain("did not match the expected");
+  });
+
+  it("passes the exact requested path to buildOpenProjectScript - the script targets THIS working copy, never a hardcoded/guessed one", async () => {
+    const fake = new FakeMutationClient({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: WORKING_COPY_PATH, openedName: "working-copy.aep" } }) });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    await bridge.openProject(WORKING_COPY_PATH);
+
+    expect(fake.lastScript).toContain(JSON.stringify(WORKING_COPY_PATH));
+  });
+});
+
 describe("NotAvailableAeEditBridge", () => {
-  it("never fabricates a result - always throws AeMutationTransportUnavailableError", async () => {
+  it("never fabricates a result - always throws AeMutationTransportUnavailableError, including for openProject", async () => {
     const bridge = new NotAvailableAeEditBridge();
+    await expect(bridge.openProject("C:\\any\\path.aep")).rejects.toBeInstanceOf(AeMutationTransportUnavailableError);
     await expect(bridge.applyOperation({ aeProjectItemIndex: 0, compositionName: COMP_NAME, operation: SET_TEXT_OP })).rejects.toBeInstanceOf(
       AeMutationTransportUnavailableError
     );

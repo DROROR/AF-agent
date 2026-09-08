@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -562,9 +562,23 @@ describe("executeJob - EXECUTE_FRAME", () => {
 
   it("succeeds end to end, stamping jobId/workerId onto the result", async () => {
     const { job, workRoot } = executeFrameJob();
+    let openedPath: string | null = null;
     const fakeBridge = {
+      openProject: vi.fn().mockImplementation(async (expectedPath: string) => {
+        openedPath = expectedPath;
+        return { ok: true, openedPath: expectedPath };
+      }),
       applyOperation: vi.fn().mockResolvedValue({ ok: true, operationType: "SET_TEXT", previousValue: null, resultingValue: "Hello" }),
-      saveProject: vi.fn().mockResolvedValue({ ok: true, resultingValue: null })
+      // Simulates a REAL mutation actually landing on disk - see
+      // execute-scene-edit-executor.test.ts's own FakeAeEditBridge for why
+      // this is necessary (the executor's own WORKING_COPY_UNCHANGED_AFTER_MUTATION
+      // safety check would otherwise correctly flag this fake as suspicious).
+      saveProject: vi.fn().mockImplementation(async () => {
+        if (openedPath) {
+          appendFileSync(openedPath, "\n// simulated edit");
+        }
+        return { ok: true, resultingValue: null };
+      })
     };
     const fakePreview = { capture: vi.fn().mockResolvedValue({ ok: true, path: "/work/preview.png", bytes: 10, timestampSeconds: 0 }) };
 
@@ -580,6 +594,7 @@ describe("executeJob - EXECUTE_FRAME", () => {
   it("reports a job-level FAILED (never SUCCEEDED) when the executor returns a failureReason, and still stamps the checkpoint onto the result", async () => {
     const { job, workRoot } = executeFrameJob();
     const fakeBridge = {
+      openProject: vi.fn().mockImplementation(async (expectedPath: string) => ({ ok: true, openedPath: expectedPath })),
       applyOperation: vi.fn().mockResolvedValue({ ok: false, operationType: "SET_TEXT", failureReason: "layer not found" }),
       saveProject: vi.fn()
     };

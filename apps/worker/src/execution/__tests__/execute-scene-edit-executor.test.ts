@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperation, SceneEditOperationIntent } from "@dyo/schemas";
 import { executeSceneEdit, type ResolveOperation } from "../execute-scene-edit-executor.js";
-import type { AeEditBridge, OperationExecutionResult, SaveProjectResult } from "../ae-edit-bridge.js";
+import type { AeEditBridge, OpenProjectResult, OperationExecutionResult, SaveProjectResult } from "../ae-edit-bridge.js";
 import type { PreviewCapture, PreviewCaptureResult } from "../preview-capture.js";
 
 /** No MAP_FOOTAGE in these fixtures - every intent is already a resolved operation, so this is a pure pass-through (the real resolver's own asset-download/verification behavior is covered separately, in resolve-scene-edit-operation.test.ts). */
@@ -57,11 +57,21 @@ function makeRequest(overrides: Partial<ExecuteSceneEditRequest> & { sourceProje
 class FakeAeEditBridge implements AeEditBridge {
   calls: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }[] = [];
   saveCalls = 0;
+  openProjectCalls: string[] = [];
+  private workingCopyPath: string | null = null;
 
   constructor(
     private readonly opResult: (operation: SceneEditOperation, callIndex: number) => OperationExecutionResult,
-    private readonly saveResult: SaveProjectResult = { ok: true, resultingValue: null }
+    private readonly saveResult: SaveProjectResult = { ok: true, resultingValue: null },
+    /** Default: confirms whatever path the executor asked to open - real per-test coverage of a MISMATCHED/failed open lives in the dedicated "explicitly opens the session working copy" describe block below. */
+    private readonly openResult: (expectedPath: string) => OpenProjectResult = (expectedPath) => ({ ok: true, openedPath: expectedPath })
   ) {}
+
+  async openProject(expectedPath: string): Promise<OpenProjectResult> {
+    this.openProjectCalls.push(expectedPath);
+    this.workingCopyPath = expectedPath;
+    return this.openResult(expectedPath);
+  }
 
   async applyOperation({
     aeProjectItemIndex,
@@ -79,6 +89,21 @@ class FakeAeEditBridge implements AeEditBridge {
 
   async saveProject(): Promise<SaveProjectResult> {
     this.saveCalls++;
+    // Simulates a REAL mutation actually landing on disk - a real AE save
+    // after real content changes always alters some bytes of the working
+    // copy; this fake stays honest about that (rather than silently
+    // leaving the file byte-identical) so the executor's own
+    // WORKING_COPY_UNCHANGED_AFTER_MUTATION safety check exercises the
+    // SAME real condition a genuine successful run would produce, not a
+    // false positive from this fake's own laziness.
+    if (this.saveResult.ok && this.calls.length > 0 && this.workingCopyPath) {
+      try {
+        appendFileSync(this.workingCopyPath, `\n// simulated edit #${this.calls.length}`);
+      } catch {
+        // Best-effort only - a test targeting a different failure mode
+        // (e.g. save itself failing) never depends on this succeeding.
+      }
+    }
     return this.saveResult;
   }
 }
@@ -587,6 +612,212 @@ describe("executeSceneEdit", () => {
       );
 
       expect(result.failureReason).toContain("working copy could not be prepared");
+      expect(result.workingCopyFailureCode).toBeNull();
+    });
+  });
+
+  describe("CRITICAL SAFETY FIX (live QA, 2026-09-08 real incident): EXECUTE_FRAME explicitly opens the session working copy, and independently re-verifies source immutability", () => {
+    it("calls openProject with the EXACT real working-copy path, before applying any operation", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+      const { sessionWorkingCopyPath } = await import("../../workspace/working-copy.js");
+      const expectedWorkingCopyPath = sessionWorkingCopyPath(workRoot, EXECUTION_SESSION_ID);
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.failureReason).toBeNull();
+      expect(bridge.openProjectCalls).toEqual([expectedWorkingCopyPath]);
+      // The working copy is never the source path - explicit, canonical proof, not just "they're different strings".
+      expect(expectedWorkingCopyPath).not.toBe(sourcePath);
+    });
+
+    it("wrong/open project path fails BEFORE any SET_TEXT/MAP_FOOTAGE operation is attempted - never mutates whatever AE actually has open", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      // Simulates the exact real incident: AE reports the IMMUTABLE SOURCE
+      // itself is open (left open by an earlier, unrelated job), not the
+      // session's own working copy.
+      const bridge = new FakeAeEditBridge(alwaysSucceed, { ok: true, resultingValue: null }, () => ({ ok: false, failureReason: `AE reports "${sourcePath}" is open, not the requested working copy` }));
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.failureReason).toContain("could not confirm the session working copy is open");
+      expect(result.workingCopyFailureCode).toBe("WORKING_COPY_NOT_OPENED");
+      expect(bridge.calls).toHaveLength(0); // no SET_TEXT/MAP_FOOTAGE/etc. was ever attempted
+      expect(bridge.saveCalls).toBe(0); // and definitely never saved
+      // Source untouched - the whole point of failing closed here.
+      expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
+    });
+
+    it("fails closed (WORKING_COPY_NOT_OPENED) when the open-project script itself reports failure (e.g. app.open() threw)", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const bridge = new FakeAeEditBridge(alwaysSucceed, { ok: true, resultingValue: null }, () => ({ ok: false, failureReason: "open failed: file is locked" }));
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.workingCopyFailureCode).toBe("WORKING_COPY_NOT_OPENED");
+      expect(result.failureReason).toContain("file is locked");
+      expect(bridge.calls).toHaveLength(0);
+    });
+
+    it("SOURCE_PROJECT_MUTATED: fails hard, never captures or uploads a preview, when the immutable source's real bytes changed during this job's own execution", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const preview = new FakePreviewCapture(REAL_PREVIEW);
+      // A bridge whose own saveProject reaches past the working copy and
+      // corrupts the SOURCE file too - simulating the exact real incident
+      // (AE had the source open and saved over it) at the level this
+      // safety check is actually meant to catch: not HOW the source got
+      // mutated, but THAT it did, independently re-verified from disk.
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const originalSave = bridge.saveProject.bind(bridge);
+      bridge.saveProject = async () => {
+        writeFileSync(sourcePath, "CORRUPTED - source was overwritten");
+        return originalSave();
+      };
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.workingCopyFailureCode).toBe("SOURCE_PROJECT_MUTATED");
+      expect(result.failureReason).toContain("SOURCE_PROJECT_MUTATED");
+      expect(result.failureReason).toContain("CRITICAL SAFETY VIOLATION");
+      expect(result.previewFramePath).toBeNull();
+      expect(preview.calls).toBe(0); // never even attempted once the violation was detected
+    });
+
+    it("working copy's own sha256 genuinely CHANGES after a real mutation, and the job reports that real, freshly-computed value - never the pre-operation one", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const { sessionWorkingCopyPath } = await import("../../workspace/working-copy.js");
+      const workingCopyPath = sessionWorkingCopyPath(workRoot, EXECUTION_SESSION_ID);
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.failureReason).toBeNull();
+      const realFileHash = sha256(readFileSync(workingCopyPath, "utf8"));
+      expect(result.workingProjectSha256).toBe(realFileHash);
+      // Genuinely different from the pre-operation copy (a fresh copy of the untouched source).
+      expect(result.workingProjectSha256).not.toBe(sourceSha);
+    });
+
+    it("WORKING_COPY_UNCHANGED_AFTER_MUTATION: fails closed when operations report success but the saved working copy's bytes never actually changed", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const preview = new FakePreviewCapture(REAL_PREVIEW);
+      // A bridge that reports every operation ok:true and saveProject
+      // ok:true, but (unlike the honest FakeAeEditBridge default) never
+      // actually writes anything - the exact "reports success but nothing
+      // was really persisted" symptom this check exists to catch.
+      const dishonestBridge: AeEditBridge = {
+        async openProject(expectedPath: string) {
+          return { ok: true, openedPath: expectedPath };
+        },
+        async applyOperation({ operation }) {
+          return { ok: true, operationType: operation.type, previousValue: null, resultingValue: null };
+        },
+        async saveProject() {
+          return { ok: true, resultingValue: null };
+        }
+      };
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: dishonestBridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.workingCopyFailureCode).toBe("WORKING_COPY_UNCHANGED_AFTER_MUTATION");
+      expect(result.failureReason).toContain("WORKING_COPY_UNCHANGED_AFTER_MUTATION");
+      expect(result.previewFramePath).toBeNull();
+      expect(preview.calls).toBe(0);
+    });
+
+    it("a duplicate/already-fully-completed job (zero operations applied THIS run) is exempt from WORKING_COPY_UNCHANGED_AFTER_MUTATION - a legitimate no-op resume, never suspicious", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const completedCheckpoint = {
+        completedOperationIndices: [0, 1],
+        checkpointBeforeAt: "2026-01-01T00:00:00.000Z",
+        checkpointAfterAt: "2026-01-01T00:00:01.000Z",
+        failureReason: null
+      };
+      // A bridge whose saveProject never writes anything - legitimate here,
+      // since zero operations are pending (both already completed per the
+      // checkpoint above), so no new mutation was ever expected this run.
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, checkpoint: completedCheckpoint });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(bridge.calls).toHaveLength(0);
+      expect(result.workingCopyFailureCode).toBeNull();
+      expect(result.failureReason).toBeNull();
+    });
+
+    it("nested logo MAP_FOOTAGE and nested Hebrew SET_TEXT operations both still succeed end-to-end through the full executor, with openProject correctly called first", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const nestedLogoOp: SceneEditOperationIntent = {
+        type: "MAP_FOOTAGE",
+        manifestPlaceholderId: null,
+        layerIndex: null,
+        nestedTarget: [
+          { compositionId: "comp-1", aeProjectItemIndex: 48, layerIndex: 3 },
+          { compositionId: "comp-1635", aeProjectItemIndex: 45, layerIndex: 1 }
+        ],
+        assetId: "22222222-2222-2222-2222-222222222222",
+        expectedSha256: "b".repeat(64),
+        mimeType: "image/png"
+      };
+      const nestedTextOp: SceneEditOperationIntent = {
+        type: "SET_TEXT",
+        manifestPlaceholderId: null,
+        layerIndex: null,
+        nestedTarget: [
+          { compositionId: "comp-1", aeProjectItemIndex: 48, layerIndex: 3 },
+          { compositionId: "comp-1635", aeProjectItemIndex: 45, layerIndex: 4 }
+        ],
+        text: "מבית DYO App"
+      };
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [nestedLogoOp, nestedTextOp] });
+
+      const result = await executeSceneEdit(
+        { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+        request
+      );
+
+      expect(result.failureReason).toBeNull();
+      expect(result.operationsCompleted.sort()).toEqual([0, 1]);
+      expect(bridge.openProjectCalls).toHaveLength(1); // opened exactly once, before either operation
+      expect(bridge.calls[0]?.operation.type).toBe("MAP_FOOTAGE");
+      expect(bridge.calls[1]?.operation.type).toBe("SET_TEXT");
       expect(result.workingCopyFailureCode).toBeNull();
     });
   });

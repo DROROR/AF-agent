@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { SceneEditOperation, SceneEditOperationType } from "@dyo/schemas";
 import { parseJsonTextContent } from "../inspection/parse-mcp-shapes.js";
-import { buildOperationScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
+import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
+import { buildOperationScript, buildOpenProjectScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
 import { HeroicSwanAeMutationClient, type MutationCallResult } from "./heroic-swan-ae-mutation-client.js";
 import { describeMcpFailure } from "./classify-mcp-failure.js";
 
@@ -51,16 +52,51 @@ export type OperationExecutionResult = OperationExecutionSuccess | OperationExec
 
 export type SaveProjectResult = { ok: true; resultingValue: unknown } | { ok: false; failureReason: string };
 
+/** What buildOpenProjectScript's own JSON.stringify(...) result actually contains on success - see that function's own doc comment. */
+const openProjectResultValueSchema = z
+  .object({
+    openedPath: z.string().nullable(),
+    openedName: z.string().nullable()
+  })
+  .strict();
+
+export type OpenProjectResult = { ok: true; openedPath: string } | { ok: false; failureReason: string };
+
 /**
  * Applies allowlisted SceneEditOperations, and saves, the AE project
- * currently open through ae-mcp - never opens/closes a project itself
- * (that is execute-scene-edit-executor.ts's responsibility, matching how
- * INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE also assume a project is
- * already open).
+ * currently open through ae-mcp.
+ *
+ * CRITICAL SAFETY FIX (live QA, 2026-09-08, real incident): this class
+ * previously never opened/closed a project itself, on the stated
+ * assumption that execute-scene-edit-executor.ts (or an earlier
+ * INSPECT_TEMPLATE-style flow) already had the right project open - that
+ * assumption was never actually enforced anywhere, and a real
+ * EXECUTE_FRAME job proved it wrong: AE still had the IMMUTABLE SOURCE
+ * .aep open (from an earlier, unrelated read-only inspection job), and
+ * `applyOperation`/`saveProject` mutated and saved THAT instead of the
+ * intended session working copy - a direct CLAUDE.md Safety Rule 1
+ * violation ("never overwrite the original .aep"). `openProject` below
+ * closes this gap: execute-scene-edit-executor.ts now calls it with the
+ * session's own real working-copy path BEFORE any operation is ever
+ * attempted, and refuses to proceed unless AE's own self-reported open
+ * project path matches it exactly (canonical Windows path comparison,
+ * never a name-only guess) - see that function's own doc comment for the
+ * full verification.
  */
 export interface AeEditBridge {
+  /**
+   * Ensures EXACTLY `expectedPath` is open in AE before anything else runs
+   * - reuses buildOpenProjectScript verbatim (the SAME fixed, versioned,
+   * already-shipped script INSPECT_TEMPLATE's own ensureTargetProjectOpen
+   * uses), then independently verifies AE's own self-reported opened path
+   * (never merely that `app.open()` didn't throw) against `expectedPath`
+   * via windowsPathsEqual - a case-insensitive, separator-normalized
+   * comparison, since both are real Windows filesystem paths. Fails
+   * closed (never proceeds) if AE reports any other path, or none at all.
+   */
+  openProject(expectedPath: string): Promise<OpenProjectResult>;
   applyOperation(params: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }): Promise<OperationExecutionResult>;
-  /** Saves the currently-open project IN PLACE (the working copy - see buildSaveProjectScript's own doc comment for why this can never reach the original source). */
+  /** Saves the currently-open project IN PLACE (the working copy - see buildSaveProjectScript's own doc comment for why this can never reach the original source, and openProject's own doc comment for why that guarantee now actually holds). */
   saveProject(): Promise<SaveProjectResult>;
 }
 
@@ -73,6 +109,9 @@ export class AeMutationTransportUnavailableError extends Error {
 
 /** Honest stub - never fabricates a mutation result. Mirrors NotAvailableTemplateInspector's own contract. */
 export class NotAvailableAeEditBridge implements AeEditBridge {
+  async openProject(_expectedPath: string): Promise<OpenProjectResult> {
+    throw new AeMutationTransportUnavailableError();
+  }
   async applyOperation(_params: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }): Promise<OperationExecutionResult> {
     throw new AeMutationTransportUnavailableError();
   }
@@ -89,6 +128,28 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
       "createMutationClient" in config
         ? config.createMutationClient
         : () => new HeroicSwanAeMutationClient({ aeMcpPath: config.aeMcpPath });
+  }
+
+  async openProject(expectedPath: string): Promise<OpenProjectResult> {
+    const script = buildOpenProjectScript(expectedPath);
+    const outcome = await this.runScript(script);
+    if (!outcome.ok) {
+      return { ok: false, failureReason: outcome.failureReason };
+    }
+    const parsed = openProjectResultValueSchema.safeParse(outcome.resultingValue);
+    if (!parsed.success) {
+      return {
+        ok: false,
+        failureReason: `open-project script's result did not match the expected {openedPath, openedName} shape: ${parsed.error.message}`
+      };
+    }
+    if (!windowsPathsEqual(parsed.data.openedPath, expectedPath)) {
+      return {
+        ok: false,
+        failureReason: `AE reports "${parsed.data.openedPath ?? "no project"}" is open, not the requested working copy ("${expectedPath}") - refusing to proceed`
+      };
+    }
+    return { ok: true, openedPath: parsed.data.openedPath as string };
   }
 
   async applyOperation({
