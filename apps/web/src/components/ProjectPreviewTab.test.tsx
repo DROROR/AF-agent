@@ -107,17 +107,170 @@ describe("ProjectPreviewTab", () => {
       "/api/jobs": {
         status: 201,
         body: { jobId: "55555555-5555-5555-5555-555555555555", workerId: WORKER_ID, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() }
+      },
+      // Polling fix (2026-09-08 live QA incident): the dispatch response
+      // itself only ever means "queued" - the button must stay disabled,
+      // and the confirmation text must not appear, until this real
+      // GET /api/jobs/:jobId poll reports a terminal status.
+      "/api/jobs/55555555-5555-5555-5555-555555555555": {
+        status: 200,
+        body: {
+          job: {
+            jobId: "55555555-5555-5555-5555-555555555555",
+            workerId: WORKER_ID,
+            projectId: PROJECT_ID,
+            operation: "EXECUTE_FRAME",
+            status: "SUCCEEDED",
+            payload: {},
+            result: {},
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
       }
     });
     renderPreview();
     const button = await screen.findByRole("button", { name: "Start execution" });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
+
+    // Still in flight (real 2s poll interval, real timers) - whichever
+    // label the one primary action button now shows ("Start execution"
+    // synchronously right after the click, flipping to "Continue
+    // execution" once the session-create response lands), it must stay
+    // disabled and show no premature success text - exactly the gap that
+    // let an operator's second click race a not-yet-completed job and hit
+    // the server's own duplicate-dispatch guard while the dashboard still
+    // looked idle/stale.
+    expect(screen.queryByText("Started - this will update automatically, no need to check again.")).toBeNull();
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button") as HTMLButtonElement[];
+      expect(buttons.length).toBeGreaterThan(0);
+      for (const b of buttons) {
+        expect(b.disabled).toBe(true);
+      }
+    });
+
     // Final MVP polish item 3 (client status copy): a plain confirmation,
     // never the raw job id (Advanced's Render Settings tab still shows the
     // id for operator correlation with the Jobs/Queue page - unaffected).
-    await screen.findByText("Started - this will update automatically, no need to check again.");
-  });
+    // Only appears once the poll above has actually observed SUCCEEDED.
+    await waitFor(() => expect(screen.getByText("Started - this will update automatically, no need to check again.")).not.toBeNull(), {
+      timeout: 5000
+    });
+  }, 10000);
+
+  it("a second click while the job is still in flight is impossible (button stays disabled) - and once the job completes, the button releases and the session refreshes to show real progress, never requiring a duplicate dispatch attempt", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    const WORKER_ID = "44444444-4444-4444-4444-444444444444";
+    const SESSION_ID = "66666666-6666-6666-6666-666666666666";
+    const JOB_ID = "55555555-5555-5555-5555-555555555555";
+    let sessionCallCount = 0;
+    stubFetchByUrl({
+      "/api/dashboard/status": {
+        status: 200,
+        body: {
+          api: "ok",
+          database: "ok",
+          workers: [
+            {
+              workerId: WORKER_ID,
+              name: "worker-a",
+              status: "ONLINE",
+              lastHeartbeatAt: new Date().toISOString(),
+              aeStatus: "ONLINE",
+              mcpStatus: "ONLINE",
+              aeAvailability: "ONLINE",
+              mcpAvailability: "ONLINE",
+              aeVersion: "26.0",
+              capabilities: ["EXECUTE_FRAME"],
+              maxConcurrency: 1,
+              currentJobId: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          ]
+        }
+      },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions`]: {
+        status: 201,
+        body: {
+          session: {
+            id: SESSION_ID,
+            projectId: PROJECT_ID,
+            executionPlanId: "plan-1",
+            planRevision: 3,
+            sourceProjectSha256: SOURCE_SHA,
+            assignedWorkerId: WORKER_ID,
+            status: "PREPARING",
+            latestWorkingProjectSha256: null,
+            completedScenePlanIds: [],
+            firstPreviewApproved: false,
+            hasPreview: false,
+            latestPreviewScenePlanId: null,
+            latestPreviewCapturedAt: null,
+            fullPreviewApproved: false,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      },
+      "/api/jobs": {
+        status: 201,
+        body: { jobId: JOB_ID, workerId: WORKER_ID, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() }
+      },
+      [`/api/jobs/${JOB_ID}`]: {
+        status: 200,
+        body: {
+          job: {
+            jobId: JOB_ID,
+            workerId: WORKER_ID,
+            projectId: PROJECT_ID,
+            operation: "EXECUTE_FRAME",
+            status: "SUCCEEDED",
+            payload: {},
+            result: {},
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderPreview();
+    const button = await screen.findByRole("button", { name: "Start execution" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByText("Started - this will update automatically, no need to check again.")).not.toBeNull(), {
+      timeout: 5000
+    });
+
+    // The session refetch the poll's completion triggers is the real fix -
+    // confirm it actually happened (never left relying on stale local
+    // completedScenePlanIds), by counting real calls to the session-fetch
+    // endpoint across the whole interaction. The refetch fires from a
+    // state update made inside the same poll tick that showed the text
+    // above, but React flushes the resulting effect asynchronously, so
+    // this must itself be awaited rather than checked immediately.
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string][];
+      sessionCallCount = calls.filter(([url]) => url.includes("/execution-sessions/current")).length;
+      expect(sessionCallCount).toBeGreaterThanOrEqual(2);
+    });
+  }, 10000);
 
   function awaitingPreviewSession(overrides: Record<string, unknown> = {}) {
     return {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
-import type { ExecutionSessionDto, FullPreviewArtifactDto } from "@dyo/schemas";
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import type { ExecutionSessionDto, FullPreviewArtifactDto, JobDto } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
@@ -16,6 +16,7 @@ import {
   dispatchJob,
   createExecutionSession,
   fetchCurrentExecutionSession,
+  fetchJobStatus,
   approveFirstPreview,
   rejectFirstPreview,
   executionSessionPreviewUrl,
@@ -25,6 +26,13 @@ import {
   requestFinalPreviewChanges
 } from "../lib/projects-api-client";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
+
+// Same terminal-status set and poll cadence as NewProjectWizard's own
+// dispatch-then-poll pattern (kept local rather than shared, same
+// convention as that file - a one-line Set literal isn't worth a shared
+// module).
+const TERMINAL_JOB_STATUSES = new Set<JobDto["status"]>(["SUCCEEDED", "FAILED", "CANCELLED"]);
+const JOB_POLL_INTERVAL_MS = 2_000;
 
 /**
  * "Preview" tab (final MVP nav, client-facing UX redesign section H) - the
@@ -47,6 +55,20 @@ export function ProjectPreviewTab(): ReactElement | null {
   const [isDispatching, setIsDispatching] = useState(false);
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  // Tracks the EXECUTE_FRAME job dispatched by the button below, from
+  // dispatch until it reaches a terminal status - see the polling effect
+  // just under this one for why this exists (2026-09-08 live QA: a job
+  // dispatch response only means "queued", never "the scene is done" - the
+  // real AE mutation happens asynchronously on the Worker, 10-25+ seconds
+  // later. Without this, isDispatching cleared as soon as the dispatch
+  // HTTP call returned, so the button re-enabled and nextScenePlanId still
+  // pointed at the same not-yet-completed scene - a click in that window
+  // hit the server's own correct "already been edited" duplicate-dispatch
+  // guard (resolve-execute-frame-dispatch.ts) while the dashboard still
+  // showed stale 0/N progress, reading as a confusing failure for a scene
+  // that had, in fact, already safely succeeded or was still safely
+  // running - never a lost or double mutation, only a UI visibility gap).
+  const [inFlightJobId, setInFlightJobId] = useState<string | null>(null);
 
   const projectIdForEffect = project?.project.projectId ?? null;
   useEffect(() => {
@@ -63,6 +85,54 @@ export function ProjectPreviewTab(): ReactElement | null {
       cancelled = true;
     };
   }, [projectIdForEffect, sessionRefreshKey]);
+
+  // Polls the real EXECUTE_FRAME job while non-terminal, same
+  // dispatch-then-poll pattern as NewProjectWizard's INSPECT_TEMPLATE
+  // polling - stops itself once SUCCEEDED/FAILED/CANCELLED, then refreshes
+  // the session (picking up the real completedScenePlanIds/status) and
+  // only THEN releases the button, so a second click can never race an
+  // in-flight or just-completed dispatch for the same scene.
+  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!inFlightJobId) {
+      return;
+    }
+    let cancelled = false;
+
+    // Self-rescheduling, not a fixed-count/interval poll: each tick only
+    // queues the next one once the previous fetch has actually returned,
+    // so a slow response can never cause two overlapping requests in
+    // flight for the same job.
+    async function tick(): Promise<void> {
+      const result = await fetchJobStatus(inFlightJobId as string);
+      if (cancelled) {
+        return;
+      }
+      if (result.ok && TERMINAL_JOB_STATUSES.has(result.data.status)) {
+        setInFlightJobId(null);
+        setIsDispatching(false);
+        if (result.data.status === "SUCCEEDED") {
+          setDispatchSuccess(t.jobDispatch.startedHint);
+        } else {
+          setDispatchError(result.data.error?.message ?? `Job ${result.data.status.toLowerCase()}`);
+        }
+        setSessionRefreshKey((k) => k + 1);
+        return;
+      }
+      // Non-terminal status, or a transient status-fetch failure (not
+      // itself a dispatch failure) - stay in-flight and try again, rather
+      // than releasing the button onto stale local state.
+      pollingRef.current = setTimeout(() => void tick(), JOB_POLL_INTERVAL_MS);
+    }
+
+    pollingRef.current = setTimeout(() => void tick(), JOB_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (pollingRef.current) {
+        clearTimeout(pollingRef.current);
+      }
+    };
+  }, [inFlightJobId, t]);
 
   if (!project) {
     return null;
@@ -140,13 +210,16 @@ export function ProjectPreviewTab(): ReactElement | null {
       executionSessionId: targetSession.id,
       scenePlanId: nextScenePlanId
     });
-    setIsDispatching(false);
     if (!result.ok) {
+      setIsDispatching(false);
       setDispatchError(result.message);
       return;
     }
-    setDispatchSuccess(t.jobDispatch.startedHint);
-    setSessionRefreshKey((k) => k + 1);
+    // Stay "dispatching" (button stays disabled) until the polling effect
+    // above observes this job reach a terminal status - the dispatch HTTP
+    // call only means "queued", never "the scene is done" (see that
+    // effect's own doc comment for the real incident this fixes).
+    setInFlightJobId(result.data.jobId);
   }
 
   async function handleApprovePreview(): Promise<void> {
