@@ -12,6 +12,7 @@ import type { SessionRepository, UserRepository } from "../domain/auth/types.js"
 import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
 import { createExecutionSession } from "../application/execution-session/create-execution-session.js";
+import { abandonExecutionSession } from "../application/execution-session/abandon-execution-session.js";
 import { getCurrentExecutionSession } from "../application/execution-session/get-current-execution-session.js";
 import { approveFirstPreview } from "../application/execution-session/approve-first-preview.js";
 import { rejectFirstPreview } from "../application/execution-session/reject-first-preview.js";
@@ -107,6 +108,19 @@ export function registerExecutionSessionRoutes(app: FastifyInstance, deps: Execu
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
     const session = await rejectFirstPreview({ executionSessionRepository: deps.executionSessionRepository, now }, projectId, sessionId);
+    reply.send({ session });
+  });
+
+  /**
+   * "Abandon Session" (live QA execution-session recovery fix, 2026-09-08)
+   * - see abandon-execution-session.ts's own doc comment for the full
+   * rationale. Dashboard-session authenticated, same as every other route
+   * in this file - never a worker action.
+   */
+  app.post("/api/projects/:projectId/execution-sessions/:sessionId/abandon", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
+    const session = await abandonExecutionSession({ executionSessionRepository: deps.executionSessionRepository, now }, projectId, sessionId);
     reply.send({ session });
   });
 
