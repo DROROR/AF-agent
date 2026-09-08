@@ -204,7 +204,7 @@ describe("groupIntoRealScenes", () => {
     it("also shows the master itself as a real scene when it carries real content of its own (never silently drops it)", () => {
       const { compositions, sceneIds } = mainCompWithScenes(2);
       const m = manifest(compositions);
-      const mainMapping = { id: "mapping-logo", manifestPlaceholderId: "ph-logo", placeholderName: "Persistent Logo", placeholderClassification: { value: "logo", source: "MANIFEST", evidence: [] }, selectedAssetId: null, selectedAssetType: null, text: null, assetTimestamp: null, colorHex: null, layerVisible: null, freezeAtSeconds: null, layerDurationSeconds: null, mappingSource: "MANIFEST", confidence: null, createdAt: NOW, updatedAt: NOW } as ScenePlanEntry["mappings"][number];
+      const mainMapping = { id: "mapping-logo", manifestPlaceholderId: "ph-logo", placeholderName: "Persistent Logo", placeholderClassification: { value: "logo", source: "MANIFEST", evidence: [] }, selectedAssetId: null, selectedAssetType: null, text: null, assetTimestamp: null, colorHex: null, layerVisible: null, freezeAtSeconds: null, layerDurationSeconds: null, humanLayerIndex: null, humanNestedTarget: null, mappingSource: "MANIFEST", confidence: null, createdAt: NOW, updatedAt: NOW } as ScenePlanEntry["mappings"][number];
       const plans = [
         scenePlan({ id: "sp-main", manifestCompositionId: "comp-main", sourcePosition: 0, mappings: [mainMapping] }),
         ...sceneIds.map((id, i) => scenePlan({ id: `sp-${id}`, manifestCompositionId: id, compositionName: `Scene_0${i + 1}`, sourcePosition: i + 1 }))

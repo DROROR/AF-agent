@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
+import { nestedTargetStepSchema } from "./execution-plan.js";
 
 /**
  * Strict, allowlisted execution-plan edit operations - deliberately never
@@ -19,6 +20,7 @@ export const EXECUTION_PLAN_EDIT_OPERATION_TYPES = [
   "INCLUDE_SCENE",
   "EXCLUDE_SCENE",
   "SET_FINAL_ORDER",
+  "ADD_MAPPING",
   "MAP_ASSET",
   "CLEAR_ASSET",
   "SET_TEXT",
@@ -58,6 +60,49 @@ const setFinalOrderSchema = z
     finalOrder: z.number().int().nonnegative()
   })
   .strict();
+
+/**
+ * Creates a real, human-added PlaceholderMapping on a scene that has no
+ * existing mapping row to act on (every other operation below requires an
+ * existing `mappingId` - see execution-plan.ts's own placeholderMapping
+ * doc comment: "manifestPlaceholderId is nullable: a mapping can be
+ * human-added... without being tied to any specific detected manifest
+ * placeholder" - a case the schema always anticipated but no operation
+ * ever actually implemented, live QA brand-rule blocker fix 2026-09-08).
+ *
+ * Exactly one of `humanLayerIndex` (a real AE layer index within
+ * scenePlanId's OWN manifestCompositionId - the simple, same-composition
+ * case) or `humanNestedTarget` (a real, manifest-verified path through
+ * one or more NESTED compositions - see nestedTargetStepSchema's own doc
+ * comment - for a target that lives several precomp levels below the
+ * owning scene's own composition, as most real branding elements do) is
+ * required - never both, never neither, never a fake manifest
+ * placeholder invented to paper over either.
+ */
+const addMappingSchema = z
+  .object({
+    type: z.literal("ADD_MAPPING"),
+    scenePlanId: z.string().min(1),
+    /** Operator-facing label only - e.g. naming the real confirmed AE layer this represents. Never used for AE addressing (humanLayerIndex/humanNestedTarget are). */
+    placeholderName: z.string().min(1),
+    placeholderClassification: placeholderTypeSchema,
+    /** Direct-layer case - see this schema's own doc comment. Mutually exclusive with humanNestedTarget. */
+    humanLayerIndex: z.number().int().nonnegative().nullable().optional(),
+    /** Nested-composition case - see this schema's own doc comment. Mutually exclusive with humanLayerIndex. At least one step (a single-step path is still a genuine nested target, one level below the owning scene - use humanLayerIndex instead for a target in the owning scene's own composition). */
+    humanNestedTarget: z.array(nestedTargetStepSchema).min(1).nullable().optional(),
+    /** Required when placeholderClassification is an asset type (image/video/logo/phone_screen); omitted/null for "text"/"color"/"unknown". Deliberately `.optional()` rather than `.default(null)` - a defaulted field is non-optional in the inferred TS type (every OTHER caller that constructs this object directly, e.g. in tests, would then be forced to always supply it) - apply-execution-plan-edit.ts coalesces an omitted value to null itself. */
+    selectedAssetId: z.string().min(1).nullable().optional(),
+    /** Required when placeholderClassification is "text"; null/omitted otherwise - see selectedAssetId's own doc comment for why this is `.optional()` rather than `.default(null)`. */
+    text: z.string().min(1).nullable().optional()
+  })
+  .strict();
+// Deliberately NOT a `.refine()` on the object above (the "exactly one of
+// humanLayerIndex/humanNestedTarget" cross-field rule) - z.discriminatedUnion
+// requires every member to be a plain ZodObject it can read the literal
+// `type` field directly off; a `.refine()`-wrapped ZodEffects breaks that.
+// apply-execution-plan-edit.ts enforces this rule instead, the same layer
+// every other ADD_MAPPING cross-field check (selectedAssetId/text required
+// for the right classification) already lives at.
 
 const mapAssetSchema = z
   .object({
@@ -219,6 +264,7 @@ export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   includeSceneSchema,
   excludeSceneSchema,
   setFinalOrderSchema,
+  addMappingSchema,
   mapAssetSchema,
   clearAssetSchema,
   setTextSchema,

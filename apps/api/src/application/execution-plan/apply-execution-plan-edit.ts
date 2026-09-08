@@ -1,5 +1,37 @@
-import type { ExecutionPlanEditOperation, PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
+import { randomUUID } from "node:crypto";
+import type { ExecutionPlanEditOperation, NestedTargetStep, PlaceholderMapping, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { computeSceneUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
+import { ASSET_CLASSIFICATIONS } from "../../domain/execute-frame-dispatch/resolve-execute-frame-dispatch.js";
+
+/**
+ * Verifies a nested AE target path against real manifest evidence only
+ * (live QA brand-rule blocker fix, 2026-09-08 correction) - never a name
+ * guess. Each step's compositionId must be a real composition in the
+ * CURRENT manifest, and must be a real child (compositions[].
+ * parentCompositionIds) of the previous step's compositionId, or of
+ * `ownerCompositionId` (the mapping's own owning scene) for the first
+ * step. Returns a reason string on the first broken link found (fails
+ * closed on the whole path rather than accepting a partially-real one).
+ */
+function verifyNestedTargetPath(manifest: TemplateManifest, ownerCompositionId: string, steps: readonly NestedTargetStep[]): string | null {
+  const compositionById = new Map(manifest.compositions.map((c) => [c.compositionId, c]));
+  let expectedParentId = ownerCompositionId;
+  for (const [index, step] of steps.entries()) {
+    const composition = compositionById.get(step.compositionId);
+    if (!composition) {
+      return `humanNestedTarget step ${index} references compositionId "${step.compositionId}" which does not exist in the current manifest`;
+    }
+    if (!composition.parentCompositionIds.includes(expectedParentId)) {
+      return `humanNestedTarget step ${index}'s compositionId "${step.compositionId}" is not a real child of "${expectedParentId}" (manifest compositions[].parentCompositionIds evidence) - cannot be part of a deterministic nested path from there`;
+    }
+    expectedParentId = step.compositionId;
+  }
+  return null;
+}
+
+function nestedTargetsEqual(a: readonly NestedTargetStep[], b: readonly NestedTargetStep[]): boolean {
+  return a.length === b.length && a.every((step, index) => step.compositionId === b[index]?.compositionId && step.layerIndex === b[index]?.layerIndex);
+}
 
 export type ApplyEditResult = { ok: true; scenePlans: ScenePlanEntry[] } | { ok: false; reason: string };
 
@@ -77,11 +109,18 @@ function updateMapping(
  * level validity (negative duration, invalid timestamp) is already
  * rejected by the request schema before this is ever called - never
  * duplicated here.
+ *
+ * `currentManifest` is optional - only ADD_MAPPING's own humanNestedTarget
+ * validation needs it (verifyNestedTargetPath above), so every OTHER
+ * operation/caller stays unaffected. ADD_MAPPING itself fails closed with
+ * a clear reason if a nested target is requested but no manifest was
+ * supplied, rather than skipping the real-chain verification silently.
  */
 function applyExecutionPlanEditRaw(
   scenePlans: readonly ScenePlanEntry[],
   operation: ExecutionPlanEditOperation,
-  now: () => Date
+  now: () => Date,
+  currentManifest?: TemplateManifest
 ): ApplyEditResult {
   const plans = [...scenePlans];
   const sceneIndex = plans.findIndex((s) => s.id === operation.scenePlanId);
@@ -115,6 +154,97 @@ function applyExecutionPlanEditRaw(
       return {
         ok: true,
         scenePlans: replaceScene(plans, sceneIndex, { ...scene, finalOrder: operation.finalOrder, updatedAt: timestamp })
+      };
+    }
+
+    case "ADD_MAPPING": {
+      // Exactly one of humanLayerIndex/humanNestedTarget - see this
+      // operation's own schema doc comment for why this lives here rather
+      // than a schema-level .refine() (discriminated union constraint).
+      const hasDirect = operation.humanLayerIndex !== null && operation.humanLayerIndex !== undefined;
+      const hasNested = operation.humanNestedTarget !== null && operation.humanNestedTarget !== undefined;
+      if (hasDirect === hasNested) {
+        return { ok: false, reason: "ADD_MAPPING requires exactly one of humanLayerIndex or humanNestedTarget - never both, never neither" };
+      }
+
+      let humanLayerIndex: number | null = null;
+      let humanNestedTarget: NestedTargetStep[] | null = null;
+      if (hasDirect) {
+        humanLayerIndex = operation.humanLayerIndex as number;
+      } else {
+        const nestedTarget = operation.humanNestedTarget as NestedTargetStep[];
+        if (!currentManifest) {
+          return {
+            ok: false,
+            reason: "ADD_MAPPING with humanNestedTarget requires the current project manifest to verify the real composition chain - none was supplied to this edit"
+          };
+        }
+        const chainError = verifyNestedTargetPath(currentManifest, scene.manifestCompositionId, nestedTarget);
+        if (chainError) {
+          return { ok: false, reason: chainError };
+        }
+        humanNestedTarget = nestedTarget;
+      }
+
+      // Duplicate real-layer targeting within the SAME scene - direct vs
+      // direct, or nested vs nested at the exact same final step - would
+      // make two mappings claim the same real AE layer, never silently
+      // allowed. A direct target and a nested target can never collide
+      // with each other (different compositions by construction: a direct
+      // target lives in the owning scene's own composition, a nested
+      // target's LAST step is verified above to be a real descendant of
+      // it, never that same composition itself).
+      const duplicateTarget = scene.mappings.some((m) => {
+        if (hasDirect) {
+          return m.humanLayerIndex === humanLayerIndex;
+        }
+        return m.humanNestedTarget !== null && nestedTargetsEqual(m.humanNestedTarget, humanNestedTarget as NestedTargetStep[]);
+      });
+      if (duplicateTarget) {
+        return {
+          ok: false,
+          reason: `Scene "${scene.id}" already has a mapping targeting this exact real AE layer - a human-added mapping cannot duplicate an existing real target`
+        };
+      }
+
+      const selectedAssetId = operation.selectedAssetId ?? null;
+      const text = operation.text ?? null;
+      const isAssetClassification = (ASSET_CLASSIFICATIONS as readonly string[]).includes(operation.placeholderClassification);
+      const isTextClassification = operation.placeholderClassification === "text";
+      if (isAssetClassification) {
+        if (selectedAssetId === null) {
+          return { ok: false, reason: `ADD_MAPPING with placeholderClassification "${operation.placeholderClassification}" requires selectedAssetId` };
+        }
+      } else if (isTextClassification) {
+        if (text === null) {
+          return { ok: false, reason: `ADD_MAPPING with placeholderClassification "text" requires text` };
+        }
+      } else {
+        return { ok: false, reason: `ADD_MAPPING does not support placeholderClassification "${operation.placeholderClassification}" - only asset types (image/video/logo/phone_screen) or "text" can be human-added today` };
+      }
+      const newMapping: PlaceholderMapping = {
+        id: randomUUID(),
+        manifestPlaceholderId: null,
+        placeholderName: operation.placeholderName,
+        placeholderClassification: { value: operation.placeholderClassification, source: "HUMAN", evidence: [] },
+        selectedAssetId: isAssetClassification ? selectedAssetId : null,
+        selectedAssetType: isAssetClassification ? operation.placeholderClassification : null,
+        text: isTextClassification ? text : null,
+        assetTimestamp: null,
+        colorHex: null,
+        layerVisible: null,
+        freezeAtSeconds: null,
+        layerDurationSeconds: null,
+        humanLayerIndex,
+        humanNestedTarget,
+        mappingSource: "HUMAN",
+        confidence: null,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+      return {
+        ok: true,
+        scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: [...scene.mappings, newMapping], updatedAt: timestamp })
       };
     }
 
@@ -341,13 +471,19 @@ function applyExecutionPlanEditRaw(
  * withRecomputedReadiness above) - the one place every edit path shares,
  * so `unresolvedReasons`/`approvalState` can never again silently drift
  * from the real mapping state that produced them.
+ *
+ * `currentManifest` (optional) is only consulted by ADD_MAPPING's own
+ * humanNestedTarget verification (verifyNestedTargetPath above) - see
+ * update-execution-plan.ts for the real production call site, which
+ * always supplies the project's current manifest.
  */
 export function applyExecutionPlanEdit(
   scenePlans: readonly ScenePlanEntry[],
   operation: ExecutionPlanEditOperation,
-  now: () => Date
+  now: () => Date,
+  currentManifest?: TemplateManifest
 ): ApplyEditResult {
-  const result = applyExecutionPlanEditRaw(scenePlans, operation, now);
+  const result = applyExecutionPlanEditRaw(scenePlans, operation, now, currentManifest);
   if (!result.ok) {
     return result;
   }

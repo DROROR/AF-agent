@@ -85,6 +85,8 @@ function textMapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMa
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "HUMAN",
     confidence: null,
     createdAt: NOW.toISOString(),
@@ -107,6 +109,8 @@ function imageMapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderM
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "HUMAN",
     confidence: null,
     createdAt: NOW.toISOString(),
@@ -452,6 +456,60 @@ describe("resolveExecuteFrameDispatch", () => {
     if (!result.ok) return;
     expect(result.payload.operations).toHaveLength(1);
     expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
+  });
+
+  // Live QA brand-rule blocker fix (2026-09-08): a human-added mapping
+  // WITH a real, verified AE layer target (humanLayerIndex) must never be
+  // silently dropped the same way one with no target still is above -
+  // applying it as a real EXECUTE_FRAME edit is not yet implemented
+  // (see this file's own doc comment), so the whole scene fails closed
+  // with a clear, specific reason instead.
+  it("fails closed (never silently skips) a human-added mapping that DOES carry a real, verified AE layer target (humanLayerIndex)", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [textMapping(), textMapping({ id: "mapping-logo", manifestPlaceholderId: null, humanLayerIndex: 3, mappingSource: "HUMAN" })]
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("mapping-logo");
+    expect(result.reason).toContain("humanLayerIndex 3");
+  });
+
+  it("fails closed (never silently skips) a human-added mapping that carries a real nested composition target (humanNestedTarget) too", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [
+                textMapping(),
+                textMapping({
+                  id: "mapping-nested-logo",
+                  manifestPlaceholderId: null,
+                  humanLayerIndex: null,
+                  humanNestedTarget: [
+                    { compositionId: "comp-scene1", layerIndex: 5 },
+                    { compositionId: "comp-logo", layerIndex: 1 }
+                  ],
+                  mappingSource: "HUMAN"
+                })
+              ]
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("mapping-nested-logo");
+    expect(result.reason).toContain("humanNestedTarget");
   });
 
   it("fails when a scene has zero resolvable operations", () => {

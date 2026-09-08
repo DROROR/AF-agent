@@ -165,7 +165,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const body = updateExecutionPlanRequestSchema.parse(request.body);
     const result = await updateExecutionPlan(
-      { executionPlanRepository: deps.executionPlanRepository, assetRepository: deps.assetRepository, now },
+      { executionPlanRepository: deps.executionPlanRepository, assetRepository: deps.assetRepository, projectRepository: deps.projectRepository, now },
       projectId,
       body
     );

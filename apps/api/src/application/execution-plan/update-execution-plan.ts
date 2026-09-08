@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { ExecutionPlanResponse, UpdateExecutionPlanRequest } from "@dyo/schemas";
-import { ExecutionPlanEditError, ExecutionPlanNotFoundError, StaleExecutionPlanRevisionError } from "../../errors/app-error.js";
+import { ExecutionPlanEditError, ExecutionPlanNotFoundError, ProjectNotFoundError, StaleExecutionPlanRevisionError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
+import type { ProjectRepository } from "../../domain/project/types.js";
 import { findOwnedAsset } from "../asset/find-owned-asset.js";
 import { applyExecutionPlanEdit } from "./apply-execution-plan-edit.js";
 import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
@@ -10,6 +11,8 @@ import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
 export interface UpdateExecutionPlanDeps {
   executionPlanRepository: ExecutionPlanRepository;
   assetRepository: AssetRepository;
+  /** Optional (unlike executionPlanRepository/assetRepository above) - only actually read for an ADD_MAPPING operation carrying a humanNestedTarget (real-composition-chain verification, live QA brand-rule blocker fix 2026-09-08); every other operation never touches it, and the real production route (routes/projects.ts) always supplies it regardless - kept optional here so every existing test double that never exercises ADD_MAPPING stays valid unchanged. */
+  projectRepository?: ProjectRepository;
   now: () => Date;
 }
 
@@ -46,9 +49,25 @@ export async function updateExecutionPlan(
     }
   }
 
+  // Only fetched when actually needed (an ADD_MAPPING with a
+  // humanNestedTarget - real-composition-chain verification) - every
+  // other edit never touches the project/manifest at all.
+  const needsManifest = request.operations.some((operation) => operation.type === "ADD_MAPPING" && operation.humanNestedTarget != null);
+  let currentManifest;
+  if (needsManifest) {
+    if (!deps.projectRepository) {
+      throw new Error("ADD_MAPPING with humanNestedTarget requires UpdateExecutionPlanDeps.projectRepository, which was not supplied");
+    }
+    const project = await deps.projectRepository.findById(projectId);
+    if (!project) {
+      throw new ProjectNotFoundError(projectId);
+    }
+    currentManifest = project.manifest;
+  }
+
   let scenePlans = current.scenePlans;
   for (const operation of request.operations) {
-    const result = applyExecutionPlanEdit(scenePlans, operation, deps.now);
+    const result = applyExecutionPlanEdit(scenePlans, operation, deps.now, currentManifest);
     if (!result.ok) {
       throw new ExecutionPlanEditError(result.reason);
     }

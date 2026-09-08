@@ -53,6 +53,29 @@ export const provenanceSchema = z.object({
 export type Provenance = z.infer<typeof provenanceSchema>;
 
 /**
+ * One step of a deterministic nested AE target path (live QA brand-rule
+ * blocker fix, 2026-09-08 correction: the real logo layer for the exact
+ * project this fix was built for lives 4 compositions deep - !Render >
+ * Scene 1 > Pre-comp 3 > App Emblem > App Logo > layer 1 - never
+ * reachable by a single same-composition layerIndex). `compositionId` is
+ * a real, manifest-verified composition (apply-execution-plan-edit.ts
+ * checks every step's compositionId actually exists AND is a real child -
+ * via manifest evidence, compositions[].parentCompositionIds, never a
+ * name guess - of the PREVIOUS step's compositionId, or of the owning
+ * scene's own manifestCompositionId for the first step). `layerIndex` is
+ * the real AE layer within THAT composition: for every step except the
+ * last, the layer that IS the nested-composition reference to descend
+ * through next; for the last step, the real target content layer itself.
+ */
+export const nestedTargetStepSchema = z
+  .object({
+    compositionId: z.string().min(1),
+    layerIndex: z.number().int().nonnegative()
+  })
+  .strict();
+export type NestedTargetStep = z.infer<typeof nestedTargetStepSchema>;
+
+/**
  * Zero-to-many per scene (PlaceholderMapping) - a scene with no manifest-
  * detected placeholders still exists as a ScenePlanEntry with an empty
  * mappings[] array (see scenePlanEntrySchema), it never disappears.
@@ -95,6 +118,33 @@ export const placeholderMappingSchema = z.object({
    * layer's outPoint, per SET_DURATION's own worker-side contract.
    */
   layerDurationSeconds: z.number().positive().nullable(),
+  /**
+   * Live QA brand-rule blocker fix (2026-09-08): the real AE layer index
+   * within THIS scene's own manifestCompositionId, confirmed by real
+   * inspection (never guessed/derived from a name) - the ONLY way a
+   * human-added mapping (manifestPlaceholderId: null, see that field's own
+   * doc comment above) can ever become deterministically addressable to a
+   * real AE layer, since it has no manifest Placeholder record of its own
+   * to supply one. Null for a manifest-detected mapping (redundant - its
+   * own Placeholder record already carries the real layerIndex) or for a
+   * human-added mapping with no real, verified AE layer target yet - such
+   * a mapping stays purely informational and is never dispatched as a real
+   * AE edit (see resolve-execute-frame-dispatch.ts, which fails closed
+   * rather than silently skipping a human-added mapping either way).
+   */
+  humanLayerIndex: z.number().int().nonnegative().nullable().default(null),
+  /**
+   * Live QA brand-rule blocker fix (2026-09-08 correction): the nested-
+   * composition counterpart to humanLayerIndex above, for a human-added
+   * mapping whose real target lives one or more precomp levels BELOW the
+   * owning scene's own composition (nestedTargetStepSchema's own doc
+   * comment) rather than directly within it. Mutually exclusive with
+   * humanLayerIndex - a mapping never carries both. Null for a manifest-
+   * detected mapping, or a human-added mapping whose real target (if any)
+   * lives directly in the owning scene's own composition instead (use
+   * humanLayerIndex for that case), or one with no real target yet.
+   */
+  humanNestedTarget: z.array(nestedTargetStepSchema).nullable().default(null),
   mappingSource: mappingSourceSchema,
   /** AI-suggestion confidence only - null for MANIFEST/HUMAN mappingSource, never fabricated for those. */
   confidence: z.number().min(0).max(1).nullable(),

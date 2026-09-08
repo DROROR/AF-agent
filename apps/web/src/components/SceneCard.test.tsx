@@ -79,6 +79,8 @@ describe("SceneCard - zero-mapping resolved scenes show 'kept as original' copy 
           layerVisible: null,
           freezeAtSeconds: null,
           layerDurationSeconds: null,
+          humanLayerIndex: null,
+          humanNestedTarget: null,
           mappingSource: "MANIFEST",
           confidence: null,
           createdAt: new Date().toISOString(),

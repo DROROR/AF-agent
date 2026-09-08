@@ -19,6 +19,8 @@ function mapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMappin
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "HUMAN",
     confidence: null,
     createdAt: "2026-08-25T00:00:00.000Z",

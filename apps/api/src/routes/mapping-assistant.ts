@@ -105,6 +105,7 @@ export function registerMappingAssistantRoutes(app: FastifyInstance, deps: Mappi
       {
         executionPlanRepository: deps.executionPlanRepository,
         assetRepository: deps.assetRepository,
+        projectRepository: deps.projectRepository,
         mappingSuggestionRepository: deps.mappingSuggestionRepository,
         now
       },
@@ -130,6 +131,7 @@ export function registerMappingAssistantRoutes(app: FastifyInstance, deps: Mappi
       {
         executionPlanRepository: deps.executionPlanRepository,
         assetRepository: deps.assetRepository,
+        projectRepository: deps.projectRepository,
         mappingSuggestionRepository: deps.mappingSuggestionRepository,
         now
       },

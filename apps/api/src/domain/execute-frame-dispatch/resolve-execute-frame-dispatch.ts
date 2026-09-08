@@ -12,7 +12,8 @@ import type { AssetRecord } from "../asset/types.js";
 const REQUIRED_WORKER_CAPABILITY: WorkerCapability = "EXECUTE_FRAME";
 
 /** Manifest classification values MAP_FOOTAGE can resolve today - every one names an asset-bearing placeholder type. */
-const ASSET_CLASSIFICATIONS = ["image", "video", "logo", "phone_screen"] as const;
+/** Exported so apply-execution-plan-edit.ts's own ADD_MAPPING handling uses the exact same asset-vs-text classification split as real EXECUTE_FRAME dispatch resolution - never a second, divergent list. */
+export const ASSET_CLASSIFICATIONS = ["image", "video", "logo", "phone_screen"] as const;
 
 export interface ExecuteFrameDispatchPlanSnapshot {
   id: string;
@@ -165,6 +166,36 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
 
   for (const mapping of scene.mappings) {
     if (mapping.manifestPlaceholderId === null) {
+      // A purely informational human-added mapping (no real, verified AE
+      // layer target - execution-plan.ts's own humanLayerIndex doc
+      // comment) is inert here, unchanged from before that field existed.
+      // One WITH a real target is not yet dispatchable (applying a
+      // human-added mapping during EXECUTE_FRAME requires extending the
+      // worker's own dispatch-facing operation contract -
+      // execute-scene-edit.ts's manifestPlaceholderId is required/
+      // non-null there today - real, additional scope, not done as a
+      // side effect of recording the target) - this fails the WHOLE scene
+      // closed with a clear, specific reason rather than silently
+      // proceeding as if the mapping were not there, so a real, verified
+      // branding target can never silently vanish at execution time.
+      if (mapping.humanLayerIndex !== null) {
+        return {
+          ok: false,
+          reason: `Mapping "${mapping.id}" is a human-added mapping with a real AE layer target (humanLayerIndex ${mapping.humanLayerIndex}) - dispatching it as a real EXECUTE_FRAME edit is not yet implemented, so this scene cannot be dispatched until that support exists or this mapping is removed`
+        };
+      }
+      // Same fail-closed rule for the nested-composition case (live QA
+      // brand-rule blocker fix, 2026-09-08 correction) - a real, verified
+      // nested target must never be treated as if it were not there
+      // either, even though dispatching it is even further from
+      // implemented (the worker's own dispatch contract has no concept of
+      // descending through intermediate compositions at all yet).
+      if (mapping.humanNestedTarget !== null) {
+        return {
+          ok: false,
+          reason: `Mapping "${mapping.id}" is a human-added mapping with a real nested AE layer target (humanNestedTarget, ${mapping.humanNestedTarget.length} step(s)) - dispatching a nested target as a real EXECUTE_FRAME edit is not yet implemented, so this scene cannot be dispatched until that support exists or this mapping is removed`
+        };
+      }
       continue;
     }
     const placeholder = manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId);

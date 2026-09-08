@@ -19,6 +19,8 @@ function mapping(overrides: Partial<ScenePlanEntry["mappings"][number]> = {}): S
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "MANIFEST",
     confidence: null,
     createdAt: "2026-08-26T00:00:00.000Z",

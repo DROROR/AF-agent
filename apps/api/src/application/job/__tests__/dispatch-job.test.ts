@@ -563,6 +563,8 @@ function approvedTextScene() {
         layerVisible: null,
         freezeAtSeconds: null,
         layerDurationSeconds: null,
+        humanLayerIndex: null,
+        humanNestedTarget: null,
         mappingSource: "HUMAN" as const,
         confidence: null,
         createdAt: FIXED_NOW.toISOString(),

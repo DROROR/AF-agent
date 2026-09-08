@@ -35,6 +35,8 @@ function mappingFixture(overrides: Record<string, unknown> = {}) {
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "MANIFEST",
     confidence: null,
     createdAt: new Date().toISOString(),

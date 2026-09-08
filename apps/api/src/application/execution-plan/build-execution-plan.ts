@@ -22,6 +22,8 @@ function buildMapping(placeholder: Placeholder, timestamp: string): PlaceholderM
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "MANIFEST",
     confidence: null,
     createdAt: timestamp,

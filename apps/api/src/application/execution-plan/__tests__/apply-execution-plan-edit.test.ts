@@ -1,9 +1,48 @@
 import { describe, expect, it } from "vitest";
-import type { PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
+import { SCHEMA_VERSION, type NestedTargetStep, type PlaceholderMapping, type ScenePlanEntry, type TemplateManifest } from "@dyo/schemas";
 import { applyExecutionPlanEdit } from "../apply-execution-plan-edit.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const fixedNow = () => NOW;
+
+/**
+ * The exact real confirmed chain live QA traced for this project's
+ * branding blocker: !Render > Scene 1 > Pre-comp 3 > App Emblem >
+ * App Logo > layer 1 (workshop_logo__.png) - comp-render is the owning
+ * scene's own manifestCompositionId (scene()'s default below).
+ */
+function nestedTargetManifest(): TemplateManifest {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    templateId: "tmpl-1",
+    templateName: "tmpl-1",
+    sourceProject: { path: "/copies/test.aep", name: "test.aep", sha256: "a".repeat(64) },
+    afterEffects: { version: "26.3x87" },
+    generatedAt: NOW.toISOString(),
+    compositions: [
+      { compositionId: "comp-render", aeProjectItemIndex: 2, name: "!Render", widthPx: 1920, heightPx: 1080, durationSeconds: 45, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-scene1", aeProjectItemIndex: 48, name: "Scene 1", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-render"] },
+      { compositionId: "comp-precomp3", aeProjectItemIndex: 45, name: "Pre-comp 3", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-scene1"] },
+      { compositionId: "comp-emblem", aeProjectItemIndex: 34, name: "App Emblem", widthPx: 500, heightPx: 500, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-precomp3"] },
+      { compositionId: "comp-logo", aeProjectItemIndex: 31, name: "App Logo", widthPx: 500, heightPx: 500, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-emblem"] },
+      // A composition that is NOT actually a child of comp-scene1 (its real
+      // parent is comp-render directly) - used to prove a broken/invalid
+      // link is caught, never accepted on trust.
+      { compositionId: "comp-unrelated", aeProjectItemIndex: 99, name: "Unrelated Comp", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-render"] }
+    ],
+    scenes: [],
+    preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+    unknownItems: []
+  };
+}
+
+/** The real confirmed path: within Scene 1 layer 5 references Pre-comp 3, within Pre-comp 3 layer 2 references App Emblem, within App Emblem layer 3 references App Logo, and within App Logo layer 1 IS workshop_logo__.png. */
+const REAL_LOGO_NESTED_TARGET: NestedTargetStep[] = [
+  { compositionId: "comp-scene1", layerIndex: 5 },
+  { compositionId: "comp-precomp3", layerIndex: 2 },
+  { compositionId: "comp-emblem", layerIndex: 3 },
+  { compositionId: "comp-logo", layerIndex: 1 }
+];
 
 function mapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMapping {
   return {
@@ -19,6 +58,8 @@ function mapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMappin
     layerVisible: null,
     freezeAtSeconds: null,
     layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
     mappingSource: "MANIFEST",
     confidence: null,
     createdAt: "2026-08-25T00:00:00.000Z",
@@ -357,5 +398,275 @@ describe("applyExecutionPlanEdit - mapping-review -> execution-plan propagation 
     expect(result.scenePlans[0]?.mappings.find((m) => m.id === "mapping-2")?.text).toBeNull();
     // The scene as a whole stays unresolved - mapping-2 still needs its own real decision.
     expect(result.scenePlans[0]?.unresolvedReasons.length).toBeGreaterThan(0);
+  });
+
+  // Live QA brand-rule blocker fix (2026-09-08): ADD_MAPPING is the first
+  // operation that can create a brand-new PlaceholderMapping row on a
+  // scene that has none - every other operation above requires an
+  // existing mappingId. These tests cover the human-added-mapping
+  // contract this exists to serve: real logo/text branding for a
+  // template whose own manifest never classified a placeholder for it.
+  describe("ADD_MAPPING", () => {
+    const emptyScene = scene({ mappings: [] });
+
+    it("creates a real, human-added logo mapping with a real AE layer target, going through the SAME revision/audit path (updatedAt bump, readiness recompute) as every other operation", () => {
+      const result = applyExecutionPlanEdit(
+        [emptyScene],
+        {
+          type: "ADD_MAPPING",
+          scenePlanId: "scene-1",
+          placeholderName: "App Logo (workshop_logo__.png)",
+          placeholderClassification: "logo",
+          humanLayerIndex: 3,
+          selectedAssetId: "asset-logo-1"
+        },
+        fixedNow
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const updated = result.scenePlans[0]!;
+      expect(updated.mappings).toHaveLength(1);
+      const created = updated.mappings[0]!;
+      expect(created.manifestPlaceholderId).toBeNull();
+      expect(created.mappingSource).toBe("HUMAN");
+      expect(created.placeholderClassification).toEqual({ value: "logo", source: "HUMAN", evidence: [] });
+      expect(created.selectedAssetType).toBe("logo");
+      expect(created.selectedAssetId).toBe("asset-logo-1");
+      expect(created.humanLayerIndex).toBe(3);
+      expect(created.text).toBeNull();
+      // Same audit/revision-recompute path every other edit already goes through.
+      expect(updated.updatedAt).toBe(NOW.toISOString());
+    });
+
+    it("creates a real, human-added text mapping carrying the EXACT required Hebrew branding string, byte-for-byte, never mangled/reversed", () => {
+      const REQUIRED_TEXT = "מבית DYO App";
+      const result = applyExecutionPlanEdit(
+        [emptyScene],
+        {
+          type: "ADD_MAPPING",
+          scenePlanId: "scene-1",
+          placeholderName: "DYO branding text",
+          placeholderClassification: "text",
+          humanLayerIndex: 4,
+          text: REQUIRED_TEXT
+        },
+        fixedNow
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const created = result.scenePlans[0]!.mappings[0]!;
+      expect(created.text).toBe(REQUIRED_TEXT);
+      expect(created.text).toBe("מבית DYO App");
+      expect(created.selectedAssetId).toBeNull();
+      expect(created.selectedAssetType).toBeNull();
+    });
+
+    it("fails closed when an asset-type classification has no selectedAssetId - never creates a half-real row", () => {
+      const result = applyExecutionPlanEdit(
+        [emptyScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Logo", placeholderClassification: "logo", humanLayerIndex: 3, selectedAssetId: null },
+        fixedNow
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("fails closed when a text classification has no text - never creates a half-real row", () => {
+      const result = applyExecutionPlanEdit(
+        [emptyScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Branding text", placeholderClassification: "text", humanLayerIndex: 4, text: null },
+        fixedNow
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("fails closed for an unsupported classification (e.g. color) - ADD_MAPPING only supports asset types and text today", () => {
+      const result = applyExecutionPlanEdit(
+        [emptyScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Brand color", placeholderClassification: "color", humanLayerIndex: 5 },
+        fixedNow
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("fails closed on a duplicate humanLayerIndex within the same scene - two mappings can never claim the same real AE layer", () => {
+      const sceneWithLogo = scene({
+        mappings: [mapping({ id: "mapping-logo", manifestPlaceholderId: null, humanLayerIndex: 3, mappingSource: "HUMAN" })]
+      });
+      const result = applyExecutionPlanEdit(
+        [sceneWithLogo],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Another logo", placeholderClassification: "logo", humanLayerIndex: 3, selectedAssetId: "asset-2" },
+        fixedNow
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("never produces duplicate mapping IDs across repeated ADD_MAPPING calls", () => {
+      const first = applyExecutionPlanEdit(
+        [emptyScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Logo", placeholderClassification: "logo", humanLayerIndex: 3, selectedAssetId: "asset-1" },
+        fixedNow
+      );
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      const second = applyExecutionPlanEdit(
+        first.scenePlans,
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Branding text", placeholderClassification: "text", humanLayerIndex: 4, text: "מבית DYO App" },
+        fixedNow
+      );
+      expect(second.ok).toBe(true);
+      if (!second.ok) return;
+      const ids = second.scenePlans[0]!.mappings.map((m) => m.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it("a scene with a human-added logo mapping and no other unresolved content reaches READY_FOR_APPROVAL, same as any other resolved scene", () => {
+      const result = applyExecutionPlanEdit(
+        [scene({ mappings: [] })],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Logo", placeholderClassification: "logo", humanLayerIndex: 3, selectedAssetId: "asset-1" },
+        fixedNow
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.scenePlans[0]?.approvalState).toBe("READY_FOR_APPROVAL");
+    });
+  });
+
+  // Live QA brand-rule blocker fix, 2026-09-08 correction: the real logo
+  // layer for this project lives 4 compositions below the owning scene
+  // (!Render) - a direct humanLayerIndex on !Render itself could never
+  // reach it. These tests cover the nested-target design.
+  describe("ADD_MAPPING - nested composition target", () => {
+    const renderScene = scene({ id: "scene-1", manifestCompositionId: "comp-render", mappings: [] });
+
+    it("creates a real, human-added nested logo mapping matching the exact real confirmed chain - humanLayerIndex stays null, humanNestedTarget carries the real path", () => {
+      const result = applyExecutionPlanEdit(
+        [renderScene],
+        {
+          type: "ADD_MAPPING",
+          scenePlanId: "scene-1",
+          placeholderName: "App Logo (workshop_logo__.png)",
+          placeholderClassification: "logo",
+          humanNestedTarget: REAL_LOGO_NESTED_TARGET,
+          selectedAssetId: "asset-logo-1"
+        },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const created = result.scenePlans[0]!.mappings[0]!;
+      expect(created.manifestPlaceholderId).toBeNull();
+      expect(created.mappingSource).toBe("HUMAN");
+      expect(created.humanLayerIndex).toBeNull();
+      expect(created.humanNestedTarget).toEqual(REAL_LOGO_NESTED_TARGET);
+      // The nested target genuinely reaches the intended real layer - the
+      // LAST step is the real App Logo composition, real layer 1.
+      const lastStep = created.humanNestedTarget![created.humanNestedTarget!.length - 1]!;
+      expect(lastStep).toEqual({ compositionId: "comp-logo", layerIndex: 1 });
+    });
+
+    it("fails closed when a nested path's compositionId does not exist in the current manifest at all", () => {
+      const result = applyExecutionPlanEdit(
+        [renderScene],
+        {
+          type: "ADD_MAPPING",
+          scenePlanId: "scene-1",
+          placeholderName: "Broken target",
+          placeholderClassification: "logo",
+          humanNestedTarget: [{ compositionId: "comp-does-not-exist", layerIndex: 1 }],
+          selectedAssetId: "asset-1"
+        },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("fails closed when a nested path step is NOT a real child of the previous step (a broken/invented link, even if every compositionId individually exists)", () => {
+      const brokenPath: NestedTargetStep[] = [
+        { compositionId: "comp-scene1", layerIndex: 5 },
+        // comp-unrelated is real, but its real parent is comp-render
+        // directly, never comp-scene1 - this link is invented, not evidence.
+        { compositionId: "comp-unrelated", layerIndex: 2 }
+      ];
+      const result = applyExecutionPlanEdit(
+        [renderScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Broken chain", placeholderClassification: "logo", humanNestedTarget: brokenPath, selectedAssetId: "asset-1" },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("fails closed when a nested target is requested but no manifest was supplied to verify it against", () => {
+      const result = applyExecutionPlanEdit(
+        [renderScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Logo", placeholderClassification: "logo", humanNestedTarget: REAL_LOGO_NESTED_TARGET, selectedAssetId: "asset-1" },
+        fixedNow
+        // currentManifest omitted
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("rejects ADD_MAPPING carrying BOTH humanLayerIndex and humanNestedTarget - never both", () => {
+      const result = applyExecutionPlanEdit(
+        [renderScene],
+        {
+          type: "ADD_MAPPING",
+          scenePlanId: "scene-1",
+          placeholderName: "Ambiguous target",
+          placeholderClassification: "logo",
+          humanLayerIndex: 1,
+          humanNestedTarget: REAL_LOGO_NESTED_TARGET,
+          selectedAssetId: "asset-1"
+        },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it("no accidental targeting of !Render's own layer 1 - a nested target whose FINAL step happens to be layerIndex 1 is never confused with a direct humanLayerIndex:1 mapping on the owning scene itself", () => {
+      const result = applyExecutionPlanEdit(
+        [renderScene],
+        {
+          type: "ADD_MAPPING",
+          scenePlanId: "scene-1",
+          placeholderName: "App Logo (workshop_logo__.png)",
+          placeholderClassification: "logo",
+          humanNestedTarget: REAL_LOGO_NESTED_TARGET,
+          selectedAssetId: "asset-logo-1"
+        },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const created = result.scenePlans[0]!.mappings[0]!;
+      // Never set - a nested target must never ALSO populate the
+      // same-composition field, which would make it indistinguishable
+      // from (and could be silently mistaken for) a direct target on the
+      // owning scene's own composition (comp-render / !Render) itself.
+      expect(created.humanLayerIndex).toBeNull();
+      expect(created.humanNestedTarget).not.toBeNull();
+    });
+
+    it("a duplicate nested target (same final compositionId+layerIndex) within the same scene is rejected, just like a duplicate direct target", () => {
+      const first = applyExecutionPlanEdit(
+        [renderScene],
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Logo", placeholderClassification: "logo", humanNestedTarget: REAL_LOGO_NESTED_TARGET, selectedAssetId: "asset-1" },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      const second = applyExecutionPlanEdit(
+        first.scenePlans,
+        { type: "ADD_MAPPING", scenePlanId: "scene-1", placeholderName: "Logo again", placeholderClassification: "logo", humanNestedTarget: REAL_LOGO_NESTED_TARGET, selectedAssetId: "asset-2" },
+        fixedNow,
+        nestedTargetManifest()
+      );
+      expect(second.ok).toBe(false);
+    });
   });
 });
