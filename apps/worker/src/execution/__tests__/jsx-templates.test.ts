@@ -72,14 +72,14 @@ const FAKE_RENDER_CAPABILITIES_APP_SETUP = `
 
 describe("buildOperationScript", () => {
   it("is deterministic - the same operation always produces byte-identical JSX", () => {
-    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 3, text: "Hello" };
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 3, nestedTarget: null, text: "Hello" };
     const a = buildOperationScript(2, COMP_NAME, op);
     const b = buildOperationScript(2, COMP_NAME, op);
     expect(a).toBe(b);
   });
 
   it("is a bare function BODY, never a self-invoking (function(){...})() expression - regression test for the real ae_run_jsx contract (new Function('args', code))", () => {
-    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "x" };
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "x" };
     const script = buildOperationScript(0, COMP_NAME, op);
     expect(script).not.toMatch(/^\s*\(function\s*\(/);
     expect(script).not.toMatch(/\}\)\(\)\s*$/);
@@ -91,8 +91,8 @@ describe("buildOperationScript", () => {
 
   it("wraps every operation in beginUndoGroup/try/finally/endUndoGroup", () => {
     const ops: SceneEditOperation[] = [
-      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "x" },
-      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/tmp/a.png" },
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "x" },
+      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, assetPath: "/tmp/a.png" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: true },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 1 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 3 },
@@ -132,7 +132,7 @@ describe("buildOperationScript", () => {
 
   it("never breaks out of its string literal for a malicious text value (JSON.stringify escaping)", () => {
     const malicious = '"; app.quit(); var x = "';
-    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: malicious };
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: malicious };
     const script = buildOperationScript(0, COMP_NAME, op);
     // The malicious payload must appear only inside a properly escaped
     // JSON string literal (backslash-escaped quotes), never as a bare
@@ -143,14 +143,14 @@ describe("buildOperationScript", () => {
 
   it("never breaks out via a backslash/newline/unicode-heavy text value", () => {
     const nasty = 'line1\nline2\\backslash  "quote"';
-    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: nasty };
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: nasty };
     // Must not throw, and must produce valid embeddable JSON for the value.
     const script = buildOperationScript(0, COMP_NAME, op);
     expect(script).toContain(JSON.stringify(nasty));
   });
 
   it("SET_TEXT preserves style by mutating only sourceText.value.text, never replacing the whole TextDocument", () => {
-    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "שלום" };
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "שלום" };
     const script = buildOperationScript(0, COMP_NAME, op);
     expect(script).toContain("__layer instanceof TextLayer");
     expect(script).toContain("__layer.sourceText.value");
@@ -162,7 +162,7 @@ describe("buildOperationScript", () => {
   });
 
   it("MAP_FOOTAGE checks AVLayer, file existence, and uses replaceSource - never a global footage-by-name replacement", () => {
-    const op: SceneEditOperation = { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 4, assetPath: "/safe/local/clip.mp4" };
+    const op: SceneEditOperation = { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 4, nestedTarget: null, assetPath: "/safe/local/clip.mp4" };
     const script = buildOperationScript(1, COMP_NAME, op);
     expect(script).toContain("__layer instanceof AVLayer");
     expect(script).toContain("new File(" + JSON.stringify("/safe/local/clip.mp4") + ")");
@@ -198,8 +198,8 @@ describe("buildOperationScript", () => {
 
   it("every operation type produces a distinct script", () => {
     const ops: SceneEditOperation[] = [
-      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "x" },
-      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/a.png" },
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "x" },
+      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, assetPath: "/a.png" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: true },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 1 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 3 },
@@ -261,8 +261,8 @@ describe("buildInspectRenderCapabilitiesScript", () => {
 
 describe("real production bug fix (2026-09-02): 'JSON is undefined' can never recur - every script installs a JSON.stringify shim before it is ever called", () => {
   const allBuiltScripts = (): { name: string; script: string }[] => [
-    { name: "SET_TEXT", script: buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "x" }) },
-    { name: "MAP_FOOTAGE", script: buildOperationScript(1, COMP_NAME, { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/tmp/a.png" }) },
+    { name: "SET_TEXT", script: buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "x" }) },
+    { name: "MAP_FOOTAGE", script: buildOperationScript(1, COMP_NAME, { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, assetPath: "/tmp/a.png" }) },
     { name: "SET_LAYER_VISIBILITY", script: buildOperationScript(1, COMP_NAME, { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: true }) },
     { name: "SET_TIME_REMAP_FREEZE", script: buildOperationScript(1, COMP_NAME, { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 1 }) },
     { name: "SET_DURATION", script: buildOperationScript(1, COMP_NAME, { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 3 }) },
@@ -441,6 +441,268 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect(script).not.toMatch(/\.setSource\s*\(/);
     expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
     expect(script).not.toMatch(/\.setValue\s*\(/);
+  });
+});
+
+describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fix, 2026-09-08)", () => {
+  /**
+   * Fake AE object model for a real, 2-hop nested chain shaped exactly
+   * like the live App Logo mapping's own tail (Pre-comp 3 [id 1635, item
+   * index 11] -> App Logo [id 1113, item index 22]). `__precompLayer4`
+   * (index 4, within Pre-comp 3) is the real precomp-reference layer whose
+   * `.source` IS the App Logo composition - every nested resolution below
+   * must verify this relationship live, never assume it. The App Logo
+   * composition itself carries BOTH a TextLayer (index 1) and an AVLayer
+   * (index 2, with a real footage-replaceable `.source`), so the exact
+   * same fake app can exercise both SET_TEXT and MAP_FOOTAGE nested
+   * mutations.
+   */
+  const NESTED_FAKE_APP_SETUP = `
+    function CompItem() {}
+    function AVLayer() {}
+    AVLayer.prototype = Object.create(CompItem.prototype);
+    function TextLayer() {}
+    TextLayer.prototype = new AVLayer();
+
+    var __logoComp = new CompItem();
+    __logoComp.id = 1113;
+    __logoComp.name = "App Logo";
+    var __logoTextLayer = new TextLayer();
+    __logoTextLayer.index = 1;
+    __logoTextLayer.sourceText = { value: { text: "old text" }, setValue: function (v) { this.value = v; } };
+    var __existingFootageSource = new CompItem();
+    __existingFootageSource.name = "workshop_logo__.png";
+    var __logoImageLayer = new AVLayer();
+    __logoImageLayer.index = 2;
+    __logoImageLayer.source = __existingFootageSource;
+    __logoImageLayer.replaceSource = function (newItem) { this.source = newItem; };
+    var __logoLayersByIndex = { 1: __logoTextLayer, 2: __logoImageLayer };
+    // Real AE throws for an out-of-range layer index, it never returns
+    // undefined - matched here so the "layer not found" fail-closed path
+    // is exercised the same way it would be against real AE.
+    __logoComp.layer = function (i) {
+      var __l = __logoLayersByIndex[i];
+      if (__l === undefined) { throw new Error("layer index out of range"); }
+      return __l;
+    };
+
+    var __precompComp = new CompItem();
+    __precompComp.id = 1635;
+    __precompComp.name = "Pre-comp 3";
+    var __precompLayer4 = new AVLayer();
+    __precompLayer4.index = 4;
+    __precompLayer4.source = __logoComp;
+    var __precompLayersByIndex = { 4: __precompLayer4 };
+    __precompComp.layer = function (i) { return __precompLayersByIndex[i]; };
+
+    var __itemsByIndex = { 11: __precompComp, 22: __logoComp };
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: {
+        item: function (i) { return __itemsByIndex[i]; },
+        importFile: function (opts) { return { name: opts.file.fsName }; }
+      }
+    };
+    function File(path) { this.fsName = path; this.exists = true; }
+    function ImportOptions(file) { this.file = file; }
+  `;
+
+  const NESTED_TARGET = [
+    { compositionId: "comp-1635", aeProjectItemIndex: 11, layerIndex: 4 },
+    { compositionId: "comp-1113", aeProjectItemIndex: 22, layerIndex: 1 }
+  ];
+
+  it("nested text sourceText replacement: descends through the real precomp reference and mutates the final TextLayer's sourceText", () => {
+    const op: SceneEditOperation = {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: NESTED_TARGET,
+      text: "מבית DYO App"
+    };
+    const script = buildOperationScript(999, "irrelevant - nested resolution never uses this", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
+  });
+
+  it("nested logo asset replacement: descends through the real precomp reference and replaces the final AVLayer's footage source", () => {
+    const op: SceneEditOperation = {
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: [
+        { compositionId: "comp-1635", aeProjectItemIndex: 11, layerIndex: 4 },
+        { compositionId: "comp-1113", aeProjectItemIndex: 22, layerIndex: 2 }
+      ],
+      assetPath: "/real/dyo-logo.png"
+    };
+    const script = buildOperationScript(999, "irrelevant", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.previousValue).toBe("workshop_logo__.png");
+    expect(result.resultingValue).toBe("/real/dyo-logo.png");
+  });
+
+  it("multi-hop traversal: a 3-hop chain resolves through two intermediate precomp hops before reaching the final layer", () => {
+    const threeHopSetup = `
+      function CompItem() {}
+      function AVLayer() {}
+      AVLayer.prototype = Object.create(CompItem.prototype);
+      function TextLayer() {}
+      TextLayer.prototype = new AVLayer();
+
+      var __final = new CompItem();
+      __final.id = 300;
+      __final.name = "Final";
+      var __finalText = new TextLayer();
+      __finalText.index = 1;
+      __finalText.sourceText = { value: { text: "before" }, setValue: function (v) { this.value = v; } };
+      __final.layer = function (i) { return i === 1 ? __finalText : null; };
+
+      var __mid = new CompItem();
+      __mid.id = 200;
+      __mid.name = "Mid";
+      var __midLayer = new AVLayer();
+      __midLayer.index = 2;
+      __midLayer.source = __final;
+      __mid.layer = function (i) { return i === 2 ? __midLayer : null; };
+
+      var __outer = new CompItem();
+      __outer.id = 100;
+      __outer.name = "Outer";
+      var __outerLayer = new AVLayer();
+      __outerLayer.index = 3;
+      __outerLayer.source = __mid;
+      __outer.layer = function (i) { return i === 3 ? __outerLayer : null; };
+
+      var __itemsByIndex = { 10: __outer, 20: __mid, 30: __final };
+      var app = {
+        beginUndoGroup: function () {},
+        endUndoGroup: function () {},
+        project: { item: function (i) { return __itemsByIndex[i]; } }
+      };
+    `;
+    const op: SceneEditOperation = {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: [
+        { compositionId: "comp-100", aeProjectItemIndex: 10, layerIndex: 3 },
+        { compositionId: "comp-200", aeProjectItemIndex: 20, layerIndex: 2 },
+        { compositionId: "comp-300", aeProjectItemIndex: 30, layerIndex: 1 }
+      ],
+      text: "after"
+    };
+    const script = buildOperationScript(999, "irrelevant", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, threeHopSetup);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({ ok: true, previousValue: "before", resultingValue: "after" });
+  });
+
+  it("stale/broken path fails closed: an intermediate hop's real composition id no longer matches the expected one (e.g. the project was re-ordered) - never guesses, never mutates", () => {
+    const staleSetup = NESTED_FAKE_APP_SETUP.replace("__precompComp.id = 1635;", "__precompComp.id = 9999;");
+    const op: SceneEditOperation = {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: NESTED_TARGET,
+      text: "should never be applied"
+    };
+    const script = buildOperationScript(999, "irrelevant", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, staleSetup);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("stale or broken nested path");
+    expect(result.failureReason).toContain("1635");
+  });
+
+  it("stale/broken path fails closed: an intermediate layer no longer references the expected next composition (e.g. the template's precomp reference changed) - never guesses, never mutates", () => {
+    const retargetedSetup = NESTED_FAKE_APP_SETUP.replace("__precompLayer4.source = __logoComp;", "__precompLayer4.source = new CompItem();");
+    const op: SceneEditOperation = {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: NESTED_TARGET,
+      text: "should never be applied"
+    };
+    const script = buildOperationScript(999, "irrelevant", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, retargetedSetup);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("stale or broken nested path");
+  });
+
+  it("wrong composition/layer fails closed: a step's aeProjectItemIndex does not resolve to any composition at all", () => {
+    const op: SceneEditOperation = {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: [{ compositionId: "comp-9999", aeProjectItemIndex: 500, layerIndex: 1 }],
+      text: "should never be applied"
+    };
+    const script = buildOperationScript(999, "irrelevant", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("did not resolve to a composition");
+  });
+
+  it("wrong composition/layer fails closed: the final step's layerIndex does not exist in the final composition", () => {
+    const op: SceneEditOperation = {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: [
+        { compositionId: "comp-1635", aeProjectItemIndex: 11, layerIndex: 4 },
+        { compositionId: "comp-1113", aeProjectItemIndex: 22, layerIndex: 99 }
+      ],
+      text: "should never be applied"
+    };
+    const script = buildOperationScript(999, "irrelevant", op);
+    const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("was not found in the final target composition");
+  });
+
+  it("direct humanLayerIndex still works (flat, same-composition case) - unaffected by nested-target support existing alongside it", () => {
+    const flatSetup = `
+      function CompItem() {}
+      function AVLayer() {}
+      AVLayer.prototype = Object.create(CompItem.prototype);
+      function TextLayer() {}
+      TextLayer.prototype = new AVLayer();
+      var __comp = new CompItem();
+      __comp.name = ${JSON.stringify(COMP_NAME)};
+      var __textLayer = new TextLayer();
+      __textLayer.index = 7;
+      __textLayer.sourceText = { value: { text: "flat before" }, setValue: function (v) { this.value = v; } };
+      __comp.layer = function (i) { return i === 7 ? __textLayer : null; };
+      var app = {
+        beginUndoGroup: function () {},
+        endUndoGroup: function () {},
+        project: { item: function (i) { return i === 1 ? __comp : null; } }
+      };
+    `;
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: 7, nestedTarget: null, text: "flat after" };
+    const script = buildOperationScript(1, COMP_NAME, op);
+    const resultText = runFixedScriptWithoutNativeJson(script, flatSetup);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({ ok: true, previousValue: "flat before", resultingValue: "flat after" });
+  });
+
+  it("never mutates the source AEP directly - the nested script never calls app.project.save() or anything file-writing beyond the layer/footage mutation itself", () => {
+    const script = buildOperationScript(999, "irrelevant", {
+      type: "SET_TEXT",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: NESTED_TARGET,
+      text: "x"
+    });
+    expect(script).not.toContain("app.project.save(");
   });
 });
 

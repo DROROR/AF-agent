@@ -1,4 +1,4 @@
-import type { SceneEditOperation } from "@dyo/schemas";
+import type { ResolvedNestedTargetStep, SceneEditOperation } from "@dyo/schemas";
 
 /**
  * The ONE and ONLY source of JSX/ExtendScript text this worker will ever
@@ -213,28 +213,29 @@ function withTargets(script: string, aeProjectItemIndex: number, compositionName
     .replaceAll("__TARGET_LAYER_INDEX__", String(layerIndex));
 }
 
-function buildSetTextScript(aeProjectItemIndex: number, compositionName: string, op: Extract<SceneEditOperation, { type: "SET_TEXT" }>): FixedJsxScript {
-  const text = JSON.stringify(op.text);
-  const body = `
+/** Shared mutation body for SET_TEXT - identical for the flat and nested target cases, since both resolve down to the same `__layer` variable before this runs. */
+function buildSetTextBody(text: string): string {
+  const textLiteral = JSON.stringify(text);
+  return `
         if (!(__layer instanceof TextLayer)) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer is not a text layer" });
         } else {
           var __td = __layer.sourceText.value;
           var __previousText = __td.text;
-          __td.text = ${text};
+          __td.text = ${textLiteral};
           __layer.sourceText.setValue(__td);
-          __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${text} });
+          __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${textLiteral} });
         }`;
-  return withTargets(wrapScript("SET_TEXT", body), aeProjectItemIndex, compositionName, op.layerIndex) as FixedJsxScript;
 }
 
-function buildMapFootageScript(aeProjectItemIndex: number, compositionName: string, op: Extract<SceneEditOperation, { type: "MAP_FOOTAGE" }>): FixedJsxScript {
-  const assetPath = JSON.stringify(op.assetPath);
-  const body = `
+/** Shared mutation body for MAP_FOOTAGE - identical for the flat and nested target cases (module doc comment on buildSetTextBody above). */
+function buildMapFootageBody(assetPath: string): string {
+  const assetPathLiteral = JSON.stringify(assetPath);
+  return `
         if (!(__layer instanceof AVLayer)) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer is not an AV layer" });
         } else {
-          var __assetFile = new File(${assetPath});
+          var __assetFile = new File(${assetPathLiteral});
           if (!__assetFile.exists) {
             __result = JSON.stringify({ ok: false, failureReason: "asset file does not exist on the worker filesystem: " + __assetFile.fsName });
           } else {
@@ -245,7 +246,152 @@ function buildMapFootageScript(aeProjectItemIndex: number, compositionName: stri
             __result = JSON.stringify({ ok: true, previousValue: __previousSourceName, resultingValue: __newFootageItem.name });
           }
         }`;
-  return withTargets(wrapScript("MAP_FOOTAGE", body), aeProjectItemIndex, compositionName, op.layerIndex) as FixedJsxScript;
+}
+
+function buildSetTextScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, text: string): FixedJsxScript {
+  return withTargets(wrapScript("SET_TEXT", buildSetTextBody(text)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
+}
+
+function buildMapFootageScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, assetPath: string): FixedJsxScript {
+  return withTargets(wrapScript("MAP_FOOTAGE", buildMapFootageBody(assetPath)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
+}
+
+/**
+ * Extracts the numeric AE persistent item id from a manifest compositionId
+ * ("comp-1635" -> 1635) - the SAME identity convention
+ * buildInspectCompositionPrecompsScript/buildInspectCompositionLayerDetailsScript
+ * already use (`"comp-" + item.id`), so a nested step's own expected id can
+ * be compared directly against a real `CompItem.id` read live from AE.
+ * Throws (a real TypeScript-level bug, never a runtime/user-data issue) if
+ * a compositionId does not match this convention - every compositionId
+ * reaching this file already came from the manifest, which only ever
+ * produces this exact shape.
+ */
+function parseCompositionNumericId(compositionId: string): number {
+  const match = /^comp-(\d+)$/.exec(compositionId);
+  if (!match) {
+    throw new Error(`compositionId "${compositionId}" does not match the expected "comp-<number>" convention`);
+  }
+  return Number(match[1]);
+}
+
+/**
+ * Live QA execution-wiring fix (2026-09-08): the nested-target counterpart
+ * to wrapScript above, for a human-added mapping whose real target lives
+ * one or more precomp levels below the scene's own top composition
+ * (execution-plan.ts's own NestedTargetStep/humanNestedTarget doc
+ * comments). Never walks through `.source` chains starting from the
+ * scene's own top composition - each step's own composition is resolved
+ * DIRECTLY via `app.project.item(step.aeProjectItemIndex)`, the exact same
+ * primitive every other script in this file already uses, and its real
+ * `.id` is independently verified against the step's own compositionId
+ * BEFORE any layer in it is ever touched (never a name-only match - the
+ * numeric AE item id is a stronger, duplicate-proof identity name can
+ * never provide). For every step except the last, that step's own
+ * `layerIndex` is ADDITIONALLY verified to be a real precomp-reference
+ * layer whose `.source.id` matches the NEXT step's expected id - this is
+ * what makes a stale/broken path (the template changed since this target
+ * was verified) fail closed with a clear reason, rather than silently
+ * mutating whatever layer now happens to sit at that index. The LAST
+ * step's own `layerIndex` becomes the real target `__layer` the caller's
+ * `body` mutates - identical contract to wrapScript's own `__layer`.
+ */
+function wrapNestedScript(operationLabel: string, body: string, nestedTarget: readonly ResolvedNestedTargetStep[]): FixedJsxScript {
+  const hopBlocks = nestedTarget
+    .map((step, index) => {
+      const compIndexLiteral = String(step.aeProjectItemIndex);
+      const numericIdLiteral = String(parseCompositionNumericId(step.compositionId));
+      // compositionId is always a build-time-known "comp-<digits>" string
+      // (parseCompositionNumericId above already threw otherwise) - never
+      // contains a quote character, so it is safe to embed directly inside
+      // an escaped-quote fragment (matching the SAME \\" ... \\" pattern
+      // this file already uses to interpolate a live-read comp/layer NAME
+      // into a generated failure message). Never JSON.stringify'd here -
+      // that produces a quoted STRING LITERAL TOKEN (its own leading/
+      // trailing `"`), which would prematurely close the enclosing
+      // generated string if embedded inside it directly, a real bug this
+      // exact construction fixes.
+      const compIdForMessage = step.compositionId;
+      const resolveBlock = `
+      if (__pathFailureReason === null) {
+        var __stepComp = null;
+        try {
+          var __stepRawItem = app.project.item(${compIndexLiteral});
+          if (__stepRawItem instanceof CompItem) { __stepComp = __stepRawItem; }
+        } catch (__stepLookupError) { __stepComp = null; }
+        if (__stepComp === null) {
+          __pathFailureReason = "nested target step ${index}: project item index ${compIndexLiteral} did not resolve to a composition in this project";
+        } else if (__stepComp.id !== ${numericIdLiteral}) {
+          __pathFailureReason = "nested target step ${index}: project item index ${compIndexLiteral} resolved to composition id " + __stepComp.id + " (name \\"" + __stepComp.name + "\\"), expected id ${numericIdLiteral} (\\"${compIdForMessage}\\") - stale or broken nested path, refusing to guess";
+        } else {
+          __comp = __stepComp;
+        }
+      }`;
+      const isLast = index === nestedTarget.length - 1;
+      if (isLast) {
+        return resolveBlock;
+      }
+      const nextStep = nestedTarget[index + 1] as ResolvedNestedTargetStep;
+      const nextNumericIdLiteral = String(parseCompositionNumericId(nextStep.compositionId));
+      const hopLayerIndexLiteral = String(step.layerIndex);
+      const hopBlock = `
+      if (__pathFailureReason === null) {
+        var __hopLayer = null;
+        try { __hopLayer = __comp.layer(${hopLayerIndexLiteral}); } catch (__hopLayerError) { __hopLayer = null; }
+        if (__hopLayer === null) {
+          __pathFailureReason = "nested target step ${index}: layer index ${hopLayerIndexLiteral} was not found in composition \\"${compIdForMessage}\\"";
+        } else if (!(__hopLayer.source && (__hopLayer.source instanceof CompItem))) {
+          __pathFailureReason = "nested target step ${index}: layer index ${hopLayerIndexLiteral} does not reference a nested composition - stale or broken nested path";
+        } else if (__hopLayer.source.id !== ${nextNumericIdLiteral}) {
+          __pathFailureReason = "nested target step ${index}: layer index ${hopLayerIndexLiteral}'s source composition id (" + __hopLayer.source.id + ") does not match the expected next step id ${nextNumericIdLiteral} - stale or broken nested path, refusing to guess";
+        }
+      }`;
+      return `${resolveBlock}${hopBlock}`;
+    })
+    .join("\n");
+
+  const finalStep = nestedTarget[nestedTarget.length - 1] as ResolvedNestedTargetStep;
+  const finalLayerIndexLiteral = String(finalStep.layerIndex);
+
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify(`DYO EXECUTE_FRAME: ${operationLabel} (nested)`)});
+  var __result = null;
+  try {
+    var __comp = null;
+    var __pathFailureReason = null;
+    ${hopBlocks}
+    if (__pathFailureReason !== null) {
+      __result = JSON.stringify({ ok: false, failureReason: __pathFailureReason });
+    } else {
+      var __layer = null;
+      try {
+        __layer = __comp.layer(${finalLayerIndexLiteral});
+      } catch (__layerLookupError) {
+        __layer = null;
+      }
+      if (__layer === null) {
+        __result = JSON.stringify({ ok: false, failureReason: "layer index ${finalLayerIndexLiteral} was not found in the final target composition" });
+      } else {
+        ${body}
+      }
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+function buildSetTextNestedScript(nestedTarget: readonly ResolvedNestedTargetStep[], text: string): FixedJsxScript {
+  return wrapNestedScript("SET_TEXT", buildSetTextBody(text), nestedTarget);
+}
+
+function buildMapFootageNestedScript(nestedTarget: readonly ResolvedNestedTargetStep[], assetPath: string): FixedJsxScript {
+  return wrapNestedScript("MAP_FOOTAGE", buildMapFootageBody(assetPath), nestedTarget);
 }
 
 function buildSetLayerVisibilityScript(
@@ -855,9 +1001,21 @@ export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: nu
 export function buildOperationScript(aeProjectItemIndex: number, compositionName: string, operation: SceneEditOperation): FixedJsxScript {
   switch (operation.type) {
     case "SET_TEXT":
-      return buildSetTextScript(aeProjectItemIndex, compositionName, operation);
+      if (operation.nestedTarget !== null) {
+        return buildSetTextNestedScript(operation.nestedTarget, operation.text);
+      }
+      if (operation.layerIndex === null) {
+        throw new Error("SET_TEXT operation has neither layerIndex nor nestedTarget set");
+      }
+      return buildSetTextScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.text);
     case "MAP_FOOTAGE":
-      return buildMapFootageScript(aeProjectItemIndex, compositionName, operation);
+      if (operation.nestedTarget !== null) {
+        return buildMapFootageNestedScript(operation.nestedTarget, operation.assetPath);
+      }
+      if (operation.layerIndex === null) {
+        throw new Error("MAP_FOOTAGE operation has neither layerIndex nor nestedTarget set");
+      }
+      return buildMapFootageScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.assetPath);
     case "SET_LAYER_VISIBILITY":
       return buildSetLayerVisibilityScript(aeProjectItemIndex, compositionName, operation);
     case "SET_TIME_REMAP_FREEZE":

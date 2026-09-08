@@ -31,7 +31,7 @@ function makeSourceProject(): { root: string; sourcePath: string; sha256: string
   return { root, sourcePath, sha256: sha256(content) };
 }
 
-const OP_0: SceneEditOperationIntent = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "first" };
+const OP_0: SceneEditOperationIntent = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "first" };
 const OP_1: SceneEditOperationIntent = { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-2", layerIndex: 2, visible: false };
 
 const EXECUTION_SESSION_ID = "session-1";

@@ -78,7 +78,7 @@ function request(overrides: Partial<ExecuteSceneEditRequest> = {}): ExecuteScene
     aeProjectItemIndex: 14,
     compositionName: "Text 01",
     approvedMappingIds: ["mapping-1"],
-    operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" }],
+    operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Approved Copy" }],
     checkpoint: null,
     ...overrides
   };
@@ -112,7 +112,7 @@ describe("validateSceneEditPreconditions", () => {
         currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
         request: request({
           operations: [
-            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Approved Copy" },
             { type: "BUILD_REELS_COMPOSITION", reelsCompositionName: reelsLayout.reelsCompositionName, layerTransforms: reelsLayout.layerTransforms }
           ]
         })
@@ -126,7 +126,7 @@ describe("validateSceneEditPreconditions", () => {
       baseInput({
         request: request({
           operations: [
-            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Approved Copy" },
             { type: "BUILD_REELS_COMPOSITION", reelsCompositionName: "Sneaky Reels", layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }] }
           ]
         })
@@ -146,7 +146,7 @@ describe("validateSceneEditPreconditions", () => {
         currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
         request: request({
           operations: [
-            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Approved Copy" },
             { type: "BUILD_REELS_COMPOSITION", reelsCompositionName: "A Different Name", layerTransforms: reelsLayout.layerTransforms }
           ]
         })
@@ -166,7 +166,7 @@ describe("validateSceneEditPreconditions", () => {
         currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
         request: request({
           operations: [
-            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Approved Copy" },
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Approved Copy" },
             {
               type: "BUILD_REELS_COMPOSITION",
               reelsCompositionName: reelsLayout.reelsCompositionName,
@@ -188,7 +188,7 @@ describe("validateSceneEditPreconditions", () => {
 
   it("rejects when the referenced mapping is not resolved (SET_TEXT value differs from the approved mapping's own text)", () => {
     const result = validateSceneEditPreconditions(
-      baseInput({ request: request({ operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Different unapproved text" }] }) })
+      baseInput({ request: request({ operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Different unapproved text" }] }) })
     );
     expect(result.ok).toBe(false);
   });
@@ -204,7 +204,7 @@ describe("validateSceneEditPreconditions", () => {
         },
         request: request({
           operations: [
-            { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetId: "22222222-2222-2222-2222-222222222222", expectedSha256: "c".repeat(64), mimeType: "video/mp4" }
+            { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, assetId: "22222222-2222-2222-2222-222222222222", expectedSha256: "c".repeat(64), mimeType: "video/mp4" }
           ]
         })
       })
@@ -269,7 +269,7 @@ describe("validateSceneEditPreconditions", () => {
           sourceProjectSha256: SHA,
           scenePlans: [scene({ mappings: [mapping(), mapping({ id: "mapping-2", manifestPlaceholderId: "ph-2" })] })]
         },
-        request: request({ operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-2", layerIndex: 2, text: "x" }] })
+        request: request({ operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-2", layerIndex: 2, nestedTarget: null, text: "x" }] })
       })
     );
     expect(result.ok).toBe(false);

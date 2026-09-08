@@ -2,32 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ExecutionPlanEditOperation, NestedTargetStep, PlaceholderMapping, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { computeSceneUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
 import { ASSET_CLASSIFICATIONS } from "../../domain/execute-frame-dispatch/resolve-execute-frame-dispatch.js";
-
-/**
- * Verifies a nested AE target path against real manifest evidence only
- * (live QA brand-rule blocker fix, 2026-09-08 correction) - never a name
- * guess. Each step's compositionId must be a real composition in the
- * CURRENT manifest, and must be a real child (compositions[].
- * parentCompositionIds) of the previous step's compositionId, or of
- * `ownerCompositionId` (the mapping's own owning scene) for the first
- * step. Returns a reason string on the first broken link found (fails
- * closed on the whole path rather than accepting a partially-real one).
- */
-function verifyNestedTargetPath(manifest: TemplateManifest, ownerCompositionId: string, steps: readonly NestedTargetStep[]): string | null {
-  const compositionById = new Map(manifest.compositions.map((c) => [c.compositionId, c]));
-  let expectedParentId = ownerCompositionId;
-  for (const [index, step] of steps.entries()) {
-    const composition = compositionById.get(step.compositionId);
-    if (!composition) {
-      return `humanNestedTarget step ${index} references compositionId "${step.compositionId}" which does not exist in the current manifest`;
-    }
-    if (!composition.parentCompositionIds.includes(expectedParentId)) {
-      return `humanNestedTarget step ${index}'s compositionId "${step.compositionId}" is not a real child of "${expectedParentId}" (manifest compositions[].parentCompositionIds evidence) - cannot be part of a deterministic nested path from there`;
-    }
-    expectedParentId = step.compositionId;
-  }
-  return null;
-}
+import { verifyNestedTargetPath } from "../../domain/execution-plan/verify-nested-target-path.js";
 
 function nestedTargetsEqual(a: readonly NestedTargetStep[], b: readonly NestedTargetStep[]): boolean {
   return a.length === b.length && a.every((step, index) => step.compositionId === b[index]?.compositionId && step.layerIndex === b[index]?.layerIndex);

@@ -21,7 +21,7 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
     aeProjectItemIndex: 14,
     compositionName: "Scene 01",
     approvedMappingIds: ["mapping-1"],
-    operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" }],
+    operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" }],
     checkpoint: null,
     ...overrides
   };
@@ -30,8 +30,8 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
 describe("sceneEditOperationSchema", () => {
   it("accepts each of the seven allowlisted operation types", () => {
     const ops = [
-      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" },
-      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, assetPath: "/assets/clip.mp4" },
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" },
+      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, assetPath: "/assets/clip.mp4" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: false },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 2.5 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 4 },
@@ -87,13 +87,53 @@ describe("sceneEditOperationSchema", () => {
 
   it("rejects an operation with an arbitrary free-form property path instead of a fixed field", () => {
     expect(() =>
-      sceneEditOperationSchema.parse({ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "x", propertyPath: "ADBE Text Properties" })
+      sceneEditOperationSchema.parse({ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "x", propertyPath: "ADBE Text Properties" })
     ).toThrow();
   });
 
   it("rejects a non-hex color for SET_BRAND_COLOR", () => {
     expect(() =>
       sceneEditOperationSchema.parse({ type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "blue" })
+    ).toThrow();
+  });
+
+  // Live QA execution-wiring fix (2026-09-08): a human-added mapping's
+  // real nested AE target (manifestPlaceholderId/layerIndex both null,
+  // nestedTarget carrying one or more real resolved steps).
+  it("accepts a SET_TEXT/MAP_FOOTAGE operation addressed by nestedTarget instead of layerIndex - manifestPlaceholderId/layerIndex both null", () => {
+    const nestedTarget = [
+      { compositionId: "comp-1635", aeProjectItemIndex: 11, layerIndex: 4 },
+      { compositionId: "comp-1113", aeProjectItemIndex: 22, layerIndex: 1 }
+    ];
+    expect(() =>
+      sceneEditOperationSchema.parse({ type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget, text: "מבית DYO App" })
+    ).not.toThrow();
+    expect(() =>
+      sceneEditOperationSchema.parse({
+        type: "MAP_FOOTAGE",
+        manifestPlaceholderId: null,
+        layerIndex: null,
+        nestedTarget,
+        assetPath: "/real/logo.png"
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects an empty nestedTarget array - a nested target must have at least one real step", () => {
+    expect(() =>
+      sceneEditOperationSchema.parse({ type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: [], text: "x" })
+    ).toThrow();
+  });
+
+  it("rejects a nestedTarget step missing its own aeProjectItemIndex - never a same-composition NestedTargetStep passed straight through unresolved", () => {
+    expect(() =>
+      sceneEditOperationSchema.parse({
+        type: "SET_TEXT",
+        manifestPlaceholderId: null,
+        layerIndex: null,
+        nestedTarget: [{ compositionId: "comp-1635", layerIndex: 4 }],
+        text: "x"
+      })
     ).toThrow();
   });
 });
@@ -105,6 +145,7 @@ describe("sceneEditOperationIntentSchema - the dispatch-facing (server -> worker
         type: "MAP_FOOTAGE",
         manifestPlaceholderId: "ph-1",
         layerIndex: 1,
+        nestedTarget: null,
         assetId: "22222222-2222-2222-2222-222222222222",
         expectedSha256: "c".repeat(64),
         mimeType: "video/mp4"
@@ -118,6 +159,7 @@ describe("sceneEditOperationIntentSchema - the dispatch-facing (server -> worker
         type: "MAP_FOOTAGE",
         manifestPlaceholderId: "ph-1",
         layerIndex: 1,
+        nestedTarget: null,
         assetPath: "/some/worker/path.mp4"
       })
     ).toThrow();
@@ -129,6 +171,7 @@ describe("sceneEditOperationIntentSchema - the dispatch-facing (server -> worker
         type: "MAP_FOOTAGE",
         manifestPlaceholderId: "ph-1",
         layerIndex: 1,
+        nestedTarget: null,
         assetId: "not-a-uuid",
         expectedSha256: "c".repeat(64),
         mimeType: "video/mp4"
@@ -138,7 +181,7 @@ describe("sceneEditOperationIntentSchema - the dispatch-facing (server -> worker
 
   it("accepts every non-asset operation type identically to the resolved schema", () => {
     const ops = [
-      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" },
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: false },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 1, freezeAtSeconds: 2.5 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 1, durationSeconds: 4 },

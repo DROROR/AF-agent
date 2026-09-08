@@ -180,7 +180,7 @@ async function createRunningExecuteFrameJob(workerId: string, projectId: string,
         aeProjectItemIndex: 1,
         compositionName: "Master",
         approvedMappingIds: ["mapping-1"],
-        operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" }],
+        operations: [{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" }],
         checkpoint: null
       }
     },

@@ -224,7 +224,7 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.payload.aeProjectItemIndex).toBe(5);
     expect(result.payload.compositionName).toBe("Scene 01");
     expect(result.payload.sourceProjectPath).toBe("C:\\vidio agent\\White App Promo (converted).aep");
-    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" }]);
     expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
     expect(result.payload.executionSessionId).toBe(SESSION_ID);
     expect(result.payload.expectedWorkingProjectSha256).toBeNull();
@@ -247,7 +247,7 @@ describe("resolveExecuteFrameDispatch", () => {
     // Content operations still come first - the duplicate is built from
     // the already-edited landscape composition, never from stale template
     // placeholder content.
-    expect(result.payload.operations[0]).toEqual({ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" });
+    expect(result.payload.operations[0]).toEqual({ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" });
   });
 
   it("never appends BUILD_REELS_COMPOSITION when the scene has no reelsLayout configured - fully additive, landscape-only by default", () => {
@@ -273,7 +273,7 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.operations).toEqual([
-      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-2", layerIndex: 3, assetId: ASSET_ID, expectedSha256: "b".repeat(64), mimeType: "image/jpeg" }
+      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-2", layerIndex: 3, nestedTarget: null, assetId: ASSET_ID, expectedSha256: "b".repeat(64), mimeType: "image/jpeg" }
     ]);
   });
 
@@ -378,7 +378,7 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.operations).toEqual([
-      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" },
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 2, visible: false },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-1", layerIndex: 2, freezeAtSeconds: 2.5 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-1", layerIndex: 2, durationSeconds: 4 }
@@ -391,7 +391,7 @@ describe("resolveExecuteFrameDispatch", () => {
     const result = resolveExecuteFrameDispatch(baseInput());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" }]);
   });
 
   it("resolves a visibility-only override on a mapping with no other resolvable classification, so the scene is still dispatchable", () => {
@@ -423,7 +423,7 @@ describe("resolveExecuteFrameDispatch", () => {
     const result = resolveExecuteFrameDispatch(baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ mappings: [legacyMapping] })] }) }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" }]);
   });
 
   it("fails when an asset-classified mapping has no selectedAssetId", () => {
@@ -458,58 +458,308 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
   });
 
-  // Live QA brand-rule blocker fix (2026-09-08): a human-added mapping
-  // WITH a real, verified AE layer target (humanLayerIndex) must never be
-  // silently dropped the same way one with no target still is above -
-  // applying it as a real EXECUTE_FRAME edit is not yet implemented
-  // (see this file's own doc comment), so the whole scene fails closed
-  // with a clear, specific reason instead.
-  it("fails closed (never silently skips) a human-added mapping that DOES carry a real, verified AE layer target (humanLayerIndex)", () => {
-    const result = resolveExecuteFrameDispatch(
-      baseInput({
-        currentPlan: validPlan({
-          scenePlans: [
-            validScene({
-              mappings: [textMapping(), textMapping({ id: "mapping-logo", manifestPlaceholderId: null, humanLayerIndex: 3, mappingSource: "HUMAN" })]
-            })
-          ]
+  // Live QA execution-wiring fix (2026-09-08): a human-added mapping WITH
+  // a real, verified AE layer target (humanLayerIndex/humanNestedTarget)
+  // is now translated into a REAL dispatchable operation - the executor
+  // fully supports both direct and nested human targets. These replace
+  // the earlier "fails closed, not yet implemented" tests.
+  describe("human-added mappings with a real, verified AE target (humanLayerIndex/humanNestedTarget)", () => {
+    it("direct humanLayerIndex still works: resolves a real SET_TEXT operation addressed within the scene's own composition, manifestPlaceholderId: null", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  textMapping({
+                    id: "mapping-human-text",
+                    manifestPlaceholderId: null,
+                    humanLayerIndex: 7,
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
         })
-      })
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toContain("mapping-logo");
-    expect(result.reason).toContain("humanLayerIndex 3");
-  });
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: 7, nestedTarget: null, text: "Approved Headline" }
+      ]);
+      expect(result.payload.approvedMappingIds).toEqual(["mapping-human-text"]);
+    });
 
-  it("fails closed (never silently skips) a human-added mapping that carries a real nested composition target (humanNestedTarget) too", () => {
-    const result = resolveExecuteFrameDispatch(
-      baseInput({
-        currentPlan: validPlan({
-          scenePlans: [
-            validScene({
-              mappings: [
-                textMapping(),
-                textMapping({
-                  id: "mapping-nested-logo",
-                  manifestPlaceholderId: null,
-                  humanLayerIndex: null,
-                  humanNestedTarget: [
-                    { compositionId: "comp-scene1", layerIndex: 5 },
-                    { compositionId: "comp-logo", layerIndex: 1 }
-                  ],
-                  mappingSource: "HUMAN"
-                })
-              ]
-            })
-          ]
+    it("direct humanLayerIndex works for an asset (logo) classification too - real MAP_FOOTAGE operation", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  imageMapping({
+                    id: "mapping-human-logo-direct",
+                    manifestPlaceholderId: null,
+                    placeholderClassification: { value: "logo", source: "HUMAN", evidence: [] },
+                    humanLayerIndex: 9,
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
         })
-      })
-    );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toContain("mapping-nested-logo");
-    expect(result.reason).toContain("humanNestedTarget");
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        { type: "MAP_FOOTAGE", manifestPlaceholderId: null, layerIndex: 9, nestedTarget: null, assetId: ASSET_ID, expectedSha256: "b".repeat(64), mimeType: "image/jpeg" }
+      ]);
+    });
+
+    /** A real, 3-hop nested manifest graph shaped exactly like the live App Logo chain (!Render > Scene 1 > Pre-comp 3 > App Logo). */
+    function nestedManifest(): TemplateManifest {
+      return validManifest({
+        compositions: [
+          { compositionId: "comp-1", aeProjectItemIndex: 5, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+          { compositionId: "comp-precomp", aeProjectItemIndex: 11, name: "Pre-comp 3", widthPx: 400, heightPx: 400, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] },
+          { compositionId: "comp-logo", aeProjectItemIndex: 22, name: "App Logo", widthPx: 200, heightPx: 200, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-precomp"] }
+        ]
+      });
+    }
+
+    it("multi-hop traversal: resolves a real, multi-step nestedTarget into a MAP_FOOTAGE operation with each step's own real aeProjectItemIndex resolved fresh from the manifest - nested logo asset replacement", () => {
+      const humanNestedTarget = [
+        { compositionId: "comp-precomp", layerIndex: 4 },
+        { compositionId: "comp-logo", layerIndex: 1 }
+      ];
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentProjectManifest: nestedManifest(),
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  imageMapping({
+                    id: "mapping-nested-logo",
+                    manifestPlaceholderId: null,
+                    placeholderClassification: { value: "logo", source: "HUMAN", evidence: [] },
+                    humanLayerIndex: null,
+                    humanNestedTarget,
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
+        })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        {
+          type: "MAP_FOOTAGE",
+          manifestPlaceholderId: null,
+          layerIndex: null,
+          nestedTarget: [
+            { compositionId: "comp-precomp", aeProjectItemIndex: 11, layerIndex: 4 },
+            { compositionId: "comp-logo", aeProjectItemIndex: 22, layerIndex: 1 }
+          ],
+          assetId: ASSET_ID,
+          expectedSha256: "b".repeat(64),
+          mimeType: "image/jpeg"
+        }
+      ]);
+      expect(result.payload.approvedMappingIds).toEqual(["mapping-nested-logo"]);
+    });
+
+    it("nested text sourceText replacement: resolves a real, multi-step nestedTarget into a SET_TEXT operation", () => {
+      const humanNestedTarget = [
+        { compositionId: "comp-precomp", layerIndex: 4 },
+        { compositionId: "comp-logo", layerIndex: 1 }
+      ];
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentProjectManifest: nestedManifest(),
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  textMapping({
+                    id: "mapping-nested-text",
+                    manifestPlaceholderId: null,
+                    text: "מבית DYO App",
+                    humanLayerIndex: null,
+                    humanNestedTarget,
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
+        })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        {
+          type: "SET_TEXT",
+          manifestPlaceholderId: null,
+          layerIndex: null,
+          nestedTarget: [
+            { compositionId: "comp-precomp", aeProjectItemIndex: 11, layerIndex: 4 },
+            { compositionId: "comp-logo", aeProjectItemIndex: 22, layerIndex: 1 }
+          ],
+          text: "מבית DYO App"
+        }
+      ]);
+    });
+
+    it("stale/broken path fails closed: a nestedTarget step whose compositionId is no longer a real child (manifest changed since the mapping was added) fails the whole scene, never silently skips or guesses", () => {
+      // comp-logo's parent is reassigned away from comp-precomp - the exact
+      // "the template's real structure changed since this was verified"
+      // scenario this must fail closed on.
+      const brokenManifest = validManifest({
+        compositions: [
+          { compositionId: "comp-1", aeProjectItemIndex: 5, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+          { compositionId: "comp-precomp", aeProjectItemIndex: 11, name: "Pre-comp 3", widthPx: 400, heightPx: 400, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] },
+          { compositionId: "comp-logo", aeProjectItemIndex: 22, name: "App Logo", widthPx: 200, heightPx: 200, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+        ]
+      });
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentProjectManifest: brokenManifest,
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  imageMapping({
+                    id: "mapping-stale-logo",
+                    manifestPlaceholderId: null,
+                    placeholderClassification: { value: "logo", source: "HUMAN", evidence: [] },
+                    humanLayerIndex: null,
+                    humanNestedTarget: [
+                      { compositionId: "comp-precomp", layerIndex: 4 },
+                      { compositionId: "comp-logo", layerIndex: 1 }
+                    ],
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
+        })
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain("mapping-stale-logo");
+      expect(result.reason).toContain("not a real child");
+    });
+
+    it("wrong composition/layer fails closed: a nestedTarget step referencing a compositionId that no longer exists in the current manifest at all fails the whole scene", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentProjectManifest: nestedManifest(),
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  imageMapping({
+                    id: "mapping-vanished-logo",
+                    manifestPlaceholderId: null,
+                    placeholderClassification: { value: "logo", source: "HUMAN", evidence: [] },
+                    humanLayerIndex: null,
+                    humanNestedTarget: [
+                      { compositionId: "comp-precomp", layerIndex: 4 },
+                      { compositionId: "comp-does-not-exist", layerIndex: 1 }
+                    ],
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
+        })
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain("mapping-vanished-logo");
+      expect(result.reason).toContain("does not exist in the current manifest");
+    });
+
+    it("fails closed when a human-added mapping has a real target but an unsupported classification", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  textMapping({
+                    id: "mapping-human-color",
+                    manifestPlaceholderId: null,
+                    placeholderClassification: { value: "color", source: "HUMAN", evidence: [] },
+                    text: null,
+                    humanLayerIndex: 3,
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
+        })
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toContain("mapping-human-color");
+      expect(result.reason).toContain("unsupported placeholderClassification");
+    });
+
+    it("existing manifest-linked mappings are completely unchanged alongside a human-added one in the SAME scene", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({
+          currentProjectManifest: nestedManifest(),
+          currentPlan: validPlan({
+            scenePlans: [
+              validScene({
+                mappings: [
+                  textMapping(),
+                  imageMapping({
+                    id: "mapping-nested-logo",
+                    manifestPlaceholderId: null,
+                    placeholderClassification: { value: "logo", source: "HUMAN", evidence: [] },
+                    humanLayerIndex: null,
+                    humanNestedTarget: [
+                      { compositionId: "comp-precomp", layerIndex: 4 },
+                      { compositionId: "comp-logo", layerIndex: 1 }
+                    ],
+                    mappingSource: "HUMAN"
+                  })
+                ]
+              })
+            ]
+          })
+        })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" },
+        {
+          type: "MAP_FOOTAGE",
+          manifestPlaceholderId: null,
+          layerIndex: null,
+          nestedTarget: [
+            { compositionId: "comp-precomp", aeProjectItemIndex: 11, layerIndex: 4 },
+            { compositionId: "comp-logo", aeProjectItemIndex: 22, layerIndex: 1 }
+          ],
+          assetId: ASSET_ID,
+          expectedSha256: "b".repeat(64),
+          mimeType: "image/jpeg"
+        }
+      ]);
+      expect(result.payload.approvedMappingIds).toEqual(["mapping-1", "mapping-nested-logo"]);
+    });
   });
 
   it("fails when a scene has zero resolvable operations", () => {

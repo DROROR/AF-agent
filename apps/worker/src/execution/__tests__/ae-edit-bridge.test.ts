@@ -4,7 +4,7 @@ import { HeroicSwanAeEditBridge, NotAvailableAeEditBridge, AeMutationTransportUn
 import type { FixedJsxScript } from "../jsx-templates.js";
 import type { MutationCallResult } from "../heroic-swan-ae-mutation-client.js";
 
-const SET_TEXT_OP: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" };
+const SET_TEXT_OP: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" };
 const COMP_NAME = "Test Comp";
 
 /**

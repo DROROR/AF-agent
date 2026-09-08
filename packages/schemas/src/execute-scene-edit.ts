@@ -31,16 +31,57 @@ export const SCENE_EDIT_OPERATION_TYPES = [
 ] as const;
 export type SceneEditOperationType = (typeof SCENE_EDIT_OPERATION_TYPES)[number];
 
+/**
+ * Live QA "generic AE layer-discovery capability" execution-wiring fix
+ * (2026-09-08): the EXECUTION-time (dispatch-resolved) counterpart to
+ * execution-plan.ts's own NestedTargetStep - identical compositionId/
+ * layerIndex meaning (see that schema's own doc comment), PLUS a real,
+ * freshly-resolved `aeProjectItemIndex` for THIS step's own composition -
+ * resolveExecuteFrameDispatch resolves this from the CURRENT manifest at
+ * dispatch time (never persisted, never trusted stale), the exact same way
+ * the top-level scene composition's own aeProjectItemIndex already is.
+ * This is what lets jsx-templates.ts jump directly to each hop's real
+ * composition via `app.project.item(n)` (the same primitive every other
+ * script in that file already uses), independently re-verifying its own
+ * `.id` against this step's compositionId before ever touching a layer in
+ * it - never a single blind walk through `.source` chains, and never a
+ * name-only match.
+ */
+const resolvedNestedTargetStepSchema = z
+  .object({
+    compositionId: z.string().min(1),
+    aeProjectItemIndex: z.number().int().positive(),
+    layerIndex: z.number().int().nonnegative()
+  })
+  .strict();
+export type ResolvedNestedTargetStep = z.infer<typeof resolvedNestedTargetStepSchema>;
+
 // Every operation targets one layer by BOTH manifestPlaceholderId (the
 // stable, evidence-backed identity from the manifest) AND layerIndex (the
 // real AE layer.index within the composition) - never a free-form
 // property path, never a layer resolved by name alone (duplicate layer
 // names are explicitly supported elsewhere in this project).
+//
+// Live QA execution-wiring fix (2026-09-08): manifestPlaceholderId/
+// layerIndex are now BOTH nullable, and a new optional `nestedTarget` was
+// added, so a human-added mapping (execution-plan.ts's own
+// humanLayerIndex/humanNestedTarget - manifestPlaceholderId: null on the
+// mapping itself, no manifest Placeholder record to supply a flat
+// layerIndex) can also become a real, dispatchable operation. Exactly one
+// of layerIndex/nestedTarget is ever non-null (enforced in
+// resolve-execute-frame-dispatch.ts, the same "outside the schema" pattern
+// ADD_MAPPING's own humanLayerIndex/humanNestedTarget mutual exclusivity
+// already uses - z.discriminatedUnion members reject .refine()).
+// Every EXISTING caller that always supplies a non-null manifestPlaceholderId
+// + non-null layerIndex + omits nestedTarget is completely unaffected -
+// this is a strictly additive widening, never a behavior change for the
+// manifest-linked path.
 const setTextOperationSchema = z
   .object({
     type: z.literal("SET_TEXT"),
-    manifestPlaceholderId: z.string().min(1),
-    layerIndex: z.number().int().positive(),
+    manifestPlaceholderId: z.string().min(1).nullable(),
+    layerIndex: z.number().int().positive().nullable(),
+    nestedTarget: z.array(resolvedNestedTargetStepSchema).min(1).nullable(),
     text: z.string().min(1)
   })
   .strict();
@@ -48,8 +89,9 @@ const setTextOperationSchema = z
 const mapFootageOperationSchema = z
   .object({
     type: z.literal("MAP_FOOTAGE"),
-    manifestPlaceholderId: z.string().min(1),
-    layerIndex: z.number().int().positive(),
+    manifestPlaceholderId: z.string().min(1).nullable(),
+    layerIndex: z.number().int().positive().nullable(),
+    nestedTarget: z.array(resolvedNestedTargetStepSchema).min(1).nullable(),
     /** Real file path on the worker's OWN filesystem, already downloaded and sha256-verified by the worker itself - see resolve-scene-edit-operation.ts. Never a URL, never a value that ever crossed the wire from the API - this operation shape is worker-internal only (constructed by the worker after asset resolution), never the dispatch-facing wire contract (see mapFootageOperationIntentSchema below for that). */
     assetPath: z.string().min(1)
   })
@@ -174,8 +216,9 @@ export type SceneEditOperation = z.infer<typeof sceneEditOperationSchema>;
 const mapFootageOperationIntentSchema = z
   .object({
     type: z.literal("MAP_FOOTAGE"),
-    manifestPlaceholderId: z.string().min(1),
-    layerIndex: z.number().int().positive(),
+    manifestPlaceholderId: z.string().min(1).nullable(),
+    layerIndex: z.number().int().positive().nullable(),
+    nestedTarget: z.array(resolvedNestedTargetStepSchema).min(1).nullable(),
     assetId: z.string().uuid(),
     /** The asset's real, server-computed sha256 (AssetRecord.sha256) - the worker refuses to use downloaded bytes that don't match this. */
     expectedSha256: z.string().min(1),

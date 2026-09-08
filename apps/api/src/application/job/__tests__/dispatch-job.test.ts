@@ -667,7 +667,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
     const payload = job?.payload as Record<string, unknown>;
     expect(payload.aeProjectItemIndex).toBe(5);
     expect(payload.compositionName).toBe("Scene 01");
-    expect(payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, text: "Approved Headline" }]);
+    expect(payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" }]);
     expect(payload.executionSessionId).toBe(session.id);
     expect(payload.expectedWorkingProjectSha256).toBeNull();
     expect(payload.checkpoint).toBeNull();

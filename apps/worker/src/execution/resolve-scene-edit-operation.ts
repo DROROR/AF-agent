@@ -45,6 +45,7 @@ export async function resolveSceneEditOperation(
       type: "MAP_FOOTAGE",
       manifestPlaceholderId: intent.manifestPlaceholderId,
       layerIndex: intent.layerIndex,
+      nestedTarget: intent.nestedTarget,
       assetPath: resolved.assetPath
     }
   };

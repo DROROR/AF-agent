@@ -37,7 +37,7 @@ describe("resolveSceneEditOperation", () => {
   it("passes every non-MAP_FOOTAGE intent through unchanged - never touches the asset download client", async () => {
     const client = new FakeAssetDownloadClient(Buffer.from(""));
     const intents: SceneEditOperationIntent[] = [
-      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, text: "Hello" },
+      { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" },
       { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-2", layerIndex: 2, visible: false },
       { type: "SET_TIME_REMAP_FREEZE", manifestPlaceholderId: "ph-3", layerIndex: 3, freezeAtSeconds: 1.5 },
       { type: "SET_DURATION", manifestPlaceholderId: "ph-4", layerIndex: 4, durationSeconds: 4 },
@@ -63,6 +63,7 @@ describe("resolveSceneEditOperation", () => {
       type: "MAP_FOOTAGE",
       manifestPlaceholderId: "ph-1",
       layerIndex: 1,
+      nestedTarget: null,
       assetId: "22222222-2222-2222-2222-222222222222",
       expectedSha256: sha256(content),
       mimeType: "video/mp4"
@@ -90,6 +91,7 @@ describe("resolveSceneEditOperation", () => {
       type: "MAP_FOOTAGE",
       manifestPlaceholderId: "ph-1",
       layerIndex: 1,
+      nestedTarget: null,
       assetId: "22222222-2222-2222-2222-222222222222",
       expectedSha256: sha256("expected bytes"),
       mimeType: "video/mp4"

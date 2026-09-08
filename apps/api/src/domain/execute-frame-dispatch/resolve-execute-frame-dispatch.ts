@@ -1,8 +1,55 @@
-import type { ExecuteSceneEditRequest, ExecutionSessionStatus, PlanStatus, SceneEditOperationIntent, ScenePlanEntry, TemplateManifest, WorkerCapability } from "@dyo/schemas";
+import type {
+  ExecuteSceneEditRequest,
+  ExecutionSessionStatus,
+  NestedTargetStep,
+  PlanStatus,
+  ResolvedNestedTargetStep,
+  SceneEditOperationIntent,
+  ScenePlanEntry,
+  TemplateManifest,
+  WorkerCapability
+} from "@dyo/schemas";
 import { TERMINAL_EXECUTION_SESSION_STATUSES } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 import type { AssetRecord } from "../asset/types.js";
+import { verifyNestedTargetPath } from "../execution-plan/verify-nested-target-path.js";
+
+/**
+ * Live QA execution-wiring fix (2026-09-08): re-verifies a human-added
+ * mapping's persisted humanNestedTarget against the CURRENT manifest (the
+ * SAME evidence-based ancestry check apply-execution-plan-edit.ts already
+ * ran once at ADD_MAPPING time - never trusted as still-valid forever,
+ * since the project's manifest is the only source of truth for what's
+ * really there), then resolves each step's own real, freshly-read
+ * `aeProjectItemIndex` from that manifest - never persisted on the
+ * mapping, never stale, the exact same freshness guarantee the top-level
+ * scene composition's own aeProjectItemIndex already gets on every single
+ * dispatch.
+ */
+function resolveHumanNestedTarget(
+  steps: readonly NestedTargetStep[],
+  manifest: TemplateManifest,
+  ownerCompositionId: string
+): { ok: true; resolved: ResolvedNestedTargetStep[] } | { ok: false; reason: string } {
+  const chainError = verifyNestedTargetPath(manifest, ownerCompositionId, steps);
+  if (chainError) {
+    return { ok: false, reason: chainError };
+  }
+  const compositionById = new Map(manifest.compositions.map((c) => [c.compositionId, c]));
+  const resolved: ResolvedNestedTargetStep[] = [];
+  for (const step of steps) {
+    const composition = compositionById.get(step.compositionId);
+    if (!composition) {
+      // Unreachable given verifyNestedTargetPath already confirmed this
+      // exact composition exists above - defensive only, never trusts its
+      // own earlier check without re-deriving here too.
+      return { ok: false, reason: `humanNestedTarget step references compositionId "${step.compositionId}" which does not exist in the current manifest` };
+    }
+    resolved.push({ compositionId: step.compositionId, aeProjectItemIndex: composition.aeProjectItemIndex, layerIndex: step.layerIndex });
+  }
+  return { ok: true, resolved };
+}
 
 /**
  * The real WorkerCapability this dispatches as - already in
@@ -169,31 +216,58 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       // A purely informational human-added mapping (no real, verified AE
       // layer target - execution-plan.ts's own humanLayerIndex doc
       // comment) is inert here, unchanged from before that field existed.
-      // One WITH a real target is not yet dispatchable (applying a
-      // human-added mapping during EXECUTE_FRAME requires extending the
-      // worker's own dispatch-facing operation contract -
-      // execute-scene-edit.ts's manifestPlaceholderId is required/
-      // non-null there today - real, additional scope, not done as a
-      // side effect of recording the target) - this fails the WHOLE scene
-      // closed with a clear, specific reason rather than silently
-      // proceeding as if the mapping were not there, so a real, verified
-      // branding target can never silently vanish at execution time.
-      if (mapping.humanLayerIndex !== null) {
-        return {
-          ok: false,
-          reason: `Mapping "${mapping.id}" is a human-added mapping with a real AE layer target (humanLayerIndex ${mapping.humanLayerIndex}) - dispatching it as a real EXECUTE_FRAME edit is not yet implemented, so this scene cannot be dispatched until that support exists or this mapping is removed`
-        };
+      if (mapping.humanLayerIndex === null && mapping.humanNestedTarget === null) {
+        continue;
       }
-      // Same fail-closed rule for the nested-composition case (live QA
-      // brand-rule blocker fix, 2026-09-08 correction) - a real, verified
-      // nested target must never be treated as if it were not there
-      // either, even though dispatching it is even further from
-      // implemented (the worker's own dispatch contract has no concept of
-      // descending through intermediate compositions at all yet).
+
+      // Live QA execution-wiring fix (2026-09-08): a human-added mapping
+      // WITH a real, verified target is now translated into a real
+      // dispatchable operation - the exact same classification-driven
+      // SET_TEXT/MAP_FOOTAGE derivation the manifest-linked path below
+      // already uses, just addressed by humanLayerIndex/humanNestedTarget
+      // instead of a manifest Placeholder's own layerIndex. Never silently
+      // dropped, and never a second, divergent validation path - a
+      // classification this branch cannot resolve into an operation still
+      // fails the WHOLE scene closed, exactly as it always has.
+      const classification = mapping.placeholderClassification.value;
+      let nestedTarget: ResolvedNestedTargetStep[] | null = null;
       if (mapping.humanNestedTarget !== null) {
+        const resolved = resolveHumanNestedTarget(mapping.humanNestedTarget, currentProjectManifest, scene.manifestCompositionId);
+        if (!resolved.ok) {
+          return { ok: false, reason: `Mapping "${mapping.id}"'s humanNestedTarget is no longer valid: ${resolved.reason}` };
+        }
+        nestedTarget = resolved.resolved;
+      }
+      const layerIndex = mapping.humanLayerIndex;
+
+      if (classification === "text") {
+        if (mapping.text === null) {
+          return { ok: false, reason: `Mapping "${mapping.id}" is a human-added text mapping but has no text set` };
+        }
+        operations.push({ type: "SET_TEXT", manifestPlaceholderId: null, layerIndex, nestedTarget, text: mapping.text });
+        approvedMappingIds.push(mapping.id);
+      } else if ((ASSET_CLASSIFICATIONS as readonly string[]).includes(classification ?? "")) {
+        if (mapping.selectedAssetId === null) {
+          return { ok: false, reason: `Mapping "${mapping.id}" is a human-added ${classification} mapping but has no selectedAssetId set` };
+        }
+        const asset = assetsById.get(mapping.selectedAssetId);
+        if (!asset) {
+          return { ok: false, reason: `Mapping "${mapping.id}"'s selected asset "${mapping.selectedAssetId}" no longer exists in this project's Asset Catalog` };
+        }
+        operations.push({
+          type: "MAP_FOOTAGE",
+          manifestPlaceholderId: null,
+          layerIndex,
+          nestedTarget,
+          assetId: asset.id,
+          expectedSha256: asset.sha256,
+          mimeType: asset.mimeType
+        });
+        approvedMappingIds.push(mapping.id);
+      } else {
         return {
           ok: false,
-          reason: `Mapping "${mapping.id}" is a human-added mapping with a real nested AE layer target (humanNestedTarget, ${mapping.humanNestedTarget.length} step(s)) - dispatching a nested target as a real EXECUTE_FRAME edit is not yet implemented, so this scene cannot be dispatched until that support exists or this mapping is removed`
+          reason: `Mapping "${mapping.id}" is a human-added mapping with a real AE target but an unsupported placeholderClassification (${String(classification)}) - only "text" or an asset type (image/video/logo/phone_screen) can be dispatched today`
         };
       }
       continue;
@@ -223,7 +297,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       if (mapping.text === null) {
         return { ok: false, reason: `Mapping "${mapping.id}" is classified as text but has no text set` };
       }
-      operations.push({ type: "SET_TEXT", manifestPlaceholderId: mapping.manifestPlaceholderId, layerIndex: placeholder.layerIndex, text: mapping.text });
+      operations.push({ type: "SET_TEXT", manifestPlaceholderId: mapping.manifestPlaceholderId, layerIndex: placeholder.layerIndex, nestedTarget: null, text: mapping.text });
       approvedMappingIds.push(mapping.id);
     } else if ((ASSET_CLASSIFICATIONS as readonly string[]).includes(classification ?? "")) {
       if (mapping.selectedAssetId === null) {
@@ -237,6 +311,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         type: "MAP_FOOTAGE",
         manifestPlaceholderId: mapping.manifestPlaceholderId,
         layerIndex: placeholder.layerIndex,
+        nestedTarget: null,
         assetId: asset.id,
         expectedSha256: asset.sha256,
         mimeType: asset.mimeType
