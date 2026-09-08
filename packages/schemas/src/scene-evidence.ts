@@ -173,3 +173,28 @@ export const sceneEvidencePreviewUploadResponseSchema = z.object({
   sha256: z.string()
 });
 export type SceneEvidencePreviewUploadResponse = z.infer<typeof sceneEvidencePreviewUploadResponseSchema>;
+
+/**
+ * The one shared source of truth for this route's path shape - the exact
+ * Fastify route pattern apps/api/src/routes/scene-evidence-preview-
+ * upload.ts registers (":workerId"/":jobId" are Fastify route params, not
+ * real values). Live QA regression, 2026-09-07: this path was previously
+ * a literal string independently duplicated in both the Worker's own
+ * apps/worker/src/infrastructure/api-client.ts and the API's route
+ * registration - they never actually drifted from EACH OTHER, but
+ * neither one was ever cross-checked against deploy/nginx/
+ * worker-api.dyocourses.com.conf's own separate path allowlist regex,
+ * which was simply missing this path entirely, so every real upload
+ * silently 404'd at the nginx layer for the whole time this route
+ * existed. Both apps now import this ONE constant/function instead of
+ * re-typing the path, so a future rename can never make them disagree
+ * with each other again - it still cannot, by itself, keep nginx's own
+ * separate config in sync, which is exactly why the nginx conf's own
+ * comment for this route calls this fact out explicitly.
+ */
+export const SCENE_EVIDENCE_PREVIEW_UPLOAD_ROUTE = "/api/workers/:workerId/jobs/:jobId/scene-evidence-preview";
+
+/** Builds the real, concrete URL a Worker calls for one specific upload - structurally identical to SCENE_EVIDENCE_PREVIEW_UPLOAD_ROUTE above, only :workerId/:jobId replaced with real values. */
+export function sceneEvidencePreviewUploadPath(workerId: string, jobId: string): string {
+  return SCENE_EVIDENCE_PREVIEW_UPLOAD_ROUTE.replace(":workerId", workerId).replace(":jobId", jobId);
+}

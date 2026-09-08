@@ -5,6 +5,7 @@ import {
   previewUploadResponseSchema,
   registerWorkerResponseSchema,
   renderArtifactUploadResponseSchema,
+  sceneEvidencePreviewUploadPath,
   sceneEvidencePreviewUploadResponseSchema,
   workerDtoSchema,
   type ClaimJobResponse,
@@ -314,7 +315,7 @@ export class ApiClient {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-    const path = `/api/workers/${workerId}/jobs/${jobId}/scene-evidence-preview`;
+    const path = sceneEvidencePreviewUploadPath(workerId, jobId);
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.apiUrl}${path}`, {

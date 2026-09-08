@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { SCENE_EVIDENCE_PREVIEW_UPLOAD_ROUTE } from "@dyo/schemas";
 import type { JobRepository } from "../domain/job/types.js";
 import type { WorkerRepository } from "../domain/worker/types.js";
 import type { SceneEvidencePreviewRepository } from "../domain/scene-evidence-preview/types.js";
@@ -36,7 +37,7 @@ const uploadFieldsSchema = z.object({
 export function registerSceneEvidencePreviewUploadRoutes(app: FastifyInstance, deps: SceneEvidencePreviewUploadRouteDeps): void {
   const now = deps.now ?? (() => new Date());
 
-  app.post("/api/workers/:workerId/jobs/:jobId/scene-evidence-preview", async (request, reply) => {
+  app.post(SCENE_EVIDENCE_PREVIEW_UPLOAD_ROUTE, async (request, reply) => {
     const { workerId, jobId } = jobParamsSchema.parse(request.params);
     const token = extractBearerToken(request.headers.authorization);
     if (!token) {
