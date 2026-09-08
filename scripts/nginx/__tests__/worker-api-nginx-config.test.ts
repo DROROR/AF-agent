@@ -163,18 +163,39 @@ describe("worker-api.dyocourses.com.conf - real path allowlist parsed from the a
       expect(location.maxBodyBytes).toBeNull();
     });
 
-    it("preview's client_max_body_size (10m) is well above a real single-frame image, but far below the application layer's own 200MB ASSET_MAX_UPLOAD_BYTES ceiling", () => {
-      const location = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/preview$");
-      expect(location.maxBodyBytes).toBe(10 * 1024 * 1024);
-      expect(location.maxBodyBytes).toBeLessThan(200 * 1024 * 1024);
-    });
+    /**
+     * Live QA regression (same-day correction, 2026-09-08): the first
+     * version of this file set preview's own client_max_body_size to 10m -
+     * LESS than ASSET_MAX_UPLOAD_BYTES (the route's real application-layer
+     * ceiling), which would have made nginx itself silently reject any
+     * legitimate upload the application was configured to accept between
+     * 10MB and 200MB. These REAL default byte ceilings are copied
+     * verbatim from apps/api/src/env.ts's own `.default(...)` values
+     * (ASSET_MAX_UPLOAD_BYTES / RENDER_ARTIFACT_MAX_UPLOAD_BYTES) - if
+     * those defaults ever change, this test's own numbers must be updated
+     * to match, which is the point: this is the one place a mismatch
+     * between nginx's limit and the application's real limit gets caught
+     * before it reaches production, not just "some plausible-looking
+     * number".
+     */
+    const APPLICATION_CEILINGS_BYTES = {
+      // apps/api/src/env.ts: ASSET_MAX_UPLOAD_BYTES default
+      preview: 200 * 1024 * 1024,
+      // apps/api/src/env.ts: RENDER_ARTIFACT_MAX_UPLOAD_BYTES default
+      "full-preview": 2 * 1024 * 1024 * 1024,
+      artifact: 2 * 1024 * 1024 * 1024
+    } as const;
 
-    it("full-preview and artifact both allow up to 2GB - matching the application layer's own RENDER_ARTIFACT_MAX_UPLOAD_BYTES default for a real rendered video, never silently smaller", () => {
-      const fullPreview = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/full-preview$");
-      const artifact = findByPattern("^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/artifact$");
-      expect(fullPreview.maxBodyBytes).toBe(2 * 1024 ** 3);
-      expect(artifact.maxBodyBytes).toBe(2 * 1024 ** 3);
-    });
+    for (const [name, appCeilingBytes] of Object.entries(APPLICATION_CEILINGS_BYTES)) {
+      it(`${name}'s client_max_body_size is STRICTLY GREATER than its real application-layer ceiling (${appCeilingBytes} bytes) - nginx must never be the first rejection point for a payload the application itself accepts`, () => {
+        const location = findByPattern(`^/api/workers/[0-9a-fA-F-]+/jobs/[0-9a-fA-F-]+/${name}$`);
+        expect(location.maxBodyBytes, `${name} has no client_max_body_size override at all`).not.toBeNull();
+        expect(
+          location.maxBodyBytes!,
+          `${name}'s nginx limit (${location.maxBodyBytes} bytes) must exceed its application ceiling (${appCeilingBytes} bytes) - client_max_body_size bounds the WHOLE multipart body (boundaries + headers + file bytes), never only the file bytes, so setting it equal to (or below) the app's own file-size ceiling can still reject a file the application would otherwise accept`
+        ).toBeGreaterThan(appCeilingBytes);
+      });
+    }
   });
 
   describe("unrelated paths still fall through to the 404 catch-all - this is a strict allowlist, never widened", () => {
