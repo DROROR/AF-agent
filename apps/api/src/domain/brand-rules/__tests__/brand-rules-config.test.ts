@@ -18,4 +18,27 @@ describe("loadBrandRulesConfig", () => {
   it("rejects a malformed brand-rules file rather than silently defaulting", () => {
     expect(() => loadBrandRulesConfig("/nonexistent/dyo-brand-rules.yaml")).toThrow();
   });
+
+  /**
+   * Live QA brand-rule blocker fix, 2026-09-08 codepoint audit: proves the
+   * real, logical Unicode codepoint sequence of the required Hebrew text's
+   * own letters, not merely a string-equality check against another
+   * literal in this same file (a terminal/editor RTL-rendering mishap
+   * could in principle mangle BOTH this test's own literal and the real
+   * yaml identically, defeating a plain .toBe comparison - explicit
+   * numeric codepoints have no directionality to get confused by).
+   * מבית is CORRECT: U+05DE (מ) U+05D1 (ב) U+05D9 (י) U+05EA (ת), in that
+   * logical order. The reversed form, תיבמ (U+05EA U+05D9 U+05D1 U+05DE -
+   * the exact same four codepoints, reverse order), must never pass.
+   */
+  it("the required Hebrew text's own codepoint sequence is logically exactly מבית - never the reversed form", () => {
+    const config = loadBrandRulesConfig();
+    const hebrewPrefix = config.requiredHebrewText.split(" ")[0]!;
+    const codepoints = [...hebrewPrefix].map((char) => char.codePointAt(0));
+    const CORRECT_CODEPOINTS = [0x05de, 0x05d1, 0x05d9, 0x05ea]; // מ ב י ת, in that logical order
+    const REVERSED_CODEPOINTS = [0x05ea, 0x05d9, 0x05d1, 0x05de]; // ת י ב מ - the wrong, reversed form
+    expect(codepoints).toEqual(CORRECT_CODEPOINTS);
+    expect(codepoints).not.toEqual(REVERSED_CODEPOINTS);
+    expect(config.requiredHebrewText).toBe("מבית DYO App");
+  });
 });
