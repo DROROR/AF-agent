@@ -197,6 +197,7 @@ function validSession(overrides: Partial<ExecuteFrameDispatchSessionSnapshot> = 
     latestWorkingProjectSha256: null,
     completedScenePlanIds: [],
     latestPreviewScenePlanId: null,
+    workingCopyTrusted: true,
     ...overrides
   };
 }
@@ -929,6 +930,21 @@ describe("resolveExecuteFrameDispatch - regeneratePreviewOnly (First Preview reg
   it("refuses a COMPLETED session - never a general un-fail-any-session escape hatch", () => {
     const result = resolveExecuteFrameDispatch(baseInput({ session: regeneratableSession({ status: "COMPLETED" }), regeneratePreviewOnly: true }));
     expect(result.ok).toBe(false);
+  });
+
+  /**
+   * The exact 2026-09-09 regression (session 5040ce97): every OTHER field
+   * still looks perfectly recoverable after a previewOnly run discovers
+   * WORKING_COPY_UNEXPECTEDLY_MUTATED - workingCopyTrusted is the one
+   * signal that must permanently exclude it anyway.
+   */
+  it("refuses a session whose workingCopyTrusted has been set false, even though every other field still looks recoverable", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: regeneratableSession({ workingCopyTrusted: false }), regeneratePreviewOnly: true })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("does not have a recoverable First Preview");
   });
 
   it("refuses when the caller's scenePlanId does not match the session's own latestPreviewScenePlanId - never a caller-chosen target", () => {

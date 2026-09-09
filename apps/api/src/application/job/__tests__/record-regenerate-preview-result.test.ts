@@ -130,6 +130,39 @@ describe("recordRegeneratePreviewResultIfApplicable", () => {
     expect(session?.status).toBe("FAILED");
   });
 
+  /**
+   * The exact real 2026-09-09 incident, end to end: a previewOnly run
+   * against session 5040ce97 discovers WORKING_COPY_UNEXPECTEDLY_MUTATED
+   * - this must permanently mark workingCopyTrusted false, so
+   * isRecoverableForPreviewRegeneration (checked separately by
+   * getCurrentExecutionSession/resolveRegeneratePreviewOnly) can never
+   * again offer to regenerate from this exact working copy.
+   */
+  it("sets workingCopyTrusted false on WORKING_COPY_UNEXPECTEDLY_MUTATED - the exact real 2026-09-09 incident", async () => {
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupSession(executionSessionRepository);
+
+    await recordRegeneratePreviewResultIfApplicable(
+      { executionSessionRepository, now: () => NOW },
+      baseJob({
+        status: "FAILED",
+        result: validResult({
+          failureReason: "SAFETY CHECK FAILED (WORKING_COPY_UNEXPECTEDLY_MUTATED)",
+          workingCopyFailureCode: "WORKING_COPY_UNEXPECTEDLY_MUTATED",
+          workingProjectSha256: "bafc444f220e1852e2869cab4b2cf054f9a142cdcc932c4eac95494caef71a98"
+        })
+      })
+    );
+
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.status).toBe("FAILED");
+    expect(session?.workingCopyTrusted).toBe(false);
+    // Never blessed as the new canonical hash - completedScenePlanIds/
+    // latestWorkingProjectSha256 are untouched by this function, exactly
+    // as documented (previewOnly never edits anything).
+    expect(session?.latestWorkingProjectSha256).toBe(MUTATED_SHA);
+  });
+
   it("leaves the session exactly as it was on an ordinary capture failure (no working-copy hash) - retryable, never resurrected", async () => {
     const executionSessionRepository = new InMemoryExecutionSessionRepository();
     await setupSession(executionSessionRepository);

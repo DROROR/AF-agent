@@ -18,6 +18,8 @@ export interface ExecutionSessionRecord {
   latestPreviewCapturedAt: Date | null;
   /** Client-handoff phase, "real final preview approval gate" - see schema.ts's own doc comment. Separate from firstPreviewApproved above; never derived from it. */
   fullPreviewApproved: boolean;
+  /** First Preview regeneration trust flag (live QA, 2026-09-09) - see schema.ts's own doc comment. Defaults true; once false, permanently excludes this session from isRecoverableForPreviewRegeneration. */
+  workingCopyTrusted: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,4 +90,16 @@ export interface ExecutionSessionRepository {
    * field. Returns null only if `id` doesn't exist.
    */
   setFullPreviewApproved(id: string, approved: boolean, now: Date): Promise<ExecutionSessionRecord | null>;
+  /**
+   * First Preview regeneration trust flag (live QA, 2026-09-09) - sets
+   * workingCopyTrusted to false, permanently, the moment ANY job for this
+   * session reports a working-copy chain-of-custody failure code
+   * (WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH/
+   * WORKING_COPY_UNEXPECTEDLY_MUTATED). Never reversible - there is no
+   * corresponding "restore trust" method; the only way forward for a
+   * session this was called on is a fresh execution session. Idempotent
+   * (calling it again on an already-distrusted session is a harmless
+   * no-op). Returns null only if `id` doesn't exist.
+   */
+  markWorkingCopyDistrusted(id: string, now: Date): Promise<ExecutionSessionRecord | null>;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "execution_sessions" ADD COLUMN "working_copy_trusted" boolean DEFAULT true NOT NULL;

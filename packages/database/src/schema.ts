@@ -382,6 +382,35 @@ export const executionSessions = pgTable(
     latestPreviewScenePlanId: text("latest_preview_scene_plan_id"),
     latestPreviewCapturedAt: timestamp("latest_preview_captured_at", { withTimezone: true }),
     /**
+     * First Preview regeneration trust flag (live QA, 2026-09-09 real
+     * incident: session 5040ce97's own completedScenePlanIds/
+     * latestWorkingProjectSha256/latestPreviewScenePlanId all still looked
+     * perfectly "recoverable" by every OTHER field's own value after a
+     * previewOnly regeneration attempt discovered its working copy had
+     * been unexpectedly re-serialized (WORKING_COPY_UNEXPECTEDLY_MUTATED)
+     * - those fields alone could never distinguish "genuinely recoverable"
+     * from "was recoverable, but a subsequent job proved the real file on
+     * disk no longer matches", which would otherwise have kept the
+     * dashboard offering to regenerate from a working copy already known
+     * to be untrustworthy, indefinitely, with no way to reach "Start
+     * execution" for a genuinely fresh session instead.
+     *
+     * Defaults true; set to false, permanently, the moment ANY job for
+     * this session (a normal EXECUTE_FRAME OR a previewOnly regeneration)
+     * reports a working-copy chain-of-custody failure code
+     * (WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH/
+     * WORKING_COPY_UNEXPECTEDLY_MUTATED - never SOURCE_PROJECT_MUTATED,
+     * which is about the immutable source, not this session's own working
+     * copy) - see recordExecuteFrameResultIfApplicable/
+     * recordRegeneratePreviewResultIfApplicable (apps/api) for exactly
+     * where this is set, and isRecoverableForPreviewRegeneration
+     * (domain/execution-session/is-session-active.ts) for where it's
+     * checked. Never reset back to true by anything - once a session's
+     * working copy is known untrustworthy, it stays that way forever; the
+     * only way forward is a fresh execution session.
+     */
+    workingCopyTrusted: boolean("working_copy_trusted").notNull().default(true),
+    /**
      * Client-handoff phase, "real final preview approval gate" - the
      * SEPARATE, distinct approval a human must explicitly give after
      * reviewing the assembled full_preview_artifacts video (never the same

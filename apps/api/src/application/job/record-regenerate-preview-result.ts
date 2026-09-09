@@ -1,4 +1,4 @@
-import { executeSceneEditRequestSchema, sceneEditResultSchema, type JobDto } from "@dyo/schemas";
+import { executeSceneEditRequestSchema, sceneEditResultSchema, WORKING_COPY_DISTRUST_FAILURE_CODES, type JobDto } from "@dyo/schemas";
 import type { ExecutionSessionRepository } from "../../domain/execution-session/types.js";
 
 export interface RecordRegeneratePreviewResultDeps {
@@ -30,7 +30,12 @@ export interface RecordRegeneratePreviewResultDeps {
  *   - a chain-of-custody failure (workingCopyFailureCode set, e.g. the
  *     previewOnly-specific WORKING_COPY_UNEXPECTEDLY_MUTATED, or any of
  *     the others): marks/keeps the session FAILED - exactly as severe
- *     during a supposedly read-only recapture as during a real edit.
+ *     during a supposedly read-only recapture as during a real edit -
+ *     AND, for the subset in WORKING_COPY_DISTRUST_FAILURE_CODES,
+ *     permanently sets workingCopyTrusted false (2026-09-09 real
+ *     incident, session 5040ce97: this is what stops the dashboard from
+ *     indefinitely re-offering regeneration from a working copy already
+ *     proven to have diverged from this session's own record).
  *   - an ordinary capture failure (failureReason set, or no working-copy
  *     hash): leaves the session exactly as it already was, so the
  *     operator can simply try regenerating again.
@@ -68,6 +73,17 @@ export async function recordRegeneratePreviewResultIfApplicable(deps: RecordRege
 
   if (result.workingCopyFailureCode !== null) {
     await deps.executionSessionRepository.markStatus(session.id, "FAILED", deps.now());
+    // First Preview regeneration trust flag (live QA, 2026-09-09, the
+    // exact real incident this whole function exists to guard against
+    // recurring silently): a previewOnly run discovering
+    // WORKING_COPY_UNEXPECTEDLY_MUTATED (or WORKING_COPY_MISSING/
+    // WORKING_COPY_SHA_MISMATCH) proves the working copy on disk has
+    // diverged from this session's own record - permanently exclude it
+    // from ever being offered for regeneration again, regardless of how
+    // "recoverable" its other fields still look.
+    if ((WORKING_COPY_DISTRUST_FAILURE_CODES as readonly string[]).includes(result.workingCopyFailureCode)) {
+      await deps.executionSessionRepository.markWorkingCopyDistrusted(session.id, deps.now());
+    }
     return;
   }
   if (result.failureReason !== null || !result.workingProjectSha256) {

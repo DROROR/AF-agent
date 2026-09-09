@@ -83,6 +83,8 @@ export interface ExecuteFrameDispatchSessionSnapshot {
   completedScenePlanIds: string[];
   /** First Preview regeneration (live QA, 2026-09-08/09) - the scene a previewOnly dispatch targets; see the previewOnly branch below. */
   latestPreviewScenePlanId: string | null;
+  /** First Preview regeneration trust flag (live QA, 2026-09-09) - see schema.ts's own doc comment and isRecoverableForPreviewRegeneration's own doc comment. */
+  workingCopyTrusted: boolean;
 }
 
 export interface ResolveExecuteFrameDispatchInput {

@@ -26,6 +26,8 @@ export interface RecoverableForPreviewRegenerationCheckInput extends ActiveSessi
   completedScenePlanIds: string[];
   latestWorkingProjectSha256: string | null;
   latestPreviewScenePlanId: string | null;
+  /** First Preview regeneration trust flag (live QA, 2026-09-09) - see schema.ts's own doc comment. Once false, this session is excluded here permanently, regardless of every other field's value. */
+  workingCopyTrusted: boolean;
 }
 
 /**
@@ -50,6 +52,19 @@ export interface RecoverableForPreviewRegenerationCheckInput extends ActiveSessi
  * latestWorkingProjectSha256/latestPreviewScenePlanId must be real) -
  * refused exactly as before by everything else that already treats
  * FAILED as terminal.
+ *
+ * A second real incident (2026-09-09, session 5040ce97) proved those
+ * four fields alone are not enough either: a previewOnly regeneration
+ * attempt can itself discover, AFTER the fact, that the working copy on
+ * disk no longer matches what the session's own record believes -
+ * WORKING_COPY_UNEXPECTEDLY_MUTATED - while every one of those four
+ * fields still looks perfectly valid (they simply describe the LAST
+ * known-good state, not the CURRENT real one). `workingCopyTrusted`
+ * closes that gap: set false, permanently, the moment any job proves the
+ * working copy untrustworthy (see recordExecuteFrameResultIfApplicable/
+ * recordRegeneratePreviewResultIfApplicable), and checked here as an
+ * unconditional gate - a session this was ever called on can never
+ * become "recoverable" again by any combination of its other fields.
  */
 export function isRecoverableForPreviewRegeneration(session: RecoverableForPreviewRegenerationCheckInput, currentPlanRevision: number): boolean {
   return (
@@ -57,6 +72,7 @@ export function isRecoverableForPreviewRegeneration(session: RecoverableForPrevi
     session.planRevision === currentPlanRevision &&
     session.completedScenePlanIds.length > 0 &&
     session.latestWorkingProjectSha256 !== null &&
-    session.latestPreviewScenePlanId !== null
+    session.latestPreviewScenePlanId !== null &&
+    session.workingCopyTrusted
   );
 }

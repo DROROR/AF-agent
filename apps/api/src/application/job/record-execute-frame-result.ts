@@ -1,4 +1,4 @@
-import { executeSceneEditRequestSchema, sceneEditResultSchema, type JobDto } from "@dyo/schemas";
+import { executeSceneEditRequestSchema, sceneEditResultSchema, WORKING_COPY_DISTRUST_FAILURE_CODES, type JobDto } from "@dyo/schemas";
 import { deriveExecutionSessionStatus } from "../../domain/execution-session/derive-status.js";
 import type { ExecutionSessionRepository } from "../../domain/execution-session/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -86,6 +86,14 @@ export async function recordExecuteFrameResultIfApplicable(deps: RecordExecuteFr
 
   if (result.workingCopyFailureCode !== null) {
     await deps.executionSessionRepository.markStatus(session.id, "FAILED", deps.now());
+    // First Preview regeneration trust flag (live QA, 2026-09-09) - a
+    // subset of failure codes prove the WORKING COPY ITSELF has diverged
+    // from what this session's own record believes, not merely that this
+    // one job failed - see WORKING_COPY_DISTRUST_FAILURE_CODES's own doc
+    // comment for exactly which codes and why.
+    if ((WORKING_COPY_DISTRUST_FAILURE_CODES as readonly string[]).includes(result.workingCopyFailureCode)) {
+      await deps.executionSessionRepository.markWorkingCopyDistrusted(session.id, deps.now());
+    }
     return;
   }
 

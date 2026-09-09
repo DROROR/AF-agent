@@ -90,6 +90,26 @@ describe("getCurrentExecutionSession", () => {
     expect(result.session?.latestPreviewScenePlanId).toBe("scene-1");
   });
 
+  /**
+   * The exact end-to-end 2026-09-09 regression (session 5040ce97): once
+   * workingCopyTrusted is false, this endpoint must go back to returning
+   * null - even though completedScenePlanIds/latestWorkingProjectSha256/
+   * latestPreviewScenePlanId still all look perfectly recoverable - so
+   * the dashboard falls back to "Start execution" for a genuinely fresh
+   * session, instead of indefinitely re-offering "Regenerate First
+   * Preview" against a working copy already proven untrustworthy.
+   */
+  it("returns null for a FAILED session that is otherwise recoverable but whose workingCopyTrusted has been set false", async () => {
+    const repos = await setup();
+    await repos.executionSessionRepository.recordSceneCompleted(SESSION_ID, "scene-1", "b".repeat(64), "AWAITING_PREVIEW_APPROVAL", NOW);
+    await repos.executionSessionRepository.recordPreview(SESSION_ID, { storageKey: `${PROJECT_ID}/preview-1.png`, sha256: "c".repeat(64), scenePlanId: "scene-1", capturedAt: NOW }, NOW);
+    await repos.executionSessionRepository.markStatus(SESSION_ID, "FAILED", NOW);
+    await repos.executionSessionRepository.markWorkingCopyDistrusted(SESSION_ID, NOW);
+
+    const result = await getCurrentExecutionSession(deps(repos), PROJECT_ID);
+    expect(result.session).toBeNull();
+  });
+
   it("returns null for a FAILED session with NO completed work - a genuine chain-of-custody/other failure, never treated as recoverable", async () => {
     const repos = await setup();
     await repos.executionSessionRepository.markStatus(SESSION_ID, "FAILED", NOW);

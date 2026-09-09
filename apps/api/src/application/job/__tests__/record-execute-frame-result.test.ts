@@ -160,6 +160,36 @@ describe("recordExecuteFrameResultIfApplicable", () => {
     const session = await executionSessionRepository.findById(SESSION_ID);
     expect(session?.status).toBe("FAILED");
     expect(session?.completedScenePlanIds).toEqual([]);
+    // First Preview regeneration trust flag (live QA, 2026-09-09) -
+    // WORKING_COPY_MISSING proves the working copy itself is gone/
+    // diverged, not merely that this one job failed.
+    expect(session?.workingCopyTrusted).toBe(false);
+  });
+
+  it("marks workingCopyTrusted false for WORKING_COPY_SHA_MISMATCH and WORKING_COPY_UNEXPECTEDLY_MUTATED too, but NOT for SOURCE_PROJECT_MUTATED (about the source, not this session's working copy)", async () => {
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+
+    for (const code of ["WORKING_COPY_SHA_MISMATCH", "WORKING_COPY_UNEXPECTEDLY_MUTATED"] as const) {
+      const executionSessionRepository = new InMemoryExecutionSessionRepository();
+      await setupPlan(executionPlanRepository);
+      await setupSession(executionSessionRepository);
+      await recordExecuteFrameResultIfApplicable(
+        { executionSessionRepository, executionPlanRepository, now: () => NOW },
+        baseJob({ status: "FAILED", result: validResult({ failureReason: code, workingCopyFailureCode: code, workingProjectSha256: null }) })
+      );
+      const session = await executionSessionRepository.findById(SESSION_ID);
+      expect(session?.workingCopyTrusted, `expected workingCopyTrusted=false for ${code}`).toBe(false);
+    }
+
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupSession(executionSessionRepository);
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository, executionPlanRepository, now: () => NOW },
+      baseJob({ status: "FAILED", result: validResult({ failureReason: "SOURCE_PROJECT_MUTATED", workingCopyFailureCode: "SOURCE_PROJECT_MUTATED" }) })
+    );
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.status).toBe("FAILED");
+    expect(session?.workingCopyTrusted).toBe(true);
   });
 
   it("ignores a non-EXECUTE_FRAME operation entirely", async () => {

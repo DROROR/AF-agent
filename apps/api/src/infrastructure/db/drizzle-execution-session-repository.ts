@@ -20,6 +20,7 @@ function toDomain(row: ExecutionSessionRow): ExecutionSessionRecord {
     latestPreviewScenePlanId: row.latestPreviewScenePlanId,
     latestPreviewCapturedAt: row.latestPreviewCapturedAt,
     fullPreviewApproved: row.fullPreviewApproved,
+    workingCopyTrusted: row.workingCopyTrusted,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -148,6 +149,15 @@ export class DrizzleExecutionSessionRepository implements ExecutionSessionReposi
     const [row] = await this.db
       .update(executionSessions)
       .set({ fullPreviewApproved: approved, updatedAt: now })
+      .where(eq(executionSessions.id, id))
+      .returning();
+    return row ? toDomain(row) : null;
+  }
+
+  async markWorkingCopyDistrusted(id: string, now: Date): Promise<ExecutionSessionRecord | null> {
+    const [row] = await this.db
+      .update(executionSessions)
+      .set({ workingCopyTrusted: false, updatedAt: now })
       .where(eq(executionSessions.id, id))
       .returning();
     return row ? toDomain(row) : null;

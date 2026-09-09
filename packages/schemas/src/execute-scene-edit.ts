@@ -437,6 +437,29 @@ export type WorkingCopyFailureCode = (typeof WORKING_COPY_FAILURE_CODES)[number]
 export const workingCopyFailureCodeSchema = z.enum(WORKING_COPY_FAILURE_CODES);
 
 /**
+ * The subset of WORKING_COPY_FAILURE_CODES that prove the session's
+ * WORKING COPY ITSELF (as opposed to the immutable source, or merely a
+ * suspicious-but-not-necessarily-diverged operation application) is no
+ * longer trustworthy for future use - live QA, 2026-09-09, session
+ * 5040ce97: WORKING_COPY_UNEXPECTEDLY_MUTATED fired, proving the real
+ * file on disk had diverged from the session's own recorded
+ * latestWorkingProjectSha256, while every OTHER field on that session
+ * still looked perfectly "recoverable". Shared by both
+ * recordExecuteFrameResultIfApplicable and
+ * recordRegeneratePreviewResultIfApplicable (apps/api) so the exact same
+ * set is used everywhere workingCopyTrusted is ever set to false -
+ * deliberately excludes SOURCE_PROJECT_MUTATED (about the source, not
+ * this session's working copy) and WORKING_COPY_UNCHANGED_AFTER_MUTATION
+ * (the working copy's bytes are unchanged from what's recorded - not
+ * proven to have diverged, merely suspicious that real edits landed).
+ */
+export const WORKING_COPY_DISTRUST_FAILURE_CODES = [
+  "WORKING_COPY_MISSING",
+  "WORKING_COPY_SHA_MISMATCH",
+  "WORKING_COPY_UNEXPECTEDLY_MUTATED"
+] as const satisfies readonly WorkingCopyFailureCode[];
+
+/**
  * What a real worker execution reports back - metadata alone is never
  * "success"; a real preview frame is required (Phase 7 acceptance).
  * Extended beyond the original Phase 7A draft (jobId/workerId/
