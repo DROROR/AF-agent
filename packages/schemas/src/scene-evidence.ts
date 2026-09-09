@@ -129,10 +129,38 @@ export const layerDetailFactSchema = z
     sourceText: z.string().nullable(),
     /** Real `"comp-" + layer.source.id` - only ever non-null when layerType === "PRECOMP". Same identity convention the manifest's own compositionId already uses, so this composes directly with it. */
     sourceCompositionId: z.string().nullable(),
-    /** Preview Timing Analysis (live QA, 2026-09-09) - real `layer.stretch` (percent, AE default 100). Null only if the property could not be read (see jsx-templates.ts's own try/catch). */
-    stretchPercent: z.number().nullable(),
-    /** Preview Timing Analysis (live QA, 2026-09-09) - real `layer.timeRemapEnabled`. Null only if the property could not be read (e.g. a layer type that doesn't support time remap). */
-    timeRemapEnabled: z.boolean().nullable()
+    /**
+     * Preview Timing Analysis (live QA, 2026-09-09) - real `layer.stretch`
+     * (percent, AE default 100). Null when the property could not be read
+     * (see jsx-templates.ts's own try/catch). Also accepts the key being
+     * ABSENT entirely (`.optional()`, normalized to null by the transform
+     * below) - a real incident the same day found a Worker still running
+     * the pre-extension buildInspectCompositionLayerDetailsScript (an API/
+     * Worker version-skew window during a rolling deploy, not a data
+     * error) omits this key from its JSON entirely, which a plain
+     * `.nullable()` (requires the key to be present, just allows it to be
+     * null) hard-fails on. Both "absent" and "explicit null" mean exactly
+     * the same thing to every consumer - "this Worker could not report a
+     * real value" - so both normalize to the same `null` here rather than
+     * forcing every consumer to separately handle `undefined`.
+     */
+    stretchPercent: z
+      .number()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /**
+     * Preview Timing Analysis (live QA, 2026-09-09) - real
+     * `layer.timeRemapEnabled`. Null when the property could not be read
+     * (e.g. a layer type that doesn't support time remap). Also accepts
+     * the key being ABSENT (see stretchPercent's own doc comment above for
+     * why - the identical real incident and the identical normalization).
+     */
+    timeRemapEnabled: z
+      .boolean()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null)
   })
   .strict();
 export type LayerDetailFact = z.infer<typeof layerDetailFactSchema>;
