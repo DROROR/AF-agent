@@ -14,6 +14,7 @@ import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 import type { AssetRecord } from "../asset/types.js";
 import { verifyNestedTargetPath } from "../execution-plan/verify-nested-target-path.js";
+import { isRecoverableForPreviewRegeneration } from "../execution-session/is-session-active.js";
 
 /**
  * Live QA execution-wiring fix (2026-09-08): re-verifies a human-added
@@ -501,9 +502,16 @@ function resolveRegeneratePreviewOnly(
 ): ResolveExecuteFrameDispatchResult {
   const { projectId, scenePlanId, currentPlan, currentProjectManifest, worker, now, staleAfterMs } = input;
 
-  const canRegenerate =
-    session.status === "AWAITING_PREVIEW_APPROVAL" ||
-    (session.status === "FAILED" && session.completedScenePlanIds.length > 0 && session.latestWorkingProjectSha256 !== null && session.latestPreviewScenePlanId !== null);
+  if (!currentPlan) {
+    return { ok: false, reason: "No execution plan exists for this project" };
+  }
+
+  // Shared with getCurrentExecutionSession (apps/api) - see that
+  // predicate's own doc comment for why (the 2026-09-09 fix: the
+  // dashboard's own "current session" read must agree with this
+  // resolver about which FAILED sessions are recoverable, or the UI
+  // never even gets a chance to offer regeneration).
+  const canRegenerate = session.status === "AWAITING_PREVIEW_APPROVAL" || isRecoverableForPreviewRegeneration(session, currentPlan.revision);
   if (!canRegenerate) {
     return {
       ok: false,
@@ -518,10 +526,6 @@ function resolveRegeneratePreviewOnly(
       ok: false,
       reason: `Requested scenePlanId "${scenePlanId}" does not match this session's own last-previewed scene "${session.latestPreviewScenePlanId}"`
     };
-  }
-
-  if (!currentPlan) {
-    return { ok: false, reason: "No execution plan exists for this project" };
   }
   if (currentPlan.status !== "APPROVED") {
     return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a preview can only be regenerated from an approved plan` };

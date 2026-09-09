@@ -1,5 +1,5 @@
 import type { CurrentExecutionSessionResponse } from "@dyo/schemas";
-import { isSessionActive } from "../../domain/execution-session/is-session-active.js";
+import { isRecoverableForPreviewRegeneration, isSessionActive } from "../../domain/execution-session/is-session-active.js";
 import { deriveExecutionSessionDisplayStatus } from "../../domain/execution-session/derive-display-status.js";
 import type { ExecutionSessionRepository } from "../../domain/execution-session/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -26,11 +26,21 @@ export interface GetCurrentExecutionSessionDeps {
  * `status` on the returned DTO is the READ-TIME display overlay (section
  * 8/21: RENDERING/PAUSED are live-computed, never persisted) - see
  * derive-display-status.ts.
+ *
+ * First Preview regeneration (live QA, 2026-09-08/09 fix, 2026-09-09
+ * correction): a FAILED session recoverable for preview regeneration
+ * (isRecoverableForPreviewRegeneration) is ALSO returned here, even
+ * though isSessionActive alone calls it inactive - otherwise the
+ * dashboard's own "current session" read sees null and falls back to
+ * "Start execution", which is the exact bug this closes. Every other
+ * terminal session (a genuine chain-of-custody failure, or one that
+ * never got far enough to have completed work) is still correctly
+ * returned as null, exactly as before.
  */
 export async function getCurrentExecutionSession(deps: GetCurrentExecutionSessionDeps, projectId: string): Promise<CurrentExecutionSessionResponse> {
   const plan = await deps.executionPlanRepository.findCurrentByProjectId(projectId);
   const latest = await deps.executionSessionRepository.findLatestByProjectId(projectId);
-  if (!plan || !latest || !isSessionActive(latest, plan.revision)) {
+  if (!plan || !latest || (!isSessionActive(latest, plan.revision) && !isRecoverableForPreviewRegeneration(latest, plan.revision))) {
     return { session: null };
   }
 

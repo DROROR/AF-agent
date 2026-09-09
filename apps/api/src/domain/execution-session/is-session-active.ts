@@ -21,3 +21,42 @@ export function isSessionActive(session: ActiveSessionCheckInput, currentPlanRev
   }
   return session.planRevision === currentPlanRevision;
 }
+
+export interface RecoverableForPreviewRegenerationCheckInput extends ActiveSessionCheckInput {
+  completedScenePlanIds: string[];
+  latestWorkingProjectSha256: string | null;
+  latestPreviewScenePlanId: string | null;
+}
+
+/**
+ * First Preview regeneration (live QA, 2026-09-08/09) - a session
+ * isSessionActive correctly calls NOT active (FAILED is terminal), but
+ * that still genuinely has real completed work and a prior preview worth
+ * recovering: rejecting a preview marks the session FAILED by design
+ * (section 11's "no revise in place" for a genuinely bad edit), but the
+ * real 2026-09-08 incident proved that design never anticipated "the
+ * edit was fine, only the captured FRAME was unrepresentative" as a
+ * distinct case. Shared by resolveRegeneratePreviewOnly (apps/api's
+ * dispatch-time preconditions) and getCurrentExecutionSession (so the
+ * dashboard's own "current session" read ever returns this session at
+ * all, instead of silently seeing null and falling back to "Start
+ * execution" - the exact 2026-09-09 bug this closes) - kept as ONE
+ * predicate so the two can never drift apart.
+ *
+ * Deliberately narrow, never a general "un-fail any session" escape
+ * hatch: a FAILED session from a genuine chain-of-custody violation, or
+ * one that never got far enough to have a working copy or a preview at
+ * all, is excluded (all three of completedScenePlanIds/
+ * latestWorkingProjectSha256/latestPreviewScenePlanId must be real) -
+ * refused exactly as before by everything else that already treats
+ * FAILED as terminal.
+ */
+export function isRecoverableForPreviewRegeneration(session: RecoverableForPreviewRegenerationCheckInput, currentPlanRevision: number): boolean {
+  return (
+    session.status === "FAILED" &&
+    session.planRevision === currentPlanRevision &&
+    session.completedScenePlanIds.length > 0 &&
+    session.latestWorkingProjectSha256 !== null &&
+    session.latestPreviewScenePlanId !== null
+  );
+}
