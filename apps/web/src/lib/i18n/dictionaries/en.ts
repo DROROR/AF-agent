@@ -418,7 +418,9 @@ export const en = {
     queuedDescription: (jobId: string): string => `Job ${jobId} was queued for the worker. It will run once claimed - this page does not yet show live progress.`,
     failedTitle: "Could not dispatch this job",
     previewTimestampLabel: "Preview at (seconds)",
-    invalidPreviewTimestamp: "Enter a valid, non-negative number of seconds"
+    invalidPreviewTimestamp: "Enter a valid, non-negative number of seconds",
+    /** Preview Timing Analysis (live QA, 2026-09-09) - Simple Mode's own friendly analyzing state for ProjectPreviewTab's "Analyze Preview Timing" action; raw job/composition/layer ids never appear here (see projectWorkspace.overview.previewTiming below for the Advanced-only raw detail). */
+    previewTimingAnalyzing: "Analyzing timing…"
   },
   projectWorkspace: {
     backToProjects: "Back to Projects",
@@ -538,7 +540,33 @@ export const en = {
       sessionStatusRendering: "Rendering",
       sessionStatusCompleted: "Completed",
       sessionStatusPaused: "Paused (worker offline)",
-      sessionStatusFailed: "Failed - start a new execution session"
+      sessionStatusFailed: "Failed - start a new execution session",
+      /**
+       * Preview Timing Analysis (live QA, 2026-09-09): a real incident found
+       * every existing scene_evidence row had zero real per-layer timing
+       * data, so First Preview timestamps were being chosen from average
+       * scene duration - never real evidence. This action dispatches two
+       * read-only INSPECT_SCENE_EVIDENCE jobs (never SET_TEXT/MAP_FOOTAGE,
+       * never a project save) and calculates a real recommended timestamp
+       * from their result. Simple Mode shows only `action`/analyzing state/
+       * `recommendedLabel`/`applyAction` - every other key here (raw per-
+       * label ranges, the overlap range) is Advanced-only, see
+       * ProjectPreviewTab's own rendering.
+       */
+      previewTiming: {
+        action: "Analyze Preview Timing",
+        failureTitle: "Could not analyze preview timing",
+        noSceneFound: "This scene could not be found in the current execution plan.",
+        noNestedTargets: "No nested branding targets were found for this scene's approved mappings.",
+        evidenceUnavailable: "The Worker's inspection result was not in the expected format.",
+        missingWrapperEvidence: "The Worker did not return timing evidence for the expected layer.",
+        missingLeafEvidence: (label: string): string => `The Worker did not return timing evidence for "${label}".`,
+        recommendedLabel: (seconds: number): string => `Recommended First Preview timestamp: ${seconds}s`,
+        rangeLabel: (start: number, end: number): string => `${start}s – ${end}s`,
+        overlapLabelHeading: "Both visible together",
+        noOverlapNote: "These elements are never visible at the same timestamp - showing the first one's own visible range instead.",
+        applyAction: "Use this timestamp"
+      }
     },
     revisions: {
       title: "Revision history",

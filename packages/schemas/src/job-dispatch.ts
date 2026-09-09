@@ -104,7 +104,23 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * Omitted/false preserves the exact prior INSPECT_SCENE_EVIDENCE
        * behavior for every existing caller.
        */
-      discoverLayerDetails: z.boolean().optional()
+      discoverLayerDetails: z.boolean().optional(),
+      /**
+       * Preview Timing Analysis (live QA, 2026-09-09) - opt-in intent flag
+       * only, same "never a raw worker payload passthrough" convention as
+       * discoverLayerDetails above. When present, resolveInspectSceneEvidenceDispatch
+       * takes a completely different branch: instead of the scene's own
+       * top-level manifestCompositionId, it derives the distinct NESTED
+       * composition+layerIndices targets from the scene's own real,
+       * approved mappings' humanNestedTarget chains
+       * (derivePreviewTimingTargets), and dispatches against whichever
+       * target is at this 0-based index - never a caller-supplied
+       * compositionId/layerIndices. Bounded to [0, 1] (this feature's own
+       * two-hop scope, see derivePreviewTimingTargets's own doc comment).
+       * Omitted preserves the exact prior INSPECT_SCENE_EVIDENCE behavior
+       * for every existing caller.
+       */
+      previewTimingChainIndex: z.number().int().min(0).max(1).optional()
     })
     .strict(),
   z.object({

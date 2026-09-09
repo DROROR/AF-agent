@@ -407,10 +407,10 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect(result).toEqual({
       ok: true,
       layerDetails: [
-        { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null },
-        { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242" },
-        { layerIndex: 3, layerName: "Footage Layer", layerType: "AV", sourceText: null, sourceCompositionId: null },
-        { layerIndex: 4, layerName: "Shape Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null }
+        { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null },
+        { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242", stretchPercent: null, timeRemapEnabled: null },
+        { layerIndex: 3, layerName: "Footage Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null },
+        { layerIndex: 4, layerName: "Shape Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null }
         // layerIndex 5 (__unreadableLayer) is honestly omitted, never guessed.
       ]
     });

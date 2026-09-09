@@ -896,6 +896,18 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
 }
 
 /**
+ * Preview Timing Analysis (live QA, 2026-09-09): also reads `layer.stretch`
+ * (real, standard AE DOM property, percent - default 100) and
+ * `layer.timeRemapEnabled` (real, standard AVLayer DOM property) for every
+ * layer, the same defensive try/catch-then-null pattern already used for
+ * every other optional fact here. Neither is exposed by the upstream
+ * ae-mcp `layer.get` tool (confirmed 2026-09-09 by reading its real
+ * `layerSummary()` implementation directly - it reads only index/name/
+ * enabled/inPoint/outPoint/startTime/nullLayer/threeDLayer/parent, plus
+ * position/scale/rotation/opacity/effects when detailed) - this script's
+ * own `ae_run_jsx` channel is the only way to obtain them, same as this
+ * script already does for layerType/sourceText/sourceCompositionId.
+ *
  * Generic, template-agnostic, read-only layer-classification script
  * (live-QA "generic AE layer-discovery capability" requirement - never
  * hardcodes a composition name/id/layer index, works against ANY
@@ -953,6 +965,18 @@ export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: nu
           var __layerType = "OTHER";
           var __sourceText = null;
           var __sourceCompositionId = null;
+          var __stretchPercent = null;
+          try {
+            __stretchPercent = __layer.stretch;
+          } catch (__stretchReadError) {
+            __stretchPercent = null;
+          }
+          var __timeRemapEnabled = null;
+          try {
+            __timeRemapEnabled = __layer.timeRemapEnabled;
+          } catch (__timeRemapReadError) {
+            __timeRemapEnabled = null;
+          }
           if (__layer instanceof TextLayer) {
             __layerType = "TEXT";
             try {
@@ -971,7 +995,9 @@ export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: nu
             layerName: __layer.name,
             layerType: __layerType,
             sourceText: __sourceText,
-            sourceCompositionId: __sourceCompositionId
+            sourceCompositionId: __sourceCompositionId,
+            stretchPercent: __stretchPercent,
+            timeRemapEnabled: __timeRemapEnabled
           });
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole composition's

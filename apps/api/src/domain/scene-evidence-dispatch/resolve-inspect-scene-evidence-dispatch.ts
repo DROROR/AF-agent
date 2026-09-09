@@ -1,4 +1,5 @@
 import { MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, type ScenePlanEntry, type SceneEvidenceRequest, type TemplateManifest } from "@dyo/schemas";
+import { derivePreviewTimingTargets } from "../preview-timing/derive-preview-timing-targets.js";
 
 export interface InspectSceneEvidenceDispatchPlanSnapshot {
   sourceProjectSha256: string;
@@ -13,6 +14,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   currentProjectManifest: TemplateManifest | null;
   /** Live-QA "generic AE layer-discovery capability" requirement - forwarded verbatim into the resolved payload's own discoverLayerDetails field. Omitted/false preserves prior behavior exactly. */
   discoverLayerDetails?: boolean;
+  /** Preview Timing Analysis (live QA, 2026-09-09) - see the previewTimingChainIndex branch below and derivePreviewTimingTargets's own doc comment. */
+  previewTimingChainIndex?: number;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -59,7 +62,7 @@ export type ResolveInspectSceneEvidenceDispatchResult =
  * not after.
  */
 export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEvidenceDispatchInput): ResolveInspectSceneEvidenceDispatchResult {
-  const { scenePlanId, currentPlan, currentProjectManifest, discoverLayerDetails } = input;
+  const { scenePlanId, currentPlan, currentProjectManifest, discoverLayerDetails, previewTimingChainIndex } = input;
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project yet" };
@@ -77,6 +80,46 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
   const scene = currentPlan.scenePlans.find((s) => s.id === scenePlanId);
   if (!scene) {
     return { ok: false, reason: `Unknown scenePlanId "${scenePlanId}" in this plan` };
+  }
+
+  // Preview Timing Analysis (live QA, 2026-09-09) - a completely different
+  // target composition than the scene's own manifestCompositionId below,
+  // derived ONLY from this scene's own real, approved mappings (never a
+  // caller-supplied compositionId/layerIndices) - see
+  // derivePreviewTimingTargets's own doc comment for why only the first
+  // two hops of each mapping's nested target chain are ever addressed
+  // this way.
+  if (previewTimingChainIndex !== undefined) {
+    const targets = derivePreviewTimingTargets(scene);
+    const target = targets[previewTimingChainIndex];
+    if (!target) {
+      return {
+        ok: false,
+        reason: `Scene "${scenePlanId}" has no preview-timing target at chain index ${previewTimingChainIndex} (only ${targets.length} distinct nested composition(s) found in its own approved mappings)`
+      };
+    }
+    const targetComposition = currentProjectManifest.compositions.find((c) => c.compositionId === target.compositionId);
+    if (!targetComposition) {
+      return { ok: false, reason: `Preview-timing target compositionId "${target.compositionId}" does not match any composition in the current manifest` };
+    }
+    return {
+      ok: true,
+      payload: {
+        sourceProjectPath: currentProjectManifest.sourceProject.path,
+        sourceProjectSha256: currentPlan.sourceProjectSha256,
+        manifestCompositionId: target.compositionId,
+        aeProjectItemIndex: targetComposition.aeProjectItemIndex,
+        compositionName: targetComposition.name,
+        layerIndices: target.layerIndices,
+        // No representative frame needed for a timing-only request - this
+        // never captures or uploads a preview image.
+        previewTimestampSeconds: null,
+        // Always required for this feature - stretchPercent/timeRemapEnabled
+        // (Preview Timing Analysis's own new evidence fields) are only ever
+        // populated via this flag.
+        discoverLayerDetails: true
+      }
+    };
   }
 
   const composition = currentProjectManifest.compositions.find((c) => c.compositionId === scene.manifestCompositionId);

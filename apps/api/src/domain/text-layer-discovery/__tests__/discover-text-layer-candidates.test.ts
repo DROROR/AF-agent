@@ -3,7 +3,16 @@ import type { LayerDetailFact } from "@dyo/schemas";
 import { discoverTextLayerCandidates, matchesRequiredText } from "../discover-text-layer-candidates.js";
 
 function fact(overrides: Partial<LayerDetailFact> = {}): LayerDetailFact {
-  return { layerIndex: 1, layerName: "Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null, ...overrides };
+  return {
+    layerIndex: 1,
+    layerName: "Layer",
+    layerType: "OTHER",
+    sourceText: null,
+    sourceCompositionId: null,
+    stretchPercent: null,
+    timeRemapEnabled: null,
+    ...overrides
+  };
 }
 
 describe("discoverTextLayerCandidates", () => {

@@ -411,7 +411,8 @@ export const he: Dictionary = {
     queuedDescription: (jobId) => `המשימה ${jobId} נכנסה לתור עבור הוורקר. היא תרוץ לאחר שתילקח - עמוד זה עדיין לא מציג התקדמות בזמן אמת.`,
     failedTitle: "לא ניתן היה לשלוח את המשימה",
     previewTimestampLabel: "תצוגה מקדימה בשנייה",
-    invalidPreviewTimestamp: "יש להזין מספר שניות תקין ולא שלילי"
+    invalidPreviewTimestamp: "יש להזין מספר שניות תקין ולא שלילי",
+    previewTimingAnalyzing: "מנתח תזמון…"
   },
   projectWorkspace: {
     backToProjects: "חזרה לפרויקטים",
@@ -530,7 +531,21 @@ export const he: Dictionary = {
       sessionStatusRendering: "ברינדור",
       sessionStatusCompleted: "הושלם",
       sessionStatusPaused: "מושהה (העובד לא מחובר)",
-      sessionStatusFailed: "נכשל - יש להתחיל הפעלת ביצוע חדשה"
+      sessionStatusFailed: "נכשל - יש להתחיל הפעלת ביצוע חדשה",
+      previewTiming: {
+        action: "נתח תזמון תצוגה מקדימה",
+        failureTitle: "לא ניתן היה לנתח את תזמון התצוגה המקדימה",
+        noSceneFound: "לא נמצאה הסצנה הזו בתוכנית הביצוע הנוכחית.",
+        noNestedTargets: "לא נמצאו מטרות מיתוג מקוננות עבור המיפויים המאושרים של הסצנה הזו.",
+        evidenceUnavailable: "תוצאת הבדיקה של העובד לא הייתה בפורמט הצפוי.",
+        missingWrapperEvidence: "העובד לא החזיר נתוני תזמון עבור השכבה הצפויה.",
+        missingLeafEvidence: (label: string): string => `העובד לא החזיר נתוני תזמון עבור "${label}".`,
+        recommendedLabel: (seconds: number): string => `חותמת הזמן המומלצת לתצוגה המקדימה הראשונה: ${seconds} שניות`,
+        rangeLabel: (start: number, end: number): string => `${start} – ${end} שניות`,
+        overlapLabelHeading: "גלוי גם וגם יחד",
+        noOverlapNote: "הרכיבים הללו לעולם לא גלויים באותה חותמת זמן - מוצג טווח הנראות של הרכיב הראשון בלבד.",
+        applyAction: "השתמש בחותמת הזמן הזו"
+      }
     },
     revisions: {
       title: "היסטוריית גרסאות",

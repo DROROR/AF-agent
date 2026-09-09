@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import type { ExecutionSessionDto, FullPreviewArtifactDto, JobDto } from "@dyo/schemas";
+import { sceneEvidenceResponseSchema, type ExecutionSessionDto, type FullPreviewArtifactDto, type JobDto } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
@@ -26,6 +26,7 @@ import {
   requestFinalPreviewChanges
 } from "../lib/projects-api-client";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
+import { calculateBrandingVisibility, deriveNestedTargetHops, type LabeledLeafLayer, type PreviewTimingCalculationResult } from "../lib/preview-timing";
 
 // Same terminal-status set and poll cadence as NewProjectWizard's own
 // dispatch-then-poll pattern (kept local rather than shared, same
@@ -33,6 +34,33 @@ import { resolveProjectWorker } from "../lib/resolve-project-worker";
 // module).
 const TERMINAL_JOB_STATUSES = new Set<JobDto["status"]>(["SUCCEEDED", "FAILED", "CANCELLED"]);
 const JOB_POLL_INTERVAL_MS = 2_000;
+
+/**
+ * Preview Timing Analysis (live QA, 2026-09-09) - a self-contained
+ * imperative poll loop (rather than the effect-driven inFlightJobId
+ * pattern above) used only by handleAnalyzePreviewTiming below: that flow
+ * dispatches two INSPECT_SCENE_EVIDENCE jobs strictly one after the other
+ * (never both in flight at once, honoring the QA Worker's own
+ * maxConcurrency=1), which reads far more directly as a single sequential
+ * async function than as two more instances of the effect/state-based
+ * pattern. `cancelledRef` stops polling (without throwing/updating state
+ * on an unmounted component) if the component unmounts mid-poll.
+ */
+async function pollJobUntilTerminal(jobId: string, cancelledRef: { current: boolean }): Promise<{ ok: true; job: JobDto } | { ok: false; message: string }> {
+  for (;;) {
+    if (cancelledRef.current) {
+      return { ok: false, message: "Cancelled" };
+    }
+    const result = await fetchJobStatus(jobId);
+    if (result.ok && TERMINAL_JOB_STATUSES.has(result.data.status)) {
+      if (result.data.status === "SUCCEEDED") {
+        return { ok: true, job: result.data };
+      }
+      return { ok: false, message: result.data.error?.message ?? `Job ${result.data.status.toLowerCase()}` };
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
+  }
+}
 
 /**
  * "Preview" tab (final MVP nav, client-facing UX redesign section H) - the
@@ -74,6 +102,20 @@ export function ProjectPreviewTab(): ReactElement | null {
   // that had, in fact, already safely succeeded or was still safely
   // running - never a lost or double mutation, only a UI visibility gap).
   const [inFlightJobId, setInFlightJobId] = useState<string | null>(null);
+
+  // Preview Timing Analysis (live QA, 2026-09-09) - see
+  // handleAnalyzePreviewTiming below and pollJobUntilTerminal's own doc
+  // comment for why this uses its own independent state rather than
+  // isDispatching/inFlightJobId above (those are EXECUTE_FRAME-specific).
+  const [timingPhase, setTimingPhase] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [timingError, setTimingError] = useState<string | null>(null);
+  const [timingResult, setTimingResult] = useState<Extract<PreviewTimingCalculationResult, { ok: true }> | null>(null);
+  const timingCancelledRef = useRef(false);
+  useEffect(() => {
+    return () => {
+      timingCancelledRef.current = true;
+    };
+  }, []);
 
   const projectIdForEffect = project?.project.projectId ?? null;
   useEffect(() => {
@@ -286,6 +328,148 @@ export function ProjectPreviewTab(): ReactElement | null {
     setInFlightJobId(result.data.jobId);
   }
 
+  // Preview Timing Analysis (live QA, 2026-09-09 real incident): derived
+  // only from this session's own latestPreviewScenePlanId + the CURRENT
+  // plan's own real, approved mappings for that scene - never a
+  // caller-supplied compositionId/layerIndices (see
+  // resolveInspectSceneEvidenceDispatch's own previewTimingChainIndex
+  // branch, which this drives). Null (button hidden) when there is no
+  // real two-hop nested branding target to analyze at all.
+  const previewTimingScene =
+    session && session.latestPreviewScenePlanId !== null ? plan.plan.scenePlans.find((s) => s.id === session.latestPreviewScenePlanId) ?? null : null;
+  const previewTimingHops = previewTimingScene ? deriveNestedTargetHops(previewTimingScene.mappings) : null;
+
+  async function handleAnalyzePreviewTiming(): Promise<void> {
+    if (!session || session.latestPreviewScenePlanId === null || !previewTimingHops) {
+      return;
+    }
+    const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", session.assignedWorkerId);
+    if (!worker) {
+      setTimingPhase("error");
+      setTimingError(t.jobDispatch.workerOfflineDescription);
+      return;
+    }
+
+    setTimingPhase("running");
+    setTimingError(null);
+    setTimingResult(null);
+    timingCancelledRef.current = false;
+
+    // Chain index 0: the WRAPPER layer (e.g. comp-1's own layer hosting
+    // Pre-comp 3) - its own inPoint/outPoint/startTime/stretch/
+    // timeRemapEnabled, never the leaves' evidence.
+    const wrapperDispatch = await dispatchJob({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId: worker.workerId,
+      projectId,
+      scenePlanId: session.latestPreviewScenePlanId,
+      previewTimingChainIndex: 0
+    });
+    if (!wrapperDispatch.ok) {
+      setTimingPhase("error");
+      setTimingError(wrapperDispatch.message);
+      return;
+    }
+    const wrapperPoll = await pollJobUntilTerminal(wrapperDispatch.data.jobId, timingCancelledRef);
+    if (timingCancelledRef.current) {
+      return;
+    }
+    if (!wrapperPoll.ok) {
+      setTimingPhase("error");
+      setTimingError(wrapperPoll.message);
+      return;
+    }
+    const wrapperParsed = sceneEvidenceResponseSchema.safeParse(wrapperPoll.job.result);
+    if (!wrapperParsed.success) {
+      setTimingPhase("error");
+      setTimingError(t.projectWorkspace.overview.previewTiming.evidenceUnavailable);
+      return;
+    }
+
+    // Chain index 1 is only ever dispatched after chain index 0 has
+    // reached a real terminal status above - the two INSPECT_SCENE_EVIDENCE
+    // jobs are never in flight at the same time, honoring the QA Worker's
+    // own maxConcurrency=1 (see this function's own doc comment on
+    // pollJobUntilTerminal for why this is a plain sequential await rather
+    // than two separate dispatches).
+    const innerDispatch = await dispatchJob({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId: worker.workerId,
+      projectId,
+      scenePlanId: session.latestPreviewScenePlanId,
+      previewTimingChainIndex: 1
+    });
+    if (!innerDispatch.ok) {
+      setTimingPhase("error");
+      setTimingError(innerDispatch.message);
+      return;
+    }
+    const innerPoll = await pollJobUntilTerminal(innerDispatch.data.jobId, timingCancelledRef);
+    if (timingCancelledRef.current) {
+      return;
+    }
+    if (!innerPoll.ok) {
+      setTimingPhase("error");
+      setTimingError(innerPoll.message);
+      return;
+    }
+    const innerParsed = sceneEvidenceResponseSchema.safeParse(innerPoll.job.result);
+    if (!innerParsed.success) {
+      setTimingPhase("error");
+      setTimingError(t.projectWorkspace.overview.previewTiming.evidenceUnavailable);
+      return;
+    }
+
+    const wrapperLayer = wrapperParsed.data.layers.find((layer) => layer.layerIndex === previewTimingHops.wrapperLayerIndex);
+    if (!wrapperLayer) {
+      setTimingPhase("error");
+      setTimingError(t.projectWorkspace.overview.previewTiming.missingWrapperEvidence);
+      return;
+    }
+    const wrapperDetail = wrapperParsed.data.layerDetails?.find((detail) => detail.layerIndex === previewTimingHops.wrapperLayerIndex) ?? null;
+
+    const leafLayers: LabeledLeafLayer[] = [];
+    for (const leaf of previewTimingHops.leaves) {
+      const leafEvidence = innerParsed.data.layers.find((layer) => layer.layerIndex === leaf.layerIndex);
+      if (!leafEvidence) {
+        setTimingPhase("error");
+        setTimingError(t.projectWorkspace.overview.previewTiming.missingLeafEvidence(leaf.label));
+        return;
+      }
+      leafLayers.push({
+        label: leaf.label,
+        window: {
+          layerIndex: leafEvidence.layerIndex,
+          enabled: leafEvidence.enabled,
+          inPointSeconds: leafEvidence.inPointSeconds,
+          outPointSeconds: leafEvidence.outPointSeconds,
+          startTimeSeconds: leafEvidence.startTimeSeconds
+        }
+      });
+    }
+
+    const calculation = calculateBrandingVisibility({
+      outerLayer: {
+        layerIndex: wrapperLayer.layerIndex,
+        enabled: wrapperLayer.enabled,
+        inPointSeconds: wrapperLayer.inPointSeconds,
+        outPointSeconds: wrapperLayer.outPointSeconds,
+        startTimeSeconds: wrapperLayer.startTimeSeconds
+      },
+      outerLayerStretchPercent: wrapperDetail?.stretchPercent ?? null,
+      outerLayerTimeRemapEnabled: wrapperDetail?.timeRemapEnabled ?? null,
+      leafLayers
+    });
+
+    if (!calculation.ok) {
+      setTimingPhase("error");
+      setTimingError(calculation.reason);
+      return;
+    }
+    setTimingResult(calculation);
+    setTimingPhase("done");
+  }
+
   async function handleApprovePreview(): Promise<void> {
     if (!activeSession) {
       return;
@@ -374,6 +558,43 @@ export function ProjectPreviewTab(): ReactElement | null {
             </label>
             <Button variant="secondary" disabled={!workerReady || isDispatching} onClick={() => void handleRegeneratePreview()}>
               {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.regenerateFirstPreviewAction}
+            </Button>
+          </div>
+        ) : null}
+
+        {canRegeneratePreview && previewTimingHops ? (
+          <div className="overview-actions">
+            <Button variant="secondary" disabled={!workerReady || timingPhase === "running"} onClick={() => void handleAnalyzePreviewTiming()}>
+              {timingPhase === "running" ? t.jobDispatch.previewTimingAnalyzing : t.projectWorkspace.overview.previewTiming.action}
+            </Button>
+          </div>
+        ) : null}
+        {timingPhase === "running" ? <p role="status">{t.jobDispatch.previewTimingAnalyzing}</p> : null}
+        {timingPhase === "error" && timingError ? <ErrorState title={t.projectWorkspace.overview.previewTiming.failureTitle} description={timingError} /> : null}
+        {timingPhase === "done" && timingResult ? (
+          <div className="overview-fact-list">
+            <p role="status">{t.projectWorkspace.overview.previewTiming.recommendedLabel(timingResult.recommendedTimestampSeconds)}</p>
+            {mode === "advanced" ? (
+              <>
+                {!timingResult.usedOverlap ? <p>{t.projectWorkspace.overview.previewTiming.noOverlapNote}</p> : null}
+                <dl className="overview-fact-list">
+                  {Object.entries(timingResult.rangesByLabel).map(([label, range]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{t.projectWorkspace.overview.previewTiming.rangeLabel(range[0], range[1])}</dd>
+                    </div>
+                  ))}
+                  {timingResult.overlapRange ? (
+                    <div>
+                      <dt>{t.projectWorkspace.overview.previewTiming.overlapLabelHeading}</dt>
+                      <dd>{t.projectWorkspace.overview.previewTiming.rangeLabel(timingResult.overlapRange[0], timingResult.overlapRange[1])}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </>
+            ) : null}
+            <Button variant="secondary" size="sm" onClick={() => setPreviewTimestampInput(String(timingResult.recommendedTimestampSeconds))}>
+              {t.projectWorkspace.overview.previewTiming.applyAction}
             </Button>
           </div>
         ) : null}

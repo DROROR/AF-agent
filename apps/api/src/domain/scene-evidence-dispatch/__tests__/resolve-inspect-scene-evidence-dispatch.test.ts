@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, type ScenePlanEntry, type TemplateManifest } from "@dyo/schemas";
+import { SCHEMA_VERSION, type PlaceholderMapping, type ScenePlanEntry, type TemplateManifest } from "@dyo/schemas";
 import {
   resolveInspectSceneEvidenceDispatch,
   type InspectSceneEvidenceDispatchPlanSnapshot
@@ -277,5 +277,126 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
       currentProjectManifest: validManifest()
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview Timing Analysis, live QA 2026-09-09)", () => {
+  function nestedMapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMapping {
+    return {
+      id: "mapping-1",
+      manifestPlaceholderId: null,
+      placeholderName: "test",
+      placeholderClassification: { value: "text", source: "HUMAN", evidence: [] },
+      selectedAssetId: null,
+      selectedAssetType: null,
+      text: null,
+      assetTimestamp: null,
+      colorHex: null,
+      layerVisible: null,
+      freezeAtSeconds: null,
+      layerDurationSeconds: null,
+      humanLayerIndex: null,
+      humanNestedTarget: null,
+      mappingSource: "HUMAN",
+      confidence: null,
+      createdAt: NOW_ISO,
+      updatedAt: NOW_ISO,
+      ...overrides
+    };
+  }
+
+  const nestedCompositionManifest = validManifest({
+    compositions: [
+      { compositionId: "comp-1", aeProjectItemIndex: 5, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-1635", aeProjectItemIndex: 45, name: "Pre-comp 3", widthPx: 1588, heightPx: 1920, durationSeconds: 10, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+    ]
+  });
+
+  const planWithNestedMappings = validPlan({
+    scenePlans: [
+      scenePlan({
+        mappings: [
+          nestedMapping({
+            id: "logo",
+            humanNestedTarget: [
+              { compositionId: "comp-1", layerIndex: 3 },
+              { compositionId: "comp-1635", layerIndex: 1 },
+              { compositionId: "comp-1044", layerIndex: 1 }
+            ]
+          }),
+          nestedMapping({ id: "hebrew", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }, { compositionId: "comp-1635", layerIndex: 4 }] })
+        ]
+      })
+    ]
+  });
+
+  it("resolves chain index 0 to the outer wrapper composition (comp-1) shared by both mappings - never the scene's own manifestCompositionId logic", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithNestedMappings,
+      currentProjectManifest: nestedCompositionManifest,
+      previewTimingChainIndex: 0
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-1");
+    expect(result.payload.layerIndices).toEqual([3]);
+    expect(result.payload.discoverLayerDetails).toBe(true);
+    expect(result.payload.previewTimestampSeconds).toBeNull();
+  });
+
+  it("resolves chain index 1 to comp-1635 with BOTH mappings' layer indices merged (1 from logo, 4 from Hebrew)", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithNestedMappings,
+      currentProjectManifest: nestedCompositionManifest,
+      previewTimingChainIndex: 1
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-1635");
+    expect(result.payload.layerIndices).toEqual([1, 4]);
+  });
+
+  it("never reaches the logo chain's deeper comp-1044 hop - bounded to two hops by design", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithNestedMappings,
+      currentProjectManifest: nestedCompositionManifest,
+      previewTimingChainIndex: 2
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses an out-of-range chain index with a clear reason - never silently returns the wrong composition", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithNestedMappings,
+      currentProjectManifest: nestedCompositionManifest,
+      previewTimingChainIndex: 5
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("no preview-timing target at chain index 5");
+  });
+
+  it("refuses when the scene has no nested-target mappings at all - never falls back to the scene's own top-level composition silently", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [] })] }),
+      currentProjectManifest: validManifest(),
+      previewTimingChainIndex: 0
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("still requires the manifest sha256 to match the plan's - the same staleness guard as every other branch", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: { ...planWithNestedMappings, sourceProjectSha256: "b".repeat(64) },
+      currentProjectManifest: nestedCompositionManifest,
+      previewTimingChainIndex: 0
+    });
+    expect(result.ok).toBe(false);
   });
 });

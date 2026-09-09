@@ -246,7 +246,8 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       scenePlanId: request.scenePlanId,
       currentPlan: plan,
       currentProjectManifest: project.manifest,
-      ...(request.discoverLayerDetails !== undefined ? { discoverLayerDetails: request.discoverLayerDetails } : {})
+      ...(request.discoverLayerDetails !== undefined ? { discoverLayerDetails: request.discoverLayerDetails } : {}),
+      ...(request.previewTimingChainIndex !== undefined ? { previewTimingChainIndex: request.previewTimingChainIndex } : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);

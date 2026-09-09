@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, type TemplateManifest } from "@dyo/schemas";
+import { SCHEMA_VERSION, type PlaceholderMapping, type ScenePlanEntry, type TemplateManifest } from "@dyo/schemas";
 import {
   PreconditionNotMetError,
   ProjectNotFoundError,
@@ -392,6 +392,129 @@ describe("dispatchJob", () => {
     expect(payload.aeProjectItemIndex).toBe(5);
     expect(payload.compositionName).toBe("Scene 01");
     expect(payload.layerIndices).toEqual([2]);
+  });
+
+  it("Preview Timing Analysis (live QA, 2026-09-09): previewTimingChainIndex resolves the real NESTED composition target from the scene's own approved humanNestedTarget mappings - never the scene's own top-level manifestCompositionId, and never any SET_TEXT/MAP_FOOTAGE/save-shaped field", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const workerId = randomUUID();
+    await workerRepository.create(
+      { id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] },
+      FIXED_NOW
+    );
+    await workerRepository.updateHeartbeat(
+      workerId,
+      { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null },
+      FIXED_NOW
+    );
+    const manifest = manifestWithTextPlaceholder();
+    manifest.compositions.push({
+      compositionId: "comp-1635",
+      aeProjectItemIndex: 45,
+      name: "Pre-comp 3",
+      widthPx: 1920,
+      heightPx: 1080,
+      durationSeconds: 10,
+      frameRate: 30,
+      isNestedOnlyReferenced: true,
+      parentCompositionIds: ["comp-1"]
+    });
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest });
+    const scene: ScenePlanEntry = approvedTextScene();
+    scene.mappings = [
+      {
+        ...scene.mappings[0]!,
+        id: "logo",
+        placeholderName: "App Logo",
+        humanNestedTarget: [
+          { compositionId: "comp-1", layerIndex: 3 },
+          { compositionId: "comp-1635", layerIndex: 1 }
+        ]
+      },
+      {
+        ...scene.mappings[0]!,
+        id: "hebrew",
+        placeholderName: "Hebrew Branding",
+        humanNestedTarget: [
+          { compositionId: "comp-1", layerIndex: 3 },
+          { compositionId: "comp-1635", layerIndex: 4 }
+        ]
+      }
+    ] satisfies PlaceholderMapping[];
+    await executionPlanRepository.createRevision(
+      {
+        id: "plan-1",
+        projectId: project.projectId,
+        revision: 1,
+        status: "DRAFT",
+        templateId: "tmpl-1",
+        sourceProjectSha256: "a".repeat(64),
+        scenePlans: [scene],
+        approvedAt: null,
+        approvedBy: null
+      },
+      FIXED_NOW
+    );
+    const runDeps = {
+      jobRepository,
+      workerRepository,
+      projectRepository,
+      executionPlanRepository,
+      executionSessionRepository: new InMemoryExecutionSessionRepository(),
+      fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(),
+      assetRepository: new InMemoryAssetRepository(),
+      now: () => FIXED_NOW,
+      staleAfterMs: STALE_AFTER_MS
+    };
+
+    const wrapperResult = await dispatchJob(runDeps, {
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId,
+      projectId: project.projectId,
+      scenePlanId: "scene-1",
+      previewTimingChainIndex: 0
+    });
+    const wrapperJob = await jobRepository.findById(wrapperResult.jobId);
+    const wrapperPayload = wrapperJob?.payload as Record<string, unknown>;
+    // The WRAPPER hop (comp-1's own layer 3) - never comp-1's own top-level manifestCompositionId/layerIndices ([2], the Headline placeholder resolved by the test above).
+    expect(wrapperPayload.manifestCompositionId).toBe("comp-1");
+    expect(wrapperPayload.layerIndices).toEqual([3]);
+    expect(wrapperPayload.discoverLayerDetails).toBe(true);
+    // Never any mutating/text/footage field - the discriminated dispatchJobRequestSchema union has no such field for this operation at all, but assert directly against the persisted payload too, since that's what the Worker actually receives.
+    expect(wrapperPayload).not.toHaveProperty("operations");
+    expect(wrapperPayload).not.toHaveProperty("approvedMappingIds");
+
+    // maxConcurrency=1 (worker affinity): the SAME worker is refused a
+    // second INSPECT_SCENE_EVIDENCE dispatch while the chain-0 job is
+    // still non-terminal - proving the real double-submit guard covers
+    // this feature's own two-hop dispatch, not merely asserted by
+    // convention. ProjectPreviewTab's handleAnalyzePreviewTiming honors
+    // this by awaiting pollJobUntilTerminal before ever dispatching chain
+    // index 1.
+    await expect(
+      dispatchJob(runDeps, { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1", previewTimingChainIndex: 1 })
+    ).rejects.toThrow(WorkerBusyError);
+
+    // Only once chain-0's own job reaches a real terminal status (mirroring
+    // what pollJobUntilTerminal above observes over HTTP) may chain 1 be
+    // dispatched.
+    await jobRepository.updateStatus(wrapperResult.jobId, workerId, { expectedCurrentStatus: "QUEUED", status: "SUCCEEDED", result: {} }, FIXED_NOW);
+
+    const innerResult = await dispatchJob(runDeps, {
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId,
+      projectId: project.projectId,
+      scenePlanId: "scene-1",
+      previewTimingChainIndex: 1
+    });
+    const innerJob = await jobRepository.findById(innerResult.jobId);
+    const innerPayload = innerJob?.payload as Record<string, unknown>;
+    expect(innerPayload.manifestCompositionId).toBe("comp-1635");
+    expect(innerPayload.layerIndices).toEqual([1, 4]);
+    expect(innerPayload.discoverLayerDetails).toBe(true);
+    expect(innerPayload.sourceProjectSha256).toBe("a".repeat(64));
   });
 });
 

@@ -128,7 +128,11 @@ export const layerDetailFactSchema = z
     /** Real `layer.sourceText.value.text` - only ever non-null when layerType === "TEXT". */
     sourceText: z.string().nullable(),
     /** Real `"comp-" + layer.source.id` - only ever non-null when layerType === "PRECOMP". Same identity convention the manifest's own compositionId already uses, so this composes directly with it. */
-    sourceCompositionId: z.string().nullable()
+    sourceCompositionId: z.string().nullable(),
+    /** Preview Timing Analysis (live QA, 2026-09-09) - real `layer.stretch` (percent, AE default 100). Null only if the property could not be read (see jsx-templates.ts's own try/catch). */
+    stretchPercent: z.number().nullable(),
+    /** Preview Timing Analysis (live QA, 2026-09-09) - real `layer.timeRemapEnabled`. Null only if the property could not be read (e.g. a layer type that doesn't support time remap). */
+    timeRemapEnabled: z.boolean().nullable()
   })
   .strict();
 export type LayerDetailFact = z.infer<typeof layerDetailFactSchema>;
