@@ -242,6 +242,62 @@ describe("executeSceneEditRequestSchema", () => {
     expect(() => executeSceneEditRequestSchema.parse(validRequest({ expectedWorkingProjectSha256: null }))).not.toThrow();
     expect(() => executeSceneEditRequestSchema.parse(validRequest({ expectedWorkingProjectSha256: "d".repeat(64) }))).not.toThrow();
   });
+
+  /**
+   * First Preview regeneration (live QA, 2026-09-08/09) - production
+   * smoke/regression check: this exact payload shape is precisely what
+   * resolveRegeneratePreviewOnly (apps/api) produces and what a real
+   * dispatched job's own payload looked like in the live incident this
+   * closes (job f1ff90ca-3fb9-4da1-9e40-0194757fa2b4, 2026-09-09): the
+   * API itself already accepted it (dispatch returned 201), but the
+   * WORKER rejected it with this schema's OWN pre-previewOnly shape
+   * (operations/approvedMappingIds .min(1), previewOnly/
+   * previewTimestampSeconds unrecognized) because the deployed Windows
+   * Worker build was never updated past the safety-fix ZIP that predates
+   * this feature - a packaging/deployment gap, not a code defect. This
+   * test exists so that gap can never again go unnoticed silently: it
+   * fails the moment executeSceneEditRequestSchema itself regresses,
+   * independent of whether the Worker package is up to date.
+   */
+  it("accepts a previewOnly regeneration request with zero operations/approvedMappingIds and a real previewTimestampSeconds - the exact live-incident payload shape", () => {
+    const request = validRequest({
+      expectedWorkingProjectSha256: "8043c1583960bf590961dc67e42b95388d6e6780e95b24489231bb78e497f76d",
+      operations: [],
+      approvedMappingIds: [],
+      previewOnly: true,
+      previewTimestampSeconds: 1
+    });
+    expect(() => executeSceneEditRequestSchema.parse(request)).not.toThrow();
+    const parsed = executeSceneEditRequestSchema.parse(request);
+    expect(parsed.operations).toEqual([]);
+    expect(parsed.approvedMappingIds).toEqual([]);
+    expect(parsed.previewOnly).toBe(true);
+    expect(parsed.previewTimestampSeconds).toBe(1);
+  });
+
+  it("previewOnly still requires a non-null expectedWorkingProjectSha256 - there is never a first previewOnly job", () => {
+    const request = validRequest({ expectedWorkingProjectSha256: null, operations: [], approvedMappingIds: [], previewOnly: true, previewTimestampSeconds: 1 });
+    expect(() => executeSceneEditRequestSchema.parse(request)).toThrow();
+  });
+
+  it("previewOnly rejects a non-empty operations/approvedMappingIds - previewOnly never edits anything", () => {
+    const request = validRequest({
+      expectedWorkingProjectSha256: "d".repeat(64),
+      previewOnly: true,
+      previewTimestampSeconds: 1
+      // operations/approvedMappingIds left as validRequest()'s own non-empty defaults
+    });
+    expect(() => executeSceneEditRequestSchema.parse(request)).toThrow();
+  });
+
+  it("omitting previewOnly/previewTimestampSeconds entirely still preserves the exact prior behavior for every existing caller", () => {
+    const request = validRequest();
+    expect("previewOnly" in request).toBe(false);
+    expect(() => executeSceneEditRequestSchema.parse(request)).not.toThrow();
+    const parsed = executeSceneEditRequestSchema.parse(request);
+    expect(parsed.previewOnly).toBeUndefined();
+    expect(parsed.previewTimestampSeconds).toBeUndefined();
+  });
 });
 
 describe("sceneEditResultSchema", () => {
