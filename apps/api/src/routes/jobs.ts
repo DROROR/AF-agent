@@ -25,6 +25,7 @@ import { reportJobCheckpoint } from "../application/job/report-job-checkpoint.js
 import { recordSceneEvidenceIfApplicable } from "../application/job/record-scene-evidence.js";
 import { recordRenderArtifactIfApplicable } from "../application/job/record-render-artifact.js";
 import { recordExecuteFrameResultIfApplicable } from "../application/job/record-execute-frame-result.js";
+import { recordRegeneratePreviewResultIfApplicable } from "../application/job/record-regenerate-preview-result.js";
 import { registerReelsCompositionIfApplicable } from "../application/job/register-reels-composition.js";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
@@ -209,6 +210,11 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
       { executionSessionRepository: deps.executionSessionRepository, executionPlanRepository: deps.executionPlanRepository, now },
       dto
     );
+    // Disjoint counterpart for a previewOnly job - see that function's own
+    // doc comment for why this is a separate call rather than folded into
+    // recordExecuteFrameResultIfApplicable above (exactly one of the two
+    // ever acts on any given EXECUTE_FRAME job).
+    await recordRegeneratePreviewResultIfApplicable({ executionSessionRepository: deps.executionSessionRepository, now }, dto);
     // Runs AFTER recordExecuteFrameResultIfApplicable above - by the time
     // this reads the session, it already reflects this same job's own
     // completion (see register-reels-composition.ts's own doc comment).

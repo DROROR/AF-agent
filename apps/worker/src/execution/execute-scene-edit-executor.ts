@@ -20,12 +20,16 @@ const reelsCompositionBuiltResultSchema = z.object({
 });
 
 /**
- * The one fixed frame this project's own "first-frame execution" workflow
+ * The default frame this project's own "first-frame execution" workflow
  * (CLAUDE.md Required Workflow step 9) captures for EXECUTE_FRAME's
- * preview - always t=0, never configurable/guessed (section 13: "a
- * controlled frame time").
+ * preview when the request doesn't specify one - t=0, exactly the prior
+ * always-t=0 behavior for every normal (non-previewOnly) dispatch. A
+ * `previewOnly` regeneration (live QA, 2026-09-08/09: t=0 landed on a
+ * solid background color before any branding was visible) passes its own
+ * chosen `request.previewTimestampSeconds` instead - see that field's own
+ * doc comment (packages/schemas/execute-scene-edit.ts).
  */
-const PREVIEW_TIMESTAMP_SECONDS = 0;
+const DEFAULT_PREVIEW_TIMESTAMP_SECONDS = 0;
 
 /**
  * Durable mid-job progress report - see apps/api's report-job-checkpoint.ts
@@ -390,9 +394,33 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     });
   }
 
+  // Mirror image of the check above, for `previewOnly` specifically
+  // (First Preview regeneration, live QA 2026-09-08/09): zero operations
+  // were ever requested, so the saved working copy must stay byte-
+  // identical to what it was before this run. Any change means something
+  // mutated it outside this job's own knowledge - never treated as a safe
+  // recapture.
+  if (request.previewOnly === true && savedHash.value.sha256 !== workingCopy.workingProjectSha256) {
+    checkpoint = markFailed(
+      checkpoint,
+      "SAFETY CHECK FAILED (WORKING_COPY_UNEXPECTEDLY_MUTATED): this was a previewOnly run (zero operations requested), but the " +
+        `saved working copy's sha256 (${savedHash.value.sha256}) differs from what it was before this run ` +
+        `(${workingCopy.workingProjectSha256}) - refusing to report success.`,
+      deps.now()
+    );
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: savedHash.value.sha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null,
+      workingCopyFailureCode: "WORKING_COPY_UNEXPECTEDLY_MUTATED"
+    });
+  }
+
   const previewResult = await deps.previewCapture.capture({
     aeProjectItemIndex: request.aeProjectItemIndex,
-    timestampSeconds: PREVIEW_TIMESTAMP_SECONDS
+    timestampSeconds: request.previewTimestampSeconds ?? DEFAULT_PREVIEW_TIMESTAMP_SECONDS
   });
   if (!previewResult.ok) {
     // All operations completed and saved, but a result with no verified

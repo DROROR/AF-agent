@@ -55,6 +55,11 @@ export function ProjectPreviewTab(): ReactElement | null {
   const [isDispatching, setIsDispatching] = useState(false);
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  // First Preview regeneration (live QA, 2026-09-08/09) - the operator's
+  // own choice of capture time (section 13: "a controlled frame time",
+  // never guessed) for the "Regenerate First Preview" action below.
+  // Defaults to 1s rather than the same t=0 the operator just rejected.
+  const [previewTimestampInput, setPreviewTimestampInput] = useState("1");
   // Tracks the EXECUTE_FRAME job dispatched by the button below, from
   // dispatch until it reaches a terminal status - see the polling effect
   // just under this one for why this exists (2026-09-08 live QA: a job
@@ -156,9 +161,29 @@ export function ProjectPreviewTab(): ReactElement | null {
 
   // A FAILED session is terminal (multi-scene-accumulation phase, section
   // 11) - this tab treats it exactly like "no session yet" for its own
-  // button logic (offer to start a fresh one), while still SHOWING the
-  // failure so the client understands why (see the status line below).
+  // "start a new edit" button logic, while still SHOWING the failure so
+  // the client understands why (see the status line below).
   const activeSession = session && session.status !== "FAILED" ? session : null;
+
+  // First Preview regeneration (live QA, 2026-09-08/09 incident): a
+  // rejected preview marks the session FAILED - by design, for a
+  // genuinely bad edit there is no "revise in place" (start a new
+  // execution session instead). But real completed scene work + a real
+  // working copy already exist here, and the actual incident was never
+  // the EDIT being wrong - only the captured FRAME (t=0 landed on a solid
+  // background color before any branding was visible). "Start execution"
+  // must never be offered for THIS session (it would silently create a
+  // brand new session and needlessly re-run the same MAP_FOOTAGE/SET_TEXT
+  // work) - "Regenerate First Preview" (same working copy, a different
+  // timestamp) is offered instead. See resolveRegeneratePreviewOnly
+  // (apps/api) for the exact, narrower server-side preconditions this
+  // mirrors - this is only the UI-side recognition of the same case.
+  const canRegeneratePreview =
+    session !== null &&
+    (session.status === "AWAITING_PREVIEW_APPROVAL" || session.status === "FAILED") &&
+    session.completedScenePlanIds.length > 0 &&
+    session.latestWorkingProjectSha256 !== null &&
+    session.latestPreviewScenePlanId !== null;
 
   const requiredScenePlanIds =
     plan.plan.status === "APPROVED"
@@ -168,20 +193,24 @@ export function ProjectPreviewTab(): ReactElement | null {
     requiredScenePlanIds.find((id) => !(activeSession?.completedScenePlanIds ?? []).includes(id)) ?? null;
   const allScenesComplete = activeSession !== null && requiredScenePlanIds.length > 0 && nextScenePlanId === null;
 
-  // No session yet (or the last one FAILED): the browser picks a worker via
-  // the same non-authoritative heuristic used elsewhere. Once a session
-  // exists, every further dispatch is pinned to ITS OWN assignedWorkerId -
-  // never re-chosen (section 8: worker affinity).
-  const candidateWorker = activeSession
-    ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === activeSession.assignedWorkerId) ?? null
+  // No session yet (or the last one FAILED and not regeneratable): the
+  // browser picks a worker via the same non-authoritative heuristic used
+  // elsewhere. Once a session exists (including a FAILED-but-
+  // regeneratable one - its cumulative working copy still exists only on
+  // ITS OWN pinned worker's local disk), every further dispatch is pinned
+  // to ITS OWN assignedWorkerId - never re-chosen (section 8: worker
+  // affinity).
+  const sessionPinnedToWorker = activeSession ?? (canRegeneratePreview ? session : null);
+  const candidateWorker = sessionPinnedToWorker
+    ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === sessionPinnedToWorker.assignedWorkerId) ?? null
     : resolveProjectWorker(dashboardStatus?.workers ?? null, "EXECUTE_FRAME", project.project.sourceWorkerId);
-  const workerReady = activeSession ? candidateWorker !== null && candidateWorker.status === "ONLINE" && candidateWorker.currentJobId === null : candidateWorker !== null;
+  const workerReady = sessionPinnedToWorker ? candidateWorker !== null && candidateWorker.status === "ONLINE" && candidateWorker.currentJobId === null : candidateWorker !== null;
   const canExecute = nextScenePlanId !== null && workerReady;
   // A session pins a specific worker (worker affinity, section 8) - if that
   // worker is offline this is a known, specific worker being unreachable,
   // not "no worker was ever found" - a more honest, actionable message than
   // the generic no-worker-available one.
-  const isKnownWorkerOffline = activeSession !== null && candidateWorker !== null && candidateWorker.status !== "ONLINE";
+  const isKnownWorkerOffline = sessionPinnedToWorker !== null && candidateWorker !== null && candidateWorker.status !== "ONLINE";
 
   async function handleExecuteNextScene(): Promise<void> {
     if (!nextScenePlanId || !candidateWorker) {
@@ -219,6 +248,41 @@ export function ProjectPreviewTab(): ReactElement | null {
     // above observes this job reach a terminal status - the dispatch HTTP
     // call only means "queued", never "the scene is done" (see that
     // effect's own doc comment for the real incident this fixes).
+    setInFlightJobId(result.data.jobId);
+  }
+
+  async function handleRegeneratePreview(): Promise<void> {
+    if (!session || !candidateWorker || session.latestPreviewScenePlanId === null) {
+      return;
+    }
+    const parsedTimestamp = Number(previewTimestampInput);
+    if (!Number.isFinite(parsedTimestamp) || parsedTimestamp < 0) {
+      setDispatchError(t.jobDispatch.invalidPreviewTimestamp);
+      return;
+    }
+    setIsDispatching(true);
+    setDispatchError(null);
+    setDispatchSuccess(null);
+
+    // Never creates a new session/worker choice - regeneration only ever
+    // targets THIS session's own existing, already-mutated working copy
+    // on its own pinned worker (see resolveRegeneratePreviewOnly's own
+    // doc comment for why this must never fall through to
+    // createExecutionSession the way handleExecuteNextScene does).
+    const result = await dispatchJob({
+      operation: "EXECUTE_FRAME",
+      workerId: session.assignedWorkerId,
+      projectId,
+      executionSessionId: session.id,
+      scenePlanId: session.latestPreviewScenePlanId,
+      regeneratePreviewOnly: true,
+      previewTimestampSeconds: parsedTimestamp
+    });
+    if (!result.ok) {
+      setIsDispatching(false);
+      setDispatchError(result.message);
+      return;
+    }
     setInFlightJobId(result.data.jobId);
   }
 
@@ -290,6 +354,25 @@ export function ProjectPreviewTab(): ReactElement | null {
           />
         ) : null}
 
+        {canRegeneratePreview ? (
+          <div className="overview-actions">
+            <label>
+              {t.jobDispatch.previewTimestampLabel}
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={previewTimestampInput}
+                disabled={isDispatching}
+                onChange={(event) => setPreviewTimestampInput(event.target.value)}
+              />
+            </label>
+            <Button variant="secondary" disabled={!workerReady || isDispatching} onClick={() => void handleRegeneratePreview()}>
+              {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.regenerateFirstPreviewAction}
+            </Button>
+          </div>
+        ) : null}
+
         <div className="overview-actions">
           {activeSession?.status === "AWAITING_PREVIEW_APPROVAL" ? (
             <>
@@ -300,7 +383,7 @@ export function ProjectPreviewTab(): ReactElement | null {
                 {t.projectWorkspace.overview.rejectPreviewAction}
               </Button>
             </>
-          ) : !allScenesComplete ? (
+          ) : !allScenesComplete && !canRegeneratePreview ? (
             <Button variant="primary" disabled={!canExecute || isDispatching} onClick={() => void handleExecuteNextScene()}>
               {isDispatching
                 ? t.jobDispatch.dispatching

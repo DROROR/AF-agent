@@ -315,11 +315,52 @@ export const executeSceneEditRequestSchema = z
     /** The composition's expected real AE name (as last observed/verified) - never trusted alone: the worker-side JSX confirms the resolved CompItem's own `.name` matches this before any mutation is attempted, so a stale/wrong aeProjectItemIndex can never silently target the wrong composition. */
     compositionName: z.string().min(1),
     /** The specific PlaceholderMapping IDs this edit is allowed to act on - every operation's manifestPlaceholderId must be one of these. */
-    approvedMappingIds: z.array(z.string().min(1)).min(1),
-    operations: z.array(sceneEditOperationIntentSchema).min(1),
-    checkpoint: sceneEditCheckpointSchema.nullable()
+    approvedMappingIds: z.array(z.string().min(1)),
+    operations: z.array(sceneEditOperationIntentSchema),
+    checkpoint: sceneEditCheckpointSchema.nullable(),
+    /**
+     * Live QA fix (2026-09-08/09, First Preview regeneration): opt-in
+     * intent flag only, omitted/false for every existing caller and
+     * preserving the exact prior behavior (operations/approvedMappingIds
+     * both required non-empty below). When true, this job must make NO
+     * edit at all - operations/approvedMappingIds must both be exactly
+     * empty - and instead opens the session's already-mutated working
+     * copy (expectedWorkingProjectSha256 must be set - there is never a
+     * "first" previewOnly job) purely to recapture a fresh First Preview
+     * frame at `previewTimestampSeconds`, e.g. after the operator rejected
+     * one captured at an unrepresentative moment (real incident: t=0
+     * landed on a solid background color, before any branding was ever
+     * visible). See resolveExecuteFrameDispatch's own previewOnly branch
+     * and recordRegeneratePreviewResultIfApplicable (apps/api) for the
+     * dispatch-time preconditions and the session-status transition this
+     * enables - never a path to re-running MAP_FOOTAGE/SET_TEXT.
+     */
+    previewOnly: z.boolean().optional(),
+    /**
+     * Only meaningful when previewOnly is true - the real, controlled
+     * capture time (section 13: "a controlled frame time"), never guessed
+     * by the worker itself. Omitted/undefined for a normal (previewOnly
+     * false/omitted) job preserves the exact prior fixed t=0 behavior -
+     * see execute-scene-edit-executor.ts's own PREVIEW_TIMESTAMP_SECONDS.
+     */
+    previewTimestampSeconds: z.number().nonnegative().finite().optional()
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.previewOnly === true) {
+      if (value.operations.length !== 0 || value.approvedMappingIds.length !== 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "previewOnly must carry zero operations and zero approvedMappingIds - it never edits anything" });
+      }
+      if (value.expectedWorkingProjectSha256 === null) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "previewOnly requires an existing working copy (expectedWorkingProjectSha256) - there is never a first previewOnly job" });
+      }
+    } else if (value.operations.length === 0 || value.approvedMappingIds.length === 0) {
+      // The exact prior invariant (operations.min(1)/approvedMappingIds.min(1))
+      // - preserved as a refine rather than a raw .min(1) only so previewOnly
+      // can legitimately be the one, explicit exception above.
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "operations and approvedMappingIds must both be non-empty unless previewOnly is true" });
+    }
+  });
 export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSchema>;
 
 /**
@@ -362,13 +403,25 @@ export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSche
  *     - suspicious by construction (a real content mutation should always
  *     change SOME bytes of a real binary project file) and never treated
  *     as a legitimate "no-op" success.
+ *
+ * A fourth code, added for First Preview regeneration (live QA,
+ * 2026-09-08/09):
+ *   - WORKING_COPY_UNEXPECTEDLY_MUTATED: the mirror image of
+ *     WORKING_COPY_UNCHANGED_AFTER_MUTATION, for a `previewOnly` job
+ *     specifically - zero operations were requested (previewOnly means
+ *     "recapture a frame, never edit anything"), so the saved working
+ *     copy's sha256 must stay byte-identical to what it was before this
+ *     run. If it changed anyway, something mutated the working copy
+ *     outside this job's own knowledge - never treated as a safe preview
+ *     recapture.
  */
 export const WORKING_COPY_FAILURE_CODES = [
   "WORKING_COPY_MISSING",
   "WORKING_COPY_SHA_MISMATCH",
   "WORKING_COPY_NOT_OPENED",
   "SOURCE_PROJECT_MUTATED",
-  "WORKING_COPY_UNCHANGED_AFTER_MUTATION"
+  "WORKING_COPY_UNCHANGED_AFTER_MUTATION",
+  "WORKING_COPY_UNEXPECTEDLY_MUTATED"
 ] as const;
 export type WorkingCopyFailureCode = (typeof WORKING_COPY_FAILURE_CODES)[number];
 export const workingCopyFailureCodeSchema = z.enum(WORKING_COPY_FAILURE_CODES);

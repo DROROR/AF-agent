@@ -110,9 +110,11 @@ class FakeAeEditBridge implements AeEditBridge {
 
 class FakePreviewCapture implements PreviewCapture {
   calls = 0;
+  lastCall: { aeProjectItemIndex: number; timestampSeconds: number } | null = null;
   constructor(private readonly result: PreviewCaptureResult) {}
-  async capture(): Promise<PreviewCaptureResult> {
+  async capture(params: { aeProjectItemIndex: number; timestampSeconds: number }): Promise<PreviewCaptureResult> {
     this.calls++;
+    this.lastCall = params;
     return this.result;
   }
 }
@@ -819,6 +821,217 @@ describe("executeSceneEdit", () => {
       expect(bridge.calls[0]?.operation.type).toBe("MAP_FOOTAGE");
       expect(bridge.calls[1]?.operation.type).toBe("SET_TEXT");
       expect(result.workingCopyFailureCode).toBeNull();
+    });
+  });
+
+  describe("previewOnly (First Preview regeneration, live QA 2026-09-08/09)", () => {
+    it("resumes the EXISTING working copy (never re-copies from source), applies zero operations, and captures a preview at the caller's chosen timestamp", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+
+      // A real prior edit run, exactly like any other completed scene -
+      // this is the working copy a regeneration must reuse.
+      const firstBridge = new FakeAeEditBridge(alwaysSucceed);
+      const editRequest = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+      const editResult = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: firstBridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        editRequest
+      );
+      expect(editResult.failureReason).toBeNull();
+      const mutatedWorkingCopySha256 = editResult.workingProjectSha256;
+      expect(mutatedWorkingCopySha256).not.toBeNull();
+
+      // The regeneration itself: zero operations, targeting the SAME
+      // working copy via expectedWorkingProjectSha256, a fresh, chosen
+      // previewTimestampSeconds - never the fixed t=0 default.
+      const regenBridge = new FakeAeEditBridge(alwaysSucceed);
+      const regenPreview = new FakePreviewCapture(REAL_PREVIEW);
+      const regenRequest = makeRequest({
+        sourceProjectPath: sourcePath,
+        sourceProjectSha256: sourceSha,
+        expectedWorkingProjectSha256: mutatedWorkingCopySha256,
+        operations: [],
+        approvedMappingIds: [],
+        previewOnly: true,
+        previewTimestampSeconds: 5,
+        checkpoint: null
+      });
+      const regenResult = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: regenBridge,
+          previewCapture: regenPreview,
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        regenRequest
+      );
+
+      expect(regenResult.failureReason).toBeNull();
+      expect(regenResult.workingCopyFailureCode).toBeNull();
+      // No MAP_FOOTAGE/SET_TEXT (or any operation) was ever applied again.
+      expect(regenBridge.calls).toHaveLength(0);
+      expect(regenResult.operationsCompleted).toEqual([]);
+      // Still opened the working copy (safety-fixed flow) before capturing.
+      expect(regenBridge.openProjectCalls).toHaveLength(1);
+      // The exact same working copy, never a fresh one re-copied from source.
+      expect(regenResult.workingProjectPath).toBe(editResult.workingProjectPath);
+      // No new edits were made in this run, so the working copy's own
+      // bytes are unchanged from the mutated copy the first run produced.
+      expect(regenResult.workingProjectSha256).toBe(mutatedWorkingCopySha256);
+      // The chosen timestamp, never the default t=0, actually reached preview capture.
+      expect(regenPreview.lastCall?.timestampSeconds).toBe(5);
+      // The immutable source remains untouched.
+      expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
+    });
+
+    it("defaults to t=0 when previewTimestampSeconds is omitted - the exact prior fixed behavior is preserved for any caller that doesn't set it", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const editResult = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: new FakeAeEditBridge(alwaysSucceed),
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha })
+      );
+
+      const regenPreview = new FakePreviewCapture(REAL_PREVIEW);
+      await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: new FakeAeEditBridge(alwaysSucceed),
+          previewCapture: regenPreview,
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({
+          sourceProjectPath: sourcePath,
+          sourceProjectSha256: sourceSha,
+          expectedWorkingProjectSha256: editResult.workingProjectSha256,
+          operations: [],
+          approvedMappingIds: [],
+          previewOnly: true,
+          checkpoint: null
+        })
+      );
+
+      expect(regenPreview.lastCall?.timestampSeconds).toBe(0);
+    });
+
+    it("SAFETY CHECK: fails closed with WORKING_COPY_UNEXPECTEDLY_MUTATED if the working copy's bytes changed during a supposedly no-op previewOnly run", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const editResult = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: new FakeAeEditBridge(alwaysSucceed),
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha })
+      );
+
+      // A save that mutates the file even with zero operations applied -
+      // simulates an unexpected/buggy AE-side side effect during what
+      // should have been a pure read + capture.
+      class MutatingSaveBridge extends FakeAeEditBridge {
+        override async saveProject(): Promise<SaveProjectResult> {
+          appendFileSync(editResult.workingProjectPath as string, "\n// unexpected mutation");
+          return { ok: true, resultingValue: null };
+        }
+      }
+
+      const result = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: new MutatingSaveBridge(alwaysSucceed),
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({
+          sourceProjectPath: sourcePath,
+          sourceProjectSha256: sourceSha,
+          expectedWorkingProjectSha256: editResult.workingProjectSha256,
+          operations: [],
+          approvedMappingIds: [],
+          previewOnly: true,
+          checkpoint: null
+        })
+      );
+
+      expect(result.workingCopyFailureCode).toBe("WORKING_COPY_UNEXPECTEDLY_MUTATED");
+      expect(result.failureReason).toContain("WORKING_COPY_UNEXPECTEDLY_MUTATED");
+    });
+
+    it("SOURCE_PROJECT_MUTATED still applies unconditionally during a previewOnly run - the immutable source guard is never bypassed", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const editResult = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: new FakeAeEditBridge(alwaysSucceed),
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha })
+      );
+
+      class SourceMutatingBridge extends FakeAeEditBridge {
+        override async saveProject(): Promise<SaveProjectResult> {
+          appendFileSync(sourcePath, "\n// simulated source overwrite");
+          return { ok: true, resultingValue: null };
+        }
+      }
+
+      const result = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: new SourceMutatingBridge(alwaysSucceed),
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({
+          sourceProjectPath: sourcePath,
+          sourceProjectSha256: sourceSha,
+          expectedWorkingProjectSha256: editResult.workingProjectSha256,
+          operations: [],
+          approvedMappingIds: [],
+          previewOnly: true,
+          checkpoint: null
+        })
+      );
+
+      expect(result.workingCopyFailureCode).toBe("SOURCE_PROJECT_MUTATED");
     });
   });
 });

@@ -409,7 +409,9 @@ export const he: Dictionary = {
     startedHint: "התחיל - זה יתעדכן אוטומטית, אין צורך לבדוק שוב.",
     queuedTitle: "המשימה נכנסה לתור",
     queuedDescription: (jobId) => `המשימה ${jobId} נכנסה לתור עבור הוורקר. היא תרוץ לאחר שתילקח - עמוד זה עדיין לא מציג התקדמות בזמן אמת.`,
-    failedTitle: "לא ניתן היה לשלוח את המשימה"
+    failedTitle: "לא ניתן היה לשלוח את המשימה",
+    previewTimestampLabel: "תצוגה מקדימה בשנייה",
+    invalidPreviewTimestamp: "יש להזין מספר שניות תקין ולא שלילי"
   },
   projectWorkspace: {
     backToProjects: "חזרה לפרויקטים",
@@ -505,6 +507,7 @@ export const he: Dictionary = {
       continueExecutionAction: "המשך ביצוע",
       approvePreviewAction: "אישור תצוגה מקדימה",
       rejectPreviewAction: "דחיית תצוגה מקדימה",
+      regenerateFirstPreviewAction: "יצירת תצוגה מקדימה ראשונה מחדש",
       previewImageAlt: "תצוגה מקדימה של הפריים הראשון",
       allScenesCompleteLabel: "כל הסצנות המאושרות בוצעו - מוכן לרינדור.",
       finalPreview: {

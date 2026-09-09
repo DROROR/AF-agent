@@ -225,4 +225,42 @@ describe("recordExecuteFrameResultIfApplicable", () => {
     expect(session?.completedScenePlanIds).toEqual(["scene-1", "scene-2"]);
     expect(session?.latestWorkingProjectSha256).toBe("c".repeat(64));
   });
+
+  it("skips a previewOnly job entirely - handled by the disjoint recordRegeneratePreviewResultIfApplicable instead", async () => {
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupPlan(executionPlanRepository);
+    await setupSession(executionSessionRepository, { planRevision: 1 });
+    await executionSessionRepository.markStatus(SESSION_ID, "FAILED", NOW);
+
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository, executionPlanRepository, now: () => NOW },
+      baseJob({
+        payload: {
+          projectId: PROJECT_ID,
+          planId: "plan-1",
+          planRevision: 1,
+          sourceProjectSha256: "a".repeat(64),
+          sourceProjectPath: "C:\\source.aep",
+          executionSessionId: SESSION_ID,
+          expectedWorkingProjectSha256: "b".repeat(64),
+          scenePlanId: "scene-1",
+          manifestCompositionId: "comp-1",
+          aeProjectItemIndex: 1,
+          compositionName: "Scene 01",
+          approvedMappingIds: [],
+          operations: [],
+          checkpoint: null,
+          previewOnly: true,
+          previewTimestampSeconds: 2
+        }
+      })
+    );
+
+    // Never resurrected, never completedScenePlanIds-mutated by THIS
+    // function - a previewOnly job never edits anything.
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.status).toBe("FAILED");
+    expect(session?.completedScenePlanIds).toEqual([]);
+  });
 });

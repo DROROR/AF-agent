@@ -164,18 +164,28 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       projectAssets,
       worker,
       now,
-      staleAfterMs: deps.staleAfterMs
+      staleAfterMs: deps.staleAfterMs,
+      ...(request.regeneratePreviewOnly === true ? { regeneratePreviewOnly: true as const } : {}),
+      ...(request.previewTimestampSeconds !== undefined ? { previewTimestampSeconds: request.previewTimestampSeconds } : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);
     }
-    // True interrupted-job resume (see resolve-resume-checkpoint.ts): if a
-    // prior FAILED attempt for this exact scene left a durable, verifiably-
-    // still-valid checkpoint, carry it forward so the worker skips whatever
-    // operations already completed rather than restarting the scene from
-    // operation 0. Fails closed to a fresh start (null) on any mismatch.
-    const resumeCheckpoint = await resolveExecuteFrameResumeCheckpoint(deps.jobRepository, resolved.payload);
-    payload = { ...resolved.payload, checkpoint: resumeCheckpoint };
+    if (request.regeneratePreviewOnly === true) {
+      // A previewOnly run is a deliberate one-shot, never a multi-
+      // operation job with anything to resume - checkpoint resume only
+      // ever applies to a real edit's own operations array (which is
+      // always empty here).
+      payload = { ...resolved.payload, checkpoint: null };
+    } else {
+      // True interrupted-job resume (see resolve-resume-checkpoint.ts): if a
+      // prior FAILED attempt for this exact scene left a durable, verifiably-
+      // still-valid checkpoint, carry it forward so the worker skips whatever
+      // operations already completed rather than restarting the scene from
+      // operation 0. Fails closed to a fresh start (null) on any mismatch.
+      const resumeCheckpoint = await resolveExecuteFrameResumeCheckpoint(deps.jobRepository, resolved.payload);
+      payload = { ...resolved.payload, checkpoint: resumeCheckpoint };
+    }
   } else if (request.operation === "CREATE_PREVIEW") {
     if (!project) {
       throw new ProjectNotFoundError(request.projectId);

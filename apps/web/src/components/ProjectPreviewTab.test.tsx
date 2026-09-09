@@ -327,6 +327,152 @@ describe("ProjectPreviewTab", () => {
     fireEvent.click(rejectButton);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Approve preview" })).toBeNull());
   });
+
+  /**
+   * First Preview regeneration (live QA, 2026-09-08/09 incident): rejecting
+   * a preview marks the session FAILED (terminal, by design, for a
+   * genuinely bad edit) - but the real incident was never a bad edit, only
+   * an unrepresentative captured frame (t=0, a solid background color).
+   * "Start execution" must never be offered here (it would silently start
+   * a brand new session and needlessly re-run the same real AE work) -
+   * "Regenerate First Preview" is offered instead, targeting the SAME
+   * session/working copy.
+   */
+  function rejectedButRecoverableSession(overrides: Record<string, unknown> = {}) {
+    return awaitingPreviewSession({ status: "FAILED", ...overrides });
+  }
+
+  const REGEN_WORKER = {
+    workerId: "44444444-4444-4444-4444-444444444444",
+    name: "worker-a",
+    status: "ONLINE",
+    lastHeartbeatAt: new Date().toISOString(),
+    aeStatus: "ONLINE",
+    mcpStatus: "ONLINE",
+    aeAvailability: "ONLINE",
+    mcpAvailability: "ONLINE",
+    aeVersion: "26.0",
+    capabilities: ["EXECUTE_FRAME"],
+    maxConcurrency: 1,
+    currentJobId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  it("shows 'Regenerate First Preview' instead of 'Start execution' for a FAILED session that has real completed work and a prior preview (the rejected-preview recovery case)", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [REGEN_WORKER] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: rejectedButRecoverableSession() } }
+    });
+    renderPreview();
+    await screen.findByRole("button", { name: "Regenerate First Preview" });
+    expect(screen.queryByRole("button", { name: "Start execution" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue execution" })).toBeNull();
+  });
+
+  it("clicking Regenerate First Preview dispatches EXECUTE_FRAME with regeneratePreviewOnly against the SAME session/scene - never creates a new session", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    const JOB_ID = "88888888-8888-8888-8888-888888888888";
+    let capturedBody: Record<string, unknown> | null = null;
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [REGEN_WORKER] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: rejectedButRecoverableSession() } },
+      "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId: REGEN_WORKER.workerId, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() } },
+      [`/api/jobs/${JOB_ID}`]: {
+        status: 200,
+        body: {
+          job: {
+            jobId: JOB_ID,
+            workerId: REGEN_WORKER.workerId,
+            projectId: PROJECT_ID,
+            operation: "EXECUTE_FRAME",
+            status: "SUCCEEDED",
+            payload: {},
+            result: {},
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderPreview();
+    const input = await screen.findByLabelText("Preview at (seconds)");
+    fireEvent.change(input, { target: { value: "4" } });
+    const button = screen.getByRole("button", { name: "Regenerate First Preview" });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      expect(jobsCall).toBeDefined();
+      capturedBody = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
+    });
+
+    expect(capturedBody).toMatchObject({
+      operation: "EXECUTE_FRAME",
+      workerId: REGEN_WORKER.workerId,
+      executionSessionId: "66666666-6666-6666-6666-666666666666",
+      scenePlanId: "s1",
+      regeneratePreviewOnly: true,
+      previewTimestampSeconds: 4
+    });
+    // Never called createExecutionSession - regeneration reuses the
+    // existing session, it never starts a fresh one.
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string][];
+    expect(calls.some(([url]) => url === `/api/projects/${PROJECT_ID}/execution-sessions`)).toBe(false);
+  }, 10000);
+
+  it("after a successful regeneration, the session returns to AWAITING_PREVIEW_APPROVAL with Approve/Reject shown", async () => {
+    const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    const JOB_ID = "99999999-9999-9999-9999-999999999999";
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [REGEN_WORKER] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: [
+        { status: 200, body: { session: rejectedButRecoverableSession() } },
+        { status: 200, body: { session: awaitingPreviewSession() } }
+      ],
+      "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId: REGEN_WORKER.workerId, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() } },
+      [`/api/jobs/${JOB_ID}`]: {
+        status: 200,
+        body: {
+          job: {
+            jobId: JOB_ID,
+            workerId: REGEN_WORKER.workerId,
+            projectId: PROJECT_ID,
+            operation: "EXECUTE_FRAME",
+            status: "SUCCEEDED",
+            payload: {},
+            result: {},
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderPreview();
+    const button = await screen.findByRole("button", { name: "Regenerate First Preview" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve preview" })).not.toBeNull(), { timeout: 5000 });
+    screen.getByRole("button", { name: "Reject preview" });
+  }, 10000);
 });
 
 /**

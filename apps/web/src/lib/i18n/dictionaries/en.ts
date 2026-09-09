@@ -416,7 +416,9 @@ export const en = {
     startedHint: "Started - this will update automatically, no need to check again.",
     queuedTitle: "Job queued",
     queuedDescription: (jobId: string): string => `Job ${jobId} was queued for the worker. It will run once claimed - this page does not yet show live progress.`,
-    failedTitle: "Could not dispatch this job"
+    failedTitle: "Could not dispatch this job",
+    previewTimestampLabel: "Preview at (seconds)",
+    invalidPreviewTimestamp: "Enter a valid, non-negative number of seconds"
   },
   projectWorkspace: {
     backToProjects: "Back to Projects",
@@ -513,6 +515,7 @@ export const en = {
       continueExecutionAction: "Continue execution",
       approvePreviewAction: "Approve preview",
       rejectPreviewAction: "Reject preview",
+      regenerateFirstPreviewAction: "Regenerate First Preview",
       previewImageAlt: "Captured first-frame preview",
       allScenesCompleteLabel: "All approved scenes have been executed - ready to render.",
       finalPreview: {

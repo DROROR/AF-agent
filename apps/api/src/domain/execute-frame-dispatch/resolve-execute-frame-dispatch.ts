@@ -80,6 +80,8 @@ export interface ExecuteFrameDispatchSessionSnapshot {
   status: ExecutionSessionStatus;
   latestWorkingProjectSha256: string | null;
   completedScenePlanIds: string[];
+  /** First Preview regeneration (live QA, 2026-09-08/09) - the scene a previewOnly dispatch targets; see the previewOnly branch below. */
+  latestPreviewScenePlanId: string | null;
 }
 
 export interface ResolveExecuteFrameDispatchInput {
@@ -97,6 +99,15 @@ export interface ResolveExecuteFrameDispatchInput {
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
+  /**
+   * First Preview regeneration (live QA, 2026-09-08/09) - see the
+   * previewOnly branch below and executeSceneEditRequestSchema's own
+   * previewOnly doc comment. Omitted/false preserves every existing
+   * caller's exact prior behavior untouched.
+   */
+  regeneratePreviewOnly?: boolean;
+  /** Only meaningful alongside regeneratePreviewOnly. */
+  previewTimestampSeconds?: number;
 }
 
 export type ResolveExecuteFrameDispatchResult =
@@ -164,6 +175,23 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   if (session.projectId !== projectId) {
     return { ok: false, reason: "The execution session does not belong to this project" };
   }
+
+  // First Preview regeneration (live QA, 2026-09-08/09 incident: a
+  // captured preview landed at t=0 on a solid background color, before
+  // any branding was visible; the operator rejected it, which - by
+  // design, section 11's "no revise in place" for a genuinely bad edit -
+  // marks the session FAILED. That design never anticipated "the edit is
+  // fine, only the captured FRAME was unrepresentative" as a distinct
+  // case.) A previewOnly dispatch deliberately bypasses the two checks
+  // right below (terminal-session, already-edited) - both are correct for
+  // a NEW edit, both are exactly wrong for "recapture the existing,
+  // already-safely-verified working copy at a different timestamp,
+  // nothing else changes." See resolveRegeneratePreviewOnly's own doc
+  // comment for its distinct, narrower preconditions.
+  if (input.regeneratePreviewOnly === true) {
+    return resolveRegeneratePreviewOnly(input, session);
+  }
+
   if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
     return { ok: false, reason: `Execution session is ${session.status} - start a new execution session to continue` };
   }
@@ -441,6 +469,122 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       compositionName: composition.name,
       approvedMappingIds,
       operations
+    }
+  };
+}
+
+/**
+ * First Preview regeneration (live QA, 2026-09-08/09) - a deliberately
+ * NARROW, distinct precondition set from the normal edit path above:
+ *   - the session must be AWAITING_PREVIEW_APPROVAL (recapture before
+ *     deciding), or FAILED with real completed work already on record
+ *     (completedScenePlanIds non-empty, a real latestWorkingProjectSha256,
+ *     and a real latestPreviewScenePlanId) - i.e. genuinely reached the
+ *     preview gate and was rejected there, never a session that failed
+ *     for some OTHER reason (a chain-of-custody violation, or one that
+ *     never got far enough to have a working copy at all). Any other
+ *     FAILED session is refused exactly as before - this never becomes a
+ *     general "un-fail any session" escape hatch.
+ *   - targets EXACTLY session.latestPreviewScenePlanId - the scene the
+ *     rejected (or about-to-be-reviewed) preview was actually captured
+ *     for, never the caller-supplied scenePlanId blindly (checked for
+ *     equality below as defense in depth against a caller/UI bug, but the
+ *     session's own value is what's actually used).
+ *   - produces operations: [] / approvedMappingIds: [] / previewOnly:
+ *     true / expectedWorkingProjectSha256: session's own real value
+ *     (never null - resuming the EXISTING mutated working copy is the
+ *     entire point, never a fresh copy from source).
+ */
+function resolveRegeneratePreviewOnly(
+  input: ResolveExecuteFrameDispatchInput,
+  session: ExecuteFrameDispatchSessionSnapshot
+): ResolveExecuteFrameDispatchResult {
+  const { projectId, scenePlanId, currentPlan, currentProjectManifest, worker, now, staleAfterMs } = input;
+
+  const canRegenerate =
+    session.status === "AWAITING_PREVIEW_APPROVAL" ||
+    (session.status === "FAILED" && session.completedScenePlanIds.length > 0 && session.latestWorkingProjectSha256 !== null && session.latestPreviewScenePlanId !== null);
+  if (!canRegenerate) {
+    return {
+      ok: false,
+      reason: `Execution session is ${session.status} and does not have a recoverable First Preview to regenerate - start a new execution session to continue`
+    };
+  }
+  if (session.latestWorkingProjectSha256 === null || session.latestPreviewScenePlanId === null) {
+    return { ok: false, reason: "Execution session has no recorded working copy or prior preview to regenerate from" };
+  }
+  if (scenePlanId !== session.latestPreviewScenePlanId) {
+    return {
+      ok: false,
+      reason: `Requested scenePlanId "${scenePlanId}" does not match this session's own last-previewed scene "${session.latestPreviewScenePlanId}"`
+    };
+  }
+
+  if (!currentPlan) {
+    return { ok: false, reason: "No execution plan exists for this project" };
+  }
+  if (currentPlan.status !== "APPROVED") {
+    return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a preview can only be regenerated from an approved plan` };
+  }
+  if (session.planRevision !== currentPlan.revision || session.sourceProjectSha256 !== currentPlan.sourceProjectSha256) {
+    return {
+      ok: false,
+      reason: `Execution session is bound to plan revision ${session.planRevision}, but the current plan is revision ${currentPlan.revision} - the plan changed after this session began; start a new execution session`
+    };
+  }
+  if (!currentProjectManifest || currentProjectManifest.sourceProject.sha256 !== currentPlan.sourceProjectSha256) {
+    return { ok: false, reason: "The project's current manifest sha256 no longer matches this plan - the source project may have changed" };
+  }
+
+  const scene = currentPlan.scenePlans.find((s) => s.id === session.latestPreviewScenePlanId);
+  if (!scene) {
+    return { ok: false, reason: `Unknown scenePlanId "${session.latestPreviewScenePlanId}" in this plan` };
+  }
+  const composition = currentProjectManifest.compositions.find((c) => c.compositionId === scene.manifestCompositionId);
+  if (!composition) {
+    return { ok: false, reason: `manifestCompositionId "${scene.manifestCompositionId}" does not match any composition in the current manifest` };
+  }
+
+  if (!worker) {
+    return { ok: false, reason: "Worker has never reported in" };
+  }
+  if (worker.id !== session.assignedWorkerId) {
+    return { ok: false, reason: "This execution session is pinned to a different worker - its cumulative working copy exists only on that worker's local disk" };
+  }
+  if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, staleAfterMs)) {
+    return { ok: false, reason: "Worker is not currently ONLINE (no fresh heartbeat)" };
+  }
+  if (worker.aeStatus !== "ONLINE") {
+    return { ok: false, reason: `AE is not ONLINE (reports ${worker.aeStatus})` };
+  }
+  if (worker.mcpStatus !== "ONLINE") {
+    return { ok: false, reason: `MCP is not ONLINE (reports ${worker.mcpStatus})` };
+  }
+  if (!worker.capabilities.includes(REQUIRED_WORKER_CAPABILITY)) {
+    return { ok: false, reason: `Worker does not report the ${REQUIRED_WORKER_CAPABILITY} capability` };
+  }
+  if (worker.currentJobId !== null) {
+    return { ok: false, reason: "Worker already has a job in progress (currentJobId is not empty)" };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      projectId,
+      planId: currentPlan.id,
+      planRevision: currentPlan.revision,
+      sourceProjectSha256: currentPlan.sourceProjectSha256,
+      sourceProjectPath: currentProjectManifest.sourceProject.path,
+      executionSessionId: session.id,
+      expectedWorkingProjectSha256: session.latestWorkingProjectSha256,
+      scenePlanId: session.latestPreviewScenePlanId,
+      manifestCompositionId: scene.manifestCompositionId,
+      aeProjectItemIndex: composition.aeProjectItemIndex,
+      compositionName: composition.name,
+      approvedMappingIds: [],
+      operations: [],
+      previewOnly: true,
+      previewTimestampSeconds: input.previewTimestampSeconds
     }
   };
 }

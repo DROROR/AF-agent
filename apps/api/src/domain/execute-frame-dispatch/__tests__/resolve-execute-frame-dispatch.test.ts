@@ -196,6 +196,7 @@ function validSession(overrides: Partial<ExecuteFrameDispatchSessionSnapshot> = 
     status: "PREPARING",
     latestWorkingProjectSha256: null,
     completedScenePlanIds: [],
+    latestPreviewScenePlanId: null,
     ...overrides
   };
 }
@@ -869,5 +870,101 @@ describe("resolveExecuteFrameDispatch", () => {
         expect(operation).not.toHaveProperty("assetPath");
       }
     }
+  });
+});
+
+describe("resolveExecuteFrameDispatch - regeneratePreviewOnly (First Preview regeneration, live QA 2026-09-08/09)", () => {
+  const MUTATED_SHA = "d".repeat(64);
+
+  function regeneratableSession(overrides: Partial<ExecuteFrameDispatchSessionSnapshot> = {}): ExecuteFrameDispatchSessionSnapshot {
+    return validSession({
+      status: "FAILED",
+      completedScenePlanIds: ["scene-1"],
+      latestWorkingProjectSha256: MUTATED_SHA,
+      latestPreviewScenePlanId: "scene-1",
+      ...overrides
+    });
+  }
+
+  it("allows a FAILED session with real completed work to regenerate - the exact rejected-preview recovery case", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: regeneratableSession(), regeneratePreviewOnly: true, previewTimestampSeconds: 3 })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([]);
+    expect(result.payload.approvedMappingIds).toEqual([]);
+    expect(result.payload.previewOnly).toBe(true);
+    expect(result.payload.previewTimestampSeconds).toBe(3);
+    expect(result.payload.expectedWorkingProjectSha256).toBe(MUTATED_SHA);
+    expect(result.payload.scenePlanId).toBe("scene-1");
+  });
+
+  it("allows an AWAITING_PREVIEW_APPROVAL session to regenerate before ever being rejected", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: regeneratableSession({ status: "AWAITING_PREVIEW_APPROVAL" }), regeneratePreviewOnly: true })
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a FAILED session with no completed scenes - a genuine chain-of-custody/other failure, never treated as recoverable", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        session: validSession({ status: "FAILED", completedScenePlanIds: [], latestWorkingProjectSha256: null, latestPreviewScenePlanId: null }),
+        regeneratePreviewOnly: true
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("does not have a recoverable First Preview");
+  });
+
+  it("refuses a FAILED session with completed scenes but no working copy hash recorded", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: regeneratableSession({ latestWorkingProjectSha256: null }), regeneratePreviewOnly: true })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a COMPLETED session - never a general un-fail-any-session escape hatch", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: regeneratableSession({ status: "COMPLETED" }), regeneratePreviewOnly: true }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses when the caller's scenePlanId does not match the session's own latestPreviewScenePlanId - never a caller-chosen target", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ scenePlanId: "some-other-scene", session: regeneratableSession(), regeneratePreviewOnly: true })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("does not match this session's own last-previewed scene");
+  });
+
+  it("refuses a stale plan revision, exactly like the normal edit path", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: regeneratableSession({ planRevision: 1 }), currentPlan: validPlan({ revision: 2 }), regeneratePreviewOnly: true })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses an offline worker, exactly like the normal edit path", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: regeneratableSession(), worker: validWorker({ status: "OFFLINE" }), regeneratePreviewOnly: true })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("never produces a real edit operation - operations/approvedMappingIds are always empty regardless of the scene's own real mappings", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        session: regeneratableSession(),
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping(), imageMapping()] })] }),
+        regeneratePreviewOnly: true
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toHaveLength(0);
+    expect(result.payload.approvedMappingIds).toHaveLength(0);
   });
 });

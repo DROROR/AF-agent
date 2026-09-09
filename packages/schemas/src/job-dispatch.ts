@@ -118,7 +118,20 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
       workerId: z.string().uuid(),
       projectId: z.string().uuid(),
       executionSessionId: z.string().uuid(),
-      scenePlanId: z.string().min(1)
+      scenePlanId: z.string().min(1),
+      /**
+       * First Preview regeneration (live QA, 2026-09-08/09) - opt-in
+       * intent flag only, same "omitted/false preserves the exact prior
+       * behavior for every existing caller" convention as
+       * discoverLayerDetails above. The real ExecuteSceneEditRequest this
+       * becomes (operations: [], previewOnly: true, ...) is still entirely
+       * server-resolved from trusted session/plan/manifest state via
+       * resolveExecuteFrameDispatch's own previewOnly branch - never a raw
+       * worker payload passthrough from the browser.
+       */
+      regeneratePreviewOnly: z.boolean().optional(),
+      /** Only meaningful alongside regeneratePreviewOnly - see executeSceneEditRequestSchema's own previewTimestampSeconds doc comment. */
+      previewTimestampSeconds: z.number().nonnegative().finite().optional()
     })
     .strict(),
   z

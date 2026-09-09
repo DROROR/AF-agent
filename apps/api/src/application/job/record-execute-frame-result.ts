@@ -1,4 +1,4 @@
-import { sceneEditResultSchema, type JobDto } from "@dyo/schemas";
+import { executeSceneEditRequestSchema, sceneEditResultSchema, type JobDto } from "@dyo/schemas";
 import { deriveExecutionSessionStatus } from "../../domain/execution-session/derive-status.js";
 import type { ExecutionSessionRepository } from "../../domain/execution-session/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -54,6 +54,19 @@ export async function recordExecuteFrameResultIfApplicable(deps: RecordExecuteFr
     return;
   }
   if (!job.projectId) {
+    return;
+  }
+
+  // First Preview regeneration (live QA, 2026-09-08/09): a previewOnly job
+  // never edits anything and is handled entirely by the disjoint sibling
+  // recordRegeneratePreviewResultIfApplicable instead - it targets an
+  // already-completed scene and (in its recoverable-FAILED case) a
+  // terminal session, both of which this function's own checks below
+  // would otherwise treat as ordinary completion/no-op, not the distinct
+  // "bring a rejected preview's session back to the approval gate"
+  // transition that function performs.
+  const parsedPayload = executeSceneEditRequestSchema.safeParse(job.payload);
+  if (parsedPayload.success && parsedPayload.data.previewOnly === true) {
     return;
   }
 
