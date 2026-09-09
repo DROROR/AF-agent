@@ -296,17 +296,23 @@ describe("ProjectPreviewTab", () => {
 
   it("shows the real captured preview image (never a placeholder) once the session reports hasPreview, and offers both Approve and Reject actions", async () => {
     const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
+    const session = awaitingPreviewSession();
     stubFetchByUrl({
       "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
-      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: awaitingPreviewSession() } }
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session } }
     });
     renderPreview();
     const approveButton = await screen.findByRole("button", { name: "Approve preview" });
     screen.getByRole("button", { name: "Reject preview" });
     const image = screen.getByAltText("Captured first-frame preview") as HTMLImageElement;
     expect(image.src).toContain(`/api/projects/${PROJECT_ID}/execution-sessions/66666666-6666-6666-6666-666666666666/preview`);
+    // Cache-busting fix (live QA, 2026-09-09 real incident): the image src
+    // must include a version query param derived from the session's own
+    // real latestPreviewCapturedAt - a stable URL is exactly what let the
+    // browser keep showing an old frame after a real regeneration.
+    expect(image.src).toContain(`?v=${encodeURIComponent(session.latestPreviewCapturedAt as string)}`);
     expect(approveButton).toBeTruthy();
   });
 
@@ -432,16 +438,18 @@ describe("ProjectPreviewTab", () => {
     expect(calls.some(([url]) => url === `/api/projects/${PROJECT_ID}/execution-sessions`)).toBe(false);
   }, 10000);
 
-  it("after a successful regeneration, the session returns to AWAITING_PREVIEW_APPROVAL with Approve/Reject shown", async () => {
+  it("after a successful regeneration, the session returns to AWAITING_PREVIEW_APPROVAL with Approve/Reject shown, and the preview image's own URL changes to the new capture - never the stale cached frame", async () => {
     const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
     const JOB_ID = "99999999-9999-9999-9999-999999999999";
+    const OLD_CAPTURED_AT = "2026-09-09T13:13:37.000Z";
+    const NEW_CAPTURED_AT = "2026-09-09T13:25:48.000Z";
     stubFetchByUrl({
       "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [REGEN_WORKER] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, scenes), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: [
-        { status: 200, body: { session: rejectedButRecoverableSession() } },
-        { status: 200, body: { session: awaitingPreviewSession() } }
+        { status: 200, body: { session: rejectedButRecoverableSession({ latestPreviewCapturedAt: OLD_CAPTURED_AT }) } },
+        { status: 200, body: { session: awaitingPreviewSession({ latestPreviewCapturedAt: NEW_CAPTURED_AT }) } }
       ],
       "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId: REGEN_WORKER.workerId, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() } },
       [`/api/jobs/${JOB_ID}`]: {
@@ -467,11 +475,22 @@ describe("ProjectPreviewTab", () => {
       }
     });
     renderPreview();
+    const imageBefore = (await screen.findByAltText("Captured first-frame preview")) as HTMLImageElement;
+    expect(imageBefore.src).toContain(`?v=${encodeURIComponent(OLD_CAPTURED_AT)}`);
+
     const button = await screen.findByRole("button", { name: "Regenerate First Preview" });
     fireEvent.click(button);
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Approve preview" })).not.toBeNull(), { timeout: 5000 });
     screen.getByRole("button", { name: "Reject preview" });
+
+    // The exact real 2026-09-09 incident: the operator saw the approval
+    // gate reload but the image looked unchanged. This is what proves it
+    // didn't - same component instance, no remount, the <img>'s own src
+    // now points at the NEW capture.
+    const imageAfter = screen.getByAltText("Captured first-frame preview") as HTMLImageElement;
+    expect(imageAfter.src).toContain(`?v=${encodeURIComponent(NEW_CAPTURED_AT)}`);
+    expect(imageAfter.src).not.toBe(imageBefore.src);
   }, 10000);
 });
 

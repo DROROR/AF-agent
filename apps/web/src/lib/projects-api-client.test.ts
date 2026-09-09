@@ -4,6 +4,7 @@ import {
   GENERATE_SUGGESTIONS_TIMEOUT_MS,
   createExecutionPlan,
   createProject,
+  executionSessionPreviewUrl,
   fetchProjectList,
   generateMappingSuggestions,
   updateExecutionPlan,
@@ -18,6 +19,35 @@ afterEach(() => {
 function stubFetch(status: number, body: unknown): void {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) }));
 }
+
+/**
+ * Cache-busting fix (live QA, 2026-09-09 real incident): a previewOnly
+ * regeneration genuinely changed the session's captured preview, but the
+ * dashboard's <img> kept its OLD src string (no query param varied it),
+ * so neither React nor the browser had any reason to re-fetch - the
+ * operator saw the approval gate reload with a stale frame and needed a
+ * hard refresh to see the real new one.
+ */
+describe("executionSessionPreviewUrl", () => {
+  const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
+  const SESSION_ID = "22222222-2222-2222-2222-222222222222";
+
+  it("omits the version query param when none is given - preserves the exact prior URL shape for any existing caller", () => {
+    expect(executionSessionPreviewUrl(PROJECT_ID, SESSION_ID)).toBe(`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/preview`);
+  });
+
+  it("appends a version query param derived from the given previewVersion - the URL genuinely changes across a regeneration", () => {
+    const first = executionSessionPreviewUrl(PROJECT_ID, SESSION_ID, "2026-09-09T13:13:37.000Z");
+    const second = executionSessionPreviewUrl(PROJECT_ID, SESSION_ID, "2026-09-09T13:25:48.000Z");
+    expect(first).not.toBe(second);
+    expect(first).toContain("?v=");
+    expect(second).toContain("?v=");
+  });
+
+  it("omits the query param for a null previewVersion (no capture yet) - never a literal '?v=null'", () => {
+    expect(executionSessionPreviewUrl(PROJECT_ID, SESSION_ID, null)).toBe(`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/preview`);
+  });
+});
 
 describe("fetchProjectList", () => {
   it("returns the real project list on a well-formed 200 response", async () => {

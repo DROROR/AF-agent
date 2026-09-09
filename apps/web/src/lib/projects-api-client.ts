@@ -672,9 +672,29 @@ export async function rejectFirstPreview(projectId: string, sessionId: string): 
   return { ok: true, data: parsed.data.session };
 }
 
-/** Same-origin URL for a session's current preview PNG - safe to use directly as an <img> src; never a filesystem path or storage key. */
-export function executionSessionPreviewUrl(projectId: string, sessionId: string): string {
-  return `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/preview`;
+/**
+ * Same-origin URL for a session's current preview PNG - safe to use
+ * directly as an <img> src; never a filesystem path or storage key.
+ *
+ * Cache-busting fix (live QA, 2026-09-09 real incident): this URL is
+ * otherwise IDENTICAL across every regeneration of the same session's
+ * preview (same projectId/sessionId, no query string) - an operator who
+ * regenerated First Preview at a new timestamp saw the approval gate
+ * reload but the <img> kept showing the OLD frame, because neither the
+ * browser nor React had any reason to re-fetch a resource whose src
+ * string never changed (confirmed: the underlying file on disk and the
+ * session's own latestPreviewSha256 HAD genuinely changed - this was
+ * never a stale/identical frame, only a stale DISPLAY of a real new one).
+ * `previewVersion` should always be the session's own real
+ * latestPreviewCapturedAt (or any other value that changes exactly when
+ * the real preview does, never a client-generated random/timestamp
+ * value) - passed as a query param so the URL itself changes whenever
+ * the real preview does, forcing a genuine re-fetch. Optional/omitted
+ * preserves the exact prior URL shape for any other caller.
+ */
+export function executionSessionPreviewUrl(projectId: string, sessionId: string, previewVersion?: string | null): string {
+  const base = `/api/projects/${encodeURIComponent(projectId)}/execution-sessions/${encodeURIComponent(sessionId)}/preview`;
+  return previewVersion ? `${base}?v=${encodeURIComponent(previewVersion)}` : base;
 }
 
 /** Metadata only - null when no complete preview has ever been captured yet for this session, a real valid state (client-handoff phase, "real final preview approval gate"). */

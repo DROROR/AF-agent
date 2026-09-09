@@ -136,6 +136,12 @@ export function registerExecutionSessionRoutes(app: FastifyInstance, deps: Execu
     const { projectId, sessionId } = sessionParamsSchema.parse(request.params);
     const file = await getPreviewFile({ executionSessionRepository: deps.executionSessionRepository, assetStorage: deps.assetStorage }, projectId, sessionId);
     reply.header("content-type", file.mimeType);
+    // Cache-busting fix (live QA, 2026-09-09) - this same URL is reused
+    // for every preview a session ever has (the query param the browser
+    // now sees is what actually varies - see executionSessionPreviewUrl's
+    // own doc comment); never let an intermediary or the browser's own
+    // heuristic cache serve a stale frame for it regardless.
+    reply.header("cache-control", "no-store");
     reply.send(file.buffer);
   });
 

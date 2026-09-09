@@ -349,6 +349,12 @@ describe("GET /api/projects/:projectId/execution-sessions/:sessionId/preview", (
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toBe("image/png");
     expect(Buffer.from(response.rawPayload)).toEqual(realBytes);
+    // Cache-busting fix (live QA, 2026-09-09 real incident): this exact
+    // URL is reused for every preview a session ever has - never let an
+    // intermediary or the browser's own heuristic cache serve a stale
+    // frame for it, on top of the query-param versioning the dashboard's
+    // own <img> src now applies (see executionSessionPreviewUrl).
+    expect(response.headers["cache-control"]).toBe("no-store");
   });
 });
 

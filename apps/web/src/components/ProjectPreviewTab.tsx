@@ -347,8 +347,13 @@ export function ProjectPreviewTab(): ReactElement | null {
 
         {session?.hasPreview ? (
           // A same-origin, authenticated API route byte stream, not a static asset next/image could optimize.
+          // Cache-busted by the session's own real latestPreviewCapturedAt
+          // (live QA, 2026-09-09) - without it this <img> keeps its OLD
+          // src string across a regeneration and never re-fetches, even
+          // though the real preview genuinely changed.
           <img
-            src={executionSessionPreviewUrl(projectId, session.id)}
+            key={session.latestPreviewCapturedAt ?? session.id}
+            src={executionSessionPreviewUrl(projectId, session.id, session.latestPreviewCapturedAt)}
             alt={t.projectWorkspace.overview.previewImageAlt}
             style={{ maxWidth: "100%", borderRadius: "8px", marginBlock: "0.75rem" }}
           />
