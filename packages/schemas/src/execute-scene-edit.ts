@@ -334,6 +334,16 @@ export const executeSceneEditRequestSchema = z
      * and recordRegeneratePreviewResultIfApplicable (apps/api) for the
      * dispatch-time preconditions and the session-status transition this
      * enables - never a path to re-running MAP_FOOTAGE/SET_TEXT.
+     *
+     * MUST BE READ-ONLY WITH RESPECT TO THE .aep FILE (2026-09-09
+     * correction to the fix above): the worker never calls
+     * app.project.save() for previewOnly - AE's own save unconditionally
+     * re-serializes the entire binary, which measurably changes its
+     * sha256 even with zero real content changes (the exact real
+     * incident: workingProjectSha256 changed from a previewOnly run that
+     * requested no operations at all). The preview frame itself is
+     * captured via the separate, genuinely read-only `ae_capture_frame`
+     * tool, which never required a save to begin with.
      */
     previewOnly: z.boolean().optional(),
     /**

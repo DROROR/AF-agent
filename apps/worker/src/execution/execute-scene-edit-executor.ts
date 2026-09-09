@@ -64,8 +64,14 @@ export interface SceneEditExecutorDeps {
  * The full EXECUTE_FRAME pipeline: verify/prepare a working copy, resume
  * from any prior checkpoint, apply each still-pending operation through
  * the fixed AE edit bridge, save the working copy, capture and verify a
- * real preview frame. Never partially mutates and then reports success -
- * every early return already has a `failureReason` set and (per
+ * real preview frame. `previewOnly` (live QA, 2026-09-08/09) is the one
+ * exception to "save the working copy": zero operations are ever applied
+ * for it, and the save step itself is skipped entirely - see the
+ * saveProject call site's own doc comment for why calling it anyway would
+ * NOT be a harmless no-op (AE's save unconditionally re-serializes the
+ * whole binary, changing its sha256 even with no real content change).
+ * Never partially mutates and then reports success - every early return
+ * already has a `failureReason` set and (per
  * isSceneEditResultAcceptable, apps/api's own acceptance predicate) can
  * never be treated as complete.
  *
@@ -305,21 +311,37 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
   }
 
-  const saveResult = await deps.aeEditBridge.saveProject();
-  if (!saveResult.ok) {
-    checkpoint = markFailed(checkpoint, `working copy save failed: ${saveResult.failureReason}`, deps.now());
-    return finish({
-      sourceProjectSha256: workingCopy.sourceProjectSha256,
-      workingProjectPath: workingCopy.workingProjectPath,
-      workingProjectSha256: workingCopy.workingProjectSha256,
-      previewFramePath: null,
-      previewTimestampSeconds: null
-    });
+  // CRITICAL SAFETY FIX (live QA, 2026-09-09, real incident): `previewOnly`
+  // must be READ-ONLY with respect to the .aep file on disk - zero
+  // operations were ever requested, so there is nothing to persist.
+  // `app.project.save()` was previously called unconditionally here even
+  // for a previewOnly run, and AE's own save unconditionally re-serializes
+  // the ENTIRE binary (internal save counters/timestamps/caches), which
+  // measurably changed the working copy's own sha256 even though its real
+  // content never changed - the exact incident this fixes. Preview
+  // capture itself (deps.previewCapture.capture, below) uses the
+  // genuinely separate, read-only `ae_capture_frame` tool and never
+  // needed a save to begin with - skipping it for previewOnly loses
+  // nothing.
+  if (request.previewOnly !== true) {
+    const saveResult = await deps.aeEditBridge.saveProject();
+    if (!saveResult.ok) {
+      checkpoint = markFailed(checkpoint, `working copy save failed: ${saveResult.failureReason}`, deps.now());
+      return finish({
+        sourceProjectSha256: workingCopy.sourceProjectSha256,
+        workingProjectPath: workingCopy.workingProjectPath,
+        workingProjectSha256: workingCopy.workingProjectSha256,
+        previewFramePath: null,
+        previewTimestampSeconds: null
+      });
+    }
   }
 
-  // Section 12: verify the SAVED working copy for real - exists, real
-  // file, non-zero size, and record its resulting sha256 (never assume
-  // the save succeeded just because saveProject() didn't error).
+  // Section 12: verify the working copy for real - exists, real file,
+  // non-zero size, and record its resulting sha256 (never assume a save
+  // succeeded just because saveProject() didn't error; for previewOnly,
+  // this independently proves the file is STILL byte-identical to what
+  // it was before this run, since saveProject() was never even called).
   const savedHash = await hashSourceProject(workingCopy.workingProjectPath);
   if (!savedHash.ok) {
     checkpoint = markFailed(checkpoint, `could not verify the saved working copy on disk: ${savedHash.reason}`, deps.now());

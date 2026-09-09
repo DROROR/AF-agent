@@ -854,6 +854,7 @@ describe("executeSceneEdit", () => {
       // previewTimestampSeconds - never the fixed t=0 default.
       const regenBridge = new FakeAeEditBridge(alwaysSucceed);
       const regenPreview = new FakePreviewCapture(REAL_PREVIEW);
+      let uploadPreviewCalls = 0;
       const regenRequest = makeRequest({
         sourceProjectPath: sourcePath,
         sourceProjectSha256: sourceSha,
@@ -869,7 +870,10 @@ describe("executeSceneEdit", () => {
           workRoot,
           aeEditBridge: regenBridge,
           previewCapture: regenPreview,
-          uploadPreview: async () => ({ ok: true as const }),
+          uploadPreview: async () => {
+            uploadPreviewCalls++;
+            return { ok: true as const };
+          },
           persistCheckpoint: async () => ({ ok: true as const }),
           resolveOperation: defaultResolveOperation,
           now: () => new Date()
@@ -882,6 +886,11 @@ describe("executeSceneEdit", () => {
       // No MAP_FOOTAGE/SET_TEXT (or any operation) was ever applied again.
       expect(regenBridge.calls).toHaveLength(0);
       expect(regenResult.operationsCompleted).toEqual([]);
+      // THE fix (live QA, 2026-09-09): previewOnly never calls
+      // saveProject/app.project.save() at all - not zero-effect, never
+      // called - since AE's own save re-serializes the whole binary
+      // regardless of real content changes.
+      expect(regenBridge.saveCalls).toBe(0);
       // Still opened the working copy (safety-fixed flow) before capturing.
       expect(regenBridge.openProjectCalls).toHaveLength(1);
       // The exact same working copy, never a fresh one re-copied from source.
@@ -891,6 +900,10 @@ describe("executeSceneEdit", () => {
       expect(regenResult.workingProjectSha256).toBe(mutatedWorkingCopySha256);
       // The chosen timestamp, never the default t=0, actually reached preview capture.
       expect(regenPreview.lastCall?.timestampSeconds).toBe(5);
+      // The captured preview was genuinely uploaded, not merely captured
+      // locally - a previewOnly run still completes the real "capture ->
+      // upload" contract every other EXECUTE_FRAME job has.
+      expect(uploadPreviewCalls).toBe(1);
       // The immutable source remains untouched.
       expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
     });
@@ -952,20 +965,23 @@ describe("executeSceneEdit", () => {
         makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha })
       );
 
-      // A save that mutates the file even with zero operations applied -
-      // simulates an unexpected/buggy AE-side side effect during what
-      // should have been a pure read + capture.
-      class MutatingSaveBridge extends FakeAeEditBridge {
-        override async saveProject(): Promise<SaveProjectResult> {
+      // Simulates an unexpected/buggy AE-side side effect during the open
+      // step - the only AE-side call previewOnly still makes before its
+      // hash check (saveProject is never called for previewOnly - see the
+      // fix this test now exercises: it must catch a mutation regardless
+      // of WHERE it came from, not rely on save being the only suspect).
+      class MutatingOpenBridge extends FakeAeEditBridge {
+        override async openProject(expectedPath: string): Promise<OpenProjectResult> {
+          const opened = await super.openProject(expectedPath);
           appendFileSync(editResult.workingProjectPath as string, "\n// unexpected mutation");
-          return { ok: true, resultingValue: null };
+          return opened;
         }
       }
 
       const result = await executeSceneEdit(
         {
           workRoot,
-          aeEditBridge: new MutatingSaveBridge(alwaysSucceed),
+          aeEditBridge: new MutatingOpenBridge(alwaysSucceed),
           previewCapture: new FakePreviewCapture(REAL_PREVIEW),
           uploadPreview: async () => ({ ok: true as const }),
           persistCheckpoint: async () => ({ ok: true as const }),
@@ -1004,9 +1020,10 @@ describe("executeSceneEdit", () => {
       );
 
       class SourceMutatingBridge extends FakeAeEditBridge {
-        override async saveProject(): Promise<SaveProjectResult> {
+        override async openProject(expectedPath: string): Promise<OpenProjectResult> {
+          const opened = await super.openProject(expectedPath);
           appendFileSync(sourcePath, "\n// simulated source overwrite");
-          return { ok: true, resultingValue: null };
+          return opened;
         }
       }
 
