@@ -7,6 +7,7 @@ import { sessionWorkingCopyPath } from "../../workspace/working-copy.js";
 import { fullPreviewOutputFilename, fullPreviewOutputPath } from "./full-preview-output-path.js";
 import { validateRenderArtifact } from "../render/validate-render-artifact.js";
 import type { CompositionVerifier } from "../render/verify-render-composition.js";
+import { computeFullCompositionFrameRange } from "../render/aerender-args.js";
 import type { AerenderRunner } from "../render/aerender-runner.js";
 import type { FullPreviewUploader } from "./upload-full-preview.js";
 
@@ -112,13 +113,23 @@ export async function executeCreateFullPreview(deps: CreateFullPreviewExecutorDe
     }
   }
 
+  // Real 2026-09-10 incident fix (session a7fee3d9): always render the
+  // composition's own full, real duration - never left to the Render
+  // Settings template's own Time Span default, which for "Best Settings"
+  // on this real project turned out to mean "Work Area Only" (31.7317s),
+  // narrower than the composition's own real 45.045s duration. See
+  // aerender-args.ts's own doc comment on -s/-e.
+  const frameRange = computeFullCompositionFrameRange(verified.durationSeconds, verified.frameRate);
+
   const runResult = await deps.aerenderRunner.run({
     executablePath: deps.aerenderPath,
     projectPath: workingProjectPath,
     compName: request.compositionName,
     renderSettingsTemplateName: request.renderSettingsTemplateName,
     outputModuleTemplateName: request.outputModuleTemplateName,
-    outputPath
+    outputPath,
+    startFrame: frameRange.startFrame,
+    endFrame: frameRange.endFrame
   });
 
   if (!runResult.ok) {

@@ -62,6 +62,8 @@ function baseParams(executablePath: string, compName: string, overrides: Record<
     renderSettingsTemplateName: "Best Settings",
     outputModuleTemplateName: "H.264 - Match Source",
     outputPath: "/work/jobs/job-1/renders/landscape/output.mp4",
+    startFrame: 0,
+    endFrame: 1349,
     ...overrides
   };
 }

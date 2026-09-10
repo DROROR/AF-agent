@@ -69,7 +69,7 @@ function makeRequest(fixture: ReturnType<typeof makeFixture>, overrides: Partial
 
 class FakeCompositionVerifier implements CompositionVerifier {
   calls = 0;
-  constructor(private readonly result: VerifyRenderCompositionResult = { ok: true }) {}
+  constructor(private readonly result: VerifyRenderCompositionResult = { ok: true, durationSeconds: 45.045045045045, frameRate: 29.9700012207031 }) {}
   async verify(): Promise<VerifyRenderCompositionResult> {
     this.calls++;
     return this.result;
@@ -150,7 +150,13 @@ describe("executeRenderProject", () => {
     expect(result.artifact?.variant).toBe("LANDSCAPE");
     expect(result.checkpoint.completedOperationIndices.sort()).toEqual([0, 1, 2, 3]);
     expect(runner.calls).toHaveLength(1);
-    expect(verifier.calls).toBe(1);
+    // Real 2026-09-10 incident fix (session a7fee3d9): the composition is
+    // verified once at VERIFY_COMPOSITION, then re-verified immediately
+    // before RUN_AERENDER to obtain its own real durationSeconds/frameRate
+    // for the explicit full-composition -s/-e frame range - safe (cheap,
+    // read-only) and correct across a resumed run that starts directly at
+    // RUN_AERENDER, where stage 1's own result is never in scope.
+    expect(verifier.calls).toBe(2);
 
     // The real validated output file is uploaded exactly once, from the
     // same path VALIDATE_ARTIFACT itself just proved exists.
@@ -164,6 +170,31 @@ describe("executeRenderProject", () => {
 
     // Original source untouched.
     expect(readFileSync(fixture.sourcePath)).toEqual(Buffer.from("original source aep bytes"));
+  });
+
+  /**
+   * Real 2026-09-10 incident (session a7fee3d9): aerender was rendering
+   * only the AE project's own work area (31.7317s) instead of the
+   * composition's own real, full duration (45.045s). Proves the executor
+   * always computes and passes an explicit full-composition frame range,
+   * from the composition verifier's own real durationSeconds/frameRate -
+   * never left to the Render Settings template's own Time Span default.
+   */
+  it("real 2026-09-10 incident fix: always passes an explicit full-composition startFrame/endFrame to aerender, computed from the verifier's own real duration/frameRate", async () => {
+    const fixture = makeFixture();
+    const request = makeRequest(fixture);
+    const runner = alwaysSucceedingRunner(42);
+    const verifier = new FakeCompositionVerifier({ ok: true, durationSeconds: 45.045045045045, frameRate: 29.9700012207031 });
+
+    await executeRenderProject(
+      { workRoot: fixture.workRoot, aerenderPath: "/fake/aerender", aerenderRunner: runner, compositionVerifier: verifier, artifactUploader: alwaysSucceedingUploader(), persistCheckpoint: noopPersist, now: () => new Date() },
+      "job-1c",
+      request
+    );
+
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]?.startFrame).toBe(0);
+    expect(runner.calls[0]?.endFrame).toBe(1349);
   });
 
   it("marks the artifact INVALID and the checkpoint failed when the upload itself fails, even though rendering/validation both succeeded", async () => {

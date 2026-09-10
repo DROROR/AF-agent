@@ -50,6 +50,31 @@
  *                              fixed, moderate log verbosity: never ALL
  *                              (unbounded chatter) and never SILENT (no
  *                              troubleshooting signal).
+ *   -s <startFrame>            real 2026-09-10 incident fix (session
+ *   -e <endFrame>              a7fee3d9): without explicit -s/-e, aerender
+ *                              falls back to whatever "Time Span" the
+ *                              named Render Settings template itself
+ *                              specifies - for "Best Settings" on this
+ *                              real project that turned out to be "Work
+ *                              Area Only", and the real work area
+ *                              (31.7317s) is narrower than the
+ *                              composition's own real duration (45.045s),
+ *                              silently truncating every render. `-s`/`-e`
+ *                              are real, stable, Adobe-documented aerender
+ *                              flags that explicitly override the
+ *                              template's own Time Span for this one
+ *                              invocation - always the composition's own
+ *                              full, real, freshly-verified frame range
+ *                              (startFrame 0 through the last real frame),
+ *                              computed by the caller from
+ *                              CompositionVerifier's own real
+ *                              durationSeconds/frameRate (verify-render-
+ *                              composition.ts) - never a guessed or
+ *                              caller-supplied span, and never a change to
+ *                              the project's own AE work-area setting
+ *                              itself (this is a render-invocation
+ *                              argument only, read-only with respect to
+ *                              project state).
  */
 export interface AerenderArgsParams {
   projectPath: string;
@@ -57,6 +82,25 @@ export interface AerenderArgsParams {
   renderSettingsTemplateName: string;
   outputModuleTemplateName: string;
   outputPath: string;
+  /** 0-based, always 0 for a full-composition render - see this module's own doc comment on -s/-e above. */
+  startFrame: number;
+  /** 0-based, INCLUSIVE - the composition's own real last frame (Math.round(durationSeconds * frameRate) - 1), never the work area's own end. */
+  endFrame: number;
+}
+
+/**
+ * Real 2026-09-10 incident fix (session a7fee3d9) - the ONE place both
+ * CREATE_PREVIEW and RENDER compute a full-composition frame range from a
+ * composition's own real, freshly-verified durationSeconds/frameRate (see
+ * verify-render-composition.ts's own doc comment) - `Math.round` rather
+ * than `Math.floor`/`Math.ceil` because a real AE composition's own
+ * duration is always frameCount/frameRate exactly, so multiplying back
+ * lands on (or a hair below/above, from float rounding) the real integer
+ * frame count; never a caller-supplied or guessed span.
+ */
+export function computeFullCompositionFrameRange(durationSeconds: number, frameRate: number): { startFrame: number; endFrame: number } {
+  const totalFrames = Math.round(durationSeconds * frameRate);
+  return { startFrame: 0, endFrame: Math.max(0, totalFrames - 1) };
 }
 
 export function buildAerenderArgs(params: AerenderArgsParams): string[] {
@@ -69,6 +113,10 @@ export function buildAerenderArgs(params: AerenderArgsParams): string[] {
     params.renderSettingsTemplateName,
     "-OMtemplate",
     params.outputModuleTemplateName,
+    "-s",
+    String(params.startFrame),
+    "-e",
+    String(params.endFrame),
     "-output",
     params.outputPath,
     "-close",

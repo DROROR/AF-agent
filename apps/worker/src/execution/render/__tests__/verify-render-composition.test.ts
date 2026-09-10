@@ -64,6 +64,24 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
     expect(result.ok).toBe(true);
   });
 
+  /**
+   * Real 2026-09-10 incident fix (session a7fee3d9) - the caller
+   * (render-project-executor.ts/create-full-preview-executor.ts) needs
+   * the composition's own real duration/frameRate to compute an explicit
+   * full-composition -s/-e frame range for aerender, from the SAME
+   * ae_list_compositions scan this verification already performs.
+   */
+  it("returns the composition's own real durationSeconds/frameRate on success - from the SAME ae_list_compositions scan, zero extra cost", async () => {
+    await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }]);
+    const verifier = new HeroicSwanCompositionVerifier(dir);
+    const result = await verifier.verify({ workingProjectPath: "/w.aep", aeProjectItemIndex: 3, compositionName: "!Render (Landscape)" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // writeFakeServer's own fixed fixture values (frameRate: 30, duration: 4) - real, read back, never fabricated by the verifier itself.
+    expect(result.durationSeconds).toBe(4);
+    expect(result.frameRate).toBe(30);
+  });
+
   it("fails when aeProjectItemIndex does not resolve to any composition", async () => {
     await writeFakeServer(dir, [{ index: 1, name: "Intro" }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);

@@ -7,7 +7,22 @@ export interface VerifyRenderCompositionParams {
   compositionName: string;
 }
 
-export type VerifyRenderCompositionResult = { ok: true } | { ok: false; reason: string };
+export type VerifyRenderCompositionResult =
+  | {
+      ok: true;
+      /**
+       * Real 2026-09-10 incident fix (session a7fee3d9) - the composition's
+       * own real, freshly-read duration/frameRate, from the SAME
+       * ae_list_compositions scan this verification already performs (zero
+       * extra cost) - the caller uses these to compute an explicit full-
+       * composition -s/-e frame range for aerender (see aerender-args.ts's
+       * own doc comment on why that is now required, never left to the
+       * Render Settings template's own Time Span default).
+       */
+      durationSeconds: number;
+      frameRate: number;
+    }
+  | { ok: false; reason: string };
 
 /**
  * Canonical composition addressing safety net for RENDER (render-engine
@@ -73,7 +88,7 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
         };
       }
 
-      return { ok: true };
+      return { ok: true, durationSeconds: atIndex.durationSeconds, frameRate: atIndex.frameRate };
     } finally {
       await client.close();
     }
