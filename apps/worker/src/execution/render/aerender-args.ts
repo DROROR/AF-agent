@@ -8,6 +8,11 @@
  * string concatenation and no shell involved at all (see
  * aerender-runner.ts's own `spawn(..., { shell: false })`).
  *
+ * This is the ONE canonical builder both CREATE_PREVIEW
+ * (create-full-preview-executor.ts) and RENDER (render-project-executor.ts)
+ * already share via aerender-runner.ts - never a second, divergent
+ * argument-construction path for either operation.
+ *
  * Real, stable, Adobe-documented aerender CLI flags (unchanged across AE
  * versions, including 2026):
  *   -project <path>            the .aep to open (always the WORKING COPY)
@@ -31,9 +36,20 @@
  *                              read-only with respect to project state
  *                              (CLAUDE.md Safety Rule 5: editing and
  *                              rendering are separate stages)
- *   -v ERRORS_AND_WARNINGS      fixed, moderate log verbosity - never ALL
+ *   -v ERRORS_AND_PROGRESS     real 2026-09-10 incident fix (job
+ *                              ea99c6dd-359d-4c02-ab3b-01687a1d8cf3, AE
+ *                              26.3x87): the PRIOR value here,
+ *                              "ERRORS_AND_WARNINGS", is not a value AE's
+ *                              own aerender actually recognizes - a real
+ *                              client run failed immediately with
+ *                              "aerender SYNTAX ERROR: Bad value for
+ *                              -verbose." (AE's own error text refers to
+ *                              this flag by its long name even though -v
+ *                              is the form passed here). ERRORS_AND_PROGRESS
+ *                              is Adobe's own documented, real value -
+ *                              fixed, moderate log verbosity: never ALL
  *                              (unbounded chatter) and never SILENT (no
- *                              troubleshooting signal)
+ *                              troubleshooting signal).
  */
 export interface AerenderArgsParams {
   projectPath: string;
@@ -58,6 +74,6 @@ export function buildAerenderArgs(params: AerenderArgsParams): string[] {
     "-close",
     "DO_NOT_SAVE_CHANGES",
     "-v",
-    "ERRORS_AND_WARNINGS"
+    "ERRORS_AND_PROGRESS"
   ];
 }
