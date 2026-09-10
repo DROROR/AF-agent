@@ -533,3 +533,70 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
     expect(result.reason).toContain("comp-does-not-exist");
   });
 });
+
+describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverCompositionId + previewTimingDescribeCompositionSummary (real 2026-09-10 incident, session a7fee3d9)", () => {
+  const outerManifest = validManifest({
+    compositions: [
+      { compositionId: "comp-210", aeProjectItemIndex: 2, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-3", aeProjectItemIndex: 3, name: "!Render (Landscape)", widthPx: 1920, heightPx: 1080, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] }
+    ]
+  });
+
+  it("resolves the requested composition identity, with zero server-supplied layerIndices (self-sufficient) and describeCompositionSummary: true - never findHostLayersForChildCompositionId", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-3",
+      previewTimingDescribeCompositionSummary: true
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-3");
+    expect(result.payload.aeProjectItemIndex).toBe(3);
+    expect(result.payload.compositionName).toBe("!Render (Landscape)");
+    expect(result.payload.layerIndices).toEqual([]);
+    expect(result.payload.describeCompositionSummary).toBe(true);
+    expect(result.payload.findHostLayersForChildCompositionId).toBeUndefined();
+    expect(result.payload.discoverLayerDetails).toBeUndefined();
+  });
+
+  it("takes priority over previewTimingFindHostLayersChildCompositionId when both are somehow present - checked first, mutually exclusive by construction", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingDescribeCompositionSummary: true,
+      previewTimingFindHostLayersChildCompositionId: "comp-3"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.describeCompositionSummary).toBe(true);
+    expect(result.payload.findHostLayersForChildCompositionId).toBeUndefined();
+  });
+
+  it("refuses an unknown previewTimingDiscoverCompositionId - the same manifest-validated addressing safety net as the host-layer-lookup branch", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-does-not-exist",
+      previewTimingDescribeCompositionSummary: true
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("comp-does-not-exist");
+  });
+
+  it("still requires the manifest sha256 to match the plan's - the same staleness guard as every other branch", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ sourceProjectSha256: "b".repeat(64) }),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingDescribeCompositionSummary: true
+    });
+    expect(result.ok).toBe(false);
+  });
+});

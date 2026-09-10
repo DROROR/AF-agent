@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import { RENDER_OUTPUT_VARIANTS, type Composition, type ExecutionSessionDto, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
+import {
+  RENDER_OUTPUT_VARIANTS,
+  sceneEvidenceResponseSchema,
+  type Composition,
+  type ExecutionPlanResponse,
+  type ExecutionSessionDto,
+  type RenderOutputConfig,
+  type RenderOutputVariant
+} from "@dyo/schemas";
 import type { RenderArtifactDto } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
@@ -17,7 +25,7 @@ import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { HelpTooltip } from "./ui/HelpTooltip";
 import { useLocale } from "./LocaleProvider";
-import { dispatchJob, fetchCurrentExecutionSession, renderArtifactFileUrl } from "../lib/projects-api-client";
+import { dispatchJob, fetchCurrentExecutionSession, fetchJobStatus, renderArtifactFileUrl } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
 
@@ -75,6 +83,7 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
     <div className="overview-grid">
       <InspectRenderCapabilitiesCard />
       <BuildHorizontalCompositionCard projectId={projectId} session={session} />
+      <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
       {RENDER_OUTPUT_VARIANTS.map((variant) => (
         <VariantConfigCard
           key={variant}
@@ -257,6 +266,132 @@ function BuildHorizontalCompositionCard({ projectId, session }: { projectId: str
           {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.buildHorizontalAction}
         </Button>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * Real 2026-09-10 incident (session a7fee3d9) - a genuinely minimal,
+ * read-only diagnostic: dispatches the new describeCompositionSummary
+ * scan (buildDescribeCompositionSummaryScript) against whichever real
+ * composition is currently configured as a master (LANDSCAPE/REELS render
+ * output) - never a hardcoded compositionId, always whatever this
+ * project's own current render_outputs config says. Reports the real
+ * comp-level duration/work-area facts and every top-level layer's own
+ * timing directly in the card (never merely "queued") - never guesses
+ * whether a master's own approved timeline is actually fully populated.
+ */
+function DescribeCompositionTimelineCard({
+  projectId,
+  session,
+  plan
+}: {
+  projectId: string;
+  session: ExecutionSessionDto | null;
+  plan: ExecutionPlanResponse | null;
+}): ReactElement | null {
+  const { t } = useLocale();
+  const { data: dashboardStatus } = useDashboardStatusContext();
+  const [isDispatching, setIsDispatching] = useState<RenderOutputVariant | null>(null);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, { jobId: string; text: string } | { jobId: string; error: string }>>({});
+
+  if (!session || session.latestPreviewScenePlanId === null || !plan) {
+    return null;
+  }
+  const scenePlanId = session.latestPreviewScenePlanId;
+  const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", session.assignedWorkerId);
+
+  async function handleDescribe(variant: RenderOutputVariant): Promise<void> {
+    const config = plan?.plan.renderOutputs[variant] ?? null;
+    if (!worker || !config) {
+      return;
+    }
+    setIsDispatching(variant);
+    setDispatchError(null);
+    const dispatched = await dispatchJob({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId: worker.workerId,
+      projectId,
+      scenePlanId,
+      previewTimingDiscoverCompositionId: config.manifestCompositionId,
+      previewTimingDescribeCompositionSummary: true
+    });
+    if (!dispatched.ok) {
+      setIsDispatching(null);
+      setDispatchError(dispatched.message);
+      return;
+    }
+    for (;;) {
+      const status = await fetchJobStatus(dispatched.data.jobId);
+      if (!status.ok) {
+        setIsDispatching(null);
+        setResults((prev) => ({ ...prev, [variant]: { jobId: dispatched.data.jobId, error: status.message } }));
+        return;
+      }
+      if (status.data.status === "SUCCEEDED" || status.data.status === "FAILED" || status.data.status === "CANCELLED") {
+        setIsDispatching(null);
+        if (status.data.status !== "SUCCEEDED") {
+          setResults((prev) => ({ ...prev, [variant]: { jobId: dispatched.data.jobId, error: status.data.error?.message ?? status.data.status } }));
+          return;
+        }
+        const parsedResult = sceneEvidenceResponseSchema.safeParse(status.data.result);
+        if (!parsedResult.success) {
+          setResults((prev) => ({ ...prev, [variant]: { jobId: dispatched.data.jobId, error: "result did not match the expected shape" } }));
+          return;
+        }
+        if (!parsedResult.data.compositionSummary) {
+          setResults((prev) => ({
+            ...prev,
+            [variant]: { jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? "no compositionSummary in result" }
+          }));
+          return;
+        }
+        const s = parsedResult.data.compositionSummary;
+        const layerLines = s.layers
+          .map(
+            (l) =>
+              `#${l.layerIndex} "${l.layerName}" enabled=${l.enabled} in=${l.inPointSeconds.toFixed(3)} out=${l.outPointSeconds.toFixed(3)} start=${l.startTimeSeconds.toFixed(3)}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}(${l.sourceDurationSeconds?.toFixed(3)}s)` : ""}`
+          )
+          .join("\n");
+        const text = `compDuration=${s.compDurationSeconds.toFixed(6)}s workAreaStart=${s.workAreaStartSeconds.toFixed(6)}s workAreaDuration=${s.workAreaDurationSeconds.toFixed(6)}s frameRate=${s.frameRate.toFixed(6)}\n${layerLines}`;
+        setResults((prev) => ({ ...prev, [variant]: { jobId: dispatched.data.jobId, text } }));
+        return;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  return (
+    <Card className="overview-section">
+      <CardHeader title="Composition timeline diagnostics" />
+      <p>Read-only. Reports the real, worker-observed duration/work-area and every top-level layer&apos;s own timing for the currently configured Landscape/Reels master.</p>
+      {!worker ? <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} /> : null}
+      {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
+      <div className="overview-actions">
+        {RENDER_OUTPUT_VARIANTS.map((variant) => (
+          <Button
+            key={variant}
+            variant="secondary"
+            disabled={!worker || isDispatching !== null || !plan.plan.renderOutputs[variant]}
+            onClick={() => void handleDescribe(variant)}
+          >
+            {isDispatching === variant ? t.jobDispatch.dispatching : `Describe ${variant} timeline`}
+          </Button>
+        ))}
+      </div>
+      {RENDER_OUTPUT_VARIANTS.map((variant) => {
+        const result = results[variant];
+        if (!result) return null;
+        return (
+          <div key={variant}>
+            <p>
+              <strong>{variant}</strong> (job {result.jobId}):
+            </p>
+            <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem" }}>{"text" in result ? result.text : `ERROR: ${result.error}`}</pre>
+          </div>
+        );
+      })}
     </Card>
   );
 }

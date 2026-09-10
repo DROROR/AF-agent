@@ -20,6 +20,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   previewTimingDiscoverCompositionId?: string;
   /** Preview Timing Analysis TARGETED HOST-LAYER LOOKUP (live QA, 2026-09-10 real incident) - required alongside previewTimingDiscoverCompositionId (which names the PARENT); this names the CHILD composition whose hosting layer(s) are being looked up. See job-dispatch.ts's own doc comment. */
   previewTimingFindHostLayersChildCompositionId?: string;
+  /** Real 2026-09-10 incident (session a7fee3d9) - the OTHER thing previewTimingDiscoverCompositionId can be used for: describe THAT composition's own top-level duration/work-area/layer-timing facts (buildDescribeCompositionSummaryScript), rather than looking up where it hosts some other child. Mutually exclusive with previewTimingFindHostLayersChildCompositionId by construction - see the branch below. */
+  previewTimingDescribeCompositionSummary?: boolean;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -73,7 +75,8 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     discoverLayerDetails,
     previewTimingChainIndex,
     previewTimingDiscoverCompositionId,
-    previewTimingFindHostLayersChildCompositionId
+    previewTimingFindHostLayersChildCompositionId,
+    previewTimingDescribeCompositionSummary
   } = input;
 
   if (!currentPlan) {
@@ -120,10 +123,35 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
         reason: `Preview-timing discovery parent compositionId "${previewTimingDiscoverCompositionId}" does not match any composition in the current manifest - refusing to inspect an unknown composition`
       };
     }
+
+    // Real 2026-09-10 incident (session a7fee3d9) - describe THIS
+    // composition's own top-level duration/work-area/layer-timing facts,
+    // rather than looking up where it hosts some other child. Checked
+    // first: mutually exclusive with the host-layer-lookup branch below by
+    // construction (the resolver never sets both on the same dispatch).
+    if (previewTimingDescribeCompositionSummary === true) {
+      return {
+        ok: true,
+        payload: {
+          sourceProjectPath: currentProjectManifest.sourceProject.path,
+          sourceProjectSha256: currentPlan.sourceProjectSha256,
+          manifestCompositionId: previewTimingDiscoverCompositionId,
+          aeProjectItemIndex: parentComposition.aeProjectItemIndex,
+          compositionName: parentComposition.name,
+          // Entirely self-sufficient (the worker scans this composition's
+          // own immediate layers itself) - no caller/server-supplied
+          // layerIndices needed.
+          layerIndices: [],
+          previewTimestampSeconds: null,
+          describeCompositionSummary: true
+        }
+      };
+    }
+
     if (previewTimingFindHostLayersChildCompositionId === undefined) {
       return {
         ok: false,
-        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child."
+        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId or previewTimingDescribeCompositionSummary alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child, and a composition summary always names which composition to describe."
       };
     }
     const knownChild = currentProjectManifest.compositions.some((c) => c.compositionId === previewTimingFindHostLayersChildCompositionId);

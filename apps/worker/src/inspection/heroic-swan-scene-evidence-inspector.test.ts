@@ -48,8 +48,8 @@ async function writeFakeServer(
     layerGetFails?: boolean;
     captureShape?: "image" | "fallback" | "none";
     previewFilePath?: string;
-    /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
-    runJsxResult?: "success" | "hostLayerMatches" | "error";
+    /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "compositionSummary" returns a real {ok:true, compDurationSeconds, ...} envelope matching buildDescribeCompositionSummaryScript's own response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
+    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
   } = {}
@@ -116,9 +116,20 @@ async function writeFakeServer(
           ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, matches: [
               { layerIndex: 3, layerName: "Nested Scene", enabled: true, inPointSeconds: 0, outPointSeconds: 7.007, startTimeSeconds: 12, sourceCompositionId: "comp-1", stretchPercent: 100, timeRemapEnabled: false, opacityStatic: 100, opacityKeyframes: null }
             ] }) }) }] };`
-          : options.runJsxResult === "error"
-            ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
-            : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
+          : options.runJsxResult === "compositionSummary"
+            ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({
+                ok: true,
+                compDurationSeconds: 45.045045045045,
+                workAreaStartSeconds: 0,
+                workAreaDurationSeconds: 31.7317,
+                frameRate: 29.9700012207031,
+                layers: [
+                  { layerIndex: 1, layerName: "Scene 1", enabled: true, inPointSeconds: 1.635, outPointSeconds: 8.642, startTimeSeconds: 1.635, sourceCompositionId: "comp-1", sourceDurationSeconds: 7.007007007007 }
+                ]
+              }) }) }] };`
+            : options.runJsxResult === "error"
+              ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
+              : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
     }
   });
 
@@ -270,6 +281,56 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.response.hostLayerRecords).toBeNull();
     expect(result.response.hostLayerRecordsFailureReason).toMatch(/ae_run_jsx failed/);
     // A failed host-layer lookup never fails the rest of the evidence result.
+    expect(result.response.layers).toHaveLength(1);
+  });
+
+  it("real 2026-09-10 incident (composition summary): threads request.describeCompositionSummary through to the REAL ae_run_jsx code sent - produces buildDescribeCompositionSummaryScript, not any other script", async () => {
+    const capturePath = join(dir, "received-jsx-code-describe-summary.txt");
+    await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    await inspector.inspect(baseRequest({ describeCompositionSummary: true }));
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/DYO DESCRIBE_COMPOSITION_SUMMARY/);
+    expect(receivedCode).toMatch(/compDurationSeconds: __comp\.duration/);
+    expect(receivedCode).toMatch(/workAreaDurationSeconds: __comp\.workAreaDuration/);
+    expect(receivedCode).not.toMatch(/\bbreak;/);
+  });
+
+  it("omitting describeCompositionSummary (and every other opt-in flag) never calls ae_run_jsx at all", async () => {
+    const capturePath = join(dir, "received-jsx-code-no-describe-summary.txt");
+    await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    await inspector.inspect(baseRequest());
+
+    await expect(readFile(capturePath, "utf8")).rejects.toThrow();
+  });
+
+  it("live QA: successfully parses a real composition summary returned by ae_run_jsx into response.compositionSummary when describeCompositionSummary is requested", async () => {
+    await writeFakeServer(dir, { runJsxResult: "compositionSummary" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeCompositionSummary: true }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.compositionSummaryFailureReason).toBeNull();
+    expect(result.response.compositionSummary).toEqual({
+      compDurationSeconds: 45.045045045045,
+      workAreaStartSeconds: 0,
+      workAreaDurationSeconds: 31.7317,
+      frameRate: 29.9700012207031,
+      layers: [{ layerIndex: 1, layerName: "Scene 1", enabled: true, inPointSeconds: 1.635, outPointSeconds: 8.642, startTimeSeconds: 1.635, sourceCompositionId: "comp-1", sourceDurationSeconds: 7.007007007007 }]
+    });
+  });
+
+  it("reports compositionSummaryFailureReason (never fabricates compositionSummary) when describeCompositionSummary is requested but the underlying ae_run_jsx call fails", async () => {
+    await writeFakeServer(dir, { runJsxResult: "error" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeCompositionSummary: true }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.compositionSummary).toBeNull();
+    expect(result.response.compositionSummaryFailureReason).toMatch(/ae_run_jsx failed/);
+    // A failed composition-summary scan never fails the rest of the evidence result.
     expect(result.response.layers).toHaveLength(1);
   });
 

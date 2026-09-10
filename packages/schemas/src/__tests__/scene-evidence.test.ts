@@ -60,6 +60,8 @@ function validResponse(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
     layerDetailsFailureReason: null,
     hostLayerRecords: null,
     hostLayerRecordsFailureReason: null,
+    compositionSummary: null,
+    compositionSummaryFailureReason: null,
     capturedAt: "2026-08-26T00:00:00.000Z",
     ...overrides
   };
@@ -368,5 +370,62 @@ describe("sceneEvidenceResponseSchema - hostLayerRecords / hostLayerRecordsFailu
     if (!parsed.success) return;
     expect(parsed.data.hostLayerRecords).toBeNull();
     expect(parsed.data.hostLayerRecordsFailureReason).toBeNull();
+  });
+});
+
+describe("compositionSummarySchema / sceneEvidenceResponseSchema - compositionSummary (real 2026-09-10 incident, session a7fee3d9)", () => {
+  it("accepts a real, fully-populated composition summary", () => {
+    const response = validResponse({
+      compositionSummary: {
+        compDurationSeconds: 45.045045045045,
+        workAreaStartSeconds: 0,
+        workAreaDurationSeconds: 45.045045045045,
+        frameRate: 29.9700012207031,
+        layers: [
+          { layerIndex: 1, layerName: "Scene 1", enabled: true, inPointSeconds: 1.635, outPointSeconds: 8.642, startTimeSeconds: 1.635, sourceCompositionId: "comp-1", sourceDurationSeconds: 7.007 },
+          { layerIndex: 2, layerName: "Photo", enabled: true, inPointSeconds: 0, outPointSeconds: 5, startTimeSeconds: 0, sourceCompositionId: null, sourceDurationSeconds: null }
+        ]
+      }
+    });
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.compositionSummary?.layers).toHaveLength(2);
+    expect(parsed.data.compositionSummary?.compDurationSeconds).toBe(45.045045045045);
+  });
+
+  it("Worker/API version-skew tolerance: accepts compositionSummary/compositionSummaryFailureReason being entirely absent - normalizes to null, never a hard parse failure", () => {
+    const response = {
+      verifiedSourceProjectSha256: SHA,
+      manifestCompositionId: "comp-210",
+      aeProjectItemIndex: 2,
+      compositionName: "!Render",
+      layers: [],
+      preview: null,
+      previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
+      capturedAt: "2026-09-10T00:00:00.000Z"
+    };
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.compositionSummary).toBeNull();
+    expect(parsed.data.compositionSummaryFailureReason).toBeNull();
+  });
+
+  it("a composition summary with genuinely zero layers is distinct from a failed scan (compositionSummary: [] real layers vs compositionSummaryFailureReason set)", () => {
+    const empty = validResponse({ compositionSummary: { compDurationSeconds: 5, workAreaStartSeconds: 0, workAreaDurationSeconds: 5, frameRate: 30, layers: [] } });
+    const parsedEmpty = sceneEvidenceResponseSchema.safeParse(empty);
+    expect(parsedEmpty.success).toBe(true);
+    if (!parsedEmpty.success) return;
+    expect(parsedEmpty.data.compositionSummary?.layers).toEqual([]);
+
+    const failed = validResponse({ compositionSummary: null, compositionSummaryFailureReason: "ae_run_jsx failed: MCP error -32001: Request timed out" });
+    const parsedFailed = sceneEvidenceResponseSchema.safeParse(failed);
+    expect(parsedFailed.success).toBe(true);
+    if (!parsedFailed.success) return;
+    expect(parsedFailed.data.compositionSummary).toBeNull();
+    expect(parsedFailed.data.compositionSummaryFailureReason).toContain("timed out");
   });
 });

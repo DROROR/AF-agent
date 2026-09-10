@@ -1437,6 +1437,93 @@ export function buildFindHostLayersScript(aeProjectItemIndex: number, compositio
 }
 
 /**
+ * Real 2026-09-10 incident (session a7fee3d9): a Complete Preview of the
+ * new Landscape master rendered successfully, but visible content ended
+ * around 7s of a comp whose own `.duration` is 45.045s. This script
+ * answers "what does this composition's own top-level timeline actually
+ * look like" - comp-level duration/work-area facts, plus every top-level
+ * layer's cheapest real facts - without ever needing to render anything,
+ * and without the per-layer classification cost that made
+ * buildInspectCompositionLayerDetailsScript time out on a composition
+ * this size. Genuinely minimal, matching buildFindHostLayersScript's own
+ * proven-fast pattern: no `instanceof TextLayer`/`AVLayer` branching, no
+ * stretch/timeRemapEnabled/opacity/sourceText reads - only the handful of
+ * properties every layer object already carries with no extra AE-engine
+ * round-trip (index/name/enabled/inPoint/outPoint/startTime/source
+ * identity/source duration). Never breaks early - reports every layer,
+ * same as buildFindHostLayersScript.
+ */
+export function buildDescribeCompositionSummaryScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO DESCRIBE_COMPOSITION_SUMMARY")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
+      });
+    } else {
+      var __layers = [];
+      for (var __i = 1; __i <= __comp.numLayers; __i++) {
+        try {
+          var __layer = __comp.layer(__i);
+          var __sourceCompositionId = null;
+          var __sourceDurationSeconds = null;
+          if (__layer.source && (__layer.source instanceof CompItem)) {
+            __sourceCompositionId = "comp-" + __layer.source.id;
+            __sourceDurationSeconds = __layer.source.duration;
+          }
+          __layers.push({
+            layerIndex: __layer.index,
+            layerName: __layer.name,
+            enabled: __layer.enabled,
+            inPointSeconds: __layer.inPoint,
+            outPointSeconds: __layer.outPoint,
+            startTimeSeconds: __layer.startTime,
+            sourceCompositionId: __sourceCompositionId,
+            sourceDurationSeconds: __sourceDurationSeconds
+          });
+        } catch (__layerReadError) {
+          // A single unreadable layer never fails the whole scan - it is
+          // simply not reported (same fail-partial posture as every other
+          // read-only inspection script in this file).
+        }
+      }
+      __result = JSON.stringify({
+        ok: true,
+        compDurationSeconds: __comp.duration,
+        workAreaStartSeconds: __comp.workAreaStart,
+        workAreaDurationSeconds: __comp.workAreaDuration,
+        frameRate: __comp.frameRate,
+        layers: __layers
+      });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * The single entry point every caller must use - dispatches on the
  * operation's own `type` (already a closed, Zod-validated discriminated
  * union), so adding a new SceneEditOperationType without a corresponding

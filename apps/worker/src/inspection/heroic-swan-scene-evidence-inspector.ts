@@ -1,12 +1,12 @@
 import { stat } from "node:fs/promises";
 import { z } from "zod";
-import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord } from "@dyo/schemas";
-import { hostLayerRecordSchema, layerDetailFactSchema } from "@dyo/schemas";
+import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord, CompositionSummary } from "@dyo/schemas";
+import { compositionSummarySchema, hostLayerRecordSchema, layerDetailFactSchema } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
-import { buildFindHostLayersScript, buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
+import { buildDescribeCompositionSummaryScript, buildFindHostLayersScript, buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
 
@@ -82,6 +82,50 @@ async function fetchHostLayers(
     return { ok: false, reason: parsed.data.failureReason };
   }
   return { ok: true, matches: parsed.data.matches };
+}
+
+const describeCompositionSummaryScriptResultSchema = z.union([
+  compositionSummarySchema.extend({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/**
+ * Real 2026-09-10 incident (session a7fee3d9) - best-effort, never
+ * throws, mirrors fetchHostLayers's own shape exactly. A failure here is
+ * reported via compositionSummaryFailureReason and never fails the rest
+ * of the evidence result.
+ */
+async function fetchCompositionSummary(
+  client: HeroicSwanMcpClient,
+  aeProjectItemIndex: number,
+  compositionName: string
+): Promise<{ ok: true; summary: CompositionSummary } | { ok: false; reason: string }> {
+  const script = buildDescribeCompositionSummaryScript(aeProjectItemIndex, compositionName);
+  const result = await client.runFixedInspectionScript(script);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  const parsed = describeCompositionSummaryScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success) {
+    return { ok: false, reason: `describe-composition-summary script response did not match the expected shape: ${parsed.error.message}` };
+  }
+  if (!parsed.data.ok) {
+    return { ok: false, reason: parsed.data.failureReason };
+  }
+  return {
+    ok: true,
+    summary: {
+      compDurationSeconds: parsed.data.compDurationSeconds,
+      workAreaStartSeconds: parsed.data.workAreaStartSeconds,
+      workAreaDurationSeconds: parsed.data.workAreaDurationSeconds,
+      frameRate: parsed.data.frameRate,
+      layers: parsed.data.layers
+    }
+  };
 }
 
 /**
@@ -291,6 +335,17 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         }
       }
 
+      let compositionSummary: CompositionSummary | null = null;
+      let compositionSummaryFailureReason: string | null = null;
+      if (request.describeCompositionSummary === true) {
+        const summaryResult = await fetchCompositionSummary(client, request.aeProjectItemIndex, parsedComp.value.name);
+        if (summaryResult.ok) {
+          compositionSummary = summaryResult.summary;
+        } else {
+          compositionSummaryFailureReason = summaryResult.reason;
+        }
+      }
+
       return {
         kind: "evidence",
         response: {
@@ -305,6 +360,8 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           layerDetailsFailureReason,
           hostLayerRecords,
           hostLayerRecordsFailureReason,
+          compositionSummary,
+          compositionSummaryFailureReason,
           capturedAt: new Date().toISOString()
         }
       };

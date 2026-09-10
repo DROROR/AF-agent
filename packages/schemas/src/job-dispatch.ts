@@ -199,7 +199,18 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * against the current manifest before dispatch, never an arbitrary
        * string).
        */
-      previewTimingFindHostLayersChildCompositionId: z.string().min(1).optional()
+      previewTimingFindHostLayersChildCompositionId: z.string().min(1).optional(),
+      /**
+       * Real 2026-09-10 incident (session a7fee3d9) - the OTHER thing
+       * previewTimingDiscoverCompositionId can be used for: describe THAT
+       * composition's own top-level duration/work-area/layer-timing facts
+       * (never a caller-supplied composition's arbitrary layout - always
+       * the same manifest-validated compositionId), rather than looking up
+       * where it hosts some other child. Mutually exclusive with
+       * previewTimingFindHostLayersChildCompositionId - the resolver
+       * checks this field first, never sets both.
+       */
+      previewTimingDescribeCompositionSummary: z.boolean().optional()
     })
     .strict(),
   z.object({

@@ -10,6 +10,7 @@ import {
   buildInspectCompositionPrecompsScript,
   buildInspectCompositionLayerDetailsScript,
   buildFindHostLayersScript,
+  buildDescribeCompositionSummaryScript,
   buildOpenProjectScript
 } from "../jsx-templates.js";
 
@@ -716,6 +717,114 @@ describe("buildFindHostLayersScript (live QA, 2026-09-10 real incident: targeted
 
   it("never contains a `break` - scans every layer to completion by design (multi-instance requirement), unlike the early-exit discovery mode this replaces", () => {
     const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    expect(script).not.toMatch(/break;/);
+  });
+});
+
+describe("buildDescribeCompositionSummaryScript (real 2026-09-10 incident, session a7fee3d9: Landscape master renders with visible content ending early)", () => {
+  const DESCRIBE_SUMMARY_APP_SETUP = `
+    function CompItem() {}
+    function AVLayer() {}
+
+    var __reads = { sourceRectAtTime: 0, stretch: 0, opacity: 0 };
+
+    var __nestedSource = new CompItem();
+    __nestedSource.id = 1;
+    __nestedSource.duration = 7.007007007007;
+
+    function makeLayer(index, name, opts) {
+      opts = opts || {};
+      var l = new AVLayer();
+      l.index = index;
+      l.name = name;
+      l.enabled = opts.enabled !== undefined ? opts.enabled : true;
+      l.inPoint = opts.inPoint !== undefined ? opts.inPoint : 0;
+      l.outPoint = opts.outPoint !== undefined ? opts.outPoint : 5;
+      l.startTime = opts.startTime !== undefined ? opts.startTime : 0;
+      if (opts.source) { l.source = opts.source; }
+      Object.defineProperty(l, "stretch", { get: function () { __reads.stretch++; return 100; } });
+      Object.defineProperty(l, "opacity", { get: function () { __reads.opacity++; return { numKeys: 0, value: 100 }; } });
+      var __origSourceRectAtTime = l.sourceRectAtTime;
+      l.sourceRectAtTime = function () { __reads.sourceRectAtTime++; return { left: 0, top: 0, width: 10, height: 10 }; };
+      return l;
+    }
+
+    var __layer1 = makeLayer(1, "Scene 1", { inPoint: 1.635, outPoint: 8.642, startTime: 1.635, source: __nestedSource });
+    var __layer2 = makeLayer(2, "Photo", { enabled: false });
+
+    var __fakeComp = new CompItem();
+    __fakeComp.name = ${JSON.stringify(COMP_NAME)};
+    __fakeComp.numLayers = 2;
+    __fakeComp.duration = 45.045045045045;
+    __fakeComp.workAreaStart = 0;
+    __fakeComp.workAreaDuration = 31.7317;
+    __fakeComp.frameRate = 29.9700012207031;
+    var __layersByIndex = { 1: __layer1, 2: __layer2 };
+    __fakeComp.layer = function (i) { return __layersByIndex[i]; };
+
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: { item: function (i) { return i === 1 ? __fakeComp : null; } }
+    };
+  `;
+
+  it("reports the real comp-level duration/work-area/frameRate facts, never fabricated", () => {
+    const script = buildDescribeCompositionSummaryScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, DESCRIBE_SUMMARY_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.compDurationSeconds).toBe(45.045045045045);
+    expect(result.workAreaStartSeconds).toBe(0);
+    expect(result.workAreaDurationSeconds).toBe(31.7317);
+    expect(result.frameRate).toBe(29.9700012207031);
+  });
+
+  it("reports every top-level layer's cheap facts, including a DISABLED layer - never silently skipped", () => {
+    const script = buildDescribeCompositionSummaryScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, DESCRIBE_SUMMARY_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.layers).toEqual([
+      { layerIndex: 1, layerName: "Scene 1", enabled: true, inPointSeconds: 1.635, outPointSeconds: 8.642, startTimeSeconds: 1.635, sourceCompositionId: "comp-1", sourceDurationSeconds: 7.007007007007 },
+      { layerIndex: 2, layerName: "Photo", enabled: false, inPointSeconds: 0, outPointSeconds: 5, startTimeSeconds: 0, sourceCompositionId: null, sourceDurationSeconds: null }
+    ]);
+  });
+
+  it("the real performance fix: never reads stretch/opacity for ANY layer - only the cheap properties every layer object already carries", () => {
+    const script = buildDescribeCompositionSummaryScript(1, COMP_NAME);
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(DESCRIBE_SUMMARY_APP_SETUP, context);
+    vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context);
+    const reads = vm.runInContext("__reads", context) as { sourceRectAtTime: number; stretch: number; opacity: number };
+    expect(reads.stretch).toBe(0);
+    expect(reads.opacity).toBe(0);
+    expect(reads.sourceRectAtTime).toBe(0);
+  });
+
+  it("resolves and name-verifies the composition before touching anything, the same as every other script", () => {
+    const script = buildDescribeCompositionSummaryScript(1, "Wrong Expected Name");
+    const resultText = runFixedScriptWithoutNativeJson(script, DESCRIBE_SUMMARY_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("refusing to report facts about the wrong composition");
+  });
+
+  it("is deterministic - the same composition index/name always produces byte-identical JSX", () => {
+    const a = buildDescribeCompositionSummaryScript(3, COMP_NAME);
+    const b = buildDescribeCompositionSummaryScript(3, COMP_NAME);
+    expect(a).toBe(b);
+  });
+
+  it("never mutates the project - contains no .setSource/.remove()/.sourceText.setValue/.setValue call", () => {
+    const script = buildDescribeCompositionSummaryScript(1, COMP_NAME);
+    expect(script).not.toMatch(/\.setSource\s*\(/);
+    expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
+    expect(script).not.toMatch(/\.setValue\s*\(/);
+  });
+
+  it("never contains a `break` - scans every layer to completion, same convention as buildFindHostLayersScript", () => {
+    const script = buildDescribeCompositionSummaryScript(1, COMP_NAME);
     expect(script).not.toMatch(/break;/);
   });
 });

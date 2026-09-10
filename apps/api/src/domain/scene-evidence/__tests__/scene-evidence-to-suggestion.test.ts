@@ -36,6 +36,8 @@ function evidence(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvidence
     layerDetailsFailureReason: null,
     hostLayerRecords: null,
     hostLayerRecordsFailureReason: null,
+    compositionSummary: null,
+    compositionSummaryFailureReason: null,
     capturedAt: "2026-08-26T00:00:00.000Z",
     ...overrides
   };

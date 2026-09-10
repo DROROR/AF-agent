@@ -126,6 +126,8 @@ function sceneEvidence(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
     layerDetailsFailureReason: null,
     hostLayerRecords: null,
     hostLayerRecordsFailureReason: null,
+    compositionSummary: null,
+    compositionSummaryFailureReason: null,
     capturedAt: NOW_ISO,
     ...overrides
   };

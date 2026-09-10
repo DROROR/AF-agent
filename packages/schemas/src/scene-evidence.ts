@@ -118,7 +118,27 @@ export const sceneEvidenceRequestSchema = z
      * this operation instead - the two are mutually exclusive by
      * construction (the resolver never sets both).
      */
-    findHostLayersForChildCompositionId: z.string().min(1).optional()
+    findHostLayersForChildCompositionId: z.string().min(1).optional(),
+    /**
+     * Real 2026-09-10 incident (session a7fee3d9, Landscape master
+     * produces visible content for only ~7s of a 31.7s/45.045s-expected
+     * render) - a genuinely minimal, read-only "what does this
+     * composition's own top-level timeline actually look like" scan:
+     * comp-level duration/work-area facts plus, for EVERY top-level layer,
+     * only its cheapest properties (index/name/enabled/inPoint/outPoint/
+     * startTime/source composition identity/source duration) - never the
+     * expensive stretch/timeRemapEnabled/opacity/sourceText reads
+     * discoverLayerDetails performs, and never a classification branch per
+     * layer (no `instanceof TextLayer`/`AVLayer` checks) - matching
+     * buildFindHostLayersScript's own proven-fast "cheapest possible work
+     * per layer" pattern, generalized to every layer instead of only
+     * matches. Answers "is the master's own full duration actually full of
+     * enabled, correctly-timed content, or does it go dark/disabled
+     * partway through" without ever needing to render anything. Mutually
+     * exclusive with discoverLayerDetails/findHostLayersForChildCompositionId
+     * by construction (the resolver never sets more than one).
+     */
+    describeCompositionSummary: z.boolean().optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
@@ -294,6 +314,52 @@ export const hostLayerRecordSchema = z
   .strict();
 export type HostLayerRecord = z.infer<typeof hostLayerRecordSchema>;
 
+/**
+ * Real 2026-09-10 incident (session a7fee3d9) - one top-level layer's
+ * cheapest-possible real facts, from `describeCompositionSummary`'s own
+ * minimal scan. `sourceCompositionId`/`sourceDurationSeconds` are both
+ * non-null only when `layer.source` is confirmed to be a real CompItem
+ * (the same "comp-" + source.id identity convention every other evidence
+ * shape in this module already uses) - null for a plain footage/solid/
+ * text layer, never guessed.
+ */
+export const compositionSummaryLayerSchema = z
+  .object({
+    layerIndex: z.number().int().positive(),
+    layerName: z.string(),
+    enabled: z.boolean(),
+    inPointSeconds: z.number(),
+    outPointSeconds: z.number(),
+    startTimeSeconds: z.number(),
+    sourceCompositionId: z.string().nullable(),
+    sourceDurationSeconds: z.number().nullable()
+  })
+  .strict();
+export type CompositionSummaryLayer = z.infer<typeof compositionSummaryLayerSchema>;
+
+/**
+ * Real 2026-09-10 incident (session a7fee3d9) - a composition's own
+ * top-level duration/work-area facts plus every one of its immediate
+ * layers' cheapest real timing facts, from ONE minimal, read-only scan
+ * (`describeCompositionSummary` on the request). `workAreaDurationSeconds`
+ * is real `comp.workAreaDuration` - aerender's own default "Time Span"
+ * behavior for a Render Settings template that does not explicitly say
+ * "Length of Comp" renders only the WORK AREA, never the full
+ * `compDurationSeconds`, so a work area narrower than the comp's own
+ * duration is a real, direct explanation for a render ending early even
+ * when every layer's own timing is untouched.
+ */
+export const compositionSummarySchema = z
+  .object({
+    compDurationSeconds: z.number(),
+    workAreaStartSeconds: z.number(),
+    workAreaDurationSeconds: z.number(),
+    frameRate: z.number(),
+    layers: z.array(compositionSummaryLayerSchema)
+  })
+  .strict();
+export type CompositionSummary = z.infer<typeof compositionSummarySchema>;
+
 export const scenePreviewSchema = z
   .object({
     timestampSeconds: z.number().nonnegative(),
@@ -352,6 +418,23 @@ export const sceneEvidenceResponseSchema = z
       .transform((value) => value ?? null),
     /** Present only when findHostLayersForChildCompositionId was requested but the script call could not complete - kept distinct from `hostLayerRecords: null` meaning "not requested", and distinct from `hostLayerRecords: []` meaning "scan succeeded, genuinely no match". Same absent-key tolerance as `hostLayerRecords` above. */
     hostLayerRecordsFailureReason: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /**
+     * Real 2026-09-10 incident (session a7fee3d9) - null whenever
+     * `describeCompositionSummary` was not requested, or the scan failed
+     * (see `compositionSummaryFailureReason` below). Same absent-key
+     * Worker/API version-skew tolerance as every other Preview Timing
+     * Analysis field on this schema.
+     */
+    compositionSummary: compositionSummarySchema
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /** Present only when describeCompositionSummary was requested but the script call could not complete - kept distinct from `compositionSummary: null` meaning "not requested". Same absent-key tolerance as compositionSummary above. */
+    compositionSummaryFailureReason: z
       .string()
       .nullable()
       .optional()
