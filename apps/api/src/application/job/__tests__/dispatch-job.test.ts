@@ -516,6 +516,62 @@ describe("dispatchJob", () => {
     expect(innerPayload.discoverLayerDetails).toBe(true);
     expect(innerPayload.sourceProjectSha256).toBe("a".repeat(64));
   });
+
+  it("2026-09-10 arbitrary-depth extension: when the scene's own manifestCompositionId (e.g. !Render) differs from the chain's own first hop, chain index 0 dispatches a read-only outer-discovery job for the scene's own top-level composition itself - still no SET_TEXT/MAP_FOOTAGE/save-shaped field anywhere in the payload", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const workerId = randomUUID();
+    await workerRepository.create({ id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] }, FIXED_NOW);
+    await workerRepository.updateHeartbeat(workerId, { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null }, FIXED_NOW);
+
+    const manifest = manifestWithTextPlaceholder();
+    manifest.compositions[0]!.compositionId = "comp-1"; // Scene 1, nested inside the render comp below.
+    manifest.compositions.push({
+      compositionId: "comp-210",
+      aeProjectItemIndex: 2,
+      name: "!Render",
+      widthPx: 1080,
+      heightPx: 1920,
+      durationSeconds: 45,
+      frameRate: 29.97,
+      isNestedOnlyReferenced: false,
+      parentCompositionIds: []
+    });
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest });
+    const scene: ScenePlanEntry = approvedTextScene();
+    scene.manifestCompositionId = "comp-210";
+    scene.compositionName = "!Render";
+    scene.mappings = [{ ...scene.mappings[0]!, id: "logo", placeholderName: "App Logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] }] satisfies PlaceholderMapping[];
+    await executionPlanRepository.createRevision(
+      { id: "plan-1", projectId: project.projectId, revision: 1, status: "DRAFT", templateId: "tmpl-1", sourceProjectSha256: "a".repeat(64), scenePlans: [scene], approvedAt: null, approvedBy: null },
+      FIXED_NOW
+    );
+
+    const result = await dispatchJob(
+      {
+        jobRepository,
+        workerRepository,
+        projectRepository,
+        executionPlanRepository,
+        executionSessionRepository: new InMemoryExecutionSessionRepository(),
+        fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(),
+        assetRepository: new InMemoryAssetRepository(),
+        now: () => FIXED_NOW,
+        staleAfterMs: STALE_AFTER_MS
+      },
+      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1", previewTimingChainIndex: 0 }
+    );
+    const job = await jobRepository.findById(result.jobId);
+    const payload = job?.payload as Record<string, unknown>;
+    expect(payload.manifestCompositionId).toBe("comp-210");
+    expect(payload.layerIndices).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(payload.discoverLayerDetails).toBe(true);
+    expect(payload.sourceProjectSha256).toBe("a".repeat(64));
+    expect(payload).not.toHaveProperty("operations");
+    expect(payload).not.toHaveProperty("approvedMappingIds");
+  });
 });
 
 describe("dispatchJob - project worker affinity (live QA Blocker 1)", () => {

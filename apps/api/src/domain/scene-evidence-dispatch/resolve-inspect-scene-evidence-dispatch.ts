@@ -82,15 +82,17 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     return { ok: false, reason: `Unknown scenePlanId "${scenePlanId}" in this plan` };
   }
 
-  // Preview Timing Analysis (live QA, 2026-09-09) - a completely different
-  // target composition than the scene's own manifestCompositionId below,
-  // derived ONLY from this scene's own real, approved mappings (never a
-  // caller-supplied compositionId/layerIndices) - see
-  // derivePreviewTimingTargets's own doc comment for why only the first
-  // two hops of each mapping's nested target chain are ever addressed
-  // this way.
+  // Preview Timing Analysis (live QA, 2026-09-09, extended to arbitrary
+  // nested depth 2026-09-10) - a completely different target composition
+  // than the scene's own manifestCompositionId dispatch below, derived
+  // ONLY from this scene's own real, approved mappings' COMPLETE
+  // humanNestedTarget chains (never a caller-supplied compositionId/
+  // layerIndices) - see derivePreviewTimingTargets's own doc comment for
+  // the full walk, including its own optional prepended "outer discovery"
+  // target for the scene's own manifestCompositionId (e.g. "!Render")
+  // itself, when a chain's own first hop lives inside it but isn't it.
   if (previewTimingChainIndex !== undefined) {
-    const targets = derivePreviewTimingTargets(scene);
+    const targets = derivePreviewTimingTargets(scene, scene.manifestCompositionId);
     const target = targets[previewTimingChainIndex];
     if (!target) {
       return {

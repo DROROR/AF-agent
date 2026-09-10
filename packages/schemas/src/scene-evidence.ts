@@ -19,6 +19,17 @@ import { z } from "zod";
 
 export const MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST = 20;
 
+/**
+ * Preview Timing Analysis (live QA, 2026-09-10): the maximum number of
+ * distinct INSPECT_SCENE_EVIDENCE dispatches one "Analyze Preview Timing"
+ * run may issue - bounds an otherwise arbitrary-depth nested-target chain
+ * walk (see derivePreviewTimingTargets's own doc comment) the same way
+ * MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST already bounds layerIndices per
+ * request. No real template needs anywhere close to this many distinct
+ * compositions across one scene's own approved mappings' nested chains.
+ */
+export const MAX_PREVIEW_TIMING_CHAIN_TARGETS = 20;
+
 export const sceneEvidenceRequestSchema = z
   .object({
     sourceProjectPath: z.string().min(1),
@@ -158,6 +169,41 @@ export const layerDetailFactSchema = z
      */
     timeRemapEnabled: z
       .boolean()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /**
+     * Preview Timing Analysis (live QA, 2026-09-10 real incident, session
+     * a7fee3d9, recommended timestamp 4.93827160493827s): a recommended
+     * timestamp fell inside a text layer's confirmed inPoint/outPoint
+     * window, yet the rendered frame showed no text - the layer's real
+     * opacity was 0. Real `layer.opacity.value`, but ONLY when
+     * `layer.opacity.numKeys === 0` (not animated) - null whenever the
+     * layer IS animated (see `opacityKeyframes` below, mutually exclusive
+     * with this field) or the property could not be read. Absent key
+     * normalized to null (same Worker/API version-skew tolerance as
+     * stretchPercent/timeRemapEnabled above).
+     */
+    opacityStatic: z
+      .number()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /**
+     * Preview Timing Analysis (live QA, 2026-09-10) - the REAL, ordered
+     * keyframe list (`layer.opacity.keyTime`/`keyValue` for every key 1..
+     * `numKeys`) when `layer.opacity.numKeys > 0` - never a single sampled
+     * value standing in for a layer that actually fades. Each keyframe's
+     * `timeSeconds` is in the layer's own containing composition's
+     * timeline, the same convention `inPointSeconds`/`outPointSeconds`
+     * already use, so it composes directly with them. Null whenever the
+     * layer is NOT animated (mutually exclusive with `opacityStatic`
+     * above) or the property could not be read. Absent key normalized to
+     * null (same version-skew tolerance as the other Preview Timing
+     * Analysis fields).
+     */
+    opacityKeyframes: z
+      .array(z.object({ timeSeconds: z.number(), valuePercent: z.number() }).strict())
       .nullable()
       .optional()
       .transform((value) => value ?? null)

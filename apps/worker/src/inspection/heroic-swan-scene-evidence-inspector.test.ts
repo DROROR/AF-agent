@@ -167,8 +167,8 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.kind).toBe("evidence");
     expect(result.response.layerDetailsFailureReason).toBeNull();
     expect(result.response.layerDetails).toEqual([
-      { layerIndex: 7, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null, stretchPercent: 100, timeRemapEnabled: false },
-      { layerIndex: 8, layerName: "Precomp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-999", stretchPercent: 50, timeRemapEnabled: false }
+      { layerIndex: 7, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null, stretchPercent: 100, timeRemapEnabled: false, opacityStatic: null, opacityKeyframes: null },
+      { layerIndex: 8, layerName: "Precomp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-999", stretchPercent: 50, timeRemapEnabled: false, opacityStatic: null, opacityKeyframes: null }
     ]);
     // Exact codepoint check - never trust visual/terminal RTL rendering.
     const hebrewPrefix = result.response.layerDetails?.[0]?.sourceText?.split(" ")[0];

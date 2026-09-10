@@ -4,6 +4,7 @@ import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import { inspectRenderCapabilitiesRequestSchema } from "./inspect-render-capabilities.js";
 import { renderOutputVariantSchema } from "./render-project.js";
 import { jobStatusSchema } from "./job.js";
+import { MAX_PREVIEW_TIMING_CHAIN_TARGETS } from "./scene-evidence.js";
 
 /**
  * Operations a dashboard operator may dispatch via POST /api/jobs - a
@@ -106,21 +107,30 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        */
       discoverLayerDetails: z.boolean().optional(),
       /**
-       * Preview Timing Analysis (live QA, 2026-09-09) - opt-in intent flag
-       * only, same "never a raw worker payload passthrough" convention as
+       * Preview Timing Analysis (live QA, 2026-09-09, extended to
+       * arbitrary nested depth 2026-09-10) - opt-in intent flag only, same
+       * "never a raw worker payload passthrough" convention as
        * discoverLayerDetails above. When present, resolveInspectSceneEvidenceDispatch
        * takes a completely different branch: instead of the scene's own
        * top-level manifestCompositionId, it derives the distinct NESTED
        * composition+layerIndices targets from the scene's own real,
-       * approved mappings' humanNestedTarget chains
-       * (derivePreviewTimingTargets), and dispatches against whichever
-       * target is at this 0-based index - never a caller-supplied
-       * compositionId/layerIndices. Bounded to [0, 1] (this feature's own
-       * two-hop scope, see derivePreviewTimingTargets's own doc comment).
-       * Omitted preserves the exact prior INSPECT_SCENE_EVIDENCE behavior
-       * for every existing caller.
+       * approved mappings' COMPLETE humanNestedTarget chains, at ANY
+       * depth (derivePreviewTimingTargets), plus (when the chain's own
+       * first hop isn't already the scene's own manifestCompositionId) one
+       * further "outer discovery" target for that outermost composition
+       * itself - and dispatches against whichever target is at this
+       * 0-based index - never a caller-supplied compositionId/
+       * layerIndices. Bounded by MAX_PREVIEW_TIMING_CHAIN_TARGETS (see its
+       * own doc comment for why this is a generous safety bound, not a
+       * scope limit). Omitted preserves the exact prior
+       * INSPECT_SCENE_EVIDENCE behavior for every existing caller.
        */
-      previewTimingChainIndex: z.number().int().min(0).max(1).optional()
+      previewTimingChainIndex: z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_PREVIEW_TIMING_CHAIN_TARGETS - 1)
+        .optional()
     })
     .strict(),
   z.object({

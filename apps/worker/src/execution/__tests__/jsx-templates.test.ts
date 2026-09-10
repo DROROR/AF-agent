@@ -387,10 +387,24 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     __unreadableLayer.index = 5;
     Object.defineProperty(__unreadableLayer, "name", { get: function () { throw new Error("boom"); } });
 
+    var __staticOpacityLayer = new AVLayer();
+    __staticOpacityLayer.index = 6;
+    __staticOpacityLayer.name = "Static Zero Opacity Layer";
+    __staticOpacityLayer.opacity = { numKeys: 0, value: 0 };
+
+    var __keyframedOpacityLayer = new AVLayer();
+    __keyframedOpacityLayer.index = 7;
+    __keyframedOpacityLayer.name = "Fading Layer";
+    __keyframedOpacityLayer.opacity = {
+      numKeys: 3,
+      keyTime: function (i) { return [null, 1, 2.5, 4][i]; },
+      keyValue: function (i) { return [null, 0, 100, 0][i]; }
+    };
+
     var __fakeComp = new CompItem();
     __fakeComp.name = ${JSON.stringify(COMP_NAME)};
-    __fakeComp.numLayers = 5;
-    var __layersByIndex = { 1: __textLayer, 2: __precompLayer, 3: __avLayer, 4: __shapeLayer, 5: __unreadableLayer };
+    __fakeComp.numLayers = 7;
+    var __layersByIndex = { 1: __textLayer, 2: __precompLayer, 3: __avLayer, 4: __shapeLayer, 5: __unreadableLayer, 6: __staticOpacityLayer, 7: __keyframedOpacityLayer };
     __fakeComp.layer = function (i) { return __layersByIndex[i]; };
 
     var app = {
@@ -407,13 +421,51 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect(result).toEqual({
       ok: true,
       layerDetails: [
-        { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null },
-        { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242", stretchPercent: null, timeRemapEnabled: null },
-        { layerIndex: 3, layerName: "Footage Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null },
-        { layerIndex: 4, layerName: "Shape Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null }
+        { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 3, layerName: "Footage Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 4, layerName: "Shape Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
         // layerIndex 5 (__unreadableLayer) is honestly omitted, never guessed.
+        { layerIndex: 6, layerName: "Static Zero Opacity Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: 0, opacityKeyframes: null },
+        {
+          layerIndex: 7,
+          layerName: "Fading Layer",
+          layerType: "AV",
+          sourceText: null,
+          sourceCompositionId: null,
+          stretchPercent: null,
+          timeRemapEnabled: null,
+          opacityStatic: null,
+          opacityKeyframes: [
+            { timeSeconds: 1, valuePercent: 0 },
+            { timeSeconds: 2.5, valuePercent: 100 },
+            { timeSeconds: 4, valuePercent: 0 }
+          ]
+        }
       ]
     });
+  });
+
+  it("reads a static (non-animated) opacity value via numKeys === 0, real live-QA 2026-09-10 incident shape (a confirmed-zero opacity, distinct from a keyframed fade)", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText) as { layerDetails: { layerIndex: number; opacityStatic: number | null; opacityKeyframes: unknown }[] };
+    const staticLayer = result.layerDetails.find((d) => d.layerIndex === 6)!;
+    expect(staticLayer.opacityStatic).toBe(0);
+    expect(staticLayer.opacityKeyframes).toBeNull();
+  });
+
+  it("reads the REAL ordered keyframe list (time + value) via numKeys > 0, never merely a single sampled value, when opacity is animated", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText) as { layerDetails: { layerIndex: number; opacityStatic: number | null; opacityKeyframes: { timeSeconds: number; valuePercent: number }[] | null }[] };
+    const fadingLayer = result.layerDetails.find((d) => d.layerIndex === 7)!;
+    expect(fadingLayer.opacityStatic).toBeNull();
+    expect(fadingLayer.opacityKeyframes).toEqual([
+      { timeSeconds: 1, valuePercent: 0 },
+      { timeSeconds: 2.5, valuePercent: 100 },
+      { timeSeconds: 4, valuePercent: 0 }
+    ]);
   });
 
   it("verifies the real Hebrew sourceText round-trips through the shim by exact codepoint, not merely visual/string equality - regression guard against RTL-rendering mishaps", () => {

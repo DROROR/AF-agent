@@ -308,10 +308,17 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
   const nestedCompositionManifest = validManifest({
     compositions: [
       { compositionId: "comp-1", aeProjectItemIndex: 5, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
-      { compositionId: "comp-1635", aeProjectItemIndex: 45, name: "Pre-comp 3", widthPx: 1588, heightPx: 1920, durationSeconds: 10, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+      { compositionId: "comp-1635", aeProjectItemIndex: 45, name: "Pre-comp 3", widthPx: 1588, heightPx: 1920, durationSeconds: 10, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] },
+      { compositionId: "comp-1044", aeProjectItemIndex: 34, name: "App Emblem", widthPx: 400, heightPx: 400, durationSeconds: 10, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1635"] },
+      { compositionId: "comp-1113", aeProjectItemIndex: 31, name: "App Logo", widthPx: 400, heightPx: 400, durationSeconds: 10, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1044"] }
     ]
   });
 
+  // scenePlan()'s own default manifestCompositionId is "comp-1" - the SAME
+  // as humanNestedTarget[0].compositionId below, so this fixture exercises
+  // the "no outer-discovery needed" case; the real real-incident case
+  // (manifestCompositionId "comp-210" != chain's own first hop "comp-1")
+  // is covered separately below.
   const planWithNestedMappings = validPlan({
     scenePlans: [
       scenePlan({
@@ -321,7 +328,8 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
             humanNestedTarget: [
               { compositionId: "comp-1", layerIndex: 3 },
               { compositionId: "comp-1635", layerIndex: 1 },
-              { compositionId: "comp-1044", layerIndex: 1 }
+              { compositionId: "comp-1044", layerIndex: 1 },
+              { compositionId: "comp-1113", layerIndex: 1 }
             ]
           }),
           nestedMapping({ id: "hebrew", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }, { compositionId: "comp-1635", layerIndex: 4 }] })
@@ -358,14 +366,30 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
     expect(result.payload.layerIndices).toEqual([1, 4]);
   });
 
-  it("never reaches the logo chain's deeper comp-1044 hop - bounded to two hops by design", () => {
+  it("2026-09-10 arbitrary-depth extension: resolves chain index 2 to the deeper comp-1044 hop (App Emblem) - no longer bounded to two hops", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: planWithNestedMappings,
       currentProjectManifest: nestedCompositionManifest,
       previewTimingChainIndex: 2
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-1044");
+    expect(result.payload.layerIndices).toEqual([1]);
+  });
+
+  it("2026-09-10 arbitrary-depth extension: resolves chain index 3 to the FOURTH hop (comp-1113, App Logo) - the exact real 2026-09-10 incident gap (a recommended timestamp that showed no logo because this hop was never measured)", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithNestedMappings,
+      currentProjectManifest: nestedCompositionManifest,
+      previewTimingChainIndex: 3
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-1113");
+    expect(result.payload.layerIndices).toEqual([1]);
   });
 
   it("refuses an out-of-range chain index with a clear reason - never silently returns the wrong composition", () => {
@@ -373,11 +397,11 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
       scenePlanId: "scene-1",
       currentPlan: planWithNestedMappings,
       currentProjectManifest: nestedCompositionManifest,
-      previewTimingChainIndex: 5
+      previewTimingChainIndex: 9
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("no preview-timing target at chain index 5");
+    expect(result.reason).toContain("no preview-timing target at chain index 9");
   });
 
   it("refuses when the scene has no nested-target mappings at all - never falls back to the scene's own top-level composition silently", () => {
@@ -398,5 +422,43 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
       previewTimingChainIndex: 0
     });
     expect(result.ok).toBe(false);
+  });
+
+  it("real incident shape (session a7fee3d9): when the scene's own manifestCompositionId (\"comp-210\", !Render) differs from the chain's own first hop (\"comp-1\", Scene 1), chain index 0 resolves to an OUTER-DISCOVERY target for comp-210 itself - every plausible layer index requested, discoverLayerDetails true, never a caller-guessed/hardcoded index for how Scene 1 is placed inside !Render", () => {
+    const outerManifest = validManifest({
+      compositions: [
+        { compositionId: "comp-210", aeProjectItemIndex: 2, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+        ...nestedCompositionManifest.compositions
+      ]
+    });
+    const planWithRenderScene = validPlan({
+      scenePlans: [
+        scenePlan({ manifestCompositionId: "comp-210", compositionName: "!Render", mappings: planWithNestedMappings.scenePlans[0]!.mappings })
+      ]
+    });
+
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithRenderScene,
+      currentProjectManifest: outerManifest,
+      previewTimingChainIndex: 0
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-210");
+    expect(result.payload.layerIndices).toHaveLength(20);
+    expect(result.payload.discoverLayerDetails).toBe(true);
+
+    // Chain index 1 now resolves to comp-1 (Scene 1) itself, shifted out by the prepended outer-discovery target.
+    const shifted = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: planWithRenderScene,
+      currentProjectManifest: outerManifest,
+      previewTimingChainIndex: 1
+    });
+    expect(shifted.ok).toBe(true);
+    if (!shifted.ok) return;
+    expect(shifted.payload.manifestCompositionId).toBe("comp-1");
+    expect(shifted.payload.layerIndices).toEqual([3]);
   });
 });

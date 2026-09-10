@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
+import { MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, MAX_PREVIEW_TIMING_CHAIN_TARGETS, type PlaceholderMapping, type ScenePlanEntry } from "@dyo/schemas";
 import { derivePreviewTimingTargets } from "../derive-preview-timing-targets.js";
 
 const NOW = new Date("2026-09-09T00:00:00.000Z").toISOString();
+const ALL_LAYER_INDICES_1_TO_20 = Array.from({ length: MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST }, (_, i) => i + 1);
 
 function mapping(overrides: Partial<PlaceholderMapping> = {}): PlaceholderMapping {
   return {
@@ -51,7 +52,7 @@ function scene(overrides: Partial<ScenePlanEntry> = {}): ScenePlanEntry {
 }
 
 describe("derivePreviewTimingTargets", () => {
-  it("derives exactly the real-incident two targets - comp-1[3] and comp-1635[1,4] - from the logo and Hebrew mappings' own real nested target chains", () => {
+  it("derives the FULL real-incident chain (2026-09-10 extension) - all four logo hops (comp-1/comp-1635/comp-1044/comp-1113) and both Hebrew hops, plus one prepended outer-discovery target for !Render itself since the chain's own first hop (comp-1) differs from the scene's manifestCompositionId (comp-210)", () => {
     const logoMapping = mapping({
       id: "logo",
       humanNestedTarget: [
@@ -69,20 +70,19 @@ describe("derivePreviewTimingTargets", () => {
       ]
     });
 
-    const result = derivePreviewTimingTargets(scene({ mappings: [logoMapping, hebrewMapping] }));
+    const result = derivePreviewTimingTargets(scene({ manifestCompositionId: "comp-210", mappings: [logoMapping, hebrewMapping] }), "comp-210");
 
     expect(result).toEqual([
+      { compositionId: "comp-210", layerIndices: ALL_LAYER_INDICES_1_TO_20, isOuterDiscovery: true },
       { compositionId: "comp-1", layerIndices: [3] },
-      { compositionId: "comp-1635", layerIndices: [1, 4] }
+      { compositionId: "comp-1635", layerIndices: [1, 4] },
+      { compositionId: "comp-1044", layerIndices: [1] },
+      { compositionId: "comp-1113", layerIndices: [1] }
     ]);
-    // The 4-hop logo chain's deeper compositions (comp-1044/comp-1113) are
-    // deliberately excluded by the default maxHops=2 - never silently
-    // included.
-    expect(result.some((t) => t.compositionId === "comp-1044" || t.compositionId === "comp-1113")).toBe(false);
   });
 
-  it("returns an empty array when no mapping has a nested target (all same-composition mappings)", () => {
-    const result = derivePreviewTimingTargets(scene({ mappings: [mapping({ humanNestedTarget: null })] }));
+  it("returns an empty array when no mapping has a nested target (all same-composition mappings) - no outer-discovery target either, since nothing needs one", () => {
+    const result = derivePreviewTimingTargets(scene({ mappings: [mapping({ humanNestedTarget: null })] }), "comp-210");
     expect(result).toEqual([]);
   });
 
@@ -90,12 +90,21 @@ describe("derivePreviewTimingTargets", () => {
     const mappingA = mapping({ id: "a", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] });
     const mappingB = mapping({ id: "b", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] });
 
-    const result = derivePreviewTimingTargets(scene({ mappings: [mappingA, mappingB] }));
+    const result = derivePreviewTimingTargets(scene({ manifestCompositionId: "comp-1", mappings: [mappingA, mappingB] }), "comp-1");
 
     expect(result).toEqual([{ compositionId: "comp-1", layerIndices: [3] }]);
   });
 
-  it("respects a custom maxHops, including deeper compositions when explicitly requested", () => {
+  it("never triggers outer discovery when the scene's own manifestCompositionId already equals the chain's own first hop", () => {
+    const result = derivePreviewTimingTargets(
+      scene({ manifestCompositionId: "comp-1", mappings: [mapping({ humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })] }),
+      "comp-1"
+    );
+    expect(result).toEqual([{ compositionId: "comp-1", layerIndices: [3] }]);
+    expect(result.some((t) => t.isOuterDiscovery)).toBe(false);
+  });
+
+  it("walks the COMPLETE chain depth by default now - no maxHops limit, deeper compositions (comp-1044) are always included", () => {
     const logoMapping = mapping({
       id: "logo",
       humanNestedTarget: [
@@ -105,12 +114,39 @@ describe("derivePreviewTimingTargets", () => {
       ]
     });
 
-    const result = derivePreviewTimingTargets(scene({ mappings: [logoMapping] }), 3);
+    const result = derivePreviewTimingTargets(scene({ manifestCompositionId: "comp-1", mappings: [logoMapping] }), "comp-1");
 
     expect(result).toEqual([
       { compositionId: "comp-1", layerIndices: [3] },
       { compositionId: "comp-1635", layerIndices: [1] },
       { compositionId: "comp-1044", layerIndices: [1] }
     ]);
+  });
+
+  it("supports an arbitrary 6-hop chain end to end - never hardcoded to any specific template's own real depth", () => {
+    const deepMapping = mapping({
+      id: "deep",
+      humanNestedTarget: [
+        { compositionId: "comp-A", layerIndex: 1 },
+        { compositionId: "comp-B", layerIndex: 2 },
+        { compositionId: "comp-C", layerIndex: 3 },
+        { compositionId: "comp-D", layerIndex: 4 },
+        { compositionId: "comp-E", layerIndex: 5 },
+        { compositionId: "comp-F", layerIndex: 6 }
+      ]
+    });
+
+    const result = derivePreviewTimingTargets(scene({ manifestCompositionId: "comp-A", mappings: [deepMapping] }), "comp-A");
+
+    expect(result.map((t) => t.compositionId)).toEqual(["comp-A", "comp-B", "comp-C", "comp-D", "comp-E", "comp-F"]);
+  });
+
+  it("bounds the total target count at MAX_PREVIEW_TIMING_CHAIN_TARGETS, even for a pathologically deep/wide chain", () => {
+    const hops = Array.from({ length: MAX_PREVIEW_TIMING_CHAIN_TARGETS + 10 }, (_, i) => ({ compositionId: `comp-${i}`, layerIndex: 1 }));
+    const wideMapping = mapping({ id: "wide", humanNestedTarget: hops });
+
+    const result = derivePreviewTimingTargets(scene({ manifestCompositionId: "comp-0", mappings: [wideMapping] }), "comp-0");
+
+    expect(result.length).toBe(MAX_PREVIEW_TIMING_CHAIN_TARGETS);
   });
 });

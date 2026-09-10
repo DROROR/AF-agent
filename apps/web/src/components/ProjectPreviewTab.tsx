@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { sceneEvidenceResponseSchema, type ExecutionSessionDto, type FullPreviewArtifactDto, type JobDto } from "@dyo/schemas";
+import { sceneEvidenceResponseSchema, type ExecutionSessionDto, type FullPreviewArtifactDto, type JobDto, type SceneEvidenceResponse } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
@@ -26,7 +26,7 @@ import {
   requestFinalPreviewChanges
 } from "../lib/projects-api-client";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
-import { calculateBrandingVisibility, deriveNestedTargetHops, type LabeledLeafLayer, type PreviewTimingCalculationResult } from "../lib/preview-timing";
+import { calculatePreviewTiming, derivePreviewTimingChainTargets, resolvePreviewTimingChains, type PreviewTimingCalculationResult } from "../lib/preview-timing";
 
 // Same terminal-status set and poll cadence as NewProjectWizard's own
 // dispatch-then-poll pattern (kept local rather than shared, same
@@ -328,19 +328,22 @@ export function ProjectPreviewTab(): ReactElement | null {
     setInFlightJobId(result.data.jobId);
   }
 
-  // Preview Timing Analysis (live QA, 2026-09-09 real incident): derived
-  // only from this session's own latestPreviewScenePlanId + the CURRENT
-  // plan's own real, approved mappings for that scene - never a
-  // caller-supplied compositionId/layerIndices (see
-  // resolveInspectSceneEvidenceDispatch's own previewTimingChainIndex
-  // branch, which this drives). Null (button hidden) when there is no
-  // real two-hop nested branding target to analyze at all.
+  // Preview Timing Analysis (live QA, 2026-09-09 real incident, extended
+  // to arbitrary nested depth 2026-09-10): derived only from this
+  // session's own latestPreviewScenePlanId + the CURRENT plan's own real,
+  // approved mappings for that scene - never a caller-supplied
+  // compositionId/layerIndices (see resolveInspectSceneEvidenceDispatch's
+  // own previewTimingChainIndex branch, which this drives). Null (button
+  // hidden) when there is no real nested branding target to analyze at
+  // all. `outerMostCompositionId` is the scene's own manifestCompositionId
+  // (e.g. "!Render") - the true master timeline every reported range is
+  // ultimately expressed against.
   const previewTimingScene =
     session && session.latestPreviewScenePlanId !== null ? plan.plan.scenePlans.find((s) => s.id === session.latestPreviewScenePlanId) ?? null : null;
-  const previewTimingHops = previewTimingScene ? deriveNestedTargetHops(previewTimingScene.mappings) : null;
+  const previewTimingTargets = previewTimingScene ? derivePreviewTimingChainTargets(previewTimingScene.mappings, previewTimingScene.manifestCompositionId) : [];
 
   async function handleAnalyzePreviewTiming(): Promise<void> {
-    if (!session || session.latestPreviewScenePlanId === null || !previewTimingHops) {
+    if (!session || session.latestPreviewScenePlanId === null || !previewTimingScene || previewTimingTargets.length === 0) {
       return;
     }
     const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", session.assignedWorkerId);
@@ -355,112 +358,51 @@ export function ProjectPreviewTab(): ReactElement | null {
     setTimingResult(null);
     timingCancelledRef.current = false;
 
-    // Chain index 0: the WRAPPER layer (e.g. comp-1's own layer hosting
-    // Pre-comp 3) - its own inPoint/outPoint/startTime/stretch/
-    // timeRemapEnabled, never the leaves' evidence.
-    const wrapperDispatch = await dispatchJob({
-      operation: "INSPECT_SCENE_EVIDENCE",
-      workerId: worker.workerId,
-      projectId,
-      scenePlanId: session.latestPreviewScenePlanId,
-      previewTimingChainIndex: 0
-    });
-    if (!wrapperDispatch.ok) {
-      setTimingPhase("error");
-      setTimingError(wrapperDispatch.message);
-      return;
-    }
-    const wrapperPoll = await pollJobUntilTerminal(wrapperDispatch.data.jobId, timingCancelledRef);
-    if (timingCancelledRef.current) {
-      return;
-    }
-    if (!wrapperPoll.ok) {
-      setTimingPhase("error");
-      setTimingError(wrapperPoll.message);
-      return;
-    }
-    const wrapperParsed = sceneEvidenceResponseSchema.safeParse(wrapperPoll.job.result);
-    if (!wrapperParsed.success) {
-      setTimingPhase("error");
-      setTimingError(t.projectWorkspace.overview.previewTiming.evidenceUnavailable);
-      return;
-    }
-
-    // Chain index 1 is only ever dispatched after chain index 0 has
-    // reached a real terminal status above - the two INSPECT_SCENE_EVIDENCE
-    // jobs are never in flight at the same time, honoring the QA Worker's
-    // own maxConcurrency=1 (see this function's own doc comment on
-    // pollJobUntilTerminal for why this is a plain sequential await rather
-    // than two separate dispatches).
-    const innerDispatch = await dispatchJob({
-      operation: "INSPECT_SCENE_EVIDENCE",
-      workerId: worker.workerId,
-      projectId,
-      scenePlanId: session.latestPreviewScenePlanId,
-      previewTimingChainIndex: 1
-    });
-    if (!innerDispatch.ok) {
-      setTimingPhase("error");
-      setTimingError(innerDispatch.message);
-      return;
-    }
-    const innerPoll = await pollJobUntilTerminal(innerDispatch.data.jobId, timingCancelledRef);
-    if (timingCancelledRef.current) {
-      return;
-    }
-    if (!innerPoll.ok) {
-      setTimingPhase("error");
-      setTimingError(innerPoll.message);
-      return;
-    }
-    const innerParsed = sceneEvidenceResponseSchema.safeParse(innerPoll.job.result);
-    if (!innerParsed.success) {
-      setTimingPhase("error");
-      setTimingError(t.projectWorkspace.overview.previewTiming.evidenceUnavailable);
-      return;
-    }
-
-    const wrapperLayer = wrapperParsed.data.layers.find((layer) => layer.layerIndex === previewTimingHops.wrapperLayerIndex);
-    if (!wrapperLayer) {
-      setTimingPhase("error");
-      setTimingError(t.projectWorkspace.overview.previewTiming.missingWrapperEvidence);
-      return;
-    }
-    const wrapperDetail = wrapperParsed.data.layerDetails?.find((detail) => detail.layerIndex === previewTimingHops.wrapperLayerIndex) ?? null;
-
-    const leafLayers: LabeledLeafLayer[] = [];
-    for (const leaf of previewTimingHops.leaves) {
-      const leafEvidence = innerParsed.data.layers.find((layer) => layer.layerIndex === leaf.layerIndex);
-      if (!leafEvidence) {
+    // Every target is dispatched strictly one after another - the next
+    // INSPECT_SCENE_EVIDENCE job is never dispatched until the previous
+    // one has reached a real terminal status (pollJobUntilTerminal below),
+    // honoring the QA Worker's own maxConcurrency=1 regardless of how many
+    // hops this scene's own real nested target chains actually have.
+    const results: SceneEvidenceResponse[] = [];
+    for (let chainIndex = 0; chainIndex < previewTimingTargets.length; chainIndex++) {
+      const dispatched = await dispatchJob({
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId: worker.workerId,
+        projectId,
+        scenePlanId: session.latestPreviewScenePlanId,
+        previewTimingChainIndex: chainIndex
+      });
+      if (!dispatched.ok) {
         setTimingPhase("error");
-        setTimingError(t.projectWorkspace.overview.previewTiming.missingLeafEvidence(leaf.label));
+        setTimingError(dispatched.message);
         return;
       }
-      leafLayers.push({
-        label: leaf.label,
-        window: {
-          layerIndex: leafEvidence.layerIndex,
-          enabled: leafEvidence.enabled,
-          inPointSeconds: leafEvidence.inPointSeconds,
-          outPointSeconds: leafEvidence.outPointSeconds,
-          startTimeSeconds: leafEvidence.startTimeSeconds
-        }
-      });
+      const polled = await pollJobUntilTerminal(dispatched.data.jobId, timingCancelledRef);
+      if (timingCancelledRef.current) {
+        return;
+      }
+      if (!polled.ok) {
+        setTimingPhase("error");
+        setTimingError(polled.message);
+        return;
+      }
+      const parsed = sceneEvidenceResponseSchema.safeParse(polled.job.result);
+      if (!parsed.success) {
+        setTimingPhase("error");
+        setTimingError(t.projectWorkspace.overview.previewTiming.evidenceUnavailable);
+        return;
+      }
+      results.push(parsed.data);
     }
 
-    const calculation = calculateBrandingVisibility({
-      outerLayer: {
-        layerIndex: wrapperLayer.layerIndex,
-        enabled: wrapperLayer.enabled,
-        inPointSeconds: wrapperLayer.inPointSeconds,
-        outPointSeconds: wrapperLayer.outPointSeconds,
-        startTimeSeconds: wrapperLayer.startTimeSeconds
-      },
-      outerLayerStretchPercent: wrapperDetail?.stretchPercent ?? null,
-      outerLayerTimeRemapEnabled: wrapperDetail?.timeRemapEnabled ?? null,
-      leafLayers
-    });
+    const resolved = resolvePreviewTimingChains(previewTimingScene.mappings, previewTimingScene.manifestCompositionId, previewTimingTargets, results);
+    if (!resolved.ok) {
+      setTimingPhase("error");
+      setTimingError(resolved.reason);
+      return;
+    }
 
+    const calculation = calculatePreviewTiming(resolved.chains);
     if (!calculation.ok) {
       setTimingPhase("error");
       setTimingError(calculation.reason);
@@ -562,7 +504,7 @@ export function ProjectPreviewTab(): ReactElement | null {
           </div>
         ) : null}
 
-        {canRegeneratePreview && previewTimingHops ? (
+        {canRegeneratePreview && previewTimingTargets.length > 0 ? (
           <div className="overview-actions">
             <Button variant="secondary" disabled={!workerReady || timingPhase === "running"} onClick={() => void handleAnalyzePreviewTiming()}>
               {timingPhase === "running" ? t.jobDispatch.previewTimingAnalyzing : t.projectWorkspace.overview.previewTiming.action}
@@ -578,16 +520,16 @@ export function ProjectPreviewTab(): ReactElement | null {
               <>
                 {!timingResult.usedOverlap ? <p>{t.projectWorkspace.overview.previewTiming.noOverlapNote}</p> : null}
                 <dl className="overview-fact-list">
-                  {Object.entries(timingResult.rangesByLabel).map(([label, range]) => (
+                  {Object.entries(timingResult.rangesByLabel).map(([label, ranges]) => (
                     <div key={label}>
                       <dt>{label}</dt>
-                      <dd>{t.projectWorkspace.overview.previewTiming.rangeLabel(range[0], range[1])}</dd>
+                      <dd>{ranges.map((range) => t.projectWorkspace.overview.previewTiming.rangeLabel(range[0], range[1])).join(", ")}</dd>
                     </div>
                   ))}
-                  {timingResult.overlapRange ? (
+                  {timingResult.overlapRanges.length > 0 ? (
                     <div>
                       <dt>{t.projectWorkspace.overview.previewTiming.overlapLabelHeading}</dt>
-                      <dd>{t.projectWorkspace.overview.previewTiming.rangeLabel(timingResult.overlapRange[0], timingResult.overlapRange[1])}</dd>
+                      <dd>{timingResult.overlapRanges.map((range) => t.projectWorkspace.overview.previewTiming.rangeLabel(range[0], range[1])).join(", ")}</dd>
                     </div>
                   ) : null}
                 </dl>

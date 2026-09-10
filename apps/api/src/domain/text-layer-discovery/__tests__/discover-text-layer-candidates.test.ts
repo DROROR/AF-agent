@@ -11,6 +11,8 @@ function fact(overrides: Partial<LayerDetailFact> = {}): LayerDetailFact {
     sourceCompositionId: null,
     stretchPercent: null,
     timeRemapEnabled: null,
+    opacityStatic: null,
+    opacityKeyframes: null,
     ...overrides
   };
 }

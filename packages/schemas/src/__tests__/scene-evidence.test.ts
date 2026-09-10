@@ -220,9 +220,9 @@ describe("layerDetailFactSchema - real 2026-09-09 Worker/API version-skew incide
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
     expect(parsed.data.layerDetails).toEqual([
-      { layerName: "Control Color", layerType: "AV", layerIndex: 1, sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null },
-      { layerName: "Pre-comp 2", layerType: "PRECOMP", layerIndex: 2, sourceText: null, sourceCompositionId: "comp-1600", stretchPercent: null, timeRemapEnabled: null },
-      { layerName: "Pre-comp 3", layerType: "PRECOMP", layerIndex: 3, sourceText: null, sourceCompositionId: "comp-1635", stretchPercent: null, timeRemapEnabled: null }
+      { layerName: "Control Color", layerType: "AV", layerIndex: 1, sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+      { layerName: "Pre-comp 2", layerType: "PRECOMP", layerIndex: 2, sourceText: null, sourceCompositionId: "comp-1600", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+      { layerName: "Pre-comp 3", layerType: "PRECOMP", layerIndex: 3, sourceText: null, sourceCompositionId: "comp-1635", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null }
     ]);
   });
 });

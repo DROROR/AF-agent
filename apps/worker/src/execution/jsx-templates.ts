@@ -908,6 +908,23 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
  * own `ae_run_jsx` channel is the only way to obtain them, same as this
  * script already does for layerType/sourceText/sourceCompositionId.
  *
+ * Live QA, 2026-09-10 real incident (session a7fee3d9, timestamp
+ * 4.93827160493827s): a recommended First Preview timestamp fell inside a
+ * text layer's own confirmed-visible inPoint/outPoint window, yet the
+ * rendered frame showed no text - the ae-mcp `detailed` `layer.get`
+ * response DOES include `opacity`, but only ever a single point-in-time
+ * sample (see LayerDetail's own comment in parse-mcp-shapes.ts), never
+ * whether it is keyframed or what its real keyframe times/values are -
+ * exactly the same class of gap `stretch`/`timeRemapEnabled` already
+ * closed above. This script now also reads `layer.opacity.numKeys`: when
+ * 0 (not animated), `opacityStatic` is the real, single `layer.opacity.value`;
+ * when >0, `opacityKeyframes` is the REAL, ordered list of every keyframe's
+ * own `keyTime`/`keyValue` (both in the layer's own containing
+ * composition's timeline, the same convention `inPoint`/`outPoint`
+ * already use) - so a static opacity-0 layer can be told apart from a
+ * layer that genuinely fades in/out, rather than a single sample being
+ * mistaken for the whole timeline.
+ *
  * Generic, template-agnostic, read-only layer-classification script
  * (live-QA "generic AE layer-discovery capability" requirement - never
  * hardcodes a composition name/id/layer index, works against ANY
@@ -977,6 +994,25 @@ export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: nu
           } catch (__timeRemapReadError) {
             __timeRemapEnabled = null;
           }
+          var __opacityStatic = null;
+          var __opacityKeyframes = null;
+          try {
+            var __opacityProp = __layer.opacity;
+            if (__opacityProp.numKeys === 0) {
+              __opacityStatic = __opacityProp.value;
+            } else {
+              __opacityKeyframes = [];
+              for (var __opacityKeyIndex = 1; __opacityKeyIndex <= __opacityProp.numKeys; __opacityKeyIndex++) {
+                __opacityKeyframes.push({
+                  timeSeconds: __opacityProp.keyTime(__opacityKeyIndex),
+                  valuePercent: __opacityProp.keyValue(__opacityKeyIndex)
+                });
+              }
+            }
+          } catch (__opacityReadError) {
+            __opacityStatic = null;
+            __opacityKeyframes = null;
+          }
           if (__layer instanceof TextLayer) {
             __layerType = "TEXT";
             try {
@@ -997,7 +1033,9 @@ export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: nu
             sourceText: __sourceText,
             sourceCompositionId: __sourceCompositionId,
             stretchPercent: __stretchPercent,
-            timeRemapEnabled: __timeRemapEnabled
+            timeRemapEnabled: __timeRemapEnabled,
+            opacityStatic: __opacityStatic,
+            opacityKeyframes: __opacityKeyframes
           });
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole composition's
