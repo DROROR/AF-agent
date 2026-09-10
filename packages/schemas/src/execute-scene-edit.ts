@@ -27,7 +27,8 @@ export const SCENE_EDIT_OPERATION_TYPES = [
   "SET_TIME_REMAP_FREEZE",
   "SET_DURATION",
   "SET_BRAND_COLOR",
-  "BUILD_REELS_COMPOSITION"
+  "BUILD_REELS_COMPOSITION",
+  "BUILD_HORIZONTAL_COMPOSITION"
 ] as const;
 export type SceneEditOperationType = (typeof SCENE_EDIT_OPERATION_TYPES)[number];
 
@@ -188,6 +189,47 @@ const buildReelsCompositionOperationSchema = z
   .strict();
 export type BuildReelsCompositionOperation = z.infer<typeof buildReelsCompositionOperationSchema>;
 
+/**
+ * Builds a genuine top-level 1920x1080 Landscape output composition from
+ * the scene's own real, currently-approved content (live QA, 2026-09-10
+ * urgent request - "COMPLETE THE MISSING OUTPUT-COMPOSITION STAGE"). A
+ * comp-level operation (no single `layerIndex`/`manifestPlaceholderId`),
+ * same category as BUILD_REELS_COMPOSITION above - but deliberately
+ * DIFFERENT in one fundamental way: there is no human-reviewed
+ * `layerTransforms` input here at all. This project's real master
+ * composition is a portrait 1080x1920 timeline with no distinct widescreen
+ * composition anywhere in the template, and there is no existing UI/workflow
+ * for a human to hand-author per-layer widescreen transforms before today's
+ * deadline - so per explicit operator direction, the worker-side JSX
+ * (jsx-templates.ts's own buildBuildHorizontalCompositionScript) computes
+ * each top-level layer's new position/scale itself, from that layer's own
+ * REAL, freshly-read AE geometry (sourceRectAtTime + transform.anchorPoint/
+ * position/scale) - deterministic, generic, purely geometric rules, never
+ * a per-template hardcoded coordinate:
+ *   - a layer whose current bounding box covers most of the source
+ *     composition's own frame (background/full-frame design) is rescaled
+ *     to exactly fill the new 1920x1080 canvas,
+ *   - every other layer (foreground/text/logo/content) keeps its own
+ *     pixel scale (only shrunk, never enlarged, if it would otherwise
+ *     exceed the new canvas) and is repositioned to the same PROPORTIONAL
+ *     position within the new canvas, clamped so it never extends past the
+ *     new frame's own edges.
+ * Refuses (typed failure, no silent partial/cropped result) rather than
+ * guessing when a layer's own structure cannot be safely adapted by this
+ * rule: real keyframe animation on position/scale (would be destroyed),
+ * a 3D layer (2D geometry math does not apply), or a layer parented to
+ * another layer (correctly adapting it needs the full parent-chain
+ * transform, which this deterministic rule does not attempt).
+ */
+const buildHorizontalCompositionOperationSchema = z
+  .object({
+    type: z.literal("BUILD_HORIZONTAL_COMPOSITION"),
+    /** Server-derived, deterministic, persisted name for the new duplicate composition - never a human-typed/arbitrary caller-supplied string (see resolveExecuteFrameDispatch's own buildHorizontalCompositionOnly branch: always `${scene composition's own real name} (Landscape)`). */
+    horizontalCompositionName: z.string().min(1)
+  })
+  .strict();
+export type BuildHorizontalCompositionOperation = z.infer<typeof buildHorizontalCompositionOperationSchema>;
+
 export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setTextOperationSchema,
   mapFootageOperationSchema,
@@ -195,9 +237,13 @@ export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setTimeRemapFreezeOperationSchema,
   setDurationOperationSchema,
   setBrandColorOperationSchema,
-  buildReelsCompositionOperationSchema
+  buildReelsCompositionOperationSchema,
+  buildHorizontalCompositionOperationSchema
 ]);
 export type SceneEditOperation = z.infer<typeof sceneEditOperationSchema>;
+
+/** Every comp-level operation type - never tied to a single manifestPlaceholderId/layerIndex/approved mapping, unlike every other SceneEditOperation. Shared by executeSceneEditRequestSchema's own approvedMappingIds refine below and any future caller that needs the same "is this operation mapping-driven or not" classification. */
+const COMP_LEVEL_OPERATION_TYPES = ["BUILD_REELS_COMPOSITION", "BUILD_HORIZONTAL_COMPOSITION"] as const;
 
 /**
  * MAP_FOOTAGE's DISPATCH-FACING intent - identifies the project asset to
@@ -245,7 +291,8 @@ export const sceneEditOperationIntentSchema = z.discriminatedUnion("type", [
   setTimeRemapFreezeOperationSchema,
   setDurationOperationSchema,
   setBrandColorOperationSchema,
-  buildReelsCompositionOperationSchema
+  buildReelsCompositionOperationSchema,
+  buildHorizontalCompositionOperationSchema
 ]);
 export type SceneEditOperationIntent = z.infer<typeof sceneEditOperationIntentSchema>;
 
@@ -364,11 +411,26 @@ export const executeSceneEditRequestSchema = z
       if (value.expectedWorkingProjectSha256 === null) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: "previewOnly requires an existing working copy (expectedWorkingProjectSha256) - there is never a first previewOnly job" });
       }
-    } else if (value.operations.length === 0 || value.approvedMappingIds.length === 0) {
-      // The exact prior invariant (operations.min(1)/approvedMappingIds.min(1))
-      // - preserved as a refine rather than a raw .min(1) only so previewOnly
-      // can legitimately be the one, explicit exception above.
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "operations and approvedMappingIds must both be non-empty unless previewOnly is true" });
+      return;
+    }
+    if (value.operations.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "operations must be non-empty unless previewOnly is true" });
+      return;
+    }
+    // Post-completion derived-output-composition dispatch (live QA,
+    // 2026-09-10 - resolveExecuteFrameDispatch's own
+    // buildHorizontalCompositionOnly branch): an operations array made up
+    // ENTIRELY of comp-level operations (BUILD_REELS_COMPOSITION/
+    // BUILD_HORIZONTAL_COMPOSITION) is never tied to any
+    // manifestPlaceholderId/approved mapping, so approvedMappingIds is
+    // legitimately empty for it - the exact prior invariant
+    // (approvedMappingIds.min(1)) is preserved for every EXISTING caller,
+    // since BUILD_REELS_COMPOSITION has only ever been dispatched
+    // alongside that same scene's own mapping-driven SET_TEXT/MAP_FOOTAGE
+    // operations until now.
+    const isEntirelyCompLevel = value.operations.every((op) => (COMP_LEVEL_OPERATION_TYPES as readonly string[]).includes(op.type));
+    if (!isEntirelyCompLevel && value.approvedMappingIds.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "approvedMappingIds must be non-empty unless every operation is comp-level (BUILD_REELS_COMPOSITION/BUILD_HORIZONTAL_COMPOSITION) or previewOnly is true" });
     }
   });
 export type ExecuteSceneEditRequest = z.infer<typeof executeSceneEditRequestSchema>;
@@ -502,6 +564,29 @@ export const sceneEditResultSchema = z.object({
    * invents a canonical manifest identity - that is the API's own concern.
    */
   reelsCompositionBuilt: z
+    .object({
+      aeProjectItemIndex: z.number().int().positive(),
+      compositionName: z.string().min(1),
+      widthPx: z.number().int().positive(),
+      heightPx: z.number().int().positive(),
+      durationSeconds: z.number().nonnegative(),
+      frameRate: z.number().positive()
+    })
+    .nullable()
+    .default(null),
+  /**
+   * Non-null only when this job's operations included a successfully
+   * completed BUILD_HORIZONTAL_COMPOSITION (live QA, 2026-09-10 urgent
+   * request) - the new Landscape composition's real, worker-verified
+   * identity (read back from the actual AE CompItem, never assumed), so
+   * the API can register it as an additive derived composition on the
+   * project's manifest (see register-horizontal-composition.ts) exactly
+   * the same way reelsCompositionBuilt already does. manifestCompositionId
+   * is deliberately absent here for the exact same reason as
+   * reelsCompositionBuilt's own doc comment: the worker never invents a
+   * canonical manifest identity.
+   */
+  horizontalCompositionBuilt: z
     .object({
       aeProjectItemIndex: z.number().int().positive(),
       compositionName: z.string().min(1),

@@ -234,6 +234,81 @@ describe("executeSceneEdit", () => {
     expect(result.reelsCompositionBuilt).toBeNull();
   });
 
+  it("captures horizontalCompositionBuilt from a successful BUILD_HORIZONTAL_COMPOSITION operation's own resultingValue - never fabricated", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const horizontalOp: SceneEditOperationIntent = { type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "!Render (Landscape)" };
+    const bridge = new FakeAeEditBridge((operation) => ({
+      ok: true,
+      operationType: operation.type,
+      previousValue: null,
+      resultingValue:
+        operation.type === "BUILD_HORIZONTAL_COMPOSITION"
+          ? {
+              horizontalAeProjectItemIndex: 61,
+              horizontalCompositionName: "!Render (Landscape)",
+              horizontalWidthPx: 1920,
+              horizontalHeightPx: 1080,
+              horizontalDurationSeconds: 45.045045045045,
+              horizontalFrameRate: 29.97
+            }
+          : null
+    }));
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [horizontalOp] });
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      request
+    );
+
+    expect(result.failureReason).toBeNull();
+    expect(result.horizontalCompositionBuilt).toEqual({
+      aeProjectItemIndex: 61,
+      compositionName: "!Render (Landscape)",
+      widthPx: 1920,
+      heightPx: 1080,
+      durationSeconds: 45.045045045045,
+      frameRate: 29.97
+    });
+  });
+
+  it("leaves horizontalCompositionBuilt null for an ordinary run with no BUILD_HORIZONTAL_COMPOSITION operation", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const bridge = new FakeAeEditBridge(alwaysSucceed);
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      request
+    );
+
+    expect(result.horizontalCompositionBuilt).toBeNull();
+  });
+
+  it("does not fabricate horizontalCompositionBuilt from a malformed/incomplete resultingValue", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const horizontalOp: SceneEditOperationIntent = { type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "!Render (Landscape)" };
+    const bridge = new FakeAeEditBridge(() => ({
+      ok: true,
+      operationType: "BUILD_HORIZONTAL_COMPOSITION",
+      previousValue: null,
+      resultingValue: { horizontalAeProjectItemIndex: 61 } // missing every other required field
+    }));
+    const preview = new FakePreviewCapture(REAL_PREVIEW);
+    const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [horizontalOp] });
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: preview, uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date() },
+      request
+    );
+
+    expect(result.horizontalCompositionBuilt).toBeNull();
+  });
+
   it("fails closed when the working copy cannot be prepared (source sha mismatch) - never touches the bridge at all", async () => {
     const { sourcePath, root } = makeSourceProject();
     const workRoot = join(root, "work-root");

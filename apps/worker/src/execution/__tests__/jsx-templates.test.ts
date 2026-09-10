@@ -1069,6 +1069,248 @@ describe("BUILD_REELS_COMPOSITION (native Reels, 2026-08-29 closure requirement)
   });
 });
 
+describe("BUILD_HORIZONTAL_COMPOSITION (native Landscape, live QA 2026-09-10 urgent request)", () => {
+  function op(overrides: Partial<Extract<SceneEditOperation, { type: "BUILD_HORIZONTAL_COMPOSITION" }>> = {}): SceneEditOperation {
+    return {
+      type: "BUILD_HORIZONTAL_COMPOSITION",
+      horizontalCompositionName: "!Render (Landscape)",
+      ...overrides
+    };
+  }
+
+  it("resolves and name-verifies the SOURCE composition before touching anything, the same as every other operation", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("app.project.item(2)");
+    expect(script).toContain("__comp.name !== " + JSON.stringify("!Render"));
+    expect(script).toContain("refusing to mutate the wrong composition");
+  });
+
+  it("uses AE's native, non-destructive CompItem.duplicate() - never deletes/replaces the source composition itself", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("__comp.duplicate()");
+    expect(script).not.toMatch(/__comp\.remove\(\)/);
+  });
+
+  it("removes any PRIOR composition with the same horizontalCompositionName first, so re-execution never accumulates duplicates", () => {
+    const script = buildOperationScript(2, "!Render", op({ horizontalCompositionName: "Landscape Take 2" }));
+    expect(script).toContain(JSON.stringify("Landscape Take 2"));
+    expect(script).toContain("__existingIndex !== null");
+    expect(script).toContain("app.project.item(__existingIndex).remove()");
+  });
+
+  it("resizes ONLY the new duplicate to the fixed 1920x1080 frame - never a caller-supplied dimension", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("__newComp.width = 1920");
+    expect(script).toContain("__newComp.height = 1080");
+  });
+
+  it("never accepts a caller-supplied layout - no layerTransforms field anywhere, unlike BUILD_REELS_COMPOSITION", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).not.toContain("layerTransforms");
+  });
+
+  it("refuses (typed failure) to adapt a layer whose position or scale already has real keyframes - never silently destroys existing animation", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("__layer.transform.position.numKeys > 0");
+    expect(script).toContain("__layer.transform.scale.numKeys > 0");
+    expect(script).toContain("refusing to overwrite it and destroy that animation");
+  });
+
+  it("refuses (typed failure) to adapt a 3D layer - 2D geometry math does not apply safely", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("__layer.threeDLayer");
+    expect(script).toContain("is a 3D layer");
+  });
+
+  it("refuses (typed failure) to adapt a layer parented to another layer - a partial reposition would silently produce the wrong final position", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("__layer.parent !== null");
+    expect(script).toContain("is parented to another layer");
+  });
+
+  it("skips (never refuses) a disabled layer or a layer with no video component - nothing to adapt", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("if (!__layer.enabled) { continue; }");
+    expect(script).toContain("if (!__layer.hasVideo) { continue; }");
+  });
+
+  it("rolls back (removes the half-built duplicate) if any layer cannot be safely adapted", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    const failureAssignIndex = script.indexOf('__adaptFailure = "layer " + __li');
+    const rollbackIndex = script.indexOf("__newComp.remove();");
+    expect(failureAssignIndex).toBeGreaterThan(-1);
+    expect(rollbackIndex).toBeGreaterThan(failureAssignIndex);
+  });
+
+  it("reports the new composition's real identity AND dimensions/duration/frameRate read back from the real CompItem, never fabricated/guessed", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("horizontalAeProjectItemIndex: __newIndex");
+    expect(script).toContain("horizontalCompositionName: __newComp.name");
+    expect(script).toContain("horizontalWidthPx: __newComp.width");
+    expect(script).toContain("horizontalHeightPx: __newComp.height");
+    expect(script).toContain("horizontalDurationSeconds: __newComp.duration");
+    expect(script).toContain("horizontalFrameRate: __newComp.frameRate");
+  });
+
+  it("wraps in beginUndoGroup/try/finally/endUndoGroup like every other script", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).toContain("app.beginUndoGroup(");
+    expect(script).toContain("app.endUndoGroup();");
+    expect(script).toContain("try {");
+    expect(script).toContain("finally {");
+  });
+
+  it("is a bare function BODY, never a self-invoking expression", () => {
+    const script = buildOperationScript(2, "!Render", op());
+    expect(script).not.toMatch(/^\s*\(function\s*\(/);
+    expect(script.trim().endsWith("return __result;")).toBe(true);
+  });
+
+  it("is deterministic - the same operation always produces byte-identical JSX", () => {
+    expect(buildOperationScript(2, "!Render", op())).toBe(buildOperationScript(2, "!Render", op()));
+  });
+
+  /**
+   * Real execution of the geometry algorithm (via the same
+   * runFixedScriptWithoutNativeJson harness every other script in this
+   * file uses to prove real behavior, not merely source text) against a
+   * fake 1080x1920 source composition with one full-frame BACKGROUND layer
+   * and one small, centered FOREGROUND layer (a stand-in for something
+   * like a logo) - proves the actual numeric output of the deterministic
+   * rule, not just that it exists in the script's own text.
+   */
+  const HORIZONTAL_APP_SETUP = `
+    function CompItem() {}
+
+    function makeLayer(opts) {
+      var l = {};
+      l.name = opts.name;
+      l.enabled = opts.enabled !== undefined ? opts.enabled : true;
+      l.hasVideo = opts.hasVideo !== undefined ? opts.hasVideo : true;
+      l.threeDLayer = !!opts.threeDLayer;
+      l.parent = opts.parent || null;
+      var __posKeys = opts.positionKeys || 0;
+      var __scaleKeys = opts.scaleKeys || 0;
+      l.transform = {
+        anchorPoint: { value: opts.anchor },
+        position: { value: opts.position, numKeys: __posKeys, setValue: function (v) { l.transform.position.value = v; } },
+        scale: { value: opts.scale, numKeys: __scaleKeys, setValue: function (v) { l.transform.scale.value = v; } }
+      };
+      l.sourceRectAtTime = function () {
+        if (opts.srcRectThrows) { throw new Error("no bounds"); }
+        return opts.srcRect;
+      };
+      return l;
+    }
+
+    var __bgLayer = makeLayer({ name: "Background", anchor: [0, 0], position: [0, 0], scale: [100, 100], srcRect: { left: 0, top: 0, width: 1080, height: 1920 } });
+    var __logoLayer = makeLayer({ name: "Logo", anchor: [50, 50], position: [540, 960], scale: [100, 100], srcRect: { left: 0, top: 0, width: 100, height: 100 } });
+
+    var __origComp = new CompItem();
+    __origComp.name = ${JSON.stringify("!Render")};
+    __origComp.width = 1080;
+    __origComp.height = 1920;
+    __origComp.duration = 45;
+    __origComp.frameRate = 30;
+
+    var __theDuplicate = new CompItem();
+    __theDuplicate.name = "unnamed duplicate stub";
+    var __newCompLayers = [__bgLayer, __logoLayer];
+    __theDuplicate.numLayers = __newCompLayers.length;
+    __theDuplicate.layer = function (i) { return __newCompLayers[i - 1]; };
+    __origComp.duplicate = function () { return __theDuplicate; };
+
+    var __allItems = [__origComp, __theDuplicate];
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: {
+        numItems: __allItems.length,
+        item: function (i) { return __allItems[i - 1]; }
+      }
+    };
+  `;
+
+  it("a full-frame BACKGROUND layer is rescaled (non-uniformly) to exactly fill the new 1920x1080 canvas edge-to-edge", () => {
+    const script = buildOperationScript(1, "!Render", op());
+    const resultText = runFixedScriptWithoutNativeJson(script, HORIZONTAL_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    // scaleX = 100 * (1920/1080), scaleY = 100 * (1080/1920), position stays at the frame's own (0,0) corner.
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(HORIZONTAL_APP_SETUP, context);
+    vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context);
+    const bgTransform = vm.runInContext("__bgLayer.transform", context) as { position: { value: number[] }; scale: { value: number[] } };
+    expect(bgTransform.scale.value[0]).toBeCloseTo((1920 / 1080) * 100, 6);
+    expect(bgTransform.scale.value[1]).toBeCloseTo((1080 / 1920) * 100, 6);
+    expect(bgTransform.position.value[0]).toBeCloseTo(0, 6);
+    expect(bgTransform.position.value[1]).toBeCloseTo(0, 6);
+  });
+
+  it("a small, centered FOREGROUND layer keeps its own real pixel scale and is repositioned to the SAME proportional center in the new canvas", () => {
+    const script = buildOperationScript(1, "!Render", op());
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(HORIZONTAL_APP_SETUP, context);
+    vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context);
+    const logoTransform = vm.runInContext("__logoLayer.transform", context) as { position: { value: number[] }; scale: { value: number[] } };
+    // Was centered at (540,960) in the 1080x1920 source (exact center) - must stay exactly centered in the new 1920x1080 canvas: (960,540).
+    expect(logoTransform.scale.value).toEqual([100, 100]);
+    expect(logoTransform.position.value[0]).toBeCloseTo(960, 6);
+    expect(logoTransform.position.value[1]).toBeCloseTo(540, 6);
+  });
+
+  it("real end-to-end refusal: a parented layer stops the whole operation and reports a typed failureReason, never a partial/silent result", () => {
+    const parentedSetup = `
+      function CompItem() {}
+      function makeLayer(opts) {
+        var l = {};
+        l.name = opts.name;
+        l.enabled = true;
+        l.hasVideo = true;
+        l.threeDLayer = false;
+        l.parent = opts.parent || null;
+        l.transform = {
+          anchorPoint: { value: [0, 0] },
+          position: { value: [0, 0], numKeys: 0, setValue: function () {} },
+          scale: { value: [100, 100], numKeys: 0, setValue: function () {} }
+        };
+        l.sourceRectAtTime = function () { return { left: 0, top: 0, width: 100, height: 100 }; };
+        return l;
+      }
+      var __parentLayer = makeLayer({ name: "Parent" });
+      var __childLayer = makeLayer({ name: "Child", parent: __parentLayer });
+
+      var __origComp = new CompItem();
+      __origComp.name = ${JSON.stringify("!Render")};
+      __origComp.width = 1080;
+      __origComp.height = 1920;
+
+      var __theDuplicate = new CompItem();
+      __theDuplicate.name = "unnamed duplicate stub";
+      var __removed = false;
+      __theDuplicate.remove = function () { __removed = true; };
+      var __newCompLayers = [__parentLayer, __childLayer];
+      __theDuplicate.numLayers = __newCompLayers.length;
+      __theDuplicate.layer = function (i) { return __newCompLayers[i - 1]; };
+      __origComp.duplicate = function () { return __theDuplicate; };
+
+      var __allItems = [__origComp, __theDuplicate];
+      var app = {
+        beginUndoGroup: function () {},
+        endUndoGroup: function () {},
+        project: { numItems: __allItems.length, item: function (i) { return __allItems[i - 1]; } }
+      };
+    `;
+    const script = buildOperationScript(1, "!Render", op());
+    const resultText = runFixedScriptWithoutNativeJson(script, parentedSetup);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("parented to another layer");
+  });
+});
+
 /**
  * Modal-safe target-project open (2026-09-03, real production incident): a
  * real client attempt showed AE presenting a native "19 files are missing

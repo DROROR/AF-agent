@@ -226,7 +226,23 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        */
       regeneratePreviewOnly: z.boolean().optional(),
       /** Only meaningful alongside regeneratePreviewOnly - see executeSceneEditRequestSchema's own previewTimestampSeconds doc comment. */
-      previewTimestampSeconds: z.number().nonnegative().finite().optional()
+      previewTimestampSeconds: z.number().nonnegative().finite().optional(),
+      /**
+       * Landscape output-composition build (live QA, 2026-09-10 urgent
+       * request) - opt-in intent flag only, same "omitted/false preserves
+       * the exact prior behavior for every existing caller" convention as
+       * regeneratePreviewOnly above. Targets a scene that has ALREADY
+       * completed in this session (the opposite precondition of a normal
+       * dispatch - this scene's own real, approved content must already be
+       * baked into the working copy before it is safe to duplicate/adapt),
+       * and produces a single-operation dispatch
+       * (operations: [BUILD_HORIZONTAL_COMPOSITION], approvedMappingIds:
+       * []) entirely server-resolved via resolveExecuteFrameDispatch's own
+       * buildHorizontalCompositionOnly branch - never a raw worker payload
+       * passthrough from the browser, and never a caller-supplied
+       * composition name/geometry of any kind.
+       */
+      buildHorizontalCompositionOnly: z.boolean().optional()
     })
     .strict(),
   z

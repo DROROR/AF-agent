@@ -16,6 +16,7 @@ function result(overrides: Partial<SceneEditResult> = {}): SceneEditResult {
     previewFramePath: "/checkpoints/job-1/preview.png",
     previewTimestampSeconds: 2.5,
     reelsCompositionBuilt: null,
+    horizontalCompositionBuilt: null,
     failureReason: null,
     startedAt: "2026-08-26T00:00:00.000Z",
     completedAt: "2026-08-26T00:00:01.000Z",

@@ -111,6 +111,13 @@ export interface ResolveExecuteFrameDispatchInput {
   regeneratePreviewOnly?: boolean;
   /** Only meaningful alongside regeneratePreviewOnly. */
   previewTimestampSeconds?: number;
+  /**
+   * Landscape output-composition build (live QA, 2026-09-10 urgent
+   * request) - see resolveBuildHorizontalCompositionOnly's own doc
+   * comment below. Omitted/false preserves every existing caller's exact
+   * prior behavior untouched.
+   */
+  buildHorizontalCompositionOnly?: boolean;
 }
 
 export type ResolveExecuteFrameDispatchResult =
@@ -193,6 +200,16 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   // comment for its distinct, narrower preconditions.
   if (input.regeneratePreviewOnly === true) {
     return resolveRegeneratePreviewOnly(input, session);
+  }
+
+  // Landscape output-composition build (live QA, 2026-09-10 urgent
+  // request) - deliberately bypasses the "already edited" check right
+  // below (the OPPOSITE precondition of a normal edit: this scene's own
+  // real, approved content must ALREADY be baked into the working copy
+  // before it is safe to duplicate/adapt it - see
+  // resolveBuildHorizontalCompositionOnly's own doc comment).
+  if (input.buildHorizontalCompositionOnly === true) {
+    return resolveBuildHorizontalCompositionOnly(input, session);
   }
 
   if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
@@ -591,6 +608,138 @@ function resolveRegeneratePreviewOnly(
       operations: [],
       previewOnly: true,
       previewTimestampSeconds: input.previewTimestampSeconds
+    }
+  };
+}
+
+/**
+ * Landscape output-composition build (live QA, 2026-09-10 urgent request:
+ * "COMPLETE THE MISSING OUTPUT-COMPOSITION STAGE") - a deliberately
+ * NARROW, distinct precondition set from the normal edit path above, same
+ * "opt-in flag, own function" convention as resolveRegeneratePreviewOnly:
+ *
+ *   - targets the requested scenePlanId directly (unlike
+ *     resolveRegeneratePreviewOnly, which always targets
+ *     session.latestPreviewScenePlanId - this operation can reasonably
+ *     apply to any scene, not only the one a preview was captured for).
+ *   - requires this exact scenePlanId to ALREADY be in the session's own
+ *     completedScenePlanIds - the OPPOSITE precondition of a normal edit
+ *     dispatch (which requires it NOT yet completed): this scene's own
+ *     real, approved content must already be baked into the working copy
+ *     before it is safe to duplicate/adapt it. A scene that was never
+ *     executed in this session has nothing real to build a Landscape
+ *     master from.
+ *   - requires session.workingCopyTrusted (the same trust flag First
+ *     Preview regeneration already respects) - never builds a derived
+ *     output composition on top of a working copy this session's own
+ *     record no longer trusts.
+ *   - does NOT require session.status to be non-terminal in the general
+ *     sense session status matters for READY_TO_RENDER/EDITING (a session
+ *     that has already reached READY_TO_RENDER, the expected real case
+ *     today, is explicitly fine) - only genuinely terminal FAILED/
+ *     COMPLETED sessions are refused, mirroring every other branch's own
+ *     "start a new execution session" rule for those.
+ *   - produces exactly ONE operation (BUILD_HORIZONTAL_COMPOSITION),
+ *     never bundled with any SET_TEXT/MAP_FOOTAGE - "do not rerun
+ *     MAP_FOOTAGE or SET_TEXT" (explicit operator instruction). Its own
+ *     horizontalCompositionName is ALWAYS server-derived deterministically
+ *     from the scene's own real, current composition name
+ *     (`${compositionName} (Landscape)`) - never a caller-supplied string,
+ *     no template-specific hardcoding.
+ *   - approvedMappingIds: [] - a comp-level operation, not tied to any
+ *     mapping (see executeSceneEditRequestSchema's own superRefine, which
+ *     now explicitly allows this for an operations array made up entirely
+ *     of comp-level operations).
+ *   - expectedWorkingProjectSha256 is always the session's own real,
+ *     current latestWorkingProjectSha256 (never null - there is never a
+ *     "first" build-horizontal-only job; a working copy already exists by
+ *     construction, since completedScenePlanIds is non-empty).
+ */
+function resolveBuildHorizontalCompositionOnly(
+  input: ResolveExecuteFrameDispatchInput,
+  session: ExecuteFrameDispatchSessionSnapshot
+): ResolveExecuteFrameDispatchResult {
+  const { projectId, scenePlanId, currentPlan, currentProjectManifest, worker, now, staleAfterMs } = input;
+
+  if (session.status === "FAILED" || session.status === "COMPLETED") {
+    return { ok: false, reason: `Execution session is ${session.status} - start a new execution session to continue` };
+  }
+  if (!session.workingCopyTrusted) {
+    return { ok: false, reason: "Execution session's working copy is no longer trusted - start a new execution session to continue" };
+  }
+  if (!session.completedScenePlanIds.includes(scenePlanId)) {
+    return {
+      ok: false,
+      reason: `Scene "${scenePlanId}" has not been executed in this session yet - a Landscape master can only be built from a scene's own already-executed, approved content`
+    };
+  }
+  if (session.latestWorkingProjectSha256 === null) {
+    return { ok: false, reason: "Execution session has no recorded working copy to build a Landscape master from" };
+  }
+
+  if (!currentPlan) {
+    return { ok: false, reason: "No execution plan exists for this project" };
+  }
+  if (currentPlan.status !== "APPROVED") {
+    return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a Landscape master can only be built from an approved plan` };
+  }
+  if (session.planRevision !== currentPlan.revision || session.sourceProjectSha256 !== currentPlan.sourceProjectSha256) {
+    return {
+      ok: false,
+      reason: `Execution session is bound to plan revision ${session.planRevision}, but the current plan is revision ${currentPlan.revision} - the plan changed after this session began; start a new execution session`
+    };
+  }
+  if (!currentProjectManifest || currentProjectManifest.sourceProject.sha256 !== currentPlan.sourceProjectSha256) {
+    return { ok: false, reason: "The project's current manifest sha256 no longer matches this plan - the source project may have changed" };
+  }
+
+  const scene = currentPlan.scenePlans.find((s) => s.id === scenePlanId);
+  if (!scene) {
+    return { ok: false, reason: `Unknown scenePlanId "${scenePlanId}" in this plan` };
+  }
+  const composition = currentProjectManifest.compositions.find((c) => c.compositionId === scene.manifestCompositionId);
+  if (!composition) {
+    return { ok: false, reason: `manifestCompositionId "${scene.manifestCompositionId}" does not match any composition in the current manifest` };
+  }
+
+  if (!worker) {
+    return { ok: false, reason: "Worker has never reported in" };
+  }
+  if (worker.id !== session.assignedWorkerId) {
+    return { ok: false, reason: "This execution session is pinned to a different worker - its cumulative working copy exists only on that worker's local disk" };
+  }
+  if (worker.status !== "ONLINE" || isHeartbeatStale(worker.lastHeartbeatAt, now, staleAfterMs)) {
+    return { ok: false, reason: "Worker is not currently ONLINE (no fresh heartbeat)" };
+  }
+  if (worker.aeStatus !== "ONLINE") {
+    return { ok: false, reason: `AE is not ONLINE (reports ${worker.aeStatus})` };
+  }
+  if (worker.mcpStatus !== "ONLINE") {
+    return { ok: false, reason: `MCP is not ONLINE (reports ${worker.mcpStatus})` };
+  }
+  if (!worker.capabilities.includes(REQUIRED_WORKER_CAPABILITY)) {
+    return { ok: false, reason: `Worker does not report the ${REQUIRED_WORKER_CAPABILITY} capability` };
+  }
+  if (worker.currentJobId !== null) {
+    return { ok: false, reason: "Worker already has a job in progress (currentJobId is not empty)" };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      projectId,
+      planId: currentPlan.id,
+      planRevision: currentPlan.revision,
+      sourceProjectSha256: currentPlan.sourceProjectSha256,
+      sourceProjectPath: currentProjectManifest.sourceProject.path,
+      executionSessionId: session.id,
+      expectedWorkingProjectSha256: session.latestWorkingProjectSha256,
+      scenePlanId,
+      manifestCompositionId: scene.manifestCompositionId,
+      aeProjectItemIndex: composition.aeProjectItemIndex,
+      compositionName: composition.name,
+      approvedMappingIds: [],
+      operations: [{ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: `${composition.name} (Landscape)` }]
     }
   };
 }

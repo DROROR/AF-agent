@@ -984,3 +984,112 @@ describe("resolveExecuteFrameDispatch - regeneratePreviewOnly (First Preview reg
     expect(result.payload.approvedMappingIds).toHaveLength(0);
   });
 });
+
+describe("resolveExecuteFrameDispatch - buildHorizontalCompositionOnly (Landscape output-composition build, live QA 2026-09-10 urgent request)", () => {
+  const MUTATED_SHA = "d".repeat(64);
+
+  function readyToBuildSession(overrides: Partial<ExecuteFrameDispatchSessionSnapshot> = {}): ExecuteFrameDispatchSessionSnapshot {
+    return validSession({
+      status: "READY_TO_RENDER",
+      completedScenePlanIds: ["scene-1"],
+      latestWorkingProjectSha256: MUTATED_SHA,
+      ...overrides
+    });
+  }
+
+  it("real session shape (a7fee3d9): a scene already completed in this session produces a single, self-sufficient BUILD_HORIZONTAL_COMPOSITION operation, never bundled with any content edit", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession(), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "Scene 01 (Landscape)" }]);
+    expect(result.payload.approvedMappingIds).toEqual([]);
+    expect(result.payload.expectedWorkingProjectSha256).toBe(MUTATED_SHA);
+    expect(result.payload.scenePlanId).toBe("scene-1");
+    expect(result.payload.aeProjectItemIndex).toBe(5);
+    expect(result.payload.compositionName).toBe("Scene 01");
+  });
+
+  it("the new composition's name is ALWAYS server-derived from the scene's own real, current composition name - never a caller-supplied string", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        session: readyToBuildSession(),
+        currentProjectManifest: validManifest({
+          compositions: [{ compositionId: "comp-1", aeProjectItemIndex: 5, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] }]
+        }),
+        buildHorizontalCompositionOnly: true
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "!Render (Landscape)" }]);
+  });
+
+  it("requires the target scene to already be in the session's own completedScenePlanIds - the OPPOSITE precondition of a normal edit dispatch", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ completedScenePlanIds: [] }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("has not been executed in this session yet");
+  });
+
+  it("refuses when the session has no recorded working copy at all", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ latestWorkingProjectSha256: null }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a FAILED session - never a general un-fail-any-session escape hatch", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ status: "FAILED" }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("start a new execution session");
+  });
+
+  it("refuses a COMPLETED session", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ status: "COMPLETED" }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses when the session's own workingCopyTrusted has been set false", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ workingCopyTrusted: false }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("no longer trusted");
+  });
+
+  it("refuses a stale plan revision, exactly like every other dispatch branch", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: readyToBuildSession({ planRevision: 1 }), currentPlan: validPlan({ revision: 2 }), buildHorizontalCompositionOnly: true })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses when the plan is not APPROVED", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ session: readyToBuildSession(), currentPlan: validPlan({ status: "DRAFT" }), buildHorizontalCompositionOnly: true })
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses an offline worker, exactly like every other dispatch branch", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession(), worker: validWorker({ status: "OFFLINE" }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a worker pinned to a different session (worker affinity)", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession(), worker: validWorker({ id: "other-worker" }), buildHorizontalCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("never touches operations/approvedMappingIds derived from the scene's own real mappings - a comp-level operation regardless of how many mappings exist", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        session: readyToBuildSession(),
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping(), imageMapping()] })] }),
+        buildHorizontalCompositionOnly: true
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toHaveLength(1);
+    expect(result.payload.approvedMappingIds).toHaveLength(0);
+  });
+});

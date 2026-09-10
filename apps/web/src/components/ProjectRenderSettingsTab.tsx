@@ -74,6 +74,7 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
   return (
     <div className="overview-grid">
       <InspectRenderCapabilitiesCard />
+      <BuildHorizontalCompositionCard projectId={projectId} session={session} />
       {RENDER_OUTPUT_VARIANTS.map((variant) => (
         <VariantConfigCard
           key={variant}
@@ -181,6 +182,79 @@ function InspectRenderCapabilitiesCard(): ReactElement {
       <div className="overview-actions">
         <Button variant="secondary" disabled={!worker || isDispatching} onClick={() => void handleInspect()}>
           {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.inspectCapabilitiesAction}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Landscape output-composition build (live QA, 2026-09-10 urgent request:
+ * "COMPLETE THE MISSING OUTPUT-COMPOSITION STAGE") - dispatches the new
+ * one-shot BUILD_HORIZONTAL_COMPOSITION operation for the session's own
+ * already-executed master/preview scene (`session.latestPreviewScenePlanId`
+ * - the exact same field regeneratePreviewOnly already targets for the
+ * same reason: that scene's own approved content is already baked into the
+ * working copy). Once the dispatched job succeeds, the new Landscape
+ * composition is registered onto the project's manifest automatically (see
+ * register-horizontal-composition.ts) and appears in the composition
+ * dropdown below with zero further action here - this card only ever
+ * triggers the build, it never reads back or selects the result itself.
+ */
+function BuildHorizontalCompositionCard({ projectId, session }: { projectId: string; session: ExecutionSessionDto | null }): ReactElement | null {
+  const { t } = useLocale();
+  const { data: dashboardStatus } = useDashboardStatusContext();
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [dispatchSuccess, setDispatchSuccess] = useState<string | null>(null);
+
+  if (!session || session.latestPreviewScenePlanId === null) {
+    return null;
+  }
+  const scenePlanId = session.latestPreviewScenePlanId;
+  const ready = session.completedScenePlanIds.includes(scenePlanId);
+  // Same worker-affinity resolution as every other session-scoped dispatch
+  // in this file (RENDER above) - the session's cumulative working copy
+  // exists only on its own assigned worker's local disk.
+  const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "EXECUTE_FRAME", session.assignedWorkerId);
+
+  async function handleBuild(): Promise<void> {
+    if (!worker || !session) {
+      return;
+    }
+    setIsDispatching(true);
+    setDispatchError(null);
+    setDispatchSuccess(null);
+    const result = await dispatchJob({
+      operation: "EXECUTE_FRAME",
+      workerId: worker.workerId,
+      projectId,
+      executionSessionId: session.id,
+      scenePlanId,
+      buildHorizontalCompositionOnly: true
+    });
+    setIsDispatching(false);
+    if (!result.ok) {
+      setDispatchError(result.message);
+      return;
+    }
+    setDispatchSuccess(t.jobDispatch.queuedDescription(result.data.jobId));
+  }
+
+  return (
+    <Card className="overview-section">
+      <CardHeader title={t.projectWorkspace.renderSettings.buildHorizontalSection} />
+      <p>{t.projectWorkspace.renderSettings.buildHorizontalDescription}</p>
+      {!ready ? (
+        <EmptyState title={t.projectWorkspace.renderSettings.buildHorizontalNotReadyTitle} description={t.projectWorkspace.renderSettings.buildHorizontalNotReadyDescription} />
+      ) : !worker ? (
+        <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} />
+      ) : null}
+      {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
+      {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
+      <div className="overview-actions">
+        <Button variant="secondary" disabled={!ready || !worker || isDispatching} onClick={() => void handleBuild()}>
+          {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.buildHorizontalAction}
         </Button>
       </div>
     </Card>

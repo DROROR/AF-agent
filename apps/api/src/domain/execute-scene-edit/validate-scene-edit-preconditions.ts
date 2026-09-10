@@ -107,6 +107,15 @@ export function validateSceneEditPreconditions(input: ValidateSceneEditPrecondit
       }
       continue;
     }
+    if (operation.type === "BUILD_HORIZONTAL_COMPOSITION") {
+      // Comp-level, not tied to one manifestPlaceholderId or a persisted
+      // human-approved layout (live QA, 2026-09-10) - its own
+      // horizontalCompositionName is server-derived deterministically from
+      // the scene's own real composition name, never a human-approved
+      // persisted object the way reelsLayout is. Nothing further to verify
+      // here.
+      continue;
+    }
 
     const mapping = scene.mappings.find((m) => m.manifestPlaceholderId === operation.manifestPlaceholderId);
     if (!mapping) {

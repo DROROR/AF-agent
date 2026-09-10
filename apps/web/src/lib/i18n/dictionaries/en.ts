@@ -604,6 +604,11 @@ export const en = {
       inspectCapabilitiesSection: "Render capabilities",
       inspectCapabilitiesAction: "Inspect Render Capabilities",
       inspectCapabilitiesDescription: "Read-only. Asks the worker to report the real AE Render Queue template names and AE version - never mutates or saves anything.",
+      buildHorizontalSection: "Landscape master",
+      buildHorizontalAction: "Build Landscape Master",
+      buildHorizontalDescription: "Creates a genuine 1920×1080 widescreen composition from the current approved content, with elements repositioned for horizontal presentation - never a crop. The new composition is added to the composition list above automatically once it's ready.",
+      buildHorizontalNotReadyTitle: "Not ready yet",
+      buildHorizontalNotReadyDescription: "The approved scene must finish executing (see the Preview tab) before a Landscape master can be built from it.",
       renderAction: "Render",
       sessionNotReadyTitle: "Not ready to render yet",
       sessionNotReadyDescription: "Every approved scene must be executed and its first preview approved before rendering - see the Preview tab."

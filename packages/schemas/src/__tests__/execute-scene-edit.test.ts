@@ -28,7 +28,7 @@ function validRequest(overrides: Partial<ExecuteSceneEditRequest> = {}): Execute
 }
 
 describe("sceneEditOperationSchema", () => {
-  it("accepts each of the seven allowlisted operation types", () => {
+  it("accepts each of the eight allowlisted operation types", () => {
     const ops = [
       { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" },
       { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, assetPath: "/assets/clip.mp4" },
@@ -40,7 +40,8 @@ describe("sceneEditOperationSchema", () => {
         type: "BUILD_REELS_COMPOSITION",
         reelsCompositionName: "Scene 01 - Reels",
         layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }]
-      }
+      },
+      { type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "!Render (Landscape)" }
     ];
     for (const op of ops) {
       expect(() => sceneEditOperationSchema.parse(op)).not.toThrow();
@@ -60,6 +61,20 @@ describe("sceneEditOperationSchema", () => {
         reelsCompositionName: "Reels",
         layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }],
         arbitraryPropertyPath: "ADBE Transform Group"
+      })
+    ).toThrow();
+  });
+
+  it("BUILD_HORIZONTAL_COMPOSITION rejects an empty/missing horizontalCompositionName", () => {
+    expect(() => sceneEditOperationSchema.parse({ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "" })).toThrow();
+  });
+
+  it("BUILD_HORIZONTAL_COMPOSITION never accepts a caller-supplied layerTransforms/layout - unlike BUILD_REELS_COMPOSITION, this operation's own geometry is always worker-computed", () => {
+    expect(() =>
+      sceneEditOperationSchema.parse({
+        type: "BUILD_HORIZONTAL_COMPOSITION",
+        horizontalCompositionName: "!Render (Landscape)",
+        layerTransforms: [{ layerIndex: 1, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }]
       })
     ).toThrow();
   });
@@ -298,6 +313,47 @@ describe("executeSceneEditRequestSchema", () => {
     expect(parsed.previewOnly).toBeUndefined();
     expect(parsed.previewTimestampSeconds).toBeUndefined();
   });
+
+  /**
+   * Landscape output-composition build (live QA, 2026-09-10 urgent
+   * request) - the exact real payload shape
+   * resolveBuildHorizontalCompositionOnly (apps/api) produces: a single
+   * comp-level operation, zero approvedMappingIds. Never widens the
+   * general rule for a mapping-driven operation (see the "rejects a
+   * request with zero approvedMappingIds" test above, unaffected).
+   */
+  it("accepts a single BUILD_HORIZONTAL_COMPOSITION operation with zero approvedMappingIds - a comp-level operation never needs a mapping", () => {
+    const request = validRequest({
+      operations: [{ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "!Render (Landscape)" }],
+      approvedMappingIds: []
+    });
+    expect(() => executeSceneEditRequestSchema.parse(request)).not.toThrow();
+  });
+
+  it("accepts a single BUILD_REELS_COMPOSITION operation with zero approvedMappingIds too - the same comp-level exception applies to both", () => {
+    const request = validRequest({
+      operations: [
+        {
+          type: "BUILD_REELS_COMPOSITION",
+          reelsCompositionName: "Scene 01 - Reels",
+          layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: null, positionX: 0, positionY: 0, scalePercent: 100 }]
+        }
+      ],
+      approvedMappingIds: []
+    });
+    expect(() => executeSceneEditRequestSchema.parse(request)).not.toThrow();
+  });
+
+  it("still rejects zero approvedMappingIds when operations mixes a mapping-driven operation alongside a comp-level one", () => {
+    const request = validRequest({
+      operations: [
+        { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" },
+        { type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "!Render (Landscape)" }
+      ],
+      approvedMappingIds: []
+    });
+    expect(() => executeSceneEditRequestSchema.parse(request)).toThrow();
+  });
 });
 
 describe("sceneEditResultSchema", () => {
@@ -353,5 +409,26 @@ describe("sceneEditResultSchema", () => {
     const raw = validResult() as Partial<ReturnType<typeof validResult>>;
     delete raw.executionSessionId;
     expect(() => sceneEditResultSchema.parse(raw)).toThrow();
+  });
+
+  it("reelsCompositionBuilt and horizontalCompositionBuilt both default to null when absent - every existing/normal result", () => {
+    const parsed = sceneEditResultSchema.parse(validResult());
+    expect(parsed.reelsCompositionBuilt).toBeNull();
+    expect(parsed.horizontalCompositionBuilt).toBeNull();
+  });
+
+  it("accepts a real horizontalCompositionBuilt (live QA, 2026-09-10 urgent request) - the worker-verified new Landscape composition's own identity", () => {
+    const parsed = sceneEditResultSchema.parse({
+      ...validResult(),
+      horizontalCompositionBuilt: { aeProjectItemIndex: 61, compositionName: "!Render (Landscape)", widthPx: 1920, heightPx: 1080, durationSeconds: 45.045045045045, frameRate: 29.97 }
+    });
+    expect(parsed.horizontalCompositionBuilt).toEqual({
+      aeProjectItemIndex: 61,
+      compositionName: "!Render (Landscape)",
+      widthPx: 1920,
+      heightPx: 1080,
+      durationSeconds: 45.045045045045,
+      frameRate: 29.97
+    });
   });
 });

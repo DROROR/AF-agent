@@ -583,6 +583,11 @@ export const he: Dictionary = {
       inspectCapabilitiesSection: "יכולות רינדור",
       inspectCapabilitiesAction: "בדיקת יכולות רינדור",
       inspectCapabilitiesDescription: "קריאה בלבד. מבקש מהוורקר לדווח על שמות תבניות Render Queue האמיתיים של AE וגרסת AE - לעולם לא משנה או שומר דבר.",
+      buildHorizontalSection: "אב לרוחב",
+      buildHorizontalAction: "בניית אב לרוחב",
+      buildHorizontalDescription: "יוצר קומפוזיציה אמיתית ברוחב 1920×1080 מהתוכן המאושר הנוכחי, עם אלמנטים שמוצבים מחדש להצגה אופקית - לעולם לא חיתוך. הקומפוזיציה החדשה תתווסף לרשימת הקומפוזיציות למעלה אוטומטית ברגע שתהיה מוכנה.",
+      buildHorizontalNotReadyTitle: "עדיין לא מוכן",
+      buildHorizontalNotReadyDescription: "הסצנה המאושרת חייבת לסיים לפעול (ראו את לשונית התצוגה המקדימה) לפני שניתן לבנות ממנה אב לרוחב.",
       renderAction: "רינדור",
       sessionNotReadyTitle: "עדיין לא מוכן לרינדור",
       sessionNotReadyDescription: "יש לבצע כל סצנה מאושרת ולאשר את התצוגה המקדימה הראשונה לפני הרינדור - ראו את לשונית התצוגה המקדימה."

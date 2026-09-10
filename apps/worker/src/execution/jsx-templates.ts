@@ -595,6 +595,229 @@ function buildBuildReelsCompositionScript(
   return script as FixedJsxScript;
 }
 
+/**
+ * Builds a genuine top-level 1920x1080 Landscape output composition from
+ * the scene's own real, currently-approved content (live QA, 2026-09-10
+ * urgent request - "COMPLETE THE MISSING OUTPUT-COMPOSITION STAGE"). A
+ * comp-level operation, same shape/safety convention as
+ * buildBuildReelsCompositionScript above (duplicate -> resize -> per-layer
+ * adjust -> verify), but with ONE fundamental difference: there is no
+ * human-reviewed layerTransforms input. This project's real master is a
+ * portrait 1080x1920 timeline with no distinct widescreen composition
+ * anywhere in the template, and no existing workflow lets a human
+ * hand-author per-layer widescreen transforms before today's deadline - so
+ * per explicit operator direction, THIS SCRIPT computes each top-level
+ * layer's new position/scale itself, from that layer's own real, freshly
+ * read AE geometry - never a per-template hardcoded coordinate, never an
+ * arbitrary caller-supplied transform.
+ *
+ * The deterministic, purely geometric rule (identical for every template):
+ *   1. Read each of the duplicate's own immediate layers' REAL current
+ *      bounding box in the SOURCE composition's own coordinate space, via
+ *      the standard AE formula: compLeft = position.x - (anchorPoint.x -
+ *      sourceRect.left) * scale.x/100 (same for Y/height), using
+ *      `layer.sourceRectAtTime(0, false)` for the layer's own untransformed
+ *      bounds.
+ *   2. A layer whose bounding box covers most of the source composition's
+ *      own frame (>= 85% of both width and height - a background/
+ *      full-frame design layer) is rescaled (non-uniformly, since it is
+ *      meant to fully cover the frame regardless of aspect) to exactly
+ *      fill the new 1920x1080 canvas edge-to-edge.
+ *   3. Every OTHER layer (foreground/text/logo/content) keeps its own real
+ *      pixel scale unchanged - preserving visual hierarchy/relative size -
+ *      unless it would not fit inside the new canvas at all, in which case
+ *      it is scaled down (uniformly, aspect preserved, never enlarged) just
+ *      enough to fit. It is repositioned to the SAME PROPORTIONAL center
+ *      position within the new canvas (oldCenter/oldCompSize mapped onto
+ *      newCompSize), then clamped so its own bounding box never extends
+ *      past the new frame's own edges - "safe bounds", never off-canvas.
+ *
+ * Refuses (typed failure, the half-built duplicate composition removed, no
+ * silent partial/cropped result) rather than guessing when a layer's own
+ * structure cannot be safely adapted by this rule - matching CLAUDE.md/
+ * this operator's own explicit instruction ("fail clearly... rather than
+ * silently producing a crop"):
+ *   - the layer has existing keyframe animation on position/scale (would be
+ *     destroyed by a single static transform - the SAME refusal
+ *     buildBuildReelsCompositionScript already uses),
+ *   - the layer is a 3D layer (this rule's 2D geometry math does not apply
+ *     safely to a 3D transform),
+ *   - the layer is parented to another layer (correctly adapting it needs
+ *     the FULL parent-chain transform, which this deterministic rule does
+ *     not attempt - repositioning it alone, while its parent stays
+ *     unchanged, would silently produce the wrong final position).
+ * A disabled layer or a layer with no video component (hasVideo === false)
+ * is left completely untouched (skipped, not refused) - nothing to adapt.
+ *
+ * Other safety guarantees, identical to buildBuildReelsCompositionScript:
+ * resolves and name-verifies the SOURCE composition first; never mutates
+ * the source (CompItem.duplicate() is AE's own non-destructive copy); if a
+ * composition already exists with the requested horizontalCompositionName
+ * (a prior run), it is removed first so re-execution never accumulates
+ * stale duplicates; resizes ONLY the duplicate to the fixed 1920x1080
+ * frame.
+ */
+function buildBuildHorizontalCompositionScript(
+  aeProjectItemIndex: number,
+  compositionName: string,
+  op: Extract<SceneEditOperation, { type: "BUILD_HORIZONTAL_COMPOSITION" }>
+): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const horizontalNameLiteral = JSON.stringify(op.horizontalCompositionName);
+  const NEW_WIDTH = 1920;
+  const NEW_HEIGHT = 1080;
+  const BACKGROUND_COVERAGE_RATIO = 0.85;
+
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: BUILD_HORIZONTAL_COMPOSITION")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to mutate the wrong composition"
+      });
+    } else {
+      var __existingIndex = null;
+      for (var __i = 1; __i <= app.project.numItems; __i++) {
+        var __candidate = app.project.item(__i);
+        if (__candidate instanceof CompItem && __candidate.name === ${horizontalNameLiteral}) {
+          __existingIndex = __i;
+          break;
+        }
+      }
+      if (__existingIndex !== null) {
+        app.project.item(__existingIndex).remove();
+      }
+
+      var __origWidth = __comp.width;
+      var __origHeight = __comp.height;
+      var __newComp = __comp.duplicate();
+      __newComp.name = ${horizontalNameLiteral};
+      __newComp.width = ${NEW_WIDTH};
+      __newComp.height = ${NEW_HEIGHT};
+
+      var __adaptFailure = null;
+      for (var __li = 1; __li <= __newComp.numLayers; __li++) {
+        var __layer = __newComp.layer(__li);
+        if (!__layer.enabled) { continue; }
+        if (!__layer.hasVideo) { continue; }
+        if (__layer.threeDLayer) {
+          __adaptFailure = "layer " + __li + " (\\"" + __layer.name + "\\") is a 3D layer - cannot be safely adapted by 2D geometry rules";
+          break;
+        }
+        if (__layer.parent !== null) {
+          __adaptFailure = "layer " + __li + " (\\"" + __layer.name + "\\") is parented to another layer - cannot be safely adapted without a full parent-chain transform, which this deterministic rule does not attempt";
+          break;
+        }
+        if (__layer.transform.position.numKeys > 0 || __layer.transform.scale.numKeys > 0) {
+          __adaptFailure = "layer " + __li + " (\\"" + __layer.name + "\\") has existing keyframe animation on position/scale - refusing to overwrite it and destroy that animation";
+          break;
+        }
+        var __srcRect = null;
+        try {
+          __srcRect = __layer.sourceRectAtTime(0, false);
+        } catch (__srcRectError) {
+          __srcRect = null;
+        }
+        if (__srcRect === null || __srcRect.width <= 0 || __srcRect.height <= 0) {
+          __adaptFailure = "layer " + __li + " (\\"" + __layer.name + "\\") has no readable bounding box - cannot be safely adapted";
+          break;
+        }
+
+        var __anchor = __layer.transform.anchorPoint.value;
+        var __pos = __layer.transform.position.value;
+        var __scale = __layer.transform.scale.value;
+        var __compLeft = __pos[0] - (__anchor[0] - __srcRect.left) * (__scale[0] / 100);
+        var __compTop = __pos[1] - (__anchor[1] - __srcRect.top) * (__scale[1] / 100);
+        var __compWidth = __srcRect.width * (__scale[0] / 100);
+        var __compHeight = __srcRect.height * (__scale[1] / 100);
+        if (__compWidth <= 0 || __compHeight <= 0) { continue; }
+
+        var __isBackground = (__compWidth >= ${BACKGROUND_COVERAGE_RATIO} * __origWidth) && (__compHeight >= ${BACKGROUND_COVERAGE_RATIO} * __origHeight);
+        var __newScaleX, __newScaleY, __newPosX, __newPosY;
+
+        if (__isBackground) {
+          __newScaleX = __scale[0] * (${NEW_WIDTH} / __compWidth);
+          __newScaleY = __scale[1] * (${NEW_HEIGHT} / __compHeight);
+          __newPosX = (__anchor[0] - __srcRect.left) * (__newScaleX / 100);
+          __newPosY = (__anchor[1] - __srcRect.top) * (__newScaleY / 100);
+        } else {
+          var __fitFactor = Math.min(1, ${NEW_WIDTH} / __compWidth, ${NEW_HEIGHT} / __compHeight);
+          __newScaleX = __scale[0] * __fitFactor;
+          __newScaleY = __scale[1] * __fitFactor;
+          var __compWidthNew = __compWidth * __fitFactor;
+          var __compHeightNew = __compHeight * __fitFactor;
+
+          var __oldCenterX = __compLeft + __compWidth / 2;
+          var __oldCenterY = __compTop + __compHeight / 2;
+          var __newCenterX = (__oldCenterX / __origWidth) * ${NEW_WIDTH};
+          var __newCenterY = (__oldCenterY / __origHeight) * ${NEW_HEIGHT};
+
+          var __halfW = __compWidthNew / 2;
+          var __halfH = __compHeightNew / 2;
+          if (__newCenterX - __halfW < 0) { __newCenterX = __halfW; }
+          if (__newCenterX + __halfW > ${NEW_WIDTH}) { __newCenterX = ${NEW_WIDTH} - __halfW; }
+          if (__newCenterY - __halfH < 0) { __newCenterY = __halfH; }
+          if (__newCenterY + __halfH > ${NEW_HEIGHT}) { __newCenterY = ${NEW_HEIGHT} - __halfH; }
+
+          var __newLeft = __newCenterX - __halfW;
+          var __newTop = __newCenterY - __halfH;
+          __newPosX = __newLeft + (__anchor[0] - __srcRect.left) * (__newScaleX / 100);
+          __newPosY = __newTop + (__anchor[1] - __srcRect.top) * (__newScaleY / 100);
+        }
+
+        __layer.transform.position.setValue([__newPosX, __newPosY]);
+        __layer.transform.scale.setValue([__newScaleX, __newScaleY]);
+      }
+
+      if (__adaptFailure !== null) {
+        __newComp.remove();
+        __result = JSON.stringify({ ok: false, failureReason: __adaptFailure });
+      } else {
+        var __newIndex = null;
+        for (var __j = 1; __j <= app.project.numItems; __j++) {
+          if (app.project.item(__j) === __newComp) {
+            __newIndex = __j;
+            break;
+          }
+        }
+        __result = JSON.stringify({
+          ok: true,
+          resultingValue: {
+            horizontalAeProjectItemIndex: __newIndex,
+            horizontalCompositionName: __newComp.name,
+            horizontalWidthPx: __newComp.width,
+            horizontalHeightPx: __newComp.height,
+            horizontalDurationSeconds: __newComp.duration,
+            horizontalFrameRate: __newComp.frameRate
+          }
+        });
+      }
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
 /** #RRGGBB (already validated by setBrandColorOperationSchema's regex) -> [r,g,b] in AE's native 0..1 float range. */
 function hexToUnitRgb(colorHex: string): [number, number, number] {
   const r = parseInt(colorHex.slice(1, 3), 16) / 255;
@@ -1247,6 +1470,8 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildSetBrandColorScript(aeProjectItemIndex, compositionName, operation);
     case "BUILD_REELS_COMPOSITION":
       return buildBuildReelsCompositionScript(aeProjectItemIndex, compositionName, operation);
+    case "BUILD_HORIZONTAL_COMPOSITION":
+      return buildBuildHorizontalCompositionScript(aeProjectItemIndex, compositionName, operation);
     default: {
       const exhaustive: never = operation;
       throw new Error(`Unhandled scene edit operation type: ${JSON.stringify(exhaustive)}`);

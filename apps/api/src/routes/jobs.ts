@@ -27,6 +27,7 @@ import { recordRenderArtifactIfApplicable } from "../application/job/record-rend
 import { recordExecuteFrameResultIfApplicable } from "../application/job/record-execute-frame-result.js";
 import { recordRegeneratePreviewResultIfApplicable } from "../application/job/record-regenerate-preview-result.js";
 import { registerReelsCompositionIfApplicable } from "../application/job/register-reels-composition.js";
+import { registerHorizontalCompositionIfApplicable } from "../application/job/register-horizontal-composition.js";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
 
@@ -221,6 +222,17 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     // Same "best-effort side effect, never a competing source of truth"
     // contract as every other record-*-if-applicable call here.
     await registerReelsCompositionIfApplicable(
+      {
+        executionSessionRepository: deps.executionSessionRepository,
+        executionPlanRepository: deps.executionPlanRepository,
+        projectRepository: deps.projectRepository,
+        now
+      },
+      dto
+    );
+    // Same "best-effort side effect, never a competing source of truth"
+    // contract - see register-horizontal-composition.ts's own doc comment.
+    await registerHorizontalCompositionIfApplicable(
       {
         executionSessionRepository: deps.executionSessionRepository,
         executionPlanRepository: deps.executionPlanRepository,

@@ -19,6 +19,16 @@ const reelsCompositionBuiltResultSchema = z.object({
   reelsFrameRate: z.number().positive()
 });
 
+/** What jsx-templates.ts's BUILD_HORIZONTAL_COMPOSITION script's own resultingValue actually contains - parsed defensively, never trusted blindly. */
+const horizontalCompositionBuiltResultSchema = z.object({
+  horizontalAeProjectItemIndex: z.number().int().positive(),
+  horizontalCompositionName: z.string().min(1),
+  horizontalWidthPx: z.number().int().positive(),
+  horizontalHeightPx: z.number().int().positive(),
+  horizontalDurationSeconds: z.number().nonnegative(),
+  horizontalFrameRate: z.number().positive()
+});
+
 /**
  * The default frame this project's own "first-frame execution" workflow
  * (CLAUDE.md Required Workflow step 9) captures for EXECUTE_FRAME's
@@ -107,6 +117,9 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // in this attempt - see jsx-templates.ts's own resultingValue shape for
   // that operation.
   let reelsCompositionBuilt: SceneEditResult["reelsCompositionBuilt"] = null;
+  // Same as reelsCompositionBuilt above, for a successfully completed
+  // BUILD_HORIZONTAL_COMPOSITION operation (live QA, 2026-09-10).
+  let horizontalCompositionBuilt: SceneEditResult["horizontalCompositionBuilt"] = null;
   // Counts operations actually applied to the AE bridge DURING THIS
   // INVOCATION only - deliberately NOT checkpoint.completedOperationIndices
   // (which reflects the FULL cumulative history, including operations a
@@ -139,6 +152,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewFramePath: params.previewFramePath,
       previewTimestampSeconds: params.previewTimestampSeconds,
       reelsCompositionBuilt,
+      horizontalCompositionBuilt,
       failureReason: checkpoint.failureReason,
       startedAt,
       completedAt: deps.now().toISOString()
@@ -280,6 +294,20 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
           heightPx: parsedResultingValue.data.reelsHeightPx,
           durationSeconds: parsedResultingValue.data.reelsDurationSeconds,
           frameRate: parsedResultingValue.data.reelsFrameRate
+        };
+      }
+    }
+
+    if (operation.type === "BUILD_HORIZONTAL_COMPOSITION") {
+      const parsedResultingValue = horizontalCompositionBuiltResultSchema.safeParse(outcome.resultingValue);
+      if (parsedResultingValue.success) {
+        horizontalCompositionBuilt = {
+          aeProjectItemIndex: parsedResultingValue.data.horizontalAeProjectItemIndex,
+          compositionName: parsedResultingValue.data.horizontalCompositionName,
+          widthPx: parsedResultingValue.data.horizontalWidthPx,
+          heightPx: parsedResultingValue.data.horizontalHeightPx,
+          durationSeconds: parsedResultingValue.data.horizontalDurationSeconds,
+          frameRate: parsedResultingValue.data.horizontalFrameRate
         };
       }
     }

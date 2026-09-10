@@ -166,16 +166,17 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       now,
       staleAfterMs: deps.staleAfterMs,
       ...(request.regeneratePreviewOnly === true ? { regeneratePreviewOnly: true as const } : {}),
-      ...(request.previewTimestampSeconds !== undefined ? { previewTimestampSeconds: request.previewTimestampSeconds } : {})
+      ...(request.previewTimestampSeconds !== undefined ? { previewTimestampSeconds: request.previewTimestampSeconds } : {}),
+      ...(request.buildHorizontalCompositionOnly === true ? { buildHorizontalCompositionOnly: true as const } : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);
     }
-    if (request.regeneratePreviewOnly === true) {
-      // A previewOnly run is a deliberate one-shot, never a multi-
-      // operation job with anything to resume - checkpoint resume only
-      // ever applies to a real edit's own operations array (which is
-      // always empty here).
+    if (request.regeneratePreviewOnly === true || request.buildHorizontalCompositionOnly === true) {
+      // Both a previewOnly run and a buildHorizontalCompositionOnly run
+      // are a deliberate one-shot, never a multi-operation job with
+      // anything to resume - checkpoint resume only ever applies to a
+      // real content edit's own multi-operation array.
       payload = { ...resolved.payload, checkpoint: null };
     } else {
       // True interrupted-job resume (see resolve-resume-checkpoint.ts): if a
