@@ -96,22 +96,29 @@ export const sceneEvidenceRequestSchema = z
      */
     discoverLayerDetailsMode: z.enum(["full", "discovery"]).optional(),
     /**
-     * Preview Timing Analysis composition-graph discovery, FIX 2 (live
-     * QA, 2026-09-10 real incident): only meaningful alongside
-     * `discoverLayerDetailsMode: "discovery"`. When the caller already
-     * knows (from the project manifest's own `parentCompositionIds` -
-     * see deriveManifestContainmentPath/findLayerHostingComposition in
-     * apps/web/src/lib/preview-timing.ts) exactly which nested
-     * composition it is looking for, the Worker's own scan stops the
-     * instant it finds that one composition, rather than exhaustively
-     * classifying every remaining layer of a potentially large
-     * composition - the fix for the real incident where scanning !Render
-     * itself (~40+ layers) timed out even in plain "discovery" mode.
-     * Omitted preserves the exact prior discoverLayerDetailsMode
-     * behavior (a full, un-short-circuited scan) for every existing
-     * caller.
+     * Preview Timing Analysis targeted host-layer lookup (live QA,
+     * 2026-09-10 real incident, session a7fee3d9): even
+     * `discoverLayerDetailsMode: "discovery"` with an early-exit target
+     * hint (the FIRST attempted fix) still timed out scanning !Render -
+     * because it still built a full classification record for every
+     * layer up to the match, which for a composition with many dozens of
+     * layers is itself real per-layer cost. This is a genuinely
+     * different, dedicated operation (buildFindHostLayersScript, never
+     * buildInspectCompositionLayerDetailsScript): for every layer, it
+     * does ONLY the cheapest possible check (a `layer.source instanceof
+     * CompItem` test plus a string comparison) unless that layer IS a
+     * real match, in which case (and ONLY then) it reads the full real
+     * facts (enabled/inPoint/outPoint/startTime/stretch/
+     * timeRemapEnabled/opacity) needed for Preview Timing Analysis's own
+     * visibility calculation. Scans every layer to completion (never an
+     * early exit) so it reports ALL real host layers when the same
+     * nested composition is placed more than once - see
+     * `hostLayerRecords` below. When set, the worker ignores
+     * `discoverLayerDetails`/`discoverLayerDetailsMode` entirely and runs
+     * this operation instead - the two are mutually exclusive by
+     * construction (the resolver never sets both).
      */
-    discoverLayerDetailsTargetCompositionId: z.string().min(1).optional()
+    findHostLayersForChildCompositionId: z.string().min(1).optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
@@ -243,6 +250,50 @@ export const layerDetailFactSchema = z
   .strict();
 export type LayerDetailFact = z.infer<typeof layerDetailFactSchema>;
 
+/**
+ * Preview Timing Analysis targeted host-layer lookup (live QA, 2026-09-10
+ * real incident, session a7fee3d9) - one real layer, inside the requested
+ * PARENT composition, whose own `source` is confirmed to be the requested
+ * CHILD composition (`buildFindHostLayersScript`'s own real match). Unlike
+ * `LayerEvidence`/`LayerDetailFact` (two separate, correlate-by-index
+ * facts from two separate operations), this is a single, self-sufficient
+ * record: every field Preview Timing Analysis's own visibility
+ * calculation needs for this hop, from ONE targeted operation.
+ */
+export const hostLayerRecordSchema = z
+  .object({
+    layerIndex: z.number().int().positive(),
+    layerName: z.string(),
+    enabled: z.boolean(),
+    inPointSeconds: z.number(),
+    outPointSeconds: z.number(),
+    startTimeSeconds: z.number(),
+    /** Always the requested child compositionId - echoed back (rather than assumed) so a consumer never has to trust that this record's own inclusion in `matches` implies correctness. */
+    sourceCompositionId: z.string().min(1),
+    stretchPercent: z
+      .number()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    timeRemapEnabled: z
+      .boolean()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    opacityStatic: z
+      .number()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    opacityKeyframes: z
+      .array(z.object({ timeSeconds: z.number(), valuePercent: z.number() }).strict())
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null)
+  })
+  .strict();
+export type HostLayerRecord = z.infer<typeof hostLayerRecordSchema>;
+
 export const scenePreviewSchema = z
   .object({
     timestampSeconds: z.number().nonnegative(),
@@ -278,6 +329,33 @@ export const sceneEvidenceResponseSchema = z
     layerDetails: z.array(layerDetailFactSchema).nullable(),
     /** Present only when discoverLayerDetails was requested but the script call could not complete - kept distinct from `layerDetails: null` meaning "not requested". */
     layerDetailsFailureReason: z.string().nullable(),
+    /**
+     * Preview Timing Analysis targeted host-layer lookup (live QA,
+     * 2026-09-10 real incident) - null whenever
+     * `findHostLayersForChildCompositionId` was not requested, or the
+     * script call failed (see `hostLayerRecordsFailureReason` below).
+     * Non-null (possibly EMPTY) array on a genuinely successful scan - an
+     * empty array is a real, confirmed "this child composition is not
+     * actually placed anywhere inside this parent", never the same thing
+     * as a failed scan. Also accepts the key being ABSENT entirely
+     * (`.optional()`, normalized to null) - the SAME Worker/API
+     * version-skew tolerance as every other Preview Timing Analysis field
+     * on `layerDetailFactSchema` above: a Worker that predates this
+     * capability simply never includes these keys in its own response at
+     * all, which must parse as "evidence unavailable", never crash the
+     * whole result.
+     */
+    hostLayerRecords: z
+      .array(hostLayerRecordSchema)
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /** Present only when findHostLayersForChildCompositionId was requested but the script call could not complete - kept distinct from `hostLayerRecords: null` meaning "not requested", and distinct from `hostLayerRecords: []` meaning "scan succeeded, genuinely no match". Same absent-key tolerance as `hostLayerRecords` above. */
+    hostLayerRecordsFailureReason: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
     capturedAt: z.string().datetime()
   })
   .strict();

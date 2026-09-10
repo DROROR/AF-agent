@@ -9,6 +9,7 @@ import {
   buildInspectRenderCapabilitiesScript,
   buildInspectCompositionPrecompsScript,
   buildInspectCompositionLayerDetailsScript,
+  buildFindHostLayersScript,
   buildOpenProjectScript
 } from "../jsx-templates.js";
 
@@ -540,34 +541,6 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect(discovery1).not.toBe(full);
   });
 
-  it("FIX 2 (live QA, 2026-09-10): with a targetSourceCompositionId, the scan stops the instant it finds that composition - never classifies remaining layers, proving the early exit actually skips real work, not merely that the result happens to be a prefix", () => {
-    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME, "discovery", "comp-4242");
-    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
-    const result = JSON.parse(resultText);
-    expect(result.ok).toBe(true);
-    // "Nested Comp Ref" (layerIndex 2, sourceCompositionId "comp-4242") is
-    // the target - the scan must stop there, never reaching layerIndex
-    // 3/4/6/7.
-    expect(result.layerDetails).toEqual([
-      { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
-      { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null }
-    ]);
-  });
-
-  it("FIX 2: when targetSourceCompositionId is never found, the scan still completes as a normal full/discovery scan (falls through to the end of the loop, never hangs or errors)", () => {
-    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME, "discovery", "comp-does-not-exist");
-    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
-    const result = JSON.parse(resultText);
-    expect(result.ok).toBe(true);
-    expect(result.layerDetails).toHaveLength(6);
-  });
-
-  it("FIX 2: targetSourceCompositionId produces a real script-text difference from the same mode without it (never a runtime-only behavior change invisible to the deterministic-script test)", () => {
-    const withoutTarget = buildInspectCompositionLayerDetailsScript(3, COMP_NAME, "discovery");
-    const withTarget = buildInspectCompositionLayerDetailsScript(3, COMP_NAME, "discovery", "comp-4242");
-    expect(withoutTarget).not.toBe(withTarget);
-  });
-
   it("fails closed with a typed failureReason when the project item index does not resolve to the expected composition name", () => {
     const script = buildInspectCompositionLayerDetailsScript(1, "Wrong Expected Name");
     const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
@@ -585,6 +558,165 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect(script).not.toMatch(/\.setSource\s*\(/);
     expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
     expect(script).not.toMatch(/\.setValue\s*\(/);
+  });
+});
+
+describe("buildFindHostLayersScript (live QA, 2026-09-10 real incident: targeted host-layer lookup, session a7fee3d9)", () => {
+  /**
+   * Fake composition exercising: a non-matching precomp (different real
+   * source id), a real MATCH, a plain footage layer (no source at all), a
+   * SECOND real match (multi-instance), and a layer whose own `.source`
+   * read throws. Every layer's expensive properties (stretch/
+   * timeRemapEnabled/opacity) are call-counted so tests can prove they
+   * were read ONLY for the two real matches, never for the others - not
+   * merely that the final result happens to omit them.
+   */
+  const FIND_HOST_LAYERS_APP_SETUP = `
+    function CompItem() {}
+    function AVLayer() {}
+
+    var __reads = { stretch: 0, timeRemapEnabled: 0, opacity: 0 };
+
+    var __targetSource = new CompItem();
+    __targetSource.id = 1635;
+    var __otherSource = new CompItem();
+    __otherSource.id = 999;
+
+    function makePrecompLayer(index, name, source) {
+      var l = new AVLayer();
+      l.index = index;
+      l.name = name;
+      l.source = source;
+      l.enabled = true;
+      l.inPoint = index * 1.5;
+      l.outPoint = index * 1.5 + 5;
+      l.startTime = index * 0.5;
+      Object.defineProperty(l, "stretch", { get: function () { __reads.stretch++; return 100; } });
+      Object.defineProperty(l, "timeRemapEnabled", { get: function () { __reads.timeRemapEnabled++; return false; } });
+      Object.defineProperty(l, "opacity", { get: function () { __reads.opacity++; return { numKeys: 0, value: 100 }; } });
+      return l;
+    }
+
+    var __otherPrecompLayer = makePrecompLayer(1, "Other Precomp", __otherSource);
+    var __matchLayerA = makePrecompLayer(2, "Target Precomp A", __targetSource);
+    var __footageLayer = new AVLayer();
+    __footageLayer.index = 3;
+    __footageLayer.name = "Footage";
+    var __matchLayerB = makePrecompLayer(4, "Target Precomp B", __targetSource);
+    var __throwingSourceLayer = {};
+    __throwingSourceLayer.index = 5;
+    __throwingSourceLayer.name = "Throws On Source Read";
+    Object.defineProperty(__throwingSourceLayer, "source", { get: function () { throw new Error("boom"); } });
+
+    var __fakeComp = new CompItem();
+    __fakeComp.name = ${JSON.stringify(COMP_NAME)};
+    __fakeComp.numLayers = 5;
+    var __layersByIndex = { 1: __otherPrecompLayer, 2: __matchLayerA, 3: __footageLayer, 4: __matchLayerB, 5: __throwingSourceLayer };
+    __fakeComp.layer = function (i) { return __layersByIndex[i]; };
+
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: { item: function (i) { return i === 1 ? __fakeComp : null; } }
+    };
+  `;
+
+  it("finds every real matching host layer, and returns NOTHING at all for non-matching layers (not even a stub record)", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    const resultText = runFixedScriptWithoutNativeJson(script, FIND_HOST_LAYERS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.matches).toEqual([
+      {
+        layerIndex: 2,
+        layerName: "Target Precomp A",
+        enabled: true,
+        inPointSeconds: 3,
+        outPointSeconds: 8,
+        startTimeSeconds: 1,
+        sourceCompositionId: "comp-1635",
+        stretchPercent: 100,
+        timeRemapEnabled: false,
+        opacityStatic: 100,
+        opacityKeyframes: null
+      },
+      {
+        layerIndex: 4,
+        layerName: "Target Precomp B",
+        enabled: true,
+        inPointSeconds: 6,
+        outPointSeconds: 11,
+        startTimeSeconds: 2,
+        sourceCompositionId: "comp-1635",
+        stretchPercent: 100,
+        timeRemapEnabled: false,
+        opacityStatic: 100,
+        opacityKeyframes: null
+      }
+    ]);
+  });
+
+  it("the real performance fix: reads stretch/timeRemapEnabled/opacity ONLY for the real matches (2 layers), never for the 3 non-matching layers - proven by a real call counter on each getter, not merely the result shape", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(FIND_HOST_LAYERS_APP_SETUP, context);
+    vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context);
+    const reads = (context as unknown as { __reads: Record<string, number> }).__reads;
+    // Exactly 2 matches -> exactly 2 reads of each expensive property, never 5 (the total layer count).
+    expect(reads).toEqual({ stretch: 2, timeRemapEnabled: 2, opacity: 2 });
+  });
+
+  it("real 2026-09-10 incident: multiple instances of the same child composition inside one parent are ALL reported, never silently narrowed to the first match", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    const resultText = runFixedScriptWithoutNativeJson(script, FIND_HOST_LAYERS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.matches).toHaveLength(2);
+    expect(result.matches.map((m: { layerIndex: number }) => m.layerIndex)).toEqual([2, 4]);
+  });
+
+  it("returns a genuine, successful EMPTY matches array (never a failure) when no real layer hosts the target composition - MANIFEST_EDGE_NOT_FOUND_IN_AE is a caller-side conclusion from this, not something this script itself reports", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-does-not-exist");
+    const resultText = runFixedScriptWithoutNativeJson(script, FIND_HOST_LAYERS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({ ok: true, matches: [] });
+  });
+
+  it("skips (rather than fails the whole scan for) a layer whose own .source read throws", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    const resultText = runFixedScriptWithoutNativeJson(script, FIND_HOST_LAYERS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.matches.map((m: { layerIndex: number }) => m.layerIndex)).not.toContain(5);
+  });
+
+  it("fails closed with a typed failureReason when the project item index does not resolve to the expected composition name", () => {
+    const script = buildFindHostLayersScript(1, "Wrong Expected Name", "comp-1635");
+    const resultText = runFixedScriptWithoutNativeJson(script, FIND_HOST_LAYERS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("Wrong Expected Name");
+  });
+
+  it("is deterministic - the same composition index/name/target always produces byte-identical JSX, and a different target produces different JSX", () => {
+    const a = buildFindHostLayersScript(3, COMP_NAME, "comp-1635");
+    const b = buildFindHostLayersScript(3, COMP_NAME, "comp-1635");
+    const c = buildFindHostLayersScript(3, COMP_NAME, "comp-9999");
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+  });
+
+  it("never mutates the project - contains no .setSource/.remove()/.sourceText.setValue call", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    expect(script).not.toMatch(/\.setSource\s*\(/);
+    expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
+    expect(script).not.toMatch(/\.setValue\s*\(/);
+  });
+
+  it("never contains a `break` - scans every layer to completion by design (multi-instance requirement), unlike the early-exit discovery mode this replaces", () => {
+    const script = buildFindHostLayersScript(1, COMP_NAME, "comp-1635");
+    expect(script).not.toMatch(/break;/);
   });
 });
 

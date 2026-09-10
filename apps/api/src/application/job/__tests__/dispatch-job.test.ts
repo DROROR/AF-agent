@@ -517,7 +517,7 @@ describe("dispatchJob", () => {
     expect(innerPayload.sourceProjectSha256).toBe("a".repeat(64));
   });
 
-  it("2026-09-10 composition-graph discovery real incident: previewTimingDiscoverCompositionId dispatches a real, read-only, LIGHTWEIGHT (\"discovery\" mode) inspection job for the requested manifest composition - still no SET_TEXT/MAP_FOOTAGE/save-shaped field anywhere in the payload, and never a caller-supplied layerIndices", async () => {
+  it("2026-09-10 targeted host-layer lookup real incident: previewTimingDiscoverCompositionId + previewTimingFindHostLayersChildCompositionId dispatches a real, read-only TARGETED lookup job for the requested parent/child manifest compositions - still no SET_TEXT/MAP_FOOTAGE/save-shaped field anywhere in the payload, and never a caller-supplied layerIndices", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);
     const projectRepository = new InMemoryProjectRepository();
@@ -560,14 +560,22 @@ describe("dispatchJob", () => {
         now: () => FIXED_NOW,
         staleAfterMs: STALE_AFTER_MS
       },
-      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1", previewTimingDiscoverCompositionId: "comp-210" }
+      {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        workerId,
+        projectId: project.projectId,
+        scenePlanId: "scene-1",
+        previewTimingDiscoverCompositionId: "comp-210",
+        previewTimingFindHostLayersChildCompositionId: "comp-1"
+      }
     );
     const job = await jobRepository.findById(result.jobId);
     const payload = job?.payload as Record<string, unknown>;
     expect(payload.manifestCompositionId).toBe("comp-210");
-    expect(payload.layerIndices).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
-    expect(payload.discoverLayerDetails).toBe(true);
-    expect(payload.discoverLayerDetailsMode).toBe("discovery");
+    expect(payload.layerIndices).toEqual([]);
+    expect(payload.discoverLayerDetails).toBeUndefined();
+    expect(payload.discoverLayerDetailsMode).toBeUndefined();
+    expect(payload.findHostLayersForChildCompositionId).toBe("comp-1");
     expect(payload.sourceProjectSha256).toBe("a".repeat(64));
     expect(payload).not.toHaveProperty("operations");
     expect(payload).not.toHaveProperty("approvedMappingIds");

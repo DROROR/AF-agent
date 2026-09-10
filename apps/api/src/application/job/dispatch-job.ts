@@ -249,8 +249,8 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       ...(request.discoverLayerDetails !== undefined ? { discoverLayerDetails: request.discoverLayerDetails } : {}),
       ...(request.previewTimingChainIndex !== undefined ? { previewTimingChainIndex: request.previewTimingChainIndex } : {}),
       ...(request.previewTimingDiscoverCompositionId !== undefined ? { previewTimingDiscoverCompositionId: request.previewTimingDiscoverCompositionId } : {}),
-      ...(request.previewTimingDiscoverTargetCompositionId !== undefined
-        ? { previewTimingDiscoverTargetCompositionId: request.previewTimingDiscoverTargetCompositionId }
+      ...(request.previewTimingFindHostLayersChildCompositionId !== undefined
+        ? { previewTimingFindHostLayersChildCompositionId: request.previewTimingFindHostLayersChildCompositionId }
         : {})
     });
     if (!resolved.ok) {

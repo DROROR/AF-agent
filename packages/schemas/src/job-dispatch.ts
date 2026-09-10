@@ -169,20 +169,37 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        */
       previewTimingDiscoverCompositionId: z.string().min(1).optional(),
       /**
-       * Preview Timing Analysis composition-graph discovery, FIX 2 (live
-       * QA, 2026-09-10 real incident) - only meaningful alongside
-       * previewTimingDiscoverCompositionId. The specific nested
-       * composition (already confirmed as a real child of
-       * previewTimingDiscoverCompositionId by the manifest's own
-       * `parentCompositionIds`) this dispatch is looking for - lets the
-       * Worker's own scan stop the instant it finds that one composition,
-       * exactly the fix for the real incident where scanning "!Render"
-       * itself (~40+ layers) timed out even in plain "discovery" mode.
+       * Preview Timing Analysis TARGETED HOST-LAYER LOOKUP (live QA,
+       * 2026-09-10 real incident, session a7fee3d9) - only meaningful
+       * alongside previewTimingDiscoverCompositionId, which names the
+       * PARENT. This field names the CHILD composition (already confirmed
+       * as a real child of previewTimingDiscoverCompositionId by the
+       * manifest's own `parentCompositionIds`) whose hosting layer(s) are
+       * being looked up.
+       *
+       * This REPLACES the prior "discovery mode + early-exit target"
+       * mechanism, which was proven insufficient by a real retry: even a
+       * trimmed, early-exiting scan still classifies/constructs an object
+       * for every layer up to wherever the match happens to be, and that
+       * per-layer classification cost alone was enough to time out on a
+       * large parent such as "!Render" (~40+ layers). This field now
+       * drives a genuinely different Worker operation
+       * (buildFindHostLayersScript) that does ZERO classification/object-
+       * construction work for a non-matching layer - only the cheapest
+       * possible check (`layer.source instanceof CompItem` plus a string
+       * id comparison) - and performs the full property reads only for
+       * actual matches. It also never breaks early: a child composition
+       * can be placed at multiple layers within the same parent, and every
+       * real instance must be reported (see hostLayerRecords on
+       * sceneEvidenceResponseSchema), never silently narrowed to the
+       * first.
+       *
        * Subject to the exact same safety reasoning as
-       * previewTimingDiscoverCompositionId above (validated against the
-       * current manifest before dispatch, never an arbitrary string).
+       * previewTimingDiscoverCompositionId above (both values validated
+       * against the current manifest before dispatch, never an arbitrary
+       * string).
        */
-      previewTimingDiscoverTargetCompositionId: z.string().min(1).optional()
+      previewTimingFindHostLayersChildCompositionId: z.string().min(1).optional()
     })
     .strict(),
   z.object({

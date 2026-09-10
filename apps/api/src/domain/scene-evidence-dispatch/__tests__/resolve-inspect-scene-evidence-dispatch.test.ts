@@ -426,7 +426,7 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
 
 });
 
-describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverCompositionId (Preview Timing Analysis composition-graph discovery, live QA 2026-09-10)", () => {
+describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverCompositionId + previewTimingFindHostLayersChildCompositionId (Preview Timing Analysis TARGETED HOST-LAYER LOOKUP, live QA 2026-09-10)", () => {
   const outerManifest = validManifest({
     compositions: [
       { compositionId: "comp-210", aeProjectItemIndex: 2, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
@@ -434,30 +434,33 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
     ]
   });
 
-  it("real incident shape (session a7fee3d9): resolves the requested composition (\"!Render\") with EVERY plausible layer index (never caller-supplied), discoverLayerDetails true, discoverLayerDetailsMode \"discovery\" (the lightweight scan that avoids the real MCP timeout against a large master composition) - never a caller-guessed/hardcoded layer index for how Scene 1 is placed inside !Render", () => {
+  it("real incident shape (session a7fee3d9): resolves the requested PARENT composition (\"!Render\") identity, with zero server-supplied layerIndices (the new targeted lookup is self-sufficient) and findHostLayersForChildCompositionId set to the real CHILD - never discoverLayerDetails/discoverLayerDetailsMode, which the real incident proved still times out on a large parent", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
-      previewTimingDiscoverCompositionId: "comp-210"
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingFindHostLayersChildCompositionId: "comp-1"
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.manifestCompositionId).toBe("comp-210");
     expect(result.payload.aeProjectItemIndex).toBe(2);
     expect(result.payload.compositionName).toBe("!Render");
-    expect(result.payload.layerIndices).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
-    expect(result.payload.discoverLayerDetails).toBe(true);
-    expect(result.payload.discoverLayerDetailsMode).toBe("discovery");
+    expect(result.payload.layerIndices).toEqual([]);
+    expect(result.payload.discoverLayerDetails).toBeUndefined();
+    expect(result.payload.discoverLayerDetailsMode).toBeUndefined();
+    expect(result.payload.findHostLayersForChildCompositionId).toBe("comp-1");
     expect(result.payload.previewTimestampSeconds).toBeNull();
   });
 
-  it("resolves any OTHER real composition in the current manifest too - never hardcoded to the render composition specifically (supports an arbitrary-depth graph search)", () => {
+  it("resolves any OTHER real parent composition in the current manifest too - never hardcoded to the render composition specifically (supports an arbitrary-depth graph search)", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
-      previewTimingDiscoverCompositionId: "comp-1"
+      previewTimingDiscoverCompositionId: "comp-1",
+      previewTimingFindHostLayersChildCompositionId: "comp-210"
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -465,12 +468,13 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
     expect(result.payload.aeProjectItemIndex).toBe(5);
   });
 
-  it("refuses a compositionId that does not match any composition in the current manifest - the safety boundary that makes accepting a caller-supplied compositionId here safe at all", () => {
+  it("refuses a parent compositionId that does not match any composition in the current manifest - the safety boundary that makes accepting a caller-supplied compositionId here safe at all", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
-      previewTimingDiscoverCompositionId: "comp-does-not-exist"
+      previewTimingDiscoverCompositionId: "comp-does-not-exist",
+      previewTimingFindHostLayersChildCompositionId: "comp-1"
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -484,12 +488,13 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
       currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
       previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingFindHostLayersChildCompositionId: "comp-1",
       previewTimingChainIndex: 0
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.manifestCompositionId).toBe("comp-210");
-    expect(result.payload.discoverLayerDetailsMode).toBe("discovery");
+    expect(result.payload.findHostLayersForChildCompositionId).toBe("comp-1");
   });
 
   it("still requires the manifest sha256 to match the plan's - the same staleness guard as every other branch", () => {
@@ -497,46 +502,34 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
       scenePlanId: "scene-1",
       currentPlan: validPlan({ sourceProjectSha256: "b".repeat(64) }),
       currentProjectManifest: outerManifest,
-      previewTimingDiscoverCompositionId: "comp-210"
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingFindHostLayersChildCompositionId: "comp-1"
     });
     expect(result.ok).toBe(false);
   });
 
-  it("FIX 2 (live QA, 2026-09-10): forwards previewTimingDiscoverTargetCompositionId into the resolved payload when it names a real manifest composition - enables the Worker's own early-exit optimization", () => {
+  it("requires previewTimingFindHostLayersChildCompositionId alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child, there is no longer a broad whole-parent scan mode", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
-      previewTimingDiscoverCompositionId: "comp-210",
-      previewTimingDiscoverTargetCompositionId: "comp-1"
+      previewTimingDiscoverCompositionId: "comp-210"
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.payload.discoverLayerDetailsTargetCompositionId).toBe("comp-1");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("previewTimingFindHostLayersChildCompositionId");
   });
 
-  it("FIX 2: refuses a previewTimingDiscoverTargetCompositionId that does not match any composition in the current manifest - never searches for an arbitrary caller-supplied composition", () => {
+  it("refuses a previewTimingFindHostLayersChildCompositionId that does not match any composition in the current manifest - never searches for an arbitrary caller-supplied composition", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
       previewTimingDiscoverCompositionId: "comp-210",
-      previewTimingDiscoverTargetCompositionId: "comp-does-not-exist"
+      previewTimingFindHostLayersChildCompositionId: "comp-does-not-exist"
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("comp-does-not-exist");
-  });
-
-  it("FIX 2: omitting previewTimingDiscoverTargetCompositionId omits it from the payload entirely - existing (pre-FIX-2) callers see byte-identical behavior", () => {
-    const result = resolveInspectSceneEvidenceDispatch({
-      scenePlanId: "scene-1",
-      currentPlan: validPlan(),
-      currentProjectManifest: outerManifest,
-      previewTimingDiscoverCompositionId: "comp-210"
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(Object.prototype.hasOwnProperty.call(result.payload, "discoverLayerDetailsTargetCompositionId")).toBe(false);
   });
 });

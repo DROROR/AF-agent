@@ -48,8 +48,8 @@ async function writeFakeServer(
     layerGetFails?: boolean;
     captureShape?: "image" | "fallback" | "none";
     previewFilePath?: string;
-    /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
-    runJsxResult?: "success" | "error";
+    /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
+    runJsxResult?: "success" | "hostLayerMatches" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
   } = {}
@@ -112,9 +112,13 @@ async function writeFakeServer(
             { layerIndex: 7, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: "מבית DYO App", sourceCompositionId: null, stretchPercent: 100, timeRemapEnabled: false },
             { layerIndex: 8, layerName: "Precomp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-999", stretchPercent: 50, timeRemapEnabled: false }
           ] }) }) }] };`
-        : options.runJsxResult === "error"
-          ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
-          : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
+        : options.runJsxResult === "hostLayerMatches"
+          ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, matches: [
+              { layerIndex: 3, layerName: "Nested Scene", enabled: true, inPointSeconds: 0, outPointSeconds: 7.007, startTimeSeconds: 12, sourceCompositionId: "comp-1", stretchPercent: 100, timeRemapEnabled: false, opacityStatic: 100, opacityKeyframes: null }
+            ] }) }) }] };`
+          : options.runJsxResult === "error"
+            ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
+            : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
     }
   });
 
@@ -210,24 +214,63 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(receivedCode).toMatch(/__layer\.opacity/);
   });
 
-  it("FIX 2 (live QA, 2026-09-10): threads request.discoverLayerDetailsTargetCompositionId through to the REAL ae_run_jsx code sent - produces the early-exit script, proven from the separate spawned process's own real received input", async () => {
-    const capturePath = join(dir, "received-jsx-code-target.txt");
+  it("real 2026-09-10 incident (targeted host-layer lookup): threads request.findHostLayersForChildCompositionId through to the REAL ae_run_jsx code sent - produces the minimal buildFindHostLayersScript, not the full/discovery layerDetails script, proven from the separate spawned process's own real received input", async () => {
+    const capturePath = join(dir, "received-jsx-code-find-host-layers.txt");
     await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    await inspector.inspect(baseRequest({ discoverLayerDetails: true, discoverLayerDetailsMode: "discovery", discoverLayerDetailsTargetCompositionId: "comp-1" }));
+    await inspector.inspect(baseRequest({ findHostLayersForChildCompositionId: "comp-1" }));
 
     const receivedCode = await readFile(capturePath, "utf8");
-    expect(receivedCode).toMatch(/if \(__sourceCompositionId === "comp-1"\) \{ break; \}/);
+    expect(receivedCode).toMatch(/DYO FIND_HOST_LAYERS/);
+    expect(receivedCode).toMatch(/\("comp-" \+ __layer\.source\.id\) === "comp-1"/);
+    // The whole point of this operation: it must never build/return the
+    // parent's full layerDetails array, and it must never break early (it
+    // has to find every real instance of a possibly-duplicated child).
+    expect(receivedCode).not.toMatch(/__layerDetails = \[\]/);
+    expect(receivedCode).not.toMatch(/\bbreak;/);
   });
 
-  it("omitting discoverLayerDetailsTargetCompositionId sends the SAME non-short-circuited script as before - no behavior change for every existing caller", async () => {
-    const capturePath = join(dir, "received-jsx-code-no-target.txt");
+  it("omitting findHostLayersForChildCompositionId (and discoverLayerDetails) never calls ae_run_jsx at all - no find-host-layers script is ever sent", async () => {
+    const capturePath = join(dir, "received-jsx-code-no-find-host-layers.txt");
     await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    await inspector.inspect(baseRequest({ discoverLayerDetails: true, discoverLayerDetailsMode: "discovery" }));
+    await inspector.inspect(baseRequest());
 
-    const receivedCode = await readFile(capturePath, "utf8");
-    expect(receivedCode).not.toMatch(/break;/);
+    await expect(readFile(capturePath, "utf8")).rejects.toThrow();
+  });
+
+  it("live QA: successfully parses real matches returned by ae_run_jsx into response.hostLayerRecords when findHostLayersForChildCompositionId is requested", async () => {
+    await writeFakeServer(dir, { runJsxResult: "hostLayerMatches" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ findHostLayersForChildCompositionId: "comp-1" }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.hostLayerRecordsFailureReason).toBeNull();
+    expect(result.response.hostLayerRecords).toEqual([
+      { layerIndex: 3, layerName: "Nested Scene", enabled: true, inPointSeconds: 0, outPointSeconds: 7.007, startTimeSeconds: 12, sourceCompositionId: "comp-1", stretchPercent: 100, timeRemapEnabled: false, opacityStatic: 100, opacityKeyframes: null }
+    ]);
+  });
+
+  it("reports a clear hostLayerRecordsFailureReason (never fabricates hostLayerRecords) when the ae_run_jsx response does not match the expected find-host-layers shape", async () => {
+    await writeFakeServer(dir, { runJsxResult: "success" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ findHostLayersForChildCompositionId: "comp-1" }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.hostLayerRecords).toBeNull();
+    expect(result.response.hostLayerRecordsFailureReason).toMatch(/did not match the expected shape/);
+  });
+
+  it("reports hostLayerRecordsFailureReason (never fabricates hostLayerRecords) when findHostLayersForChildCompositionId is requested but the underlying ae_run_jsx call fails", async () => {
+    await writeFakeServer(dir, { runJsxResult: "error" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ findHostLayersForChildCompositionId: "comp-1" }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.hostLayerRecords).toBeNull();
+    expect(result.response.hostLayerRecordsFailureReason).toMatch(/ae_run_jsx failed/);
+    // A failed host-layer lookup never fails the rest of the evidence result.
+    expect(result.response.layers).toHaveLength(1);
   });
 
   it("reports layerDetailsFailureReason (never fabricates layerDetails) when discoverLayerDetails is requested but the underlying ae_run_jsx call fails", async () => {

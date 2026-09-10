@@ -32,7 +32,7 @@ import {
   distinctChainEntryCompositionIds,
   resolveManifestPathHops,
   resolvePreviewTimingChains,
-  type DiscoveredPathHop,
+  type ChainHopSlot,
   type PreviewTimingCalculationResult
 } from "../lib/preview-timing";
 
@@ -400,21 +400,22 @@ export function ProjectPreviewTab(): ReactElement | null {
 
     const evidenceUnavailableMessage = t.projectWorkspace.overview.previewTiming.evidenceUnavailable;
     const resultsByCompositionId = new Map<string, SceneEvidenceResponse>();
-    const discoveredOuterPaths = new Map<string, DiscoveredPathHop[]>();
+    const discoveredOuterPaths = new Map<string, ChainHopSlot[]>();
 
-    // Phase 1 (live QA, 2026-09-10 FIX 2): for every mapping's own
-    // chain-entry composition that isn't already the scene's own
-    // outermost composition, resolve the REAL path reaching it - PRIMARILY
-    // from the project's own manifest (`parentCompositionIds`, already
-    // AE-confirmed by the original INSPECT_TEMPLATE inspection, zero live
-    // dispatches for the sequence itself), with exactly one targeted,
-    // early-exit live lookup per already-known hop to discover its real
-    // layerIndex + timing evidence (never a broad exploratory scan of
-    // sibling compositions - see resolveManifestPathHops's own doc
-    // comment). Entirely sequential - both across distinct entry
-    // compositions and within each hop's own lookup - so at most one
-    // INSPECT_SCENE_EVIDENCE job is ever in flight, honoring the QA
-    // Worker's own maxConcurrency=1.
+    // Phase 1 (live QA, 2026-09-10 targeted host-layer lookup extension):
+    // for every mapping's own chain-entry composition that isn't already
+    // the scene's own outermost composition, resolve the REAL path
+    // reaching it - PRIMARILY from the project's own manifest
+    // (`parentCompositionIds`, already AE-confirmed by the original
+    // INSPECT_TEMPLATE inspection, zero live dispatches for the sequence
+    // itself), with exactly one targeted host-layer-lookup live dispatch
+    // per already-known hop to discover EVERY real host layer + its own
+    // timing evidence (never a broad exploratory scan of sibling
+    // compositions or of the parent's own full layer list - see
+    // resolveManifestPathHops's own doc comment). Entirely sequential -
+    // both across distinct entry compositions and within each hop's own
+    // lookup - so at most one INSPECT_SCENE_EVIDENCE job is ever in
+    // flight, honoring the QA Worker's own maxConcurrency=1.
     const manifestCompositions = project.manifest.compositions.map((c) => ({ compositionId: c.compositionId, parentCompositionIds: c.parentCompositionIds }));
     const entryCompositionIds = distinctChainEntryCompositionIds(previewTimingScene.mappings, previewTimingScene.manifestCompositionId);
     for (const entryCompositionId of entryCompositionIds) {
@@ -422,15 +423,15 @@ export function ProjectPreviewTab(): ReactElement | null {
         manifestCompositions,
         previewTimingScene.manifestCompositionId,
         entryCompositionId,
-        (compositionId, targetSourceCompositionId) =>
+        (parentCompositionId, childCompositionId) =>
           dispatchAndPollSceneEvidence(
             {
               operation: "INSPECT_SCENE_EVIDENCE",
               workerId: worker.workerId,
               projectId,
               scenePlanId: session.latestPreviewScenePlanId as string,
-              previewTimingDiscoverCompositionId: compositionId,
-              ...(targetSourceCompositionId !== undefined ? { previewTimingDiscoverTargetCompositionId: targetSourceCompositionId } : {})
+              previewTimingDiscoverCompositionId: parentCompositionId,
+              previewTimingFindHostLayersChildCompositionId: childCompositionId
             },
             timingCancelledRef,
             evidenceUnavailableMessage
@@ -444,10 +445,7 @@ export function ProjectPreviewTab(): ReactElement | null {
         setTimingError(discovered.reason);
         return;
       }
-      discoveredOuterPaths.set(entryCompositionId, discovered.hops);
-      for (const [compositionId, response] of discovered.visitedResults) {
-        resultsByCompositionId.set(compositionId, response);
-      }
+      discoveredOuterPaths.set(entryCompositionId, discovered.hopSlots);
     }
 
     // Phase 2: every target is dispatched strictly one after another - the

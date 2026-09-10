@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  hostLayerRecordSchema,
   layerDetailFactSchema,
   layerEvidenceSchema,
   sceneEvidenceRequestSchema,
@@ -57,6 +58,8 @@ function validResponse(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
     previewFailureReason: null,
     layerDetails: null,
     layerDetailsFailureReason: null,
+    hostLayerRecords: null,
+    hostLayerRecordsFailureReason: null,
     capturedAt: "2026-08-26T00:00:00.000Z",
     ...overrides
   };
@@ -224,5 +227,146 @@ describe("layerDetailFactSchema - real 2026-09-09 Worker/API version-skew incide
       { layerName: "Pre-comp 2", layerType: "PRECOMP", layerIndex: 2, sourceText: null, sourceCompositionId: "comp-1600", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
       { layerName: "Pre-comp 3", layerType: "PRECOMP", layerIndex: 3, sourceText: null, sourceCompositionId: "comp-1635", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null }
     ]);
+  });
+});
+
+/**
+ * Preview Timing Analysis targeted host-layer lookup (live QA, 2026-09-10
+ * real incident, session a7fee3d9) - the SECOND real incident: even the
+ * "discovery" mode + early-exit target hint still timed out scanning
+ * !Render. hostLayerRecordSchema/hostLayerRecords replace that mechanism
+ * with a genuinely different, dedicated operation
+ * (buildFindHostLayersScript).
+ */
+describe("hostLayerRecordSchema", () => {
+  function record(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      layerIndex: 2,
+      layerName: "Pre-comp 3",
+      enabled: true,
+      inPointSeconds: 1.63496830163497,
+      outPointSeconds: 8.64197530864197,
+      startTimeSeconds: 1.63496830163497,
+      sourceCompositionId: "comp-1635",
+      stretchPercent: 100,
+      timeRemapEnabled: false,
+      opacityStatic: 100,
+      opacityKeyframes: null,
+      ...overrides
+    };
+  }
+
+  it("accepts a real, fully-populated host layer record", () => {
+    expect(() => hostLayerRecordSchema.parse(record())).not.toThrow();
+  });
+
+  it("Worker/API version-skew tolerance (same real incident class as layerDetailFactSchema above): accepts stretchPercent/timeRemapEnabled/opacityStatic/opacityKeyframes being entirely ABSENT, normalizing to null", () => {
+    const raw = record();
+    delete (raw as Record<string, unknown>).stretchPercent;
+    delete (raw as Record<string, unknown>).timeRemapEnabled;
+    delete (raw as Record<string, unknown>).opacityStatic;
+    delete (raw as Record<string, unknown>).opacityKeyframes;
+    const parsed = hostLayerRecordSchema.parse(raw);
+    expect(parsed.stretchPercent).toBeNull();
+    expect(parsed.timeRemapEnabled).toBeNull();
+    expect(parsed.opacityStatic).toBeNull();
+    expect(parsed.opacityKeyframes).toBeNull();
+  });
+
+  it("still requires sourceCompositionId, layerIndex, layerName, enabled, and the three timing fields - the version-skew tolerance is scoped to exactly the four optional-in-practice fields", () => {
+    const raw = record();
+    delete (raw as Record<string, unknown>).sourceCompositionId;
+    expect(() => hostLayerRecordSchema.parse(raw)).toThrow();
+  });
+});
+
+describe("sceneEvidenceResponseSchema - hostLayerRecords / hostLayerRecordsFailureReason", () => {
+  it("accepts multiple real host layer records (real 2026-09-10 incident: multiple instances of the same child composition inside one parent)", () => {
+    const response = {
+      verifiedSourceProjectSha256: SHA,
+      manifestCompositionId: "comp-210",
+      aeProjectItemIndex: 2,
+      compositionName: "!Render",
+      layers: [],
+      preview: null,
+      previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
+      hostLayerRecords: [
+        {
+          layerIndex: 9,
+          layerName: "Scene 1 instance A",
+          enabled: true,
+          inPointSeconds: 0,
+          outPointSeconds: 7.007007007007,
+          startTimeSeconds: 0,
+          sourceCompositionId: "comp-1",
+          stretchPercent: 100,
+          timeRemapEnabled: false,
+          opacityStatic: 100,
+          opacityKeyframes: null
+        },
+        {
+          layerIndex: 34,
+          layerName: "Scene 1 instance B",
+          enabled: true,
+          inPointSeconds: 20,
+          outPointSeconds: 27.007007007007,
+          startTimeSeconds: 20,
+          sourceCompositionId: "comp-1",
+          stretchPercent: 100,
+          timeRemapEnabled: false,
+          opacityStatic: 100,
+          opacityKeyframes: null
+        }
+      ],
+      hostLayerRecordsFailureReason: null,
+      capturedAt: "2026-09-10T00:00:00.000Z"
+    };
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.hostLayerRecords).toHaveLength(2);
+  });
+
+  it("accepts a genuinely empty hostLayerRecords array (a successful scan that found zero real matches) - distinct from a failed scan", () => {
+    const response = {
+      verifiedSourceProjectSha256: SHA,
+      manifestCompositionId: "comp-210",
+      aeProjectItemIndex: 2,
+      compositionName: "!Render",
+      layers: [],
+      preview: null,
+      previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
+      hostLayerRecords: [],
+      hostLayerRecordsFailureReason: null,
+      capturedAt: "2026-09-10T00:00:00.000Z"
+    };
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.hostLayerRecords).toEqual([]);
+  });
+
+  it("Worker/API version-skew tolerance: accepts hostLayerRecords/hostLayerRecordsFailureReason being entirely absent (an older Worker that predates this capability) - normalizes to null, never a hard parse failure", () => {
+    const response = {
+      verifiedSourceProjectSha256: SHA,
+      manifestCompositionId: "comp-210",
+      aeProjectItemIndex: 2,
+      compositionName: "!Render",
+      layers: [],
+      preview: null,
+      previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
+      capturedAt: "2026-09-10T00:00:00.000Z"
+    };
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.hostLayerRecords).toBeNull();
+    expect(parsed.data.hostLayerRecordsFailureReason).toBeNull();
   });
 });

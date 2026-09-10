@@ -955,25 +955,10 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
 export function buildInspectCompositionLayerDetailsScript(
   aeProjectItemIndex: number,
   compositionName: string,
-  mode: "full" | "discovery" = "full",
-  targetSourceCompositionId?: string
+  mode: "full" | "discovery" = "full"
 ): FixedJsxScript {
   const compIndexLiteral = String(aeProjectItemIndex);
   const compNameLiteral = JSON.stringify(compositionName);
-  // FIX 2 (live QA, 2026-09-10 real incident): when the caller already
-  // knows exactly which nested composition it is looking for (from the
-  // manifest's own already-confirmed containment graph - see
-  // deriveManifestContainmentPath/findLayerHostingComposition in
-  // apps/web/src/lib/preview-timing.ts), the scan stops as soon as that
-  // ONE layer is found, rather than exhaustively classifying every
-  // remaining layer of a potentially large composition. This is a pure
-  // performance optimization for the KNOWN-target case - `layerDetails`
-  // is a strict PREFIX of what a full scan would have found, ordered the
-  // same way, so a caller not using this parameter sees no change at all.
-  const earlyExitLiteral =
-    targetSourceCompositionId !== undefined
-      ? `if (__sourceCompositionId === ${JSON.stringify(targetSourceCompositionId)}) { break; }`
-      : "";
   // "discovery" mode skips the stretch/timeRemapEnabled/opacity/sourceText
   // property reads entirely (real incident, 2026-09-10, session a7fee3d9):
   // a large top-level render composition (!Render, ~40+ layers) made the
@@ -1081,13 +1066,140 @@ export function buildInspectCompositionLayerDetailsScript(
             opacityStatic: __opacityStatic,
             opacityKeyframes: __opacityKeyframes
           });
-          ${earlyExitLiteral}
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole composition's
           // result - it is simply not reported.
         }
       }
       __result = JSON.stringify({ ok: true, layerDetails: __layerDetails });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
+ * Preview Timing Analysis targeted host-layer lookup (live QA, 2026-09-10
+ * real incident, session a7fee3d9): `buildInspectCompositionLayerDetailsScript`'s
+ * own "discovery" mode + early-exit optimization STILL timed out scanning
+ * a large master render composition (!Render) - because even with the
+ * four expensive property reads removed, it still built a full
+ * classification record (TextLayer/AVLayer/PRECOMP typing, an object
+ * literal, an array push) for EVERY layer up to wherever the match
+ * happened to be, which for a composition with many dozens of layers is
+ * itself real, non-trivial per-layer cost.
+ *
+ * This is a genuinely different, minimal operation: for EVERY layer, it
+ * does ONLY the cheapest possible check (`layer.source instanceof
+ * CompItem`, then a plain string comparison against the one real
+ * `childSourceCompositionId` this call cares about) - no TextLayer check,
+ * no object construction, no array push - for every layer that is NOT a
+ * match. The full, real per-layer facts (enabled/inPoint/outPoint/
+ * startTime/stretch/timeRemapEnabled/opacity) are only ever read for a
+ * layer that IS a match, which is expected to be a small handful at most.
+ * O(numLayers) cheap comparisons + O(matches) expensive reads, never
+ * O(numLayers) expensive reads - and never returns anything for a
+ * non-matching layer at all, unlike layerDetails' own full/discovery
+ * modes.
+ *
+ * Continues scanning every layer even after a match is found (never an
+ * early `break`) - a real AE composition CAN legitimately place the same
+ * nested composition at more than one layer (e.g. a duplicated element),
+ * and silently returning only the first would silently under-report real
+ * branding visibility. `matches` is therefore always the COMPLETE set of
+ * real host layers, never just one.
+ */
+export function buildFindHostLayersScript(aeProjectItemIndex: number, compositionName: string, childSourceCompositionId: string): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const childIdLiteral = JSON.stringify(childSourceCompositionId);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO FIND_HOST_LAYERS")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
+      });
+    } else {
+      var __matches = [];
+      for (var __i = 1; __i <= __comp.numLayers; __i++) {
+        try {
+          var __layer = __comp.layer(__i);
+          // The one cheap check every layer pays - no classification, no
+          // object construction, no property reads beyond this for a
+          // non-matching layer.
+          if (__layer.source && (__layer.source instanceof CompItem) && ("comp-" + __layer.source.id) === ${childIdLiteral}) {
+            var __stretchPercent = null;
+            try {
+              __stretchPercent = __layer.stretch;
+            } catch (__stretchReadError) {
+              __stretchPercent = null;
+            }
+            var __timeRemapEnabled = null;
+            try {
+              __timeRemapEnabled = __layer.timeRemapEnabled;
+            } catch (__timeRemapReadError) {
+              __timeRemapEnabled = null;
+            }
+            var __opacityStatic = null;
+            var __opacityKeyframes = null;
+            try {
+              var __opacityProp = __layer.opacity;
+              if (__opacityProp.numKeys === 0) {
+                __opacityStatic = __opacityProp.value;
+              } else {
+                __opacityKeyframes = [];
+                for (var __opacityKeyIndex = 1; __opacityKeyIndex <= __opacityProp.numKeys; __opacityKeyIndex++) {
+                  __opacityKeyframes.push({
+                    timeSeconds: __opacityProp.keyTime(__opacityKeyIndex),
+                    valuePercent: __opacityProp.keyValue(__opacityKeyIndex)
+                  });
+                }
+              }
+            } catch (__opacityReadError) {
+              __opacityStatic = null;
+              __opacityKeyframes = null;
+            }
+            __matches.push({
+              layerIndex: __layer.index,
+              layerName: __layer.name,
+              enabled: __layer.enabled,
+              inPointSeconds: __layer.inPoint,
+              outPointSeconds: __layer.outPoint,
+              startTimeSeconds: __layer.startTime,
+              sourceCompositionId: ${childIdLiteral},
+              stretchPercent: __stretchPercent,
+              timeRemapEnabled: __timeRemapEnabled,
+              opacityStatic: __opacityStatic,
+              opacityKeyframes: __opacityKeyframes
+            });
+          }
+        } catch (__layerReadError) {
+          // A single unreadable layer never fails the whole scan - it is
+          // simply not reported (same fail-partial posture as every other
+          // read-only inspection script in this file).
+        }
+      }
+      __result = JSON.stringify({ ok: true, matches: __matches });
     }
   } catch (__unexpectedError) {
     __result = JSON.stringify({

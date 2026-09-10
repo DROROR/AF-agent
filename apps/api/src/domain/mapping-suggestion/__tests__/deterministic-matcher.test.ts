@@ -190,6 +190,8 @@ describe("matchDeterministic", () => {
           previewFailureReason: null,
           layerDetails: null,
           layerDetailsFailureReason: null,
+          hostLayerRecords: null,
+          hostLayerRecordsFailureReason: null,
           capturedAt: NOW.toISOString()
         }
       })

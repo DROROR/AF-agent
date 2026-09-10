@@ -18,8 +18,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   previewTimingChainIndex?: number;
   /** Preview Timing Analysis composition-graph discovery (live QA, 2026-09-10) - see the previewTimingDiscoverCompositionId branch below and job-dispatch.ts's own doc comment on why this is the one deliberate exception to server-only addressing resolution. */
   previewTimingDiscoverCompositionId?: string;
-  /** Preview Timing Analysis composition-graph discovery, FIX 2 (live QA, 2026-09-10) - only meaningful alongside previewTimingDiscoverCompositionId; see job-dispatch.ts's own doc comment. */
-  previewTimingDiscoverTargetCompositionId?: string;
+  /** Preview Timing Analysis TARGETED HOST-LAYER LOOKUP (live QA, 2026-09-10 real incident) - required alongside previewTimingDiscoverCompositionId (which names the PARENT); this names the CHILD composition whose hosting layer(s) are being looked up. See job-dispatch.ts's own doc comment. */
+  previewTimingFindHostLayersChildCompositionId?: string;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -73,7 +73,7 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     discoverLayerDetails,
     previewTimingChainIndex,
     previewTimingDiscoverCompositionId,
-    previewTimingDiscoverTargetCompositionId
+    previewTimingFindHostLayersChildCompositionId
   } = input;
 
   if (!currentPlan) {
@@ -94,33 +94,44 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     return { ok: false, reason: `Unknown scenePlanId "${scenePlanId}" in this plan` };
   }
 
-  // Preview Timing Analysis composition-GRAPH discovery (live QA,
+  // Preview Timing Analysis TARGETED HOST-LAYER LOOKUP (live QA,
   // 2026-09-10 real incident) - checked BEFORE previewTimingChainIndex
-  // below. The ONE caller-supplied compositionId this codebase ever
+  // below. The ONE caller-supplied compositionId(s) this codebase ever
   // accepts for addressing purposes - see job-dispatch.ts's own doc
-  // comment for the full safety reasoning (read-only, validated against
-  // THIS project's own current manifest, always lightweight "discovery"
-  // mode, never caller-supplied layerIndices).
+  // comment for the full safety reasoning (read-only, both parent and
+  // child validated against THIS project's own current manifest, never an
+  // arbitrary string).
+  //
+  // This REPLACES the prior "discovery mode scan of the WHOLE parent,
+  // optionally with an early-exit target hint" branch: a real retry
+  // proved that even a trimmed, early-exiting full-layer scan still times
+  // out on a large parent composition (the real incident: "!Render",
+  // ~40+ layers), since per-layer classification/object-construction cost
+  // alone - not merely the property reads a caller could already opt out
+  // of - was the bottleneck. `previewTimingFindHostLayersChildCompositionId`
+  // is now REQUIRED alongside `previewTimingDiscoverCompositionId` - there
+  // is no longer a broad "just scan this whole composition" mode for
+  // graph discovery, only a genuinely targeted parent->child edge lookup.
   if (previewTimingDiscoverCompositionId !== undefined) {
-    const targetComposition = currentProjectManifest.compositions.find((c) => c.compositionId === previewTimingDiscoverCompositionId);
-    if (!targetComposition) {
+    const parentComposition = currentProjectManifest.compositions.find((c) => c.compositionId === previewTimingDiscoverCompositionId);
+    if (!parentComposition) {
       return {
         ok: false,
-        reason: `Preview-timing discovery target compositionId "${previewTimingDiscoverCompositionId}" does not match any composition in the current manifest - refusing to inspect an unknown composition`
+        reason: `Preview-timing discovery parent compositionId "${previewTimingDiscoverCompositionId}" does not match any composition in the current manifest - refusing to inspect an unknown composition`
       };
     }
-    // FIX 2's own targeted-lookup optimization - only ever a composition
-    // this project's own current manifest already knows about (same
-    // validation as the parent compositionId above), never an arbitrary
-    // caller-supplied string.
-    if (previewTimingDiscoverTargetCompositionId !== undefined) {
-      const knownTarget = currentProjectManifest.compositions.some((c) => c.compositionId === previewTimingDiscoverTargetCompositionId);
-      if (!knownTarget) {
-        return {
-          ok: false,
-          reason: `Preview-timing discovery early-exit target compositionId "${previewTimingDiscoverTargetCompositionId}" does not match any composition in the current manifest - refusing to search for an unknown composition`
-        };
-      }
+    if (previewTimingFindHostLayersChildCompositionId === undefined) {
+      return {
+        ok: false,
+        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child."
+      };
+    }
+    const knownChild = currentProjectManifest.compositions.some((c) => c.compositionId === previewTimingFindHostLayersChildCompositionId);
+    if (!knownChild) {
+      return {
+        ok: false,
+        reason: `Preview-timing discovery target compositionId "${previewTimingFindHostLayersChildCompositionId}" does not match any composition in the current manifest - refusing to search for an unknown composition`
+      };
     }
     return {
       ok: true,
@@ -128,29 +139,20 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
         sourceProjectPath: currentProjectManifest.sourceProject.path,
         sourceProjectSha256: currentPlan.sourceProjectSha256,
         manifestCompositionId: previewTimingDiscoverCompositionId,
-        aeProjectItemIndex: targetComposition.aeProjectItemIndex,
-        compositionName: targetComposition.name,
-        // Server-computed, never caller-supplied - every plausible index,
-        // since the real layer hosting a searched-for nested composition
-        // is not known until this very scan returns (see
-        // heroic-swan-scene-evidence-inspector.ts's own best-effort,
-        // skip-on-failure per-index semantics for why requesting indices
-        // beyond the composition's real numLayers is always safe).
-        layerIndices: Array.from({ length: MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST }, (_, i) => i + 1),
+        aeProjectItemIndex: parentComposition.aeProjectItemIndex,
+        compositionName: parentComposition.name,
+        // The new targeted host-layer lookup is entirely self-sufficient
+        // (it scans the parent's own immediate layers itself, server-side
+        // in the Worker) - no caller/server-supplied layerIndices needed.
+        layerIndices: [],
         previewTimestampSeconds: null,
-        discoverLayerDetails: true,
-        // Keeps a graph-discovery scan over a large master composition
-        // (the real 2026-09-10 incident: !Render itself, ~40+ layers)
-        // from ever timing out, at the cost of not getting stretch/
-        // timeRemapEnabled/opacity for compositions visited only for
-        // discovery (see jsx-templates.ts's own doc comment on why this
-        // is a safe, documented default for a master timeline's own
-        // scene-sequencing layers).
-        discoverLayerDetailsMode: "discovery",
-        // FIX 2 - when the caller already knows which composition it's
-        // looking for (from the manifest's own confirmed containment
-        // graph), the Worker's own scan stops the instant it finds it.
-        ...(previewTimingDiscoverTargetCompositionId !== undefined ? { discoverLayerDetailsTargetCompositionId: previewTimingDiscoverTargetCompositionId } : {})
+        // Targeted host-layer lookup (live QA, 2026-09-10 real incident):
+        // scans ONLY the parent's own immediate layers, doing zero
+        // classification/object-construction work for a non-matching
+        // layer, and never breaks early - every real instance of the
+        // child composition is reported. See jsx-templates.ts's own
+        // buildFindHostLayersScript doc comment.
+        findHostLayersForChildCompositionId: previewTimingFindHostLayersChildCompositionId
       }
     };
   }

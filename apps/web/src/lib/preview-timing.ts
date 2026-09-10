@@ -60,7 +60,7 @@
  *     resolvePreviewTimingChains's own doc comment).
  */
 
-import type { LayerDetailFact, LayerEvidence, PlaceholderMapping, SceneEvidenceResponse } from "@dyo/schemas";
+import type { HostLayerRecord, LayerDetailFact, LayerEvidence, PlaceholderMapping, SceneEvidenceResponse } from "@dyo/schemas";
 
 export type Range = [number, number];
 
@@ -87,10 +87,23 @@ export interface ChainHop {
   opacity: OpacityFact | null;
 }
 
-/** One mapping's complete real nested-target chain, ordered OUTERMOST hop first, actual leaf layer LAST. */
+/**
+ * One chain position's real CANDIDATE hop(s) (live QA, 2026-09-10, targeted
+ * host-layer lookup extension): a child composition can be placed at
+ * MULTIPLE layers within the same parent composition (the same nested
+ * precomp used more than once), and every real instance must be reported -
+ * never silently narrowed to the first (see findHostLayers's own doc
+ * comment). A single-candidate slot (`length === 1`) is the overwhelmingly
+ * common case and behaves byte-identically to the pre-2026-09-10 single-hop
+ * model; `computeChainVisibleRanges` below is what actually computes the
+ * UNION of valid ranges across multiple candidates at one slot.
+ */
+export type ChainHopSlot = readonly ChainHop[];
+
+/** One mapping's complete real nested-target chain, ordered OUTERMOST slot first, actual leaf slot LAST. */
 export interface LabeledChain {
   label: string;
-  hops: ChainHop[];
+  hopSlots: ChainHopSlot[];
 }
 
 /**
@@ -168,35 +181,25 @@ export function distinctChainEntryCompositionIds(mappings: readonly PlaceholderM
 }
 
 /**
- * The real, distinct nested-composition children of a composition, from
- * its own "discovery"-mode `layerDetails` scan - every layer whose real
- * `sourceCompositionId` is non-null, sorted by layerIndex (a fixed,
- * deterministic order - see `discoverPathToComposition`'s own doc comment
- * on why this is what makes its BFS result deterministic).
+ * Fetches the real, targeted host-layer lookup (live QA, 2026-09-10
+ * incident, session a7fee3d9) for ONE already manifest-confirmed
+ * parent -> child containment edge - the actual dispatch/poll mechanics
+ * live in the caller (ProjectPreviewTab), never here, so this module stays
+ * free of any network/job-polling concern and is directly unit-testable
+ * against a fake in-memory composition graph.
+ *
+ * This REPLACES the prior "discovery mode scan + optional early-exit
+ * target hint" fetcher shape: a real retry proved that even a trimmed,
+ * early-exiting full-layer scan still times out on a large parent
+ * composition, since per-layer classification/object-construction cost
+ * alone (not merely the property reads a caller can opt out of) was the
+ * bottleneck. Both `parentCompositionId` and `childCompositionId` are
+ * always required now - there is no longer a broad "just scan this
+ * composition and tell me everything you found" mode for graph discovery.
  */
-export function listNestedCompositionChildren(layerDetails: readonly LayerDetailFact[]): { layerIndex: number; compositionId: string }[] {
-  return layerDetails
-    .filter((d): d is LayerDetailFact & { sourceCompositionId: string } => d.sourceCompositionId !== null)
-    .map((d) => ({ layerIndex: d.layerIndex, compositionId: d.sourceCompositionId }))
-    .sort((a, b) => a.layerIndex - b.layerIndex);
-}
-
-/**
- * Fetches ONE composition's real "discovery"-mode INSPECT_SCENE_EVIDENCE
- * evidence - the actual dispatch/poll mechanics live in the caller
- * (ProjectPreviewTab), never here, so this module stays free of any
- * network/job-polling concern and is directly unit-testable against a
- * fake in-memory composition graph. `targetSourceCompositionId`, when
- * given, is an optional hint letting the Worker's own script exit as soon
- * as it finds that specific nested composition, rather than exhaustively
- * classifying every layer (live QA, 2026-09-10: since FIX 2 below already
- * knows exactly which composition it is looking for from the manifest's
- * own graph, there is never a need to enumerate every layer of a large
- * composition just to confirm one already-expected edge).
- */
-export type SceneEvidenceFetcher = (
-  compositionId: string,
-  targetSourceCompositionId?: string
+export type HostLayerFetcher = (
+  parentCompositionId: string,
+  childCompositionId: string
 ) => Promise<{ ok: true; response: SceneEvidenceResponse } | { ok: false; message: string }>;
 
 /** One composition's own identity + real, AE-confirmed parent edges, as already recorded in the project's own manifest (TemplateManifest['compositions'][number], narrowed to only the fields this module needs). */
@@ -273,84 +276,124 @@ export function deriveManifestContainmentPath(
   return { ok: false, reason: `"${targetCompositionId}" has no real containment path from "${rootCompositionId}" in the current project manifest's own composition graph - refusing to guess.` };
 }
 
-export type FindHostingLayerResult = { ok: true; layerIndex: number; response: SceneEvidenceResponse } | { ok: false; reason: string };
+export type FindHostLayersResult = { ok: true; matches: HostLayerRecord[] } | { ok: false; reason: string };
 
 /**
- * Preview Timing Analysis composition-graph discovery, FIX 1 (live QA,
- * 2026-09-10 real incident): finds the REAL layer index inside
- * `parentCompositionId` that hosts `childCompositionId` - the ONE fact
- * the manifest itself cannot supply (it records real containment edges,
- * never AE layer indices). This is the ONLY live evidence this feature's
- * graph-discovery step ever needs, since FIX 2's
- * `deriveManifestContainmentPath` already supplies the full composition
- * SEQUENCE from durable, pre-confirmed data.
- *
- * The critical correctness fix: a scan FAILURE (`layerDetails === null`,
- * e.g. a real Worker/MCP timeout inspecting a large composition) is
- * NEVER the same thing as a scan that genuinely SUCCEEDED and found zero
- * matching children (`layerDetails: []`, or a non-empty list that simply
- * doesn't contain the target). The 2026-09-10 incident's own false
- * "comp-1 is not reachable from comp-210" conclusion was exactly this
- * conflation - a `layerDetailsFailureReason`-bearing timeout, silently
- * treated as "found nothing". This function refuses to make that mistake:
- * a failed scan is reported as a clear evidence gap, never as a negative
- * structural fact.
+ * Converts one real, AE-confirmed `HostLayerRecord` (from the targeted
+ * `findHostLayers` lookup below) directly into a `ChainHop` - the host-
+ * layer record already carries every piece of evidence a `ChainHop` needs
+ * (window, stretch, timeRemapEnabled, opacity), read in the SAME minimal
+ * Worker scan that found the layer, so no separate `layers[]`/
+ * `layerDetails[]` cross-reference is ever required for a discovered hop
+ * (unlike a mapping's own approved `humanNestedTarget` steps, which still
+ * come from a distinct INSPECT_SCENE_EVIDENCE dispatch - see
+ * `resolvePreviewTimingChains` below).
  */
-export async function findLayerHostingComposition(
+function hostLayerRecordToChainHop(compositionId: string, record: HostLayerRecord): ChainHop {
+  return {
+    compositionId,
+    window: {
+      layerIndex: record.layerIndex,
+      enabled: record.enabled,
+      inPointSeconds: record.inPointSeconds,
+      outPointSeconds: record.outPointSeconds,
+      startTimeSeconds: record.startTimeSeconds
+    },
+    stretchPercent: record.stretchPercent,
+    timeRemapEnabled: record.timeRemapEnabled,
+    opacity: { staticPercent: record.opacityStatic, keyframes: record.opacityKeyframes }
+  };
+}
+
+/**
+ * Preview Timing Analysis TARGETED HOST-LAYER LOOKUP (live QA, 2026-09-10
+ * real incident, session a7fee3d9): finds EVERY real layer inside
+ * `parentCompositionId` that hosts `childCompositionId` - the ONE fact the
+ * manifest itself cannot supply (it records real containment edges, never
+ * AE layer indices/timing). This is the ONLY live evidence this feature's
+ * graph-discovery step ever needs, since `deriveManifestContainmentPath`
+ * already supplies the full composition SEQUENCE from durable,
+ * pre-confirmed manifest data.
+ *
+ * REPLACES the prior `findLayerHostingComposition` (single-match,
+ * full/discovery-mode layerDetails scan): a real retry proved that even a
+ * trimmed, early-exiting full-layer scan still times out on a large parent
+ * composition (the real incident: "!Render", ~40+ layers) since per-layer
+ * classification/object-construction cost alone - not merely the property
+ * reads a caller could already opt out of - was the bottleneck. The new
+ * Worker-side `buildFindHostLayersScript` does zero classification/
+ * construction work for a non-matching layer and never breaks early, so it
+ * genuinely reports EVERY real instance of a possibly-duplicated child
+ * composition, never silently narrowed to the first (see this module's own
+ * `ChainHopSlot`/`computeChainVisibleRanges` for how multiple instances
+ * propagate as a union of valid visibility ranges).
+ *
+ * Three distinct outcomes, never conflated:
+ *   1. Scan FAILURE (`hostLayerRecords === null`, e.g. a real Worker/MCP
+ *      timeout) - a clear EVIDENCE GAP, never treated as "not found". This
+ *      was the exact conflation behind the 2026-09-10 incident's original
+ *      false "comp-1 is not reachable from comp-210" conclusion.
+ *   2. Scan SUCCEEDED but found zero real matching layers
+ *      (`hostLayerRecords: []`) despite the manifest recording this exact
+ *      containment edge - reported with the explicit `MANIFEST_EDGE_NOT_FOUND_IN_AE`
+ *      marker, a genuine structural discrepancy between the manifest and
+ *      live AE state, distinct from an evidence gap.
+ *   3. Scan SUCCEEDED and found one or more real matches - returned as-is,
+ *      every match, for the caller to propagate through.
+ */
+export async function findHostLayers(
   parentCompositionId: string,
   childCompositionId: string,
-  fetchCompositionEvidence: SceneEvidenceFetcher
-): Promise<FindHostingLayerResult> {
-  const result = await fetchCompositionEvidence(parentCompositionId, childCompositionId);
+  fetchHostLayersForEdge: HostLayerFetcher
+): Promise<FindHostLayersResult> {
+  const result = await fetchHostLayersForEdge(parentCompositionId, childCompositionId);
   if (!result.ok) {
     return { ok: false, reason: result.message };
   }
-  // SCAN FAILED != EMPTY COMPOSITION - a null layerDetails means the
-  // Worker's own scan did not complete (see layerDetailsFailureReason),
-  // never that the composition genuinely has zero nested children.
-  if (result.response.layerDetails === null) {
+  // SCAN FAILED != EMPTY COMPOSITION - a null hostLayerRecords means the
+  // Worker's own scan did not complete (see hostLayerRecordsFailureReason),
+  // never that the parent genuinely hosts zero matching layers.
+  if (result.response.hostLayerRecords === null) {
     return {
       ok: false,
       reason: `Could not determine which layer in "${parentCompositionId}" hosts "${childCompositionId}" - the Worker's own layer scan did not complete${
-        result.response.layerDetailsFailureReason ? `: ${result.response.layerDetailsFailureReason}` : ""
+        result.response.hostLayerRecordsFailureReason ? `: ${result.response.hostLayerRecordsFailureReason}` : ""
       }. Refusing to treat an incomplete scan as "not found".`
     };
   }
-  const children = listNestedCompositionChildren(result.response.layerDetails);
-  const match = children.find((child) => child.compositionId === childCompositionId);
-  if (!match) {
+  if (result.response.hostLayerRecords.length === 0) {
     return {
       ok: false,
-      reason: `"${childCompositionId}" does not appear as a real nested composition inside "${parentCompositionId}" - the manifest's own containment edge could not be confirmed by live evidence.`
+      reason: `MANIFEST_EDGE_NOT_FOUND_IN_AE: "${childCompositionId}" does not appear as a real nested composition inside "${parentCompositionId}" despite the manifest recording that containment edge - the manifest's own edge could not be confirmed by live AE evidence.`
     };
   }
-  return { ok: true, layerIndex: match.layerIndex, response: result.response };
+  return { ok: true, matches: result.response.hostLayerRecords };
 }
 
-export type ResolveManifestPathResult =
-  | { ok: true; hops: DiscoveredPathHop[]; visitedResults: Map<string, SceneEvidenceResponse> }
-  | { ok: false; reason: string };
+export type ResolveManifestPathResult = { ok: true; hopSlots: ChainHopSlot[] } | { ok: false; reason: string };
 
 /**
- * Preview Timing Analysis composition-graph discovery, FIX 1 + FIX 2
- * combined (live QA, 2026-09-10 real incident, session a7fee3d9): the
- * PRIMARY, manifest-driven replacement for the old live-BFS
- * `discoverPathToComposition`. Resolves the real composition SEQUENCE
- * from `rootCompositionId` to `targetCompositionId` entirely from the
- * manifest (`deriveManifestContainmentPath` - zero live dispatches), then
- * makes exactly ONE targeted, evidence-failure-aware live lookup per hop
- * (`findLayerHostingComposition`) to discover that hop's own real
- * layerIndex - never a broad, exploratory scan of every sibling
- * composition the way the retired BFS approach did. Live AE evidence is
- * used ONLY for what the manifest cannot supply (the layerIndex, plus -
- * via the SAME scan - real timing/layer properties for that index),
- * never to rediscover graph structure the manifest already provides.
+ * Preview Timing Analysis composition-graph discovery, combined manifest
+ * path + targeted host-layer lookup (live QA, 2026-09-10 real incident,
+ * session a7fee3d9): the PRIMARY, manifest-driven replacement for the old
+ * live-BFS `discoverPathToComposition`. Resolves the real composition
+ * SEQUENCE from `rootCompositionId` to `targetCompositionId` entirely from
+ * the manifest (`deriveManifestContainmentPath` - zero live dispatches),
+ * then makes exactly ONE targeted, evidence-failure-aware live lookup per
+ * hop (`findHostLayers`) to discover EVERY real host layer for that hop -
+ * never a broad, exploratory scan of every sibling composition the way the
+ * retired BFS approach did, and never silently narrowed to a single match
+ * when the same child composition is placed more than once inside its
+ * parent. Live AE evidence is used ONLY for what the manifest cannot
+ * supply (the real host layer(s), plus - via the SAME minimal scan - real
+ * timing/stretch/opacity properties for each one), never to rediscover
+ * graph structure the manifest already provides.
  */
 export async function resolveManifestPathHops(
   compositions: readonly ManifestCompositionRef[],
   rootCompositionId: string,
   targetCompositionId: string,
-  fetchCompositionEvidence: SceneEvidenceFetcher
+  fetchHostLayersForEdge: HostLayerFetcher
 ): Promise<ResolveManifestPathResult> {
   const pathResult = deriveManifestContainmentPath(compositions, rootCompositionId, targetCompositionId);
   if (!pathResult.ok) {
@@ -358,22 +401,20 @@ export async function resolveManifestPathHops(
   }
   const sequence = pathResult.path;
   if (sequence.length <= 1) {
-    return { ok: true, hops: [], visitedResults: new Map() };
+    return { ok: true, hopSlots: [] };
   }
 
-  const hops: DiscoveredPathHop[] = [];
-  const visitedResults = new Map<string, SceneEvidenceResponse>();
+  const hopSlots: ChainHopSlot[] = [];
   for (let i = 0; i < sequence.length - 1; i++) {
     const parentCompositionId = sequence[i]!;
     const childCompositionId = sequence[i + 1]!;
-    const found = await findLayerHostingComposition(parentCompositionId, childCompositionId, fetchCompositionEvidence);
+    const found = await findHostLayers(parentCompositionId, childCompositionId, fetchHostLayersForEdge);
     if (!found.ok) {
       return { ok: false, reason: found.reason };
     }
-    hops.push({ compositionId: parentCompositionId, layerIndex: found.layerIndex });
-    visitedResults.set(parentCompositionId, found.response);
+    hopSlots.push(found.matches.map((match) => hostLayerRecordToChainHop(parentCompositionId, match)));
   }
-  return { ok: true, hops, visitedResults };
+  return { ok: true, hopSlots };
 }
 
 function toWindow(evidence: LayerEvidence): LayerWindow {
@@ -395,37 +436,33 @@ function toOpacity(detail: LayerDetailFact | undefined): OpacityFact | null {
 
 export type ResolveChainsResult = { ok: true; chains: LabeledChain[] } | { ok: false; reason: string };
 
-/** One real hop discovered by `discoverPathToComposition` - `compositionId` is the composition the hop's own layer lives IN, `layerIndex` is that layer's own index. */
-export interface DiscoveredPathHop {
-  compositionId: string;
-  layerIndex: number;
-}
-
 /**
- * Resolves every mapping's own COMPLETE hop chain (real evidence at every
- * hop) from the real INSPECT_SCENE_EVIDENCE results gathered so far.
- * `resultsByCompositionId` is the union of every dispatched result this
- * analysis run has collected, keyed by the compositionId it was captured
- * against - both the KNOWN human-chain targets
- * (`derivePreviewTimingChainTargets`) and every composition visited while
- * discovering `discoveredOuterPaths` (see `discoverPathToComposition`),
- * since a hop discovered mid-search still needs its own real `layers[]`
- * timing, already present in that same discovery response.
+ * Resolves every mapping's own COMPLETE hop-slot chain (real evidence at
+ * every slot) from the real INSPECT_SCENE_EVIDENCE results gathered so
+ * far. `resultsByCompositionId` is the union of every KNOWN human-chain
+ * target (`derivePreviewTimingChainTargets`) result this analysis run has
+ * collected, keyed by the compositionId it was captured against - used
+ * only for a mapping's own approved `humanNestedTarget` steps, each always
+ * a single fixed layer. A discovered prefix slot (from
+ * `discoveredOuterPaths`) never needs this lookup - its own real evidence
+ * already travels with it (see `hostLayerRecordToChainHop`).
  *
- * `discoveredOuterPaths` maps a chain's own first-hop compositionId to
- * the REAL path of hops (root-first) that reaches it from
+ * `discoveredOuterPaths` maps a chain's own first-hop compositionId to the
+ * REAL hop-slot sequence (root-first, one slot per composition-graph edge,
+ * each slot possibly carrying MULTIPLE real candidate host layers - live
+ * QA, 2026-09-10 targeted host-layer lookup extension) that reaches it from
  * `outerMostCompositionId` - empty array when that compositionId already
  * equals `outerMostCompositionId` (no discovery needed). A mapping whose
  * first hop has no entry here at all is refused clearly (evidence gap),
  * never silently treated as a direct/identity placement.
  *
- * Fails clearly (never guesses) when a required hop's own evidence is
- * missing from its own composition's collected result.
+ * Fails clearly (never guesses) when a required approved step's own
+ * evidence is missing from its own composition's collected result.
  */
 export function resolvePreviewTimingChains(
   mappings: readonly PlaceholderMapping[],
   outerMostCompositionId: string,
-  discoveredOuterPaths: ReadonlyMap<string, readonly DiscoveredPathHop[]>,
+  discoveredOuterPaths: ReadonlyMap<string, readonly ChainHopSlot[]>,
   resultsByCompositionId: ReadonlyMap<string, SceneEvidenceResponse>
 ): ResolveChainsResult {
   const byComposition = new Map<string, { layers: Map<number, LayerEvidence>; layerDetails: Map<number, LayerDetailFact> }>();
@@ -445,10 +482,8 @@ export function resolvePreviewTimingChains(
     const label = mapping.placeholderName ?? `Mapping ${mapping.id}`;
     const entryCompositionId = steps[0]!.compositionId;
 
-    let fullSteps: { compositionId: string; layerIndex: number }[];
-    if (entryCompositionId === outerMostCompositionId) {
-      fullSteps = [...steps];
-    } else {
+    const hopSlots: ChainHopSlot[] = [];
+    if (entryCompositionId !== outerMostCompositionId) {
       const discoveredPath = discoveredOuterPaths.get(entryCompositionId);
       if (!discoveredPath) {
         return {
@@ -456,26 +491,27 @@ export function resolvePreviewTimingChains(
           reason: `"${label}" needs to know how "${entryCompositionId}" is placed inside "${outerMostCompositionId}", but that was never discovered - refusing to guess.`
         };
       }
-      fullSteps = [...discoveredPath, ...steps];
+      hopSlots.push(...discoveredPath);
     }
 
-    const hops: ChainHop[] = [];
-    for (const step of fullSteps) {
+    for (const step of steps) {
       const entry = byComposition.get(step.compositionId);
       const layerEvidence = entry?.layers.get(step.layerIndex);
       if (!layerEvidence) {
         return { ok: false, reason: `Missing real timing evidence for layer ${step.layerIndex} in "${step.compositionId}" (required for "${label}") - refusing to guess.` };
       }
       const detail = entry?.layerDetails.get(step.layerIndex);
-      hops.push({
-        compositionId: step.compositionId,
-        window: toWindow(layerEvidence),
-        stretchPercent: detail?.stretchPercent ?? null,
-        timeRemapEnabled: detail?.timeRemapEnabled ?? null,
-        opacity: toOpacity(detail)
-      });
+      hopSlots.push([
+        {
+          compositionId: step.compositionId,
+          window: toWindow(layerEvidence),
+          stretchPercent: detail?.stretchPercent ?? null,
+          timeRemapEnabled: detail?.timeRemapEnabled ?? null,
+          opacity: toOpacity(detail)
+        }
+      ]);
     }
-    chains.push({ label, hops });
+    chains.push({ label, hopSlots });
   }
 
   if (chains.length === 0) {
@@ -600,60 +636,119 @@ export function opacityVisibleIntervals(opacity: OpacityFact | null, windowStart
 
 export type ChainVisibilityResult = { ok: true; ranges: Range[] } | { ok: false; reason: string };
 
-/**
- * Composes the real AE nested-composition time-mapping formula (this
- * module's own doc comment above) through EVERY hop of a chain, from the
- * actual leaf layer outward to the chain's own outermost hop - arbitrary
- * depth, never bounded to a fixed number of hops. Real, confirmed opacity
- * (static or animated) is intersected in at every hop, not merely
- * collected.
- */
-export function computeChainVisibleRanges(hops: readonly ChainHop[]): ChainVisibilityResult {
-  if (hops.length === 0) {
-    return { ok: false, reason: "Empty chain - no hops to calculate visibility for." };
-  }
+type CandidateRangesResult = { ok: true; ranges: Range[] } | { ok: false; reason: string };
 
-  const leaf = hops[hops.length - 1]!;
+/** The real visible sub-range(s) of one LEAF candidate's own window - identical logic/messages to the pre-2026-09-10 single-hop leaf handling. */
+function leafCandidateRanges(leaf: ChainHop): CandidateRangesResult {
   if (!leaf.window.enabled) {
     return { ok: false, reason: `Layer ${leaf.window.layerIndex} in "${leaf.compositionId}" is disabled - never visible, regardless of timestamp.` };
   }
-  let ranges = opacityVisibleIntervals(leaf.opacity, leaf.window.inPointSeconds, leaf.window.outPointSeconds);
+  const ranges = opacityVisibleIntervals(leaf.opacity, leaf.window.inPointSeconds, leaf.window.outPointSeconds);
   if (ranges.length === 0) {
     return { ok: false, reason: `Layer ${leaf.window.layerIndex} in "${leaf.compositionId}" has confirmed opacity 0 throughout its own visible window - never visible.` };
   }
+  return { ok: true, ranges };
+}
 
-  for (let i = hops.length - 2; i >= 0; i--) {
-    const wrapper = hops[i]!;
-    if (!wrapper.window.enabled) {
-      return { ok: false, reason: `Wrapper layer ${wrapper.window.layerIndex} in "${wrapper.compositionId}" is disabled - nothing nested inside it can ever be visible.` };
-    }
-    if (wrapper.timeRemapEnabled === true) {
-      return {
-        ok: false,
-        reason: `Wrapper layer ${wrapper.window.layerIndex} in "${wrapper.compositionId}" has time remapping enabled - its nested content's real timing cannot be calculated from linear stretch alone, and no real time-remap keyframe evidence is available. Refusing to guess.`
-      };
-    }
-    const stretchFactor = (wrapper.stretchPercent ?? 100) / 100;
-    if (!Number.isFinite(stretchFactor) || stretchFactor <= 0) {
-      return { ok: false, reason: `Wrapper layer ${wrapper.window.layerIndex}'s own stretch (${wrapper.stretchPercent}%) in "${wrapper.compositionId}" is not a usable positive value.` };
-    }
+/** Maps `ranges` (already resolved in the nested composition's own local timeline) through one WRAPPER candidate's own stretch/window/opacity - identical logic/messages to the pre-2026-09-10 single-hop wrapper handling. */
+function wrapperCandidateRanges(wrapper: ChainHop, ranges: Range[]): CandidateRangesResult {
+  if (!wrapper.window.enabled) {
+    return { ok: false, reason: `Wrapper layer ${wrapper.window.layerIndex} in "${wrapper.compositionId}" is disabled - nothing nested inside it can ever be visible.` };
+  }
+  if (wrapper.timeRemapEnabled === true) {
+    return {
+      ok: false,
+      reason: `Wrapper layer ${wrapper.window.layerIndex} in "${wrapper.compositionId}" has time remapping enabled - its nested content's real timing cannot be calculated from linear stretch alone, and no real time-remap keyframe evidence is available. Refusing to guess.`
+    };
+  }
+  const stretchFactor = (wrapper.stretchPercent ?? 100) / 100;
+  if (!Number.isFinite(stretchFactor) || stretchFactor <= 0) {
+    return { ok: false, reason: `Wrapper layer ${wrapper.window.layerIndex}'s own stretch (${wrapper.stretchPercent}%) in "${wrapper.compositionId}" is not a usable positive value.` };
+  }
 
-    let mapped: Range[] = ranges.map(([start, end]) => [
-      wrapper.window.startTimeSeconds + start * stretchFactor,
-      wrapper.window.startTimeSeconds + end * stretchFactor
-    ]);
-    mapped = clampRangesTo(mapped, [wrapper.window.inPointSeconds, wrapper.window.outPointSeconds]);
-    if (mapped.length === 0) {
-      return { ok: false, reason: `Never overlaps wrapper layer ${wrapper.window.layerIndex}'s own visible window in "${wrapper.compositionId}" - it would never be visible at any timestamp.` };
-    }
+  let mapped: Range[] = ranges.map(([start, end]) => [
+    wrapper.window.startTimeSeconds + start * stretchFactor,
+    wrapper.window.startTimeSeconds + end * stretchFactor
+  ]);
+  mapped = clampRangesTo(mapped, [wrapper.window.inPointSeconds, wrapper.window.outPointSeconds]);
+  if (mapped.length === 0) {
+    return { ok: false, reason: `Never overlaps wrapper layer ${wrapper.window.layerIndex}'s own visible window in "${wrapper.compositionId}" - it would never be visible at any timestamp.` };
+  }
 
-    const wrapperOpacityRanges = opacityVisibleIntervals(wrapper.opacity, wrapper.window.inPointSeconds, wrapper.window.outPointSeconds);
-    mapped = intersectRangeLists(mapped, wrapperOpacityRanges);
-    if (mapped.length === 0) {
-      return { ok: false, reason: `Wrapper layer ${wrapper.window.layerIndex}'s own opacity is confirmed 0 throughout its own visible window in "${wrapper.compositionId}" - never visible.` };
-    }
+  const wrapperOpacityRanges = opacityVisibleIntervals(wrapper.opacity, wrapper.window.inPointSeconds, wrapper.window.outPointSeconds);
+  mapped = intersectRangeLists(mapped, wrapperOpacityRanges);
+  if (mapped.length === 0) {
+    return { ok: false, reason: `Wrapper layer ${wrapper.window.layerIndex}'s own opacity is confirmed 0 throughout its own visible window in "${wrapper.compositionId}" - never visible.` };
+  }
 
-    ranges = mapped;
+  return { ok: true, ranges: mapped };
+}
+
+/**
+ * Multiple-instances union (live QA, 2026-09-10 targeted host-layer lookup
+ * extension): evaluates `computeForCandidate` against EVERY candidate hop
+ * in `slot`, and returns the UNION (merged) of every candidate that
+ * produces a valid range - only refusing when EVERY candidate at this slot
+ * fails. For the overwhelmingly common single-candidate slot, this is
+ * byte-identical to calling `computeForCandidate` directly: one success
+ * merges to itself, one failure returns that exact same failure reason
+ * (never wrapped/rephrased).
+ */
+function unionOverSlot(slot: ChainHopSlot, computeForCandidate: (candidate: ChainHop) => CandidateRangesResult): CandidateRangesResult {
+  const successRanges: Range[][] = [];
+  const failureReasons: string[] = [];
+  for (const candidate of slot) {
+    const result = computeForCandidate(candidate);
+    if (result.ok) {
+      successRanges.push(result.ranges);
+    } else {
+      failureReasons.push(result.reason);
+    }
+  }
+  if (successRanges.length === 0) {
+    return {
+      ok: false,
+      reason: slot.length === 1 ? failureReasons[0]! : `None of the ${slot.length} candidate host layers produced a valid visible range: ${failureReasons.join(" | ")}`
+    };
+  }
+  return { ok: true, ranges: mergeRanges(successRanges.flat()) };
+}
+
+/**
+ * Composes the real AE nested-composition time-mapping formula (this
+ * module's own doc comment above) through EVERY hop-slot of a chain, from
+ * the actual leaf slot outward to the chain's own outermost slot -
+ * arbitrary depth, never bounded to a fixed number of hops. Real,
+ * confirmed opacity (static or animated) is intersected in at every hop,
+ * not merely collected.
+ *
+ * Live QA, 2026-09-10 targeted host-layer lookup extension: a slot may
+ * carry MULTIPLE real candidate host layers (the same child composition
+ * placed more than once inside the same parent) - the visible range at
+ * that slot is the UNION of every candidate's own valid range, never a
+ * single arbitrarily-chosen instance (see `unionOverSlot`). For the
+ * overwhelmingly common single-candidate-per-slot case, this produces
+ * byte-identical results to the pre-2026-09-10 single-hop model.
+ */
+export function computeChainVisibleRanges(hopSlots: readonly ChainHopSlot[]): ChainVisibilityResult {
+  if (hopSlots.length === 0) {
+    return { ok: false, reason: "Empty chain - no hops to calculate visibility for." };
+  }
+
+  const leafSlot = hopSlots[hopSlots.length - 1]!;
+  const leafOutcome = unionOverSlot(leafSlot, leafCandidateRanges);
+  if (!leafOutcome.ok) {
+    return leafOutcome;
+  }
+  let ranges = leafOutcome.ranges;
+
+  for (let i = hopSlots.length - 2; i >= 0; i--) {
+    const slot = hopSlots[i]!;
+    const outcome = unionOverSlot(slot, (candidate) => wrapperCandidateRanges(candidate, ranges));
+    if (!outcome.ok) {
+      return outcome;
+    }
+    ranges = outcome.ranges;
   }
 
   return { ok: true, ranges: mergeRanges(ranges) };
@@ -693,7 +788,7 @@ export function calculatePreviewTiming(chains: readonly LabeledChain[]): Preview
 
   const rangesByLabel: Record<string, Range[]> = {};
   for (const chain of chains) {
-    const result = computeChainVisibleRanges(chain.hops);
+    const result = computeChainVisibleRanges(chain.hopSlots);
     if (!result.ok) {
       return { ok: false, reason: `"${chain.label}": ${result.reason}` };
     }

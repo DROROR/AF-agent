@@ -1,12 +1,12 @@
 import { stat } from "node:fs/promises";
 import { z } from "zod";
-import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact } from "@dyo/schemas";
-import { layerDetailFactSchema } from "@dyo/schemas";
+import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord } from "@dyo/schemas";
+import { hostLayerRecordSchema, layerDetailFactSchema } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
-import { buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
+import { buildFindHostLayersScript, buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
 
@@ -26,10 +26,9 @@ async function fetchLayerDetails(
   client: HeroicSwanMcpClient,
   aeProjectItemIndex: number,
   compositionName: string,
-  mode: "full" | "discovery" = "full",
-  targetSourceCompositionId?: string
+  mode: "full" | "discovery" = "full"
 ): Promise<{ ok: true; layerDetails: LayerDetailFact[] } | { ok: false; reason: string }> {
-  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName, mode, targetSourceCompositionId);
+  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName, mode);
   const result = await client.runFixedInspectionScript(script);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
@@ -46,6 +45,43 @@ async function fetchLayerDetails(
     return { ok: false, reason: parsed.data.failureReason };
   }
   return { ok: true, layerDetails: parsed.data.layerDetails };
+}
+
+const findHostLayersScriptResultSchema = z.union([
+  z.object({ ok: z.literal(true), matches: z.array(hostLayerRecordSchema) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/**
+ * Preview Timing Analysis targeted host-layer lookup (live QA, 2026-09-10
+ * real incident, session a7fee3d9) - best-effort, never throws, mirrors
+ * fetchLayerDetails's own shape exactly. A failure here is reported via
+ * hostLayerRecordsFailureReason and never fails the rest of the evidence
+ * result.
+ */
+async function fetchHostLayers(
+  client: HeroicSwanMcpClient,
+  aeProjectItemIndex: number,
+  compositionName: string,
+  childSourceCompositionId: string
+): Promise<{ ok: true; matches: HostLayerRecord[] } | { ok: false; reason: string }> {
+  const script = buildFindHostLayersScript(aeProjectItemIndex, compositionName, childSourceCompositionId);
+  const result = await client.runFixedInspectionScript(script);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  const parsed = findHostLayersScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success) {
+    return { ok: false, reason: `find-host-layers script response did not match the expected shape: ${parsed.error.message}` };
+  }
+  if (!parsed.data.ok) {
+    return { ok: false, reason: parsed.data.failureReason };
+  }
+  return { ok: true, matches: parsed.data.matches };
 }
 
 /**
@@ -235,13 +271,23 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           client,
           request.aeProjectItemIndex,
           parsedComp.value.name,
-          request.discoverLayerDetailsMode === "discovery" ? "discovery" : "full",
-          request.discoverLayerDetailsTargetCompositionId
+          request.discoverLayerDetailsMode === "discovery" ? "discovery" : "full"
         );
         if (layerDetailsResult.ok) {
           layerDetails = layerDetailsResult.layerDetails;
         } else {
           layerDetailsFailureReason = layerDetailsResult.reason;
+        }
+      }
+
+      let hostLayerRecords: HostLayerRecord[] | null = null;
+      let hostLayerRecordsFailureReason: string | null = null;
+      if (request.findHostLayersForChildCompositionId !== undefined) {
+        const hostLayersResult = await fetchHostLayers(client, request.aeProjectItemIndex, parsedComp.value.name, request.findHostLayersForChildCompositionId);
+        if (hostLayersResult.ok) {
+          hostLayerRecords = hostLayersResult.matches;
+        } else {
+          hostLayerRecordsFailureReason = hostLayersResult.reason;
         }
       }
 
@@ -257,6 +303,8 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           previewFailureReason,
           layerDetails,
           layerDetailsFailureReason,
+          hostLayerRecords,
+          hostLayerRecordsFailureReason,
           capturedAt: new Date().toISOString()
         }
       };
