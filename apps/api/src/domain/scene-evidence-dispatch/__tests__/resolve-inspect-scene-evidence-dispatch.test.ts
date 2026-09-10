@@ -424,41 +424,81 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingChainIndex (Preview
     expect(result.ok).toBe(false);
   });
 
-  it("real incident shape (session a7fee3d9): when the scene's own manifestCompositionId (\"comp-210\", !Render) differs from the chain's own first hop (\"comp-1\", Scene 1), chain index 0 resolves to an OUTER-DISCOVERY target for comp-210 itself - every plausible layer index requested, discoverLayerDetails true, never a caller-guessed/hardcoded index for how Scene 1 is placed inside !Render", () => {
-    const outerManifest = validManifest({
-      compositions: [
-        { compositionId: "comp-210", aeProjectItemIndex: 2, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
-        ...nestedCompositionManifest.compositions
-      ]
-    });
-    const planWithRenderScene = validPlan({
-      scenePlans: [
-        scenePlan({ manifestCompositionId: "comp-210", compositionName: "!Render", mappings: planWithNestedMappings.scenePlans[0]!.mappings })
-      ]
-    });
+});
 
+describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverCompositionId (Preview Timing Analysis composition-graph discovery, live QA 2026-09-10)", () => {
+  const outerManifest = validManifest({
+    compositions: [
+      { compositionId: "comp-210", aeProjectItemIndex: 2, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-1", aeProjectItemIndex: 5, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-210"] }
+    ]
+  });
+
+  it("real incident shape (session a7fee3d9): resolves the requested composition (\"!Render\") with EVERY plausible layer index (never caller-supplied), discoverLayerDetails true, discoverLayerDetailsMode \"discovery\" (the lightweight scan that avoids the real MCP timeout against a large master composition) - never a caller-guessed/hardcoded layer index for how Scene 1 is placed inside !Render", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
-      currentPlan: planWithRenderScene,
+      currentPlan: validPlan(),
       currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-210");
+    expect(result.payload.aeProjectItemIndex).toBe(2);
+    expect(result.payload.compositionName).toBe("!Render");
+    expect(result.payload.layerIndices).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    expect(result.payload.discoverLayerDetails).toBe(true);
+    expect(result.payload.discoverLayerDetailsMode).toBe("discovery");
+    expect(result.payload.previewTimestampSeconds).toBeNull();
+  });
+
+  it("resolves any OTHER real composition in the current manifest too - never hardcoded to the render composition specifically (supports an arbitrary-depth graph search)", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-1"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-1");
+    expect(result.payload.aeProjectItemIndex).toBe(5);
+  });
+
+  it("refuses a compositionId that does not match any composition in the current manifest - the safety boundary that makes accepting a caller-supplied compositionId here safe at all", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-does-not-exist"
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("comp-does-not-exist");
+    expect(result.reason).toContain("does not match any composition");
+  });
+
+  it("takes priority over previewTimingChainIndex when both are somehow present - never ambiguous about which branch resolves", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210",
       previewTimingChainIndex: 0
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.manifestCompositionId).toBe("comp-210");
-    expect(result.payload.layerIndices).toHaveLength(20);
-    expect(result.payload.discoverLayerDetails).toBe(true);
+    expect(result.payload.discoverLayerDetailsMode).toBe("discovery");
+  });
 
-    // Chain index 1 now resolves to comp-1 (Scene 1) itself, shifted out by the prepended outer-discovery target.
-    const shifted = resolveInspectSceneEvidenceDispatch({
+  it("still requires the manifest sha256 to match the plan's - the same staleness guard as every other branch", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
-      currentPlan: planWithRenderScene,
+      currentPlan: validPlan({ sourceProjectSha256: "b".repeat(64) }),
       currentProjectManifest: outerManifest,
-      previewTimingChainIndex: 1
+      previewTimingDiscoverCompositionId: "comp-210"
     });
-    expect(shifted.ok).toBe(true);
-    if (!shifted.ok) return;
-    expect(shifted.payload.manifestCompositionId).toBe("comp-1");
-    expect(shifted.payload.layerIndices).toEqual([3]);
+    expect(result.ok).toBe(false);
   });
 });

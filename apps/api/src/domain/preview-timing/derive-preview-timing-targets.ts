@@ -1,11 +1,9 @@
-import { MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, MAX_PREVIEW_TIMING_CHAIN_TARGETS, type ScenePlanEntry } from "@dyo/schemas";
+import { MAX_PREVIEW_TIMING_CHAIN_TARGETS, type ScenePlanEntry } from "@dyo/schemas";
 
 /** One distinct nested composition worth of layer-timing evidence to gather, and the specific layer indices within it that this scene's own real mappings actually address. */
 export interface PreviewTimingTarget {
   compositionId: string;
   layerIndices: number[];
-  /** True only for the single, optional "outer discovery" target (see this module's own doc comment) - requests EVERY plausible layer index rather than a set known in advance, since discovering which one hosts each mapping's own outermost composition IS the point of this target. */
-  isOuterDiscovery?: true;
 }
 
 /**
@@ -27,25 +25,15 @@ export interface PreviewTimingTarget {
  * MAX_PREVIEW_TIMING_CHAIN_TARGETS (a generous safety bound - see its own
  * doc comment - never a real scope limit for any real template).
  *
- * A real chain's own FIRST hop (e.g. comp-1, "Scene 1") is a layer
- * INSIDE `outerMostCompositionId` (e.g. comp-210, "!Render" - the scene's
- * own manifestCompositionId, always the true master/render timeline this
- * feature ultimately reports ranges against) - but a human mapping's
- * `humanNestedTarget` never itself records THAT outermost hop (it only
- * ever nests within whichever composition the mapping tool addressed
- * directly). When `outerMostCompositionId` differs from a chain's own
- * first hop, this returns ONE extra, PREPENDED "outer discovery" target
- * for `outerMostCompositionId` itself - requesting every layer index up
- * to MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, since the real layer count of
- * a large master composition is not known ahead of time and the Worker's
- * own per-index `ae_get_layer` calls are already best-effort (an
- * out-of-range index is silently skipped, never a request failure - see
- * heroic-swan-scene-evidence-inspector.ts's own doc comment). The
- * resulting `layerDetails[]` (a FULL composition scan regardless of which
- * indices were requested - see buildInspectCompositionLayerDetailsScript)
- * lets a caller discover, from real evidence, which of those indices'
- * `sourceCompositionId` matches each chain's own first hop - never
- * guessed or assumed to be an identity/no-op placement.
+ * Does NOT resolve how a chain's own first hop (e.g. "Scene 1") is
+ * itself placed inside the scene's real master/render composition (e.g.
+ * "!Render") - a mapping's own `humanNestedTarget` never records that
+ * (see 2026-09-10's own real incident: it is not always a single direct
+ * hop, and finding the real path requires an ADAPTIVE graph search this
+ * function cannot precompute). That discovery is a SEPARATE, dynamic
+ * mechanism (previewTimingDiscoverCompositionId - see job-dispatch.ts's
+ * own doc comment), driven by the caller across multiple round trips,
+ * each one informed by the previous step's own real evidence.
  *
  * Same-composition mappings (`humanNestedTarget: null`, addressed via
  * `humanLayerIndex`/`manifestPlaceholderId` directly in the scene's own
@@ -53,17 +41,13 @@ export interface PreviewTimingTarget {
  * already what the EXISTING (non-preview-timing) INSPECT_SCENE_EVIDENCE
  * dispatch inspects.
  */
-export function derivePreviewTimingTargets(scene: ScenePlanEntry, outerMostCompositionId: string): PreviewTimingTarget[] {
+export function derivePreviewTimingTargets(scene: ScenePlanEntry): PreviewTimingTarget[] {
   const layerIndicesByCompositionId = new Map<string, Set<number>>();
   const orderedCompositionIds: string[] = [];
-  let needsOuterDiscovery = false;
 
   for (const mapping of scene.mappings) {
-    if (mapping.humanNestedTarget === null || mapping.humanNestedTarget.length === 0) {
+    if (mapping.humanNestedTarget === null) {
       continue;
-    }
-    if (mapping.humanNestedTarget[0]!.compositionId !== outerMostCompositionId) {
-      needsOuterDiscovery = true;
     }
     for (const step of mapping.humanNestedTarget) {
       let layerIndices = layerIndicesByCompositionId.get(step.compositionId);
@@ -76,21 +60,8 @@ export function derivePreviewTimingTargets(scene: ScenePlanEntry, outerMostCompo
     }
   }
 
-  const chainTargets = orderedCompositionIds.map((compositionId) => ({
+  return orderedCompositionIds.slice(0, MAX_PREVIEW_TIMING_CHAIN_TARGETS).map((compositionId) => ({
     compositionId,
     layerIndices: [...(layerIndicesByCompositionId.get(compositionId) ?? [])].sort((a, b) => a - b)
   }));
-
-  const targets: PreviewTimingTarget[] = needsOuterDiscovery
-    ? [
-        {
-          compositionId: outerMostCompositionId,
-          layerIndices: Array.from({ length: MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST }, (_, i) => i + 1),
-          isOuterDiscovery: true
-        },
-        ...chainTargets
-      ]
-    : chainTargets;
-
-  return targets.slice(0, MAX_PREVIEW_TIMING_CHAIN_TARGETS);
 }

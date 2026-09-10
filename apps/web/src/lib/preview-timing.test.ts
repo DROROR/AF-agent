@@ -4,12 +4,17 @@ import {
   calculatePreviewTiming,
   computeChainVisibleRanges,
   derivePreviewTimingChainTargets,
+  discoverPathToComposition,
+  distinctChainEntryCompositionIds,
+  listNestedCompositionChildren,
   opacityVisibleIntervals,
   resolvePreviewTimingChains,
   type ChainHop,
+  type DiscoveredPathHop,
   type LabeledChain,
   type LayerWindow,
-  type OpacityFact
+  type OpacityFact,
+  type SceneEvidenceFetcher
 } from "./preview-timing";
 
 function window(overrides: Partial<LayerWindow> = {}): LayerWindow {
@@ -101,33 +106,29 @@ function sceneEvidence(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
 }
 
 describe("derivePreviewTimingChainTargets", () => {
-  it("derives the FULL real-incident chain (2026-09-10 extension) - all four logo hops and both Hebrew hops, plus one prepended outer-discovery target for !Render since the chain's own first hop (comp-1) differs from the outermost composition (comp-210)", () => {
-    const result = derivePreviewTimingChainTargets(
-      [
-        mapping({
-          id: "logo",
-          placeholderName: "App Logo",
-          humanNestedTarget: [
-            { compositionId: "comp-1", layerIndex: 3 },
-            { compositionId: "comp-1635", layerIndex: 1 },
-            { compositionId: "comp-1044", layerIndex: 1 },
-            { compositionId: "comp-1113", layerIndex: 1 }
-          ]
-        }),
-        mapping({
-          id: "hebrew",
-          placeholderName: "Hebrew Branding",
-          humanNestedTarget: [
-            { compositionId: "comp-1", layerIndex: 3 },
-            { compositionId: "comp-1635", layerIndex: 4 }
-          ]
-        })
-      ],
-      "comp-210"
-    );
+  it("derives the FULL real-incident chain (2026-09-10 extension) - all four logo hops and both Hebrew hops, no outer-discovery prepend (that is now a separate adaptive mechanism)", () => {
+    const result = derivePreviewTimingChainTargets([
+      mapping({
+        id: "logo",
+        placeholderName: "App Logo",
+        humanNestedTarget: [
+          { compositionId: "comp-1", layerIndex: 3 },
+          { compositionId: "comp-1635", layerIndex: 1 },
+          { compositionId: "comp-1044", layerIndex: 1 },
+          { compositionId: "comp-1113", layerIndex: 1 }
+        ]
+      }),
+      mapping({
+        id: "hebrew",
+        placeholderName: "Hebrew Branding",
+        humanNestedTarget: [
+          { compositionId: "comp-1", layerIndex: 3 },
+          { compositionId: "comp-1635", layerIndex: 4 }
+        ]
+      })
+    ]);
 
     expect(result).toEqual([
-      { compositionId: "comp-210", layerIndices: Array.from({ length: 20 }, (_, i) => i + 1), isOuterDiscovery: true },
       { compositionId: "comp-1", layerIndices: [3] },
       { compositionId: "comp-1635", layerIndices: [1, 4] },
       { compositionId: "comp-1044", layerIndices: [1] },
@@ -135,38 +136,197 @@ describe("derivePreviewTimingChainTargets", () => {
     ]);
   });
 
-  it("never prepends an outer-discovery target when the outermost composition already equals the chain's own first hop", () => {
-    const result = derivePreviewTimingChainTargets([mapping({ humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })], "comp-1");
-    expect(result).toEqual([{ compositionId: "comp-1", layerIndices: [3] }]);
+  it("returns an empty array when no mapping has a nested target", () => {
+    expect(derivePreviewTimingChainTargets([mapping({ humanNestedTarget: null })])).toEqual([]);
+  });
+});
+
+describe("distinctChainEntryCompositionIds", () => {
+  it("returns the distinct first-hop compositionIds that differ from the outermost composition - real incident shape (comp-1 differs from comp-210)", () => {
+    const result = distinctChainEntryCompositionIds(
+      [
+        mapping({ id: "logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }, { compositionId: "comp-1635", layerIndex: 1 }] }),
+        mapping({ id: "hebrew", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }, { compositionId: "comp-1635", layerIndex: 4 }] })
+      ],
+      "comp-210"
+    );
+    expect(result).toEqual(["comp-1"]);
+  });
+
+  it("excludes a first hop that already equals the outermost composition - nothing to discover there", () => {
+    const result = distinctChainEntryCompositionIds([mapping({ humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })], "comp-1");
+    expect(result).toEqual([]);
   });
 
   it("returns an empty array when no mapping has a nested target", () => {
-    expect(derivePreviewTimingChainTargets([mapping({ humanNestedTarget: null })], "comp-210")).toEqual([]);
+    expect(distinctChainEntryCompositionIds([mapping({ humanNestedTarget: null })], "comp-210")).toEqual([]);
+  });
+});
+
+describe("listNestedCompositionChildren", () => {
+  it("returns only PRECOMP layers (real non-null sourceCompositionId), sorted ascending by layerIndex", () => {
+    const result = listNestedCompositionChildren([
+      layerDetail({ layerIndex: 5, sourceCompositionId: "comp-B" }),
+      layerDetail({ layerIndex: 1, sourceCompositionId: null }),
+      layerDetail({ layerIndex: 2, sourceCompositionId: "comp-A" })
+    ]);
+    expect(result).toEqual([
+      { layerIndex: 2, compositionId: "comp-A" },
+      { layerIndex: 5, compositionId: "comp-B" }
+    ]);
+  });
+
+  it("returns an empty array when no layer hosts a nested composition", () => {
+    expect(listNestedCompositionChildren([layerDetail({ layerIndex: 1, sourceCompositionId: null })])).toEqual([]);
+  });
+});
+
+/** A fake in-memory composition graph - `graph[compositionId]` lists that composition's own real nested-composition children (layerIndex + compositionId), mirroring what a real "discovery"-mode layerDetails scan would report. `calls` records the real visitation order (compositionIds, in the order fetched) so a test can assert BFS traversal order, not merely the final result. */
+function fakeGraphFetcher(graph: Record<string, { layerIndex: number; sourceCompositionId: string }[]>, calls: string[] = []): SceneEvidenceFetcher {
+  return async (compositionId) => {
+    calls.push(compositionId);
+    const children = graph[compositionId] ?? [];
+    return {
+      ok: true,
+      response: sceneEvidence({
+        manifestCompositionId: compositionId,
+        layerDetails: children.map((c) => layerDetail({ layerIndex: c.layerIndex, sourceCompositionId: c.sourceCompositionId }))
+      })
+    };
+  };
+}
+
+describe("discoverPathToComposition", () => {
+  it("real 2026-09-10 incident (session a7fee3d9): the root render composition does NOT directly expose the target as a child, but a real deeper wrapper composition does - finds the genuine two-hop path via BFS, never assumes a direct hop", async () => {
+    const calls: string[] = [];
+    // comp-210 (!Render) has NO direct child named comp-1 - only a real
+    // wrapper "comp-999" (e.g. a genuine intermediate grouping
+    // composition) which itself hosts comp-1 (Scene 1) at its own layer 4.
+    const fetcher = fakeGraphFetcher(
+      {
+        "comp-210": [
+          { layerIndex: 1, sourceCompositionId: "comp-777" },
+          { layerIndex: 2, sourceCompositionId: "comp-999" }
+        ],
+        "comp-999": [{ layerIndex: 4, sourceCompositionId: "comp-1" }]
+      },
+      calls
+    );
+
+    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.path).toEqual([
+      { compositionId: "comp-210", layerIndex: 2 },
+      { compositionId: "comp-999", layerIndex: 4 }
+    ]);
+    // comp-777 (a sibling with no path to the target) is visited too -
+    // real breadth-first search visits every same-depth sibling before
+    // going deeper, never a shortcut that only follows the "right" branch
+    // in hindsight - but comp-1 itself is never separately fetched, since
+    // it's identified as soon as it appears as comp-999's own child.
+    expect(calls).toEqual(["comp-210", "comp-777", "comp-999"]);
+    expect([...result.visitedResults.keys()]).toEqual(["comp-210", "comp-777", "comp-999"]);
+  });
+
+  it("resolves a direct single-hop path exactly as before when the root DOES directly expose the target", async () => {
+    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 3, sourceCompositionId: "comp-1" }] });
+    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+    expect(result).toEqual({ ok: true, path: [{ compositionId: "comp-210", layerIndex: 3 }], visitedResults: expect.any(Map) });
+  });
+
+  it("returns an empty path with zero fetches when the root already IS the target - nothing to discover", async () => {
+    const calls: string[] = [];
+    const fetcher = fakeGraphFetcher({}, calls);
+    const result = await discoverPathToComposition("comp-1", "comp-1", fetcher, 20);
+    expect(result).toEqual({ ok: true, path: [], visitedResults: new Map() });
+    expect(calls).toEqual([]);
+  });
+
+  it("finds the SHORTEST real path breadth-first when multiple real paths of different depth exist", async () => {
+    const calls: string[] = [];
+    const fetcher = fakeGraphFetcher(
+      {
+        // comp-210 has a direct 1-hop path to comp-1 via comp-A, AND a
+        // longer 2-hop path via comp-B -> comp-C -> comp-1 - BFS must
+        // find the direct one first and never even need to explore comp-C.
+        "comp-210": [
+          { layerIndex: 1, sourceCompositionId: "comp-A" },
+          { layerIndex: 2, sourceCompositionId: "comp-B" }
+        ],
+        "comp-A": [{ layerIndex: 1, sourceCompositionId: "comp-1" }],
+        "comp-B": [{ layerIndex: 1, sourceCompositionId: "comp-C" }],
+        "comp-C": [{ layerIndex: 1, sourceCompositionId: "comp-1" }]
+      },
+      calls
+    );
+    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+    expect(result).toEqual({
+      ok: true,
+      path: [
+        { compositionId: "comp-210", layerIndex: 1 },
+        { compositionId: "comp-A", layerIndex: 1 }
+      ],
+      visitedResults: expect.any(Map)
+    });
+    expect(calls).not.toContain("comp-C");
+  });
+
+  it("fails clearly (never guesses) when the target is never found anywhere in the real reachable graph", async () => {
+    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 1, sourceCompositionId: "comp-A" }], "comp-A": [] });
+    const result = await discoverPathToComposition("comp-210", "comp-does-not-exist", fetcher, 20);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("never found");
+  });
+
+  it("fails clearly when the search exceeds maxSteps, rather than searching forever", async () => {
+    // A long chain, each composition pointing only to the next - never reaches the target within a small maxSteps bound.
+    const graph: Record<string, { layerIndex: number; sourceCompositionId: string }[]> = {};
+    for (let i = 0; i < 10; i++) {
+      graph[`comp-${i}`] = [{ layerIndex: 1, sourceCompositionId: `comp-${i + 1}` }];
+    }
+    const fetcher = fakeGraphFetcher(graph);
+    const result = await discoverPathToComposition("comp-0", "comp-9", fetcher, 3);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("within 3 composition");
+  });
+
+  it("propagates a real fetch failure (e.g. a Worker/job error) as its own message, never silently treating it as \"not found\"", async () => {
+    const fetcher: SceneEvidenceFetcher = async () => ({ ok: false, message: "simulated Worker offline" });
+    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+    expect(result).toEqual({ ok: false, reason: "simulated Worker offline" });
+  });
+
+  it("never revisits the same composition twice, even when reachable via multiple sibling edges", async () => {
+    const calls: string[] = [];
+    const fetcher = fakeGraphFetcher(
+      {
+        "comp-210": [
+          { layerIndex: 1, sourceCompositionId: "comp-shared" },
+          { layerIndex: 2, sourceCompositionId: "comp-shared" }
+        ],
+        "comp-shared": [{ layerIndex: 1, sourceCompositionId: "comp-1" }]
+      },
+      calls
+    );
+    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+    expect(result.ok).toBe(true);
+    expect(calls.filter((c) => c === "comp-shared")).toHaveLength(1);
   });
 });
 
 describe("resolvePreviewTimingChains", () => {
-  it("resolves the outer-discovery hop by matching sourceCompositionId in the discovery target's own layerDetails - never a hardcoded/guessed layer index", () => {
+  it("resolves a discovered outer path (real graph-search result) prepended to the human-authored chain - never a hardcoded/guessed layer index", () => {
     const mappings = [mapping({ id: "logo", placeholderName: "Logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })];
-    const targets = derivePreviewTimingChainTargets(mappings, "comp-210");
-    const discoveryResult = sceneEvidence({
-      manifestCompositionId: "comp-210",
-      layers: [],
-      layerDetails: [
-        layerDetail({ layerIndex: 1, layerName: "Intro", layerType: "PRECOMP", sourceCompositionId: "comp-99" }),
-        layerDetail({ layerIndex: 7, layerName: "Scene 1", layerType: "PRECOMP", sourceCompositionId: "comp-1" })
-      ]
-    });
-    // The follow-up target for comp-1 itself is target index 1.
-    const comp1Result = sceneEvidence({
-      manifestCompositionId: "comp-1",
-      layers: [layerEvidence({ layerIndex: 3, inPointSeconds: 1, outPointSeconds: 4 })],
-      layerDetails: [layerDetail({ layerIndex: 3 })]
-    });
-    // The discovery target itself also needs real evidence for the DISCOVERED index (7) - a caller dispatches layerIndices 1..20 for it, so it comes back in the SAME discovery result's own layers[].
-    const discoveryWithLayerEvidence = { ...discoveryResult, layers: [layerEvidence({ layerIndex: 7, inPointSeconds: 0, outPointSeconds: 45, startTimeSeconds: 0 })] };
+    const discoveredOuterPaths = new Map<string, DiscoveredPathHop[]>([["comp-1", [{ compositionId: "comp-210", layerIndex: 7 }]]]);
+    const resultsByCompositionId = new Map<string, SceneEvidenceResponse>([
+      ["comp-210", sceneEvidence({ manifestCompositionId: "comp-210", layers: [layerEvidence({ layerIndex: 7, inPointSeconds: 0, outPointSeconds: 45, startTimeSeconds: 0 })] })],
+      ["comp-1", sceneEvidence({ manifestCompositionId: "comp-1", layers: [layerEvidence({ layerIndex: 3, inPointSeconds: 1, outPointSeconds: 4 })], layerDetails: [layerDetail({ layerIndex: 3 })] })]
+    ]);
 
-    const result = resolvePreviewTimingChains(mappings, "comp-210", targets, [discoveryWithLayerEvidence, comp1Result]);
+    const result = resolvePreviewTimingChains(mappings, "comp-210", discoveredOuterPaths, resultsByCompositionId);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.chains).toHaveLength(1);
@@ -176,25 +336,32 @@ describe("resolvePreviewTimingChains", () => {
     ]);
   });
 
-  it("fails clearly (never guesses) when the outer-discovery scan never finds a layer hosting the chain's own first composition", () => {
+  it("fails clearly (never guesses) when a chain's own first hop needed discovery but none was ever recorded for it", () => {
     const mappings = [mapping({ id: "logo", placeholderName: "Logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })];
-    const targets = derivePreviewTimingChainTargets(mappings, "comp-210");
-    const discoveryResult = sceneEvidence({ manifestCompositionId: "comp-210", layerDetails: [layerDetail({ layerIndex: 1, sourceCompositionId: "comp-99" })] });
-    const comp1Result = sceneEvidence({ manifestCompositionId: "comp-1", layers: [layerEvidence({ layerIndex: 3 })] });
-
-    const result = resolvePreviewTimingChains(mappings, "comp-210", targets, [discoveryResult, comp1Result]);
+    const result = resolvePreviewTimingChains(mappings, "comp-210", new Map(), new Map());
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("never appeared");
+    expect(result.reason).toContain("never discovered");
   });
 
-  it("fails clearly when real timing evidence for a required hop is missing from its target's own response", () => {
+  it("fails clearly when real timing evidence for a required hop is missing from its own composition's collected result", () => {
     const mappings = [mapping({ id: "logo", placeholderName: "Logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })];
-    const targets = derivePreviewTimingChainTargets(mappings, "comp-1");
-    const result = resolvePreviewTimingChains(mappings, "comp-1", targets, [sceneEvidence({ manifestCompositionId: "comp-1", layers: [] })]);
+    const resultsByCompositionId = new Map<string, SceneEvidenceResponse>([["comp-1", sceneEvidence({ manifestCompositionId: "comp-1", layers: [] })]]);
+    const result = resolvePreviewTimingChains(mappings, "comp-1", new Map(), resultsByCompositionId);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("Missing real timing evidence");
+  });
+
+  it("needs no discovered path at all when the chain's own first hop already equals the outermost composition", () => {
+    const mappings = [mapping({ id: "logo", placeholderName: "Logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] })];
+    const resultsByCompositionId = new Map<string, SceneEvidenceResponse>([
+      ["comp-1", sceneEvidence({ manifestCompositionId: "comp-1", layers: [layerEvidence({ layerIndex: 3 })] })]
+    ]);
+    const result = resolvePreviewTimingChains(mappings, "comp-1", new Map(), resultsByCompositionId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.chains[0]!.hops).toHaveLength(1);
   });
 });
 

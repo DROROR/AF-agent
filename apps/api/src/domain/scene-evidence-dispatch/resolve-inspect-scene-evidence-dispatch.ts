@@ -16,6 +16,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   discoverLayerDetails?: boolean;
   /** Preview Timing Analysis (live QA, 2026-09-09) - see the previewTimingChainIndex branch below and derivePreviewTimingTargets's own doc comment. */
   previewTimingChainIndex?: number;
+  /** Preview Timing Analysis composition-graph discovery (live QA, 2026-09-10) - see the previewTimingDiscoverCompositionId branch below and job-dispatch.ts's own doc comment on why this is the one deliberate exception to server-only addressing resolution. */
+  previewTimingDiscoverCompositionId?: string;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -62,7 +64,7 @@ export type ResolveInspectSceneEvidenceDispatchResult =
  * not after.
  */
 export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEvidenceDispatchInput): ResolveInspectSceneEvidenceDispatchResult {
-  const { scenePlanId, currentPlan, currentProjectManifest, discoverLayerDetails, previewTimingChainIndex } = input;
+  const { scenePlanId, currentPlan, currentProjectManifest, discoverLayerDetails, previewTimingChainIndex, previewTimingDiscoverCompositionId } = input;
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project yet" };
@@ -82,17 +84,58 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     return { ok: false, reason: `Unknown scenePlanId "${scenePlanId}" in this plan` };
   }
 
+  // Preview Timing Analysis composition-GRAPH discovery (live QA,
+  // 2026-09-10 real incident) - checked BEFORE previewTimingChainIndex
+  // below. The ONE caller-supplied compositionId this codebase ever
+  // accepts for addressing purposes - see job-dispatch.ts's own doc
+  // comment for the full safety reasoning (read-only, validated against
+  // THIS project's own current manifest, always lightweight "discovery"
+  // mode, never caller-supplied layerIndices).
+  if (previewTimingDiscoverCompositionId !== undefined) {
+    const targetComposition = currentProjectManifest.compositions.find((c) => c.compositionId === previewTimingDiscoverCompositionId);
+    if (!targetComposition) {
+      return {
+        ok: false,
+        reason: `Preview-timing discovery target compositionId "${previewTimingDiscoverCompositionId}" does not match any composition in the current manifest - refusing to inspect an unknown composition`
+      };
+    }
+    return {
+      ok: true,
+      payload: {
+        sourceProjectPath: currentProjectManifest.sourceProject.path,
+        sourceProjectSha256: currentPlan.sourceProjectSha256,
+        manifestCompositionId: previewTimingDiscoverCompositionId,
+        aeProjectItemIndex: targetComposition.aeProjectItemIndex,
+        compositionName: targetComposition.name,
+        // Server-computed, never caller-supplied - every plausible index,
+        // since the real layer hosting a searched-for nested composition
+        // is not known until this very scan returns (see
+        // heroic-swan-scene-evidence-inspector.ts's own best-effort,
+        // skip-on-failure per-index semantics for why requesting indices
+        // beyond the composition's real numLayers is always safe).
+        layerIndices: Array.from({ length: MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST }, (_, i) => i + 1),
+        previewTimestampSeconds: null,
+        discoverLayerDetails: true,
+        // The whole point of this branch - keeps a graph search over a
+        // large master composition (the real 2026-09-10 incident: !Render
+        // itself, ~40+ layers) from ever timing out, at the cost of not
+        // getting stretch/timeRemapEnabled/opacity for compositions
+        // visited only for discovery (see jsx-templates.ts's own doc
+        // comment on why this is a safe, documented default for a master
+        // timeline's own scene-sequencing layers).
+        discoverLayerDetailsMode: "discovery"
+      }
+    };
+  }
+
   // Preview Timing Analysis (live QA, 2026-09-09, extended to arbitrary
   // nested depth 2026-09-10) - a completely different target composition
   // than the scene's own manifestCompositionId dispatch below, derived
   // ONLY from this scene's own real, approved mappings' COMPLETE
   // humanNestedTarget chains (never a caller-supplied compositionId/
-  // layerIndices) - see derivePreviewTimingTargets's own doc comment for
-  // the full walk, including its own optional prepended "outer discovery"
-  // target for the scene's own manifestCompositionId (e.g. "!Render")
-  // itself, when a chain's own first hop lives inside it but isn't it.
+  // layerIndices) - see derivePreviewTimingTargets's own doc comment.
   if (previewTimingChainIndex !== undefined) {
-    const targets = derivePreviewTimingTargets(scene, scene.manifestCompositionId);
+    const targets = derivePreviewTimingTargets(scene);
     const target = targets[previewTimingChainIndex];
     if (!target) {
       return {

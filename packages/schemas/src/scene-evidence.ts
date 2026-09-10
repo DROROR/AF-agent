@@ -79,7 +79,22 @@ export const sceneEvidenceRequestSchema = z
      * this same flag works against any composition in any supported
      * template's manifest.
      */
-    discoverLayerDetails: z.boolean().optional()
+    discoverLayerDetails: z.boolean().optional(),
+    /**
+     * Preview Timing Analysis (live QA, 2026-09-10 real incident, session
+     * a7fee3d9): only meaningful alongside `discoverLayerDetails: true`.
+     * "discovery" skips the stretch/timeRemapEnabled/opacity/sourceText
+     * reads entirely (null for all four, on every layer) - a real
+     * incident found the default "full" scan timing out over MCP against
+     * a large top-level render composition (~40+ layers), since those
+     * four extra per-layer AE engine round-trips are only ever needed for
+     * a mapping's own known-small nested precomps, never for a pure
+     * composition-GRAPH-discovery walk (which only needs
+     * layerType/sourceCompositionId). Omitted (or "full") preserves the
+     * exact prior discoverLayerDetails behavior for every existing
+     * caller.
+     */
+    discoverLayerDetailsMode: z.enum(["full", "discovery"]).optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;

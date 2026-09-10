@@ -476,6 +476,70 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect([...hebrewPrefix].map((c) => c.codePointAt(0))).toEqual([0x05de, 0x05d1, 0x05d9, 0x05ea]);
   });
 
+  it("real 2026-09-10 incident (session a7fee3d9): \"discovery\" mode still classifies layerType/sourceCompositionId correctly, but skips the stretch/timeRemapEnabled/opacity/sourceText reads entirely - null for all four, on every layer, real or fake", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME, "discovery");
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result).toEqual({
+      ok: true,
+      layerDetails: [
+        { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 3, layerName: "Footage Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 4, layerName: "Shape Layer", layerType: "OTHER", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 6, layerName: "Static Zero Opacity Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+        { layerIndex: 7, layerName: "Fading Layer", layerType: "AV", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null }
+      ]
+    });
+  });
+
+  it("\"discovery\" mode NEVER even ATTEMPTS to read .stretch/.timeRemapEnabled/.opacity/.sourceText.value - proven by a call counter on each getter, which \"full\" mode DOES increment", () => {
+    const countingSetup = `
+      function CompItem() {}
+      function AVLayer() {}
+      function TextLayer() {}
+      TextLayer.prototype = new AVLayer();
+      var __reads = { stretch: 0, timeRemapEnabled: 0, opacity: 0, sourceText: 0 };
+      var __fakeComp = new CompItem();
+      __fakeComp.name = ${JSON.stringify(COMP_NAME)};
+      __fakeComp.numLayers = 1;
+      var __countingLayer = new TextLayer();
+      __countingLayer.index = 1;
+      __countingLayer.name = "Counts Reads";
+      Object.defineProperty(__countingLayer, "stretch", { get: function () { __reads.stretch++; return 100; } });
+      Object.defineProperty(__countingLayer, "timeRemapEnabled", { get: function () { __reads.timeRemapEnabled++; return false; } });
+      Object.defineProperty(__countingLayer, "opacity", { get: function () { __reads.opacity++; return { numKeys: 0, value: 100 }; } });
+      Object.defineProperty(__countingLayer, "sourceText", { get: function () { __reads.sourceText++; return { value: { text: "x" } }; } });
+      __fakeComp.layer = function (i) { return i === 1 ? __countingLayer : undefined; };
+      var app = {
+        beginUndoGroup: function () {},
+        endUndoGroup: function () {},
+        project: { item: function (i) { return i === 1 ? __fakeComp : null; } }
+      };
+    `;
+    function runAndReturnContext(script: string): { __reads: Record<string, number> } {
+      const context = vm.createContext({});
+      vm.runInContext("JSON = undefined;", context);
+      vm.runInContext(countingSetup, context);
+      vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context);
+      return context as unknown as { __reads: Record<string, number> };
+    }
+
+    const discoveryScript = buildInspectCompositionLayerDetailsScript(1, COMP_NAME, "discovery");
+    expect(runAndReturnContext(discoveryScript).__reads).toEqual({ stretch: 0, timeRemapEnabled: 0, opacity: 0, sourceText: 0 });
+
+    const fullScript = buildInspectCompositionLayerDetailsScript(1, COMP_NAME);
+    expect(runAndReturnContext(fullScript).__reads).toEqual({ stretch: 1, timeRemapEnabled: 1, opacity: 1, sourceText: 1 });
+  });
+
+  it("\"discovery\" mode is deterministic and byte-differs from the default \"full\" mode script for the same composition", () => {
+    const discovery1 = buildInspectCompositionLayerDetailsScript(3, COMP_NAME, "discovery");
+    const discovery2 = buildInspectCompositionLayerDetailsScript(3, COMP_NAME, "discovery");
+    const full = buildInspectCompositionLayerDetailsScript(3, COMP_NAME);
+    expect(discovery1).toBe(discovery2);
+    expect(discovery1).not.toBe(full);
+  });
+
   it("fails closed with a typed failureReason when the project item index does not resolve to the expected composition name", () => {
     const script = buildInspectCompositionLayerDetailsScript(1, "Wrong Expected Name");
     const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);

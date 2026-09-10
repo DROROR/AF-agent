@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -50,6 +50,8 @@ async function writeFakeServer(
     previewFilePath?: string;
     /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
     runJsxResult?: "success" | "error";
+    /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
+    captureReceivedJsxCodeToFile?: string;
   } = {}
 ): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
@@ -60,6 +62,7 @@ async function writeFakeServer(
 (async () => {
   const { McpServer } = await import(${JSON.stringify(join(sdkEsmRoot, "server", "mcp.js"))});
   const { StdioServerTransport } = await import(${JSON.stringify(join(sdkEsmRoot, "server", "stdio.js"))});
+  const { z } = await import(${JSON.stringify(join(process.cwd(), "node_modules", "zod", "index.js"))});
 
   const server = new McpServer({ name: "fake-ae-mcp-scene-evidence", version: "0.0.0" });
   let calls = [];
@@ -93,8 +96,16 @@ async function writeFakeServer(
     }
   });
 
-  server.registerTool("ae_run_jsx", { description: "d" }, async () => {
+  server.registerTool(
+    "ae_run_jsx",
+    { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } },
+    async (args) => {
     calls.push("ae_run_jsx");
+    ${
+      options.captureReceivedJsxCodeToFile
+        ? `require("node:fs").writeFileSync(${JSON.stringify(options.captureReceivedJsxCodeToFile)}, String(args && args.code));`
+        : ""
+    }
     ${
       options.runJsxResult === "success"
         ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, layerDetails: [
@@ -173,6 +184,30 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     // Exact codepoint check - never trust visual/terminal RTL rendering.
     const hebrewPrefix = result.response.layerDetails?.[0]?.sourceText?.split(" ")[0];
     expect([...(hebrewPrefix ?? "")].map((c) => c.codePointAt(0))).toEqual([0x05de, 0x05d1, 0x05d9, 0x05ea]);
+  });
+
+  it("real 2026-09-10 incident: threads request.discoverLayerDetailsMode through to the REAL ae_run_jsx code sent - \"discovery\" produces the lightweight script (no stretch/timeRemapEnabled/opacity/sourceText reads), proven from the separate spawned process's own real received input, not merely the result shape", async () => {
+    const capturePath = join(dir, "received-jsx-code.txt");
+    await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    await inspector.inspect(baseRequest({ discoverLayerDetails: true, discoverLayerDetailsMode: "discovery" }));
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).not.toMatch(/__layer\.stretch/);
+    expect(receivedCode).not.toMatch(/__layer\.timeRemapEnabled/);
+    expect(receivedCode).not.toMatch(/__layer\.opacity/);
+    expect(receivedCode).toMatch(/__skipSourceTextRead = true/);
+  });
+
+  it("real 2026-09-10 incident: omitting discoverLayerDetailsMode (or \"full\") sends the SAME heavy script as before - no behavior change for every existing caller", async () => {
+    const capturePath = join(dir, "received-jsx-code-full.txt");
+    await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    await inspector.inspect(baseRequest({ discoverLayerDetails: true }));
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/__layer\.stretch/);
+    expect(receivedCode).toMatch(/__layer\.opacity/);
   });
 
   it("reports layerDetailsFailureReason (never fabricates layerDetails) when discoverLayerDetails is requested but the underlying ae_run_jsx call fails", async () => {

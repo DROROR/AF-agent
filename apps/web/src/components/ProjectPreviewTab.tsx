@@ -26,7 +26,15 @@ import {
   requestFinalPreviewChanges
 } from "../lib/projects-api-client";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
-import { calculatePreviewTiming, derivePreviewTimingChainTargets, resolvePreviewTimingChains, type PreviewTimingCalculationResult } from "../lib/preview-timing";
+import {
+  calculatePreviewTiming,
+  derivePreviewTimingChainTargets,
+  discoverPathToComposition,
+  distinctChainEntryCompositionIds,
+  resolvePreviewTimingChains,
+  type DiscoveredPathHop,
+  type PreviewTimingCalculationResult
+} from "../lib/preview-timing";
 
 // Same terminal-status set and poll cadence as NewProjectWizard's own
 // dispatch-then-poll pattern (kept local rather than shared, same
@@ -61,6 +69,46 @@ async function pollJobUntilTerminal(jobId: string, cancelledRef: { current: bool
     await new Promise<void>((resolve) => setTimeout(resolve, JOB_POLL_INTERVAL_MS));
   }
 }
+
+/**
+ * Preview Timing Analysis (live QA, 2026-09-09/10) - dispatches ONE real
+ * INSPECT_SCENE_EVIDENCE job and awaits its real terminal result, parsed
+ * against the shared response schema. Used for BOTH the known human-chain
+ * targets (`previewTimingChainIndex`) and the adaptive composition-graph
+ * discovery steps (`previewTimingDiscoverCompositionId`) below - the two
+ * dispatch shapes differ, the poll-then-parse mechanics don't.
+ */
+async function dispatchAndPollSceneEvidence(
+  dispatchRequest: Parameters<typeof dispatchJob>[0],
+  cancelledRef: { current: boolean },
+  evidenceUnavailableMessage: string
+): Promise<{ ok: true; response: SceneEvidenceResponse } | { ok: false; message: string }> {
+  const dispatched = await dispatchJob(dispatchRequest);
+  if (!dispatched.ok) {
+    return { ok: false, message: dispatched.message };
+  }
+  const polled = await pollJobUntilTerminal(dispatched.data.jobId, cancelledRef);
+  if (cancelledRef.current) {
+    return { ok: false, message: "Cancelled" };
+  }
+  if (!polled.ok) {
+    return { ok: false, message: polled.message };
+  }
+  const parsed = sceneEvidenceResponseSchema.safeParse(polled.job.result);
+  if (!parsed.success) {
+    return { ok: false, message: evidenceUnavailableMessage };
+  }
+  return { ok: true, response: parsed.data };
+}
+
+// Preview Timing Analysis composition-graph discovery (live QA,
+// 2026-09-10 real incident, session a7fee3d9) - a generous but bounded
+// safety cap on how many DISTINCT compositions one root-to-entry BFS
+// search (discoverPathToComposition, apps/web/src/lib/preview-timing.ts)
+// may visit, matching this feature's other "generous, never a real scope
+// limit" bounds (see MAX_PREVIEW_TIMING_CHAIN_TARGETS's own doc comment
+// in packages/schemas).
+const MAX_DISCOVERY_STEPS_PER_SEARCH = 20;
 
 /**
  * "Preview" tab (final MVP nav, client-facing UX redesign section H) - the
@@ -329,21 +377,22 @@ export function ProjectPreviewTab(): ReactElement | null {
   }
 
   // Preview Timing Analysis (live QA, 2026-09-09 real incident, extended
-  // to arbitrary nested depth 2026-09-10): derived only from this
-  // session's own latestPreviewScenePlanId + the CURRENT plan's own real,
-  // approved mappings for that scene - never a caller-supplied
-  // compositionId/layerIndices (see resolveInspectSceneEvidenceDispatch's
-  // own previewTimingChainIndex branch, which this drives). Null (button
-  // hidden) when there is no real nested branding target to analyze at
-  // all. `outerMostCompositionId` is the scene's own manifestCompositionId
-  // (e.g. "!Render") - the true master timeline every reported range is
-  // ultimately expressed against.
+  // to arbitrary nested depth + real composition-graph discovery
+  // 2026-09-10): derived only from this session's own
+  // latestPreviewScenePlanId + the CURRENT plan's own real, approved
+  // mappings for that scene - never a caller-supplied compositionId/
+  // layerIndices (see resolveInspectSceneEvidenceDispatch's own
+  // previewTimingChainIndex/previewTimingDiscoverCompositionId branches,
+  // which this drives). The button is hidden when there is no real
+  // nested branding target to analyze at all. `outerMostCompositionId` is
+  // the scene's own manifestCompositionId (e.g. "!Render") - the true
+  // master timeline every reported range is ultimately expressed against.
   const previewTimingScene =
     session && session.latestPreviewScenePlanId !== null ? plan.plan.scenePlans.find((s) => s.id === session.latestPreviewScenePlanId) ?? null : null;
-  const previewTimingTargets = previewTimingScene ? derivePreviewTimingChainTargets(previewTimingScene.mappings, previewTimingScene.manifestCompositionId) : [];
+  const previewTimingHumanTargets = previewTimingScene ? derivePreviewTimingChainTargets(previewTimingScene.mappings) : [];
 
   async function handleAnalyzePreviewTiming(): Promise<void> {
-    if (!session || session.latestPreviewScenePlanId === null || !previewTimingScene || previewTimingTargets.length === 0) {
+    if (!session || session.latestPreviewScenePlanId === null || !previewTimingScene || previewTimingHumanTargets.length === 0) {
       return;
     }
     const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", session.assignedWorkerId);
@@ -358,44 +407,79 @@ export function ProjectPreviewTab(): ReactElement | null {
     setTimingResult(null);
     timingCancelledRef.current = false;
 
-    // Every target is dispatched strictly one after another - the next
-    // INSPECT_SCENE_EVIDENCE job is never dispatched until the previous
-    // one has reached a real terminal status (pollJobUntilTerminal below),
-    // honoring the QA Worker's own maxConcurrency=1 regardless of how many
-    // hops this scene's own real nested target chains actually have.
-    const results: SceneEvidenceResponse[] = [];
-    for (let chainIndex = 0; chainIndex < previewTimingTargets.length; chainIndex++) {
-      const dispatched = await dispatchJob({
-        operation: "INSPECT_SCENE_EVIDENCE",
-        workerId: worker.workerId,
-        projectId,
-        scenePlanId: session.latestPreviewScenePlanId,
-        previewTimingChainIndex: chainIndex
-      });
-      if (!dispatched.ok) {
-        setTimingPhase("error");
-        setTimingError(dispatched.message);
-        return;
-      }
-      const polled = await pollJobUntilTerminal(dispatched.data.jobId, timingCancelledRef);
+    const evidenceUnavailableMessage = t.projectWorkspace.overview.previewTiming.evidenceUnavailable;
+    const resultsByCompositionId = new Map<string, SceneEvidenceResponse>();
+    const discoveredOuterPaths = new Map<string, DiscoveredPathHop[]>();
+
+    // Phase 1: for every mapping's own chain-entry composition that isn't
+    // already the scene's own outermost composition, find the REAL path
+    // reaching it via graph search (real 2026-09-10 incident: this is
+    // never assumed to be a single direct hop). Entirely sequential -
+    // both across distinct entry compositions and within each search's
+    // own steps - so at most one INSPECT_SCENE_EVIDENCE job is ever in
+    // flight, honoring the QA Worker's own maxConcurrency=1.
+    const entryCompositionIds = distinctChainEntryCompositionIds(previewTimingScene.mappings, previewTimingScene.manifestCompositionId);
+    for (const entryCompositionId of entryCompositionIds) {
+      const discovered = await discoverPathToComposition(
+        previewTimingScene.manifestCompositionId,
+        entryCompositionId,
+        (compositionId) =>
+          dispatchAndPollSceneEvidence(
+            {
+              operation: "INSPECT_SCENE_EVIDENCE",
+              workerId: worker.workerId,
+              projectId,
+              scenePlanId: session.latestPreviewScenePlanId as string,
+              previewTimingDiscoverCompositionId: compositionId
+            },
+            timingCancelledRef,
+            evidenceUnavailableMessage
+          ),
+        MAX_DISCOVERY_STEPS_PER_SEARCH
+      );
       if (timingCancelledRef.current) {
         return;
       }
-      if (!polled.ok) {
+      if (!discovered.ok) {
         setTimingPhase("error");
-        setTimingError(polled.message);
+        setTimingError(discovered.reason);
         return;
       }
-      const parsed = sceneEvidenceResponseSchema.safeParse(polled.job.result);
-      if (!parsed.success) {
-        setTimingPhase("error");
-        setTimingError(t.projectWorkspace.overview.previewTiming.evidenceUnavailable);
-        return;
+      discoveredOuterPaths.set(entryCompositionId, discovered.path);
+      for (const [compositionId, response] of discovered.visitedResults) {
+        resultsByCompositionId.set(compositionId, response);
       }
-      results.push(parsed.data);
     }
 
-    const resolved = resolvePreviewTimingChains(previewTimingScene.mappings, previewTimingScene.manifestCompositionId, previewTimingTargets, results);
+    // Phase 2: every target is dispatched strictly one after another - the
+    // next INSPECT_SCENE_EVIDENCE job is never dispatched until the
+    // previous one has reached a real terminal status, same
+    // maxConcurrency=1 guarantee as phase 1 above.
+    for (let chainIndex = 0; chainIndex < previewTimingHumanTargets.length; chainIndex++) {
+      const target = previewTimingHumanTargets[chainIndex]!;
+      const result = await dispatchAndPollSceneEvidence(
+        {
+          operation: "INSPECT_SCENE_EVIDENCE",
+          workerId: worker.workerId,
+          projectId,
+          scenePlanId: session.latestPreviewScenePlanId,
+          previewTimingChainIndex: chainIndex
+        },
+        timingCancelledRef,
+        evidenceUnavailableMessage
+      );
+      if (timingCancelledRef.current) {
+        return;
+      }
+      if (!result.ok) {
+        setTimingPhase("error");
+        setTimingError(result.message);
+        return;
+      }
+      resultsByCompositionId.set(target.compositionId, result.response);
+    }
+
+    const resolved = resolvePreviewTimingChains(previewTimingScene.mappings, previewTimingScene.manifestCompositionId, discoveredOuterPaths, resultsByCompositionId);
     if (!resolved.ok) {
       setTimingPhase("error");
       setTimingError(resolved.reason);
@@ -504,7 +588,7 @@ export function ProjectPreviewTab(): ReactElement | null {
           </div>
         ) : null}
 
-        {canRegeneratePreview && previewTimingTargets.length > 0 ? (
+        {canRegeneratePreview && previewTimingHumanTargets.length > 0 ? (
           <div className="overview-actions">
             <Button variant="secondary" disabled={!workerReady || timingPhase === "running"} onClick={() => void handleAnalyzePreviewTiming()}>
               {timingPhase === "running" ? t.jobDispatch.previewTimingAnalyzing : t.projectWorkspace.overview.previewTiming.action}

@@ -247,7 +247,8 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       currentPlan: plan,
       currentProjectManifest: project.manifest,
       ...(request.discoverLayerDetails !== undefined ? { discoverLayerDetails: request.discoverLayerDetails } : {}),
-      ...(request.previewTimingChainIndex !== undefined ? { previewTimingChainIndex: request.previewTimingChainIndex } : {})
+      ...(request.previewTimingChainIndex !== undefined ? { previewTimingChainIndex: request.previewTimingChainIndex } : {}),
+      ...(request.previewTimingDiscoverCompositionId !== undefined ? { previewTimingDiscoverCompositionId: request.previewTimingDiscoverCompositionId } : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);

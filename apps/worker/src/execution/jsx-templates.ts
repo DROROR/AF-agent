@@ -952,36 +952,35 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
  * script. Read-only: never calls `.setSource`/`.sourceText.setValue`/
  * `.remove()` or anything else that could mutate the project.
  */
-export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
+export function buildInspectCompositionLayerDetailsScript(
+  aeProjectItemIndex: number,
+  compositionName: string,
+  mode: "full" | "discovery" = "full"
+): FixedJsxScript {
   const compIndexLiteral = String(aeProjectItemIndex);
   const compNameLiteral = JSON.stringify(compositionName);
-  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_COMPOSITION_LAYER_DETAILS")});
-  var __result = null;
-  try {
-    var __comp = null;
-    try {
-      var __rawItem = app.project.item(${compIndexLiteral});
-      if (__rawItem instanceof CompItem) {
-        __comp = __rawItem;
-      }
-    } catch (__compLookupError) {
-      __comp = null;
-    }
-    if (__comp === null) {
-      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
-    } else if (__comp.name !== ${compNameLiteral}) {
-      __result = JSON.stringify({
-        ok: false,
-        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
-      });
-    } else {
-      var __layerDetails = [];
-      for (var __i = 1; __i <= __comp.numLayers; __i++) {
-        try {
-          var __layer = __comp.layer(__i);
-          var __layerType = "OTHER";
-          var __sourceText = null;
-          var __sourceCompositionId = null;
+  // "discovery" mode skips the stretch/timeRemapEnabled/opacity/sourceText
+  // property reads entirely (real incident, 2026-09-10, session a7fee3d9):
+  // a large top-level render composition (!Render, ~40+ layers) made the
+  // "full" scan below time out over MCP (each of those four reads costs
+  // real, non-trivial AE engine round-trip time per layer, multiplied
+  // across every layer regardless of whether that layer is even relevant
+  // to any mapping's own chain). Graph-DISCOVERY only ever needs
+  // layerType/sourceCompositionId (to find which layer hosts a given
+  // nested composition) - never the heavier per-layer facts - so this
+  // mode keeps the SAME classification logic (still needs
+  // `layer.source instanceof CompItem`, itself cheap) while skipping the
+  // four expensive reads, keeping the full-composition scan safe
+  // regardless of composition size. "full" mode (the default, used for a
+  // mapping's own known-small nested precomps) is completely unchanged.
+  const heavyReadsLiteral =
+    mode === "discovery"
+      ? `var __stretchPercent = null;
+          var __timeRemapEnabled = null;
+          var __opacityStatic = null;
+          var __opacityKeyframes = null;
+          var __skipSourceTextRead = true;`
+      : `var __skipSourceTextRead = false;
           var __stretchPercent = null;
           try {
             __stretchPercent = __layer.stretch;
@@ -1012,13 +1011,43 @@ export function buildInspectCompositionLayerDetailsScript(aeProjectItemIndex: nu
           } catch (__opacityReadError) {
             __opacityStatic = null;
             __opacityKeyframes = null;
-          }
+          }`;
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_COMPOSITION_LAYER_DETAILS")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
+      });
+    } else {
+      var __layerDetails = [];
+      for (var __i = 1; __i <= __comp.numLayers; __i++) {
+        try {
+          var __layer = __comp.layer(__i);
+          var __layerType = "OTHER";
+          var __sourceText = null;
+          var __sourceCompositionId = null;
+          ${heavyReadsLiteral}
           if (__layer instanceof TextLayer) {
             __layerType = "TEXT";
-            try {
-              __sourceText = __layer.sourceText.value.text;
-            } catch (__textReadError) {
-              __sourceText = null;
+            if (!__skipSourceTextRead) {
+              try {
+                __sourceText = __layer.sourceText.value.text;
+              } catch (__textReadError) {
+                __sourceText = null;
+              }
             }
           } else if (__layer.source && (__layer.source instanceof CompItem)) {
             __layerType = "PRECOMP";

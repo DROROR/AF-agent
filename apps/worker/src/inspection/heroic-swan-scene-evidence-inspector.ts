@@ -25,9 +25,10 @@ const layerDetailsScriptResultSchema = z.union([
 async function fetchLayerDetails(
   client: HeroicSwanMcpClient,
   aeProjectItemIndex: number,
-  compositionName: string
+  compositionName: string,
+  mode: "full" | "discovery" = "full"
 ): Promise<{ ok: true; layerDetails: LayerDetailFact[] } | { ok: false; reason: string }> {
-  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName);
+  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName, mode);
   const result = await client.runFixedInspectionScript(script);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
@@ -229,7 +230,12 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let layerDetails: LayerDetailFact[] | null = null;
       let layerDetailsFailureReason: string | null = null;
       if (request.discoverLayerDetails === true) {
-        const layerDetailsResult = await fetchLayerDetails(client, request.aeProjectItemIndex, parsedComp.value.name);
+        const layerDetailsResult = await fetchLayerDetails(
+          client,
+          request.aeProjectItemIndex,
+          parsedComp.value.name,
+          request.discoverLayerDetailsMode === "discovery" ? "discovery" : "full"
+        );
         if (layerDetailsResult.ok) {
           layerDetails = layerDetailsResult.layerDetails;
         } else {

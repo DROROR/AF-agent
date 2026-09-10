@@ -102,36 +102,30 @@ export interface LabeledChain {
 export interface PreviewTimingChainTarget {
   compositionId: string;
   layerIndices: number[];
-  /** True only for the single, optional "outer discovery" target - see this module's own doc comment on derivePreviewTimingChainTargets. */
-  isOuterDiscovery?: true;
 }
-
-const MAX_OUTER_DISCOVERY_LAYER_INDICES = 20;
 
 /**
  * Client-side mirror of apps/api's derivePreviewTimingTargets - same
  * "walk every hop of every mapping's own real humanNestedTarget chain,
- * deduped by (compositionId, layerIndex)" logic, same optional prepended
- * "outer discovery" target for the scene's own manifestCompositionId
- * (e.g. "!Render") when a chain's own first hop lives inside it but isn't
- * it (a human mapping never itself records how its OWN starting
- * composition is placed inside the master render composition - that has
- * to be discovered from real evidence, never assumed to be an identity
- * placement). Returns an EMPTY array when no mapping has a real nested
- * target at all (nothing to analyze generically here).
+ * deduped by (compositionId, layerIndex)" logic. Returns an EMPTY array
+ * when no mapping has a real nested target at all (nothing to analyze
+ * generically here).
+ *
+ * Does NOT resolve how a chain's own first hop is placed inside the
+ * scene's real master/render composition - see
+ * `distinctChainEntryCompositionIds`/`discoverPathToComposition` below for
+ * that (a SEPARATE, adaptive graph search - live QA, 2026-09-10 real
+ * incident: a mapping's own chain never records that placement, and it is
+ * not always a single direct hop).
  */
-export function derivePreviewTimingChainTargets(mappings: readonly PlaceholderMapping[], outerMostCompositionId: string): PreviewTimingChainTarget[] {
+export function derivePreviewTimingChainTargets(mappings: readonly PlaceholderMapping[]): PreviewTimingChainTarget[] {
   const layerIndicesByCompositionId = new Map<string, Set<number>>();
   const orderedCompositionIds: string[] = [];
-  let needsOuterDiscovery = false;
 
   for (const mapping of mappings) {
     const steps = mapping.humanNestedTarget;
     if (!steps || steps.length === 0) {
       continue;
-    }
-    if (steps[0]!.compositionId !== outerMostCompositionId) {
-      needsOuterDiscovery = true;
     }
     for (const step of steps) {
       let layerIndices = layerIndicesByCompositionId.get(step.compositionId);
@@ -144,22 +138,117 @@ export function derivePreviewTimingChainTargets(mappings: readonly PlaceholderMa
     }
   }
 
-  const chainTargets = orderedCompositionIds.map((compositionId) => ({
+  return orderedCompositionIds.map((compositionId) => ({
     compositionId,
     layerIndices: [...(layerIndicesByCompositionId.get(compositionId) ?? [])].sort((a, b) => a - b)
   }));
+}
 
-  if (!needsOuterDiscovery) {
-    return chainTargets;
+/**
+ * The distinct compositionIds that are some mapping's own FIRST
+ * humanNestedTarget hop, excluding `outerMostCompositionId` itself (which
+ * needs no discovery - it's already the scene's own known top-level
+ * composition). Each one needs a real graph-discovery search (see
+ * `discoverPathToComposition`) to find how it's actually placed inside
+ * `outerMostCompositionId`.
+ */
+export function distinctChainEntryCompositionIds(mappings: readonly PlaceholderMapping[], outerMostCompositionId: string): string[] {
+  const seen = new Set<string>();
+  for (const mapping of mappings) {
+    const steps = mapping.humanNestedTarget;
+    if (!steps || steps.length === 0) {
+      continue;
+    }
+    const first = steps[0]!.compositionId;
+    if (first !== outerMostCompositionId) {
+      seen.add(first);
+    }
   }
-  return [
-    {
-      compositionId: outerMostCompositionId,
-      layerIndices: Array.from({ length: MAX_OUTER_DISCOVERY_LAYER_INDICES }, (_, i) => i + 1),
-      isOuterDiscovery: true as const
-    },
-    ...chainTargets
-  ];
+  return [...seen];
+}
+
+/**
+ * The real, distinct nested-composition children of a composition, from
+ * its own "discovery"-mode `layerDetails` scan - every layer whose real
+ * `sourceCompositionId` is non-null, sorted by layerIndex (a fixed,
+ * deterministic order - see `discoverPathToComposition`'s own doc comment
+ * on why this is what makes its BFS result deterministic).
+ */
+export function listNestedCompositionChildren(layerDetails: readonly LayerDetailFact[]): { layerIndex: number; compositionId: string }[] {
+  return layerDetails
+    .filter((d): d is LayerDetailFact & { sourceCompositionId: string } => d.sourceCompositionId !== null)
+    .map((d) => ({ layerIndex: d.layerIndex, compositionId: d.sourceCompositionId }))
+    .sort((a, b) => a.layerIndex - b.layerIndex);
+}
+
+/** Fetches ONE composition's real "discovery"-mode INSPECT_SCENE_EVIDENCE evidence - the actual dispatch/poll mechanics live in the caller (ProjectPreviewTab), never here, so this module stays free of any network/job-polling concern and is directly unit-testable against a fake in-memory composition graph. */
+export type SceneEvidenceFetcher = (compositionId: string) => Promise<{ ok: true; response: SceneEvidenceResponse } | { ok: false; message: string }>;
+
+export type DiscoverPathResult =
+  | { ok: true; path: DiscoveredPathHop[]; visitedResults: Map<string, SceneEvidenceResponse> }
+  | { ok: false; reason: string };
+
+/**
+ * Preview Timing Analysis composition-graph discovery (live QA,
+ * 2026-09-10 real incident, session a7fee3d9: "Could not discover which
+ * layer in comp-210 hosts comp-1" - the root render composition did NOT
+ * directly expose Scene 1 as a child at all; a real deeper wrapper
+ * composition sat between them). Finds the REAL path of layer hops from
+ * `rootCompositionId` down to `targetCompositionId` by breadth-first
+ * search over the ACTUAL composition-nesting graph, discovered one
+ * `fetchCompositionEvidence` call at a time - never assumes a direct hop,
+ * never fabricates a hop from scene names/order/UI grouping.
+ *
+ * Deterministic: children within a composition are always visited in
+ * ascending layerIndex order (`listNestedCompositionChildren`'s own
+ * sort), and compositions are explored breadth-first (a FIFO queue) - so
+ * if multiple real graph paths to the target exist, the shortest one is
+ * always found, and ties at the same depth are always broken the same
+ * way for the same real project state. Fails clearly (never guesses) if
+ * no real path is found within `maxSteps` distinct compositions visited,
+ * or if any individual fetch fails.
+ */
+export async function discoverPathToComposition(
+  rootCompositionId: string,
+  targetCompositionId: string,
+  fetchCompositionEvidence: SceneEvidenceFetcher,
+  maxSteps: number
+): Promise<DiscoverPathResult> {
+  if (rootCompositionId === targetCompositionId) {
+    return { ok: true, path: [], visitedResults: new Map() };
+  }
+
+  const visited = new Set<string>([rootCompositionId]);
+  const queue: { compositionId: string; path: DiscoveredPathHop[] }[] = [{ compositionId: rootCompositionId, path: [] }];
+  const visitedResults = new Map<string, SceneEvidenceResponse>();
+  let steps = 0;
+
+  while (queue.length > 0) {
+    if (steps >= maxSteps) {
+      return { ok: false, reason: `Could not find a real path from "${rootCompositionId}" to "${targetCompositionId}" within ${maxSteps} composition(s) searched - refusing to guess.` };
+    }
+    steps++;
+    const current = queue.shift()!;
+    const result = await fetchCompositionEvidence(current.compositionId);
+    if (!result.ok) {
+      return { ok: false, reason: result.message };
+    }
+    visitedResults.set(current.compositionId, result.response);
+
+    const children = listNestedCompositionChildren(result.response.layerDetails ?? []);
+    for (const child of children) {
+      const newPath: DiscoveredPathHop[] = [...current.path, { compositionId: current.compositionId, layerIndex: child.layerIndex }];
+      if (child.compositionId === targetCompositionId) {
+        return { ok: true, path: newPath, visitedResults };
+      }
+      if (!visited.has(child.compositionId)) {
+        visited.add(child.compositionId);
+        queue.push({ compositionId: child.compositionId, path: newPath });
+      }
+    }
+  }
+
+  return { ok: false, reason: `"${targetCompositionId}" was never found as a real nested composition reachable from "${rootCompositionId}" - no path exists in the discovered composition graph.` };
 }
 
 function toWindow(evidence: LayerEvidence): LayerWindow {
@@ -181,43 +270,45 @@ function toOpacity(detail: LayerDetailFact | undefined): OpacityFact | null {
 
 export type ResolveChainsResult = { ok: true; chains: LabeledChain[] } | { ok: false; reason: string };
 
+/** One real hop discovered by `discoverPathToComposition` - `compositionId` is the composition the hop's own layer lives IN, `layerIndex` is that layer's own index. */
+export interface DiscoveredPathHop {
+  compositionId: string;
+  layerIndex: number;
+}
+
 /**
  * Resolves every mapping's own COMPLETE hop chain (real evidence at every
- * hop, outer-discovery hop included when present) from the real
- * INSPECT_SCENE_EVIDENCE results gathered for each of
- * `derivePreviewTimingChainTargets`'s own targets - `results[i]` must be
- * the real response for `targets[i]`, same order, same length. Fails
- * clearly (never guesses) when a required hop's own evidence is missing
- * from its target's response, or when the outer-discovery composition's
- * own real layer scan never actually found a layer hosting a chain's own
- * first hop composition.
+ * hop) from the real INSPECT_SCENE_EVIDENCE results gathered so far.
+ * `resultsByCompositionId` is the union of every dispatched result this
+ * analysis run has collected, keyed by the compositionId it was captured
+ * against - both the KNOWN human-chain targets
+ * (`derivePreviewTimingChainTargets`) and every composition visited while
+ * discovering `discoveredOuterPaths` (see `discoverPathToComposition`),
+ * since a hop discovered mid-search still needs its own real `layers[]`
+ * timing, already present in that same discovery response.
+ *
+ * `discoveredOuterPaths` maps a chain's own first-hop compositionId to
+ * the REAL path of hops (root-first) that reaches it from
+ * `outerMostCompositionId` - empty array when that compositionId already
+ * equals `outerMostCompositionId` (no discovery needed). A mapping whose
+ * first hop has no entry here at all is refused clearly (evidence gap),
+ * never silently treated as a direct/identity placement.
+ *
+ * Fails clearly (never guesses) when a required hop's own evidence is
+ * missing from its own composition's collected result.
  */
 export function resolvePreviewTimingChains(
   mappings: readonly PlaceholderMapping[],
   outerMostCompositionId: string,
-  targets: readonly PreviewTimingChainTarget[],
-  results: readonly SceneEvidenceResponse[]
+  discoveredOuterPaths: ReadonlyMap<string, readonly DiscoveredPathHop[]>,
+  resultsByCompositionId: ReadonlyMap<string, SceneEvidenceResponse>
 ): ResolveChainsResult {
   const byComposition = new Map<string, { layers: Map<number, LayerEvidence>; layerDetails: Map<number, LayerDetailFact> }>();
-  targets.forEach((target, i) => {
-    const result = results[i];
-    if (!result) {
-      return;
-    }
-    byComposition.set(target.compositionId, {
+  for (const [compositionId, result] of resultsByCompositionId) {
+    byComposition.set(compositionId, {
       layers: new Map(result.layers.map((l) => [l.layerIndex, l])),
       layerDetails: new Map((result.layerDetails ?? []).map((d) => [d.layerIndex, d]))
     });
-  });
-
-  let discoveredOuterIndexByCompositionId: Map<string, number> | null = null;
-  if (targets[0]?.isOuterDiscovery) {
-    discoveredOuterIndexByCompositionId = new Map();
-    for (const detail of byComposition.get(targets[0].compositionId)?.layerDetails.values() ?? []) {
-      if (detail.sourceCompositionId !== null) {
-        discoveredOuterIndexByCompositionId.set(detail.sourceCompositionId, detail.layerIndex);
-      }
-    }
   }
 
   const chains: LabeledChain[] = [];
@@ -227,22 +318,21 @@ export function resolvePreviewTimingChains(
       continue;
     }
     const label = mapping.placeholderName ?? `Mapping ${mapping.id}`;
-    const fullSteps: { compositionId: string; layerIndex: number }[] = [];
+    const entryCompositionId = steps[0]!.compositionId;
 
-    if (steps[0]!.compositionId !== outerMostCompositionId) {
-      if (!discoveredOuterIndexByCompositionId) {
-        return { ok: false, reason: `"${label}" needs to know how "${steps[0]!.compositionId}" is placed inside "${outerMostCompositionId}", but that outer-discovery evidence was never gathered.` };
-      }
-      const discoveredIndex = discoveredOuterIndexByCompositionId.get(steps[0]!.compositionId);
-      if (discoveredIndex === undefined) {
+    let fullSteps: { compositionId: string; layerIndex: number }[];
+    if (entryCompositionId === outerMostCompositionId) {
+      fullSteps = [...steps];
+    } else {
+      const discoveredPath = discoveredOuterPaths.get(entryCompositionId);
+      if (!discoveredPath) {
         return {
           ok: false,
-          reason: `Could not discover which layer in "${outerMostCompositionId}" hosts "${steps[0]!.compositionId}" for "${label}" - it never appeared as a real nested composition in "${outerMostCompositionId}"'s own layer scan.`
+          reason: `"${label}" needs to know how "${entryCompositionId}" is placed inside "${outerMostCompositionId}", but that was never discovered - refusing to guess.`
         };
       }
-      fullSteps.push({ compositionId: outerMostCompositionId, layerIndex: discoveredIndex });
+      fullSteps = [...discoveredPath, ...steps];
     }
-    fullSteps.push(...steps);
 
     const hops: ChainHop[] = [];
     for (const step of fullSteps) {

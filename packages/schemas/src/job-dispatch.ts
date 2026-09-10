@@ -115,22 +115,56 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * top-level manifestCompositionId, it derives the distinct NESTED
        * composition+layerIndices targets from the scene's own real,
        * approved mappings' COMPLETE humanNestedTarget chains, at ANY
-       * depth (derivePreviewTimingTargets), plus (when the chain's own
-       * first hop isn't already the scene's own manifestCompositionId) one
-       * further "outer discovery" target for that outermost composition
-       * itself - and dispatches against whichever target is at this
-       * 0-based index - never a caller-supplied compositionId/
-       * layerIndices. Bounded by MAX_PREVIEW_TIMING_CHAIN_TARGETS (see its
-       * own doc comment for why this is a generous safety bound, not a
-       * scope limit). Omitted preserves the exact prior
-       * INSPECT_SCENE_EVIDENCE behavior for every existing caller.
+       * depth (derivePreviewTimingTargets) - and dispatches against
+       * whichever target is at this 0-based index - never a
+       * caller-supplied compositionId/layerIndices. Bounded by
+       * MAX_PREVIEW_TIMING_CHAIN_TARGETS (see its own doc comment for why
+       * this is a generous safety bound, not a scope limit). Omitted
+       * preserves the exact prior INSPECT_SCENE_EVIDENCE behavior for
+       * every existing caller.
        */
       previewTimingChainIndex: z
         .number()
         .int()
         .min(0)
         .max(MAX_PREVIEW_TIMING_CHAIN_TARGETS - 1)
-        .optional()
+        .optional(),
+      /**
+       * Preview Timing Analysis composition-GRAPH discovery (live QA,
+       * 2026-09-10 real incident, session a7fee3d9): a mapping's own
+       * `humanNestedTarget` never records how its OWN starting
+       * composition (e.g. "Scene 1") is actually placed inside the
+       * scene's real master/render composition (e.g. "!Render") - that
+       * placement is real AE composition-graph structure, discoverable
+       * only by inspection, and (the real incident) is not always a
+       * single direct hop: a real deeper wrapper composition can sit
+       * between them. Finding it requires an ADAPTIVE graph search (which
+       * composition to look inside next depends on what the PREVIOUS
+       * search step's own real evidence found) that the server cannot
+       * precompute up front the way previewTimingChainIndex's own static
+       * target list can.
+       *
+       * This is the one deliberate, narrowly-scoped exception in this
+       * codebase to "the server always resolves composition/layer
+       * addressing, a caller never supplies it directly" (see this
+       * module's own doc comment and resolveExecuteFrameDispatch's
+       * identical rule): safe here specifically because (a) this
+       * operation is READ-ONLY (INSPECT_SCENE_EVIDENCE never saves,
+       * mutates, or renders - CLAUDE.md Safety Rules 1-3), (b) the
+       * resolver validates this value against the CURRENT PROJECT
+       * MANIFEST's own real composition list before ever dispatching
+       * anything - a caller can only ever name a composition this
+       * project's own manifest already knows about, never an arbitrary
+       * string, (c) it always dispatches in the new lightweight
+       * "discovery" mode (never the heavier per-layer stretch/
+       * timeRemapEnabled/opacity reads), and (d) it never accepts
+       * layerIndices from the caller either - always every plausible
+       * index up to MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, server-
+       * computed. Mutually exclusive with previewTimingChainIndex in
+       * practice (the resolver checks this field first) - never both
+       * meaningfully set on the same dispatch.
+       */
+      previewTimingDiscoverCompositionId: z.string().min(1).optional()
     })
     .strict(),
   z.object({

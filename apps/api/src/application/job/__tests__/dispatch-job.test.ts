@@ -517,7 +517,7 @@ describe("dispatchJob", () => {
     expect(innerPayload.sourceProjectSha256).toBe("a".repeat(64));
   });
 
-  it("2026-09-10 arbitrary-depth extension: when the scene's own manifestCompositionId (e.g. !Render) differs from the chain's own first hop, chain index 0 dispatches a read-only outer-discovery job for the scene's own top-level composition itself - still no SET_TEXT/MAP_FOOTAGE/save-shaped field anywhere in the payload", async () => {
+  it("2026-09-10 composition-graph discovery real incident: previewTimingDiscoverCompositionId dispatches a real, read-only, LIGHTWEIGHT (\"discovery\" mode) inspection job for the requested manifest composition - still no SET_TEXT/MAP_FOOTAGE/save-shaped field anywhere in the payload, and never a caller-supplied layerIndices", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);
     const projectRepository = new InMemoryProjectRepository();
@@ -543,7 +543,6 @@ describe("dispatchJob", () => {
     const scene: ScenePlanEntry = approvedTextScene();
     scene.manifestCompositionId = "comp-210";
     scene.compositionName = "!Render";
-    scene.mappings = [{ ...scene.mappings[0]!, id: "logo", placeholderName: "App Logo", humanNestedTarget: [{ compositionId: "comp-1", layerIndex: 3 }] }] satisfies PlaceholderMapping[];
     await executionPlanRepository.createRevision(
       { id: "plan-1", projectId: project.projectId, revision: 1, status: "DRAFT", templateId: "tmpl-1", sourceProjectSha256: "a".repeat(64), scenePlans: [scene], approvedAt: null, approvedBy: null },
       FIXED_NOW
@@ -561,16 +560,49 @@ describe("dispatchJob", () => {
         now: () => FIXED_NOW,
         staleAfterMs: STALE_AFTER_MS
       },
-      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1", previewTimingChainIndex: 0 }
+      { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1", previewTimingDiscoverCompositionId: "comp-210" }
     );
     const job = await jobRepository.findById(result.jobId);
     const payload = job?.payload as Record<string, unknown>;
     expect(payload.manifestCompositionId).toBe("comp-210");
     expect(payload.layerIndices).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
     expect(payload.discoverLayerDetails).toBe(true);
+    expect(payload.discoverLayerDetailsMode).toBe("discovery");
     expect(payload.sourceProjectSha256).toBe("a".repeat(64));
     expect(payload).not.toHaveProperty("operations");
     expect(payload).not.toHaveProperty("approvedMappingIds");
+  });
+
+  it("previewTimingDiscoverCompositionId refuses a compositionId that isn't in the current manifest - never dispatches a job against an unknown composition", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const workerId = randomUUID();
+    await workerRepository.create({ id: workerId, name: "Worker", tokenHash: "hash", maxConcurrency: 1, capabilities: ["INSPECT_SCENE_EVIDENCE"] }, FIXED_NOW);
+    await workerRepository.updateHeartbeat(workerId, { aeStatus: "ONLINE", mcpStatus: "ONLINE", aeVersion: "26.0", currentJobId: null }, FIXED_NOW);
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    await executionPlanRepository.createRevision(
+      { id: "plan-1", projectId: project.projectId, revision: 1, status: "DRAFT", templateId: "tmpl-1", sourceProjectSha256: "a".repeat(64), scenePlans: [approvedTextScene()], approvedAt: null, approvedBy: null },
+      FIXED_NOW
+    );
+
+    await expect(
+      dispatchJob(
+        {
+          jobRepository,
+          workerRepository,
+          projectRepository,
+          executionPlanRepository,
+          executionSessionRepository: new InMemoryExecutionSessionRepository(),
+          fullPreviewArtifactRepository: new InMemoryFullPreviewArtifactRepository(),
+          assetRepository: new InMemoryAssetRepository(),
+          now: () => FIXED_NOW,
+          staleAfterMs: STALE_AFTER_MS
+        },
+        { operation: "INSPECT_SCENE_EVIDENCE", workerId, projectId: project.projectId, scenePlanId: "scene-1", previewTimingDiscoverCompositionId: "comp-does-not-exist" }
+      )
+    ).rejects.toThrow(PreconditionNotMetError);
   });
 });
 
