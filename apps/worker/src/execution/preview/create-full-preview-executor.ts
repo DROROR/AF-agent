@@ -138,7 +138,17 @@ export async function executeCreateFullPreview(deps: CreateFullPreviewExecutorDe
   // reused directly, never a metadata-only fabrication of readiness).
   const validation = validateRenderArtifact(outputPath);
   if (!validation.ok) {
-    return finish(`complete-preview artifact validation failed: ${validation.reason}`, null);
+    // Live QA, 2026-09-10 real incident (job dac9fc90...): aerender can
+    // exit 0 (a "successful" process lifecycle) while still producing no
+    // real output file, e.g. when an -RStemplate/-OMtemplate name does not
+    // match any real AE Render Queue template - AE's own warning about
+    // that lands on stdout/stderr, not in the exit code. Before this fix,
+    // that diagnostic signal was silently discarded on this path (unlike
+    // the exitCode !== 0 branch above, which already includes a stderr
+    // excerpt) - surfaced here the same way, so a validation failure is
+    // never a diagnostic dead end.
+    const logExcerpt = (runResult.stdout + (runResult.stderr ? `\n--- stderr ---\n${runResult.stderr}` : "")).slice(-2000);
+    return finish(`complete-preview artifact validation failed: ${validation.reason}${logExcerpt ? ` | aerender log (last 2000 chars): ${logExcerpt}` : ""}`, null);
   }
 
   // Final honesty check: the original source .aep must remain

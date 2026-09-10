@@ -323,6 +323,59 @@ describe("executeCreateFullPreview", () => {
     expect(result.artifact).toBeNull();
   });
 
+  /**
+   * The exact real 2026-09-10 incident (job dac9fc90-ed8b-4589-9fe5-d34d4f95aa95,
+   * session a7fee3d9): aerender exited 0 (a "successful" process lifecycle)
+   * but produced no real output file - AE's own diagnostic about why (e.g.
+   * an unrecognized -RStemplate/-OMtemplate name) lands on stdout/stderr,
+   * not the exit code. Before the fix, that signal was silently discarded
+   * on this exact path - this proves it now reaches the reported
+   * failureReason, so a real future incident of this shape is diagnosable
+   * without needing worker-side log/file access.
+   */
+  it("real 2026-09-10 incident: surfaces the real aerender stdout/stderr in the failureReason when validation fails after a 'successful' (exit 0) run with no output file", async () => {
+    const fixture = makeFixture();
+    const runner = new FakeAerenderRunner(() => ({
+      ok: true,
+      pid: 1,
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "aerender: rendering...\n",
+      stderr: "aerender: *** Cannot find render settings template best setting ***\n",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      spawnError: null
+      // no writeBytes - the real incident's shape: exit 0, no real output file
+    }));
+
+    const result = await executeCreateFullPreview(
+      { workRoot: fixture.workRoot, aerenderPath: "/fake/aerender", aerenderRunner: runner, compositionVerifier: new FakeCompositionVerifier(), fullPreviewUploader: alwaysSucceedingUploader(), now: () => new Date() },
+      "job-11b",
+      makeRequest(fixture)
+    );
+
+    expect(result.failureReason).toContain("complete-preview artifact validation failed");
+    expect(result.failureReason).toContain("aerender log");
+    expect(result.failureReason).toContain("Cannot find render settings template best setting");
+    expect(result.artifact).toBeNull();
+  });
+
+  it("the expected validation path is always the EXACT SAME path passed to aerender's own -output argument - never two independently-derived paths that could drift apart", async () => {
+    const fixture = makeFixture();
+    const runner = alwaysSucceedingRunner(5);
+    const request = makeRequest(fixture);
+
+    await executeCreateFullPreview(
+      { workRoot: fixture.workRoot, aerenderPath: "/fake/aerender", aerenderRunner: runner, compositionVerifier: new FakeCompositionVerifier(), fullPreviewUploader: alwaysSucceedingUploader(), now: () => new Date() },
+      "job-11c",
+      request
+    );
+
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]?.outputPath).toBe(fullPreviewOutputPath(fixture.workRoot, "job-11c"));
+  });
+
   it("removes a stale pre-existing output file before rendering, so a re-dispatched attempt can never pass validation on the old file alone", async () => {
     const fixture = makeFixture();
     const outputPath = fullPreviewOutputPath(fixture.workRoot, "job-12");
