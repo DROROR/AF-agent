@@ -18,6 +18,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   previewTimingChainIndex?: number;
   /** Preview Timing Analysis composition-graph discovery (live QA, 2026-09-10) - see the previewTimingDiscoverCompositionId branch below and job-dispatch.ts's own doc comment on why this is the one deliberate exception to server-only addressing resolution. */
   previewTimingDiscoverCompositionId?: string;
+  /** Preview Timing Analysis composition-graph discovery, FIX 2 (live QA, 2026-09-10) - only meaningful alongside previewTimingDiscoverCompositionId; see job-dispatch.ts's own doc comment. */
+  previewTimingDiscoverTargetCompositionId?: string;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -64,7 +66,15 @@ export type ResolveInspectSceneEvidenceDispatchResult =
  * not after.
  */
 export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEvidenceDispatchInput): ResolveInspectSceneEvidenceDispatchResult {
-  const { scenePlanId, currentPlan, currentProjectManifest, discoverLayerDetails, previewTimingChainIndex, previewTimingDiscoverCompositionId } = input;
+  const {
+    scenePlanId,
+    currentPlan,
+    currentProjectManifest,
+    discoverLayerDetails,
+    previewTimingChainIndex,
+    previewTimingDiscoverCompositionId,
+    previewTimingDiscoverTargetCompositionId
+  } = input;
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project yet" };
@@ -99,6 +109,19 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
         reason: `Preview-timing discovery target compositionId "${previewTimingDiscoverCompositionId}" does not match any composition in the current manifest - refusing to inspect an unknown composition`
       };
     }
+    // FIX 2's own targeted-lookup optimization - only ever a composition
+    // this project's own current manifest already knows about (same
+    // validation as the parent compositionId above), never an arbitrary
+    // caller-supplied string.
+    if (previewTimingDiscoverTargetCompositionId !== undefined) {
+      const knownTarget = currentProjectManifest.compositions.some((c) => c.compositionId === previewTimingDiscoverTargetCompositionId);
+      if (!knownTarget) {
+        return {
+          ok: false,
+          reason: `Preview-timing discovery early-exit target compositionId "${previewTimingDiscoverTargetCompositionId}" does not match any composition in the current manifest - refusing to search for an unknown composition`
+        };
+      }
+    }
     return {
       ok: true,
       payload: {
@@ -116,14 +139,18 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
         layerIndices: Array.from({ length: MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST }, (_, i) => i + 1),
         previewTimestampSeconds: null,
         discoverLayerDetails: true,
-        // The whole point of this branch - keeps a graph search over a
-        // large master composition (the real 2026-09-10 incident: !Render
-        // itself, ~40+ layers) from ever timing out, at the cost of not
-        // getting stretch/timeRemapEnabled/opacity for compositions
-        // visited only for discovery (see jsx-templates.ts's own doc
-        // comment on why this is a safe, documented default for a master
-        // timeline's own scene-sequencing layers).
-        discoverLayerDetailsMode: "discovery"
+        // Keeps a graph-discovery scan over a large master composition
+        // (the real 2026-09-10 incident: !Render itself, ~40+ layers)
+        // from ever timing out, at the cost of not getting stretch/
+        // timeRemapEnabled/opacity for compositions visited only for
+        // discovery (see jsx-templates.ts's own doc comment on why this
+        // is a safe, documented default for a master timeline's own
+        // scene-sequencing layers).
+        discoverLayerDetailsMode: "discovery",
+        // FIX 2 - when the caller already knows which composition it's
+        // looking for (from the manifest's own confirmed containment
+        // graph), the Worker's own scan stops the instant it finds it.
+        ...(previewTimingDiscoverTargetCompositionId !== undefined ? { discoverLayerDetailsTargetCompositionId: previewTimingDiscoverTargetCompositionId } : {})
       }
     };
   }

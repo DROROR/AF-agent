@@ -94,7 +94,24 @@ export const sceneEvidenceRequestSchema = z
      * exact prior discoverLayerDetails behavior for every existing
      * caller.
      */
-    discoverLayerDetailsMode: z.enum(["full", "discovery"]).optional()
+    discoverLayerDetailsMode: z.enum(["full", "discovery"]).optional(),
+    /**
+     * Preview Timing Analysis composition-graph discovery, FIX 2 (live
+     * QA, 2026-09-10 real incident): only meaningful alongside
+     * `discoverLayerDetailsMode: "discovery"`. When the caller already
+     * knows (from the project manifest's own `parentCompositionIds` -
+     * see deriveManifestContainmentPath/findLayerHostingComposition in
+     * apps/web/src/lib/preview-timing.ts) exactly which nested
+     * composition it is looking for, the Worker's own scan stops the
+     * instant it finds that one composition, rather than exhaustively
+     * classifying every remaining layer of a potentially large
+     * composition - the fix for the real incident where scanning !Render
+     * itself (~40+ layers) timed out even in plain "discovery" mode.
+     * Omitted preserves the exact prior discoverLayerDetailsMode
+     * behavior (a full, un-short-circuited scan) for every existing
+     * caller.
+     */
+    discoverLayerDetailsTargetCompositionId: z.string().min(1).optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;

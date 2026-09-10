@@ -29,8 +29,8 @@ import { resolveProjectWorker } from "../lib/resolve-project-worker";
 import {
   calculatePreviewTiming,
   derivePreviewTimingChainTargets,
-  discoverPathToComposition,
   distinctChainEntryCompositionIds,
+  resolveManifestPathHops,
   resolvePreviewTimingChains,
   type DiscoveredPathHop,
   type PreviewTimingCalculationResult
@@ -100,15 +100,6 @@ async function dispatchAndPollSceneEvidence(
   }
   return { ok: true, response: parsed.data };
 }
-
-// Preview Timing Analysis composition-graph discovery (live QA,
-// 2026-09-10 real incident, session a7fee3d9) - a generous but bounded
-// safety cap on how many DISTINCT compositions one root-to-entry BFS
-// search (discoverPathToComposition, apps/web/src/lib/preview-timing.ts)
-// may visit, matching this feature's other "generous, never a real scope
-// limit" bounds (see MAX_PREVIEW_TIMING_CHAIN_TARGETS's own doc comment
-// in packages/schemas).
-const MAX_DISCOVERY_STEPS_PER_SEARCH = 20;
 
 /**
  * "Preview" tab (final MVP nav, client-facing UX redesign section H) - the
@@ -392,7 +383,7 @@ export function ProjectPreviewTab(): ReactElement | null {
   const previewTimingHumanTargets = previewTimingScene ? derivePreviewTimingChainTargets(previewTimingScene.mappings) : [];
 
   async function handleAnalyzePreviewTiming(): Promise<void> {
-    if (!session || session.latestPreviewScenePlanId === null || !previewTimingScene || previewTimingHumanTargets.length === 0) {
+    if (!project || !session || session.latestPreviewScenePlanId === null || !previewTimingScene || previewTimingHumanTargets.length === 0) {
       return;
     }
     const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", session.assignedWorkerId);
@@ -411,31 +402,39 @@ export function ProjectPreviewTab(): ReactElement | null {
     const resultsByCompositionId = new Map<string, SceneEvidenceResponse>();
     const discoveredOuterPaths = new Map<string, DiscoveredPathHop[]>();
 
-    // Phase 1: for every mapping's own chain-entry composition that isn't
-    // already the scene's own outermost composition, find the REAL path
-    // reaching it via graph search (real 2026-09-10 incident: this is
-    // never assumed to be a single direct hop). Entirely sequential -
-    // both across distinct entry compositions and within each search's
-    // own steps - so at most one INSPECT_SCENE_EVIDENCE job is ever in
-    // flight, honoring the QA Worker's own maxConcurrency=1.
+    // Phase 1 (live QA, 2026-09-10 FIX 2): for every mapping's own
+    // chain-entry composition that isn't already the scene's own
+    // outermost composition, resolve the REAL path reaching it - PRIMARILY
+    // from the project's own manifest (`parentCompositionIds`, already
+    // AE-confirmed by the original INSPECT_TEMPLATE inspection, zero live
+    // dispatches for the sequence itself), with exactly one targeted,
+    // early-exit live lookup per already-known hop to discover its real
+    // layerIndex + timing evidence (never a broad exploratory scan of
+    // sibling compositions - see resolveManifestPathHops's own doc
+    // comment). Entirely sequential - both across distinct entry
+    // compositions and within each hop's own lookup - so at most one
+    // INSPECT_SCENE_EVIDENCE job is ever in flight, honoring the QA
+    // Worker's own maxConcurrency=1.
+    const manifestCompositions = project.manifest.compositions.map((c) => ({ compositionId: c.compositionId, parentCompositionIds: c.parentCompositionIds }));
     const entryCompositionIds = distinctChainEntryCompositionIds(previewTimingScene.mappings, previewTimingScene.manifestCompositionId);
     for (const entryCompositionId of entryCompositionIds) {
-      const discovered = await discoverPathToComposition(
+      const discovered = await resolveManifestPathHops(
+        manifestCompositions,
         previewTimingScene.manifestCompositionId,
         entryCompositionId,
-        (compositionId) =>
+        (compositionId, targetSourceCompositionId) =>
           dispatchAndPollSceneEvidence(
             {
               operation: "INSPECT_SCENE_EVIDENCE",
               workerId: worker.workerId,
               projectId,
               scenePlanId: session.latestPreviewScenePlanId as string,
-              previewTimingDiscoverCompositionId: compositionId
+              previewTimingDiscoverCompositionId: compositionId,
+              ...(targetSourceCompositionId !== undefined ? { previewTimingDiscoverTargetCompositionId: targetSourceCompositionId } : {})
             },
             timingCancelledRef,
             evidenceUnavailableMessage
-          ),
-        MAX_DISCOVERY_STEPS_PER_SEARCH
+          )
       );
       if (timingCancelledRef.current) {
         return;
@@ -445,7 +444,7 @@ export function ProjectPreviewTab(): ReactElement | null {
         setTimingError(discovered.reason);
         return;
       }
-      discoveredOuterPaths.set(entryCompositionId, discovered.path);
+      discoveredOuterPaths.set(entryCompositionId, discovered.hops);
       for (const [compositionId, response] of discovered.visitedResults) {
         resultsByCompositionId.set(compositionId, response);
       }

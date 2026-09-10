@@ -501,4 +501,42 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
     });
     expect(result.ok).toBe(false);
   });
+
+  it("FIX 2 (live QA, 2026-09-10): forwards previewTimingDiscoverTargetCompositionId into the resolved payload when it names a real manifest composition - enables the Worker's own early-exit optimization", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingDiscoverTargetCompositionId: "comp-1"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.discoverLayerDetailsTargetCompositionId).toBe("comp-1");
+  });
+
+  it("FIX 2: refuses a previewTimingDiscoverTargetCompositionId that does not match any composition in the current manifest - never searches for an arbitrary caller-supplied composition", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingDiscoverTargetCompositionId: "comp-does-not-exist"
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("comp-does-not-exist");
+  });
+
+  it("FIX 2: omitting previewTimingDiscoverTargetCompositionId omits it from the payload entirely - existing (pre-FIX-2) callers see byte-identical behavior", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-210"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.prototype.hasOwnProperty.call(result.payload, "discoverLayerDetailsTargetCompositionId")).toBe(false);
+  });
 });

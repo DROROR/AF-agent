@@ -210,6 +210,26 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(receivedCode).toMatch(/__layer\.opacity/);
   });
 
+  it("FIX 2 (live QA, 2026-09-10): threads request.discoverLayerDetailsTargetCompositionId through to the REAL ae_run_jsx code sent - produces the early-exit script, proven from the separate spawned process's own real received input", async () => {
+    const capturePath = join(dir, "received-jsx-code-target.txt");
+    await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    await inspector.inspect(baseRequest({ discoverLayerDetails: true, discoverLayerDetailsMode: "discovery", discoverLayerDetailsTargetCompositionId: "comp-1" }));
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/if \(__sourceCompositionId === "comp-1"\) \{ break; \}/);
+  });
+
+  it("omitting discoverLayerDetailsTargetCompositionId sends the SAME non-short-circuited script as before - no behavior change for every existing caller", async () => {
+    const capturePath = join(dir, "received-jsx-code-no-target.txt");
+    await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    await inspector.inspect(baseRequest({ discoverLayerDetails: true, discoverLayerDetailsMode: "discovery" }));
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).not.toMatch(/break;/);
+  });
+
   it("reports layerDetailsFailureReason (never fabricates layerDetails) when discoverLayerDetails is requested but the underlying ae_run_jsx call fails", async () => {
     await writeFakeServer(dir, { runJsxResult: "error" });
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });

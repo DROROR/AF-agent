@@ -540,6 +540,34 @@ describe("buildInspectCompositionLayerDetailsScript (live-QA generic AE layer-di
     expect(discovery1).not.toBe(full);
   });
 
+  it("FIX 2 (live QA, 2026-09-10): with a targetSourceCompositionId, the scan stops the instant it finds that composition - never classifies remaining layers, proving the early exit actually skips real work, not merely that the result happens to be a prefix", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME, "discovery", "comp-4242");
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    // "Nested Comp Ref" (layerIndex 2, sourceCompositionId "comp-4242") is
+    // the target - the scan must stop there, never reaching layerIndex
+    // 3/4/6/7.
+    expect(result.layerDetails).toEqual([
+      { layerIndex: 1, layerName: "Hebrew Branding", layerType: "TEXT", sourceText: null, sourceCompositionId: null, stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null },
+      { layerIndex: 2, layerName: "Nested Comp Ref", layerType: "PRECOMP", sourceText: null, sourceCompositionId: "comp-4242", stretchPercent: null, timeRemapEnabled: null, opacityStatic: null, opacityKeyframes: null }
+    ]);
+  });
+
+  it("FIX 2: when targetSourceCompositionId is never found, the scan still completes as a normal full/discovery scan (falls through to the end of the loop, never hangs or errors)", () => {
+    const script = buildInspectCompositionLayerDetailsScript(1, COMP_NAME, "discovery", "comp-does-not-exist");
+    const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.layerDetails).toHaveLength(6);
+  });
+
+  it("FIX 2: targetSourceCompositionId produces a real script-text difference from the same mode without it (never a runtime-only behavior change invisible to the deterministic-script test)", () => {
+    const withoutTarget = buildInspectCompositionLayerDetailsScript(3, COMP_NAME, "discovery");
+    const withTarget = buildInspectCompositionLayerDetailsScript(3, COMP_NAME, "discovery", "comp-4242");
+    expect(withoutTarget).not.toBe(withTarget);
+  });
+
   it("fails closed with a typed failureReason when the project item index does not resolve to the expected composition name", () => {
     const script = buildInspectCompositionLayerDetailsScript(1, "Wrong Expected Name");
     const resultText = runFixedScriptWithoutNativeJson(script, FAKE_LAYER_DETAILS_APP_SETUP);

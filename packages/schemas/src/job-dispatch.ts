@@ -131,18 +131,21 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
         .optional(),
       /**
        * Preview Timing Analysis composition-GRAPH discovery (live QA,
-       * 2026-09-10 real incident, session a7fee3d9): a mapping's own
+       * 2026-09-09/10 real incidents, session a7fee3d9): a mapping's own
        * `humanNestedTarget` never records how its OWN starting
        * composition (e.g. "Scene 1") is actually placed inside the
        * scene's real master/render composition (e.g. "!Render") - that
-       * placement is real AE composition-graph structure, discoverable
-       * only by inspection, and (the real incident) is not always a
-       * single direct hop: a real deeper wrapper composition can sit
-       * between them. Finding it requires an ADAPTIVE graph search (which
-       * composition to look inside next depends on what the PREVIOUS
-       * search step's own real evidence found) that the server cannot
-       * precompute up front the way previewTimingChainIndex's own static
-       * target list can.
+       * placement is real AE composition-graph structure. As of the
+       * 2026-09-10 FIX 2 extension, the PRIMARY source for that placement
+       * is the project's own manifest (`parentCompositionIds`, already
+       * AE-confirmed by the original INSPECT_TEMPLATE inspection) - see
+       * deriveManifestContainmentPath in apps/web/src/lib/preview-timing.ts.
+       * This dispatch field is used only for the ONE thing the manifest
+       * cannot supply: the real AE layerIndex inside a manifest-confirmed
+       * parent composition that hosts a manifest-confirmed child - one
+       * targeted lookup per already-known hop, never a broad/exploratory
+       * scan of sibling compositions the way the original (now retired)
+       * live graph search did.
        *
        * This is the one deliberate, narrowly-scoped exception in this
        * codebase to "the server always resolves composition/layer
@@ -164,7 +167,22 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * practice (the resolver checks this field first) - never both
        * meaningfully set on the same dispatch.
        */
-      previewTimingDiscoverCompositionId: z.string().min(1).optional()
+      previewTimingDiscoverCompositionId: z.string().min(1).optional(),
+      /**
+       * Preview Timing Analysis composition-graph discovery, FIX 2 (live
+       * QA, 2026-09-10 real incident) - only meaningful alongside
+       * previewTimingDiscoverCompositionId. The specific nested
+       * composition (already confirmed as a real child of
+       * previewTimingDiscoverCompositionId by the manifest's own
+       * `parentCompositionIds`) this dispatch is looking for - lets the
+       * Worker's own scan stop the instant it finds that one composition,
+       * exactly the fix for the real incident where scanning "!Render"
+       * itself (~40+ layers) timed out even in plain "discovery" mode.
+       * Subject to the exact same safety reasoning as
+       * previewTimingDiscoverCompositionId above (validated against the
+       * current manifest before dispatch, never an arbitrary string).
+       */
+      previewTimingDiscoverTargetCompositionId: z.string().min(1).optional()
     })
     .strict(),
   z.object({

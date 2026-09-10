@@ -248,7 +248,10 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       currentProjectManifest: project.manifest,
       ...(request.discoverLayerDetails !== undefined ? { discoverLayerDetails: request.discoverLayerDetails } : {}),
       ...(request.previewTimingChainIndex !== undefined ? { previewTimingChainIndex: request.previewTimingChainIndex } : {}),
-      ...(request.previewTimingDiscoverCompositionId !== undefined ? { previewTimingDiscoverCompositionId: request.previewTimingDiscoverCompositionId } : {})
+      ...(request.previewTimingDiscoverCompositionId !== undefined ? { previewTimingDiscoverCompositionId: request.previewTimingDiscoverCompositionId } : {}),
+      ...(request.previewTimingDiscoverTargetCompositionId !== undefined
+        ? { previewTimingDiscoverTargetCompositionId: request.previewTimingDiscoverTargetCompositionId }
+        : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);

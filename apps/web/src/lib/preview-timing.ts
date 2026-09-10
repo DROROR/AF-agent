@@ -181,74 +181,199 @@ export function listNestedCompositionChildren(layerDetails: readonly LayerDetail
     .sort((a, b) => a.layerIndex - b.layerIndex);
 }
 
-/** Fetches ONE composition's real "discovery"-mode INSPECT_SCENE_EVIDENCE evidence - the actual dispatch/poll mechanics live in the caller (ProjectPreviewTab), never here, so this module stays free of any network/job-polling concern and is directly unit-testable against a fake in-memory composition graph. */
-export type SceneEvidenceFetcher = (compositionId: string) => Promise<{ ok: true; response: SceneEvidenceResponse } | { ok: false; message: string }>;
+/**
+ * Fetches ONE composition's real "discovery"-mode INSPECT_SCENE_EVIDENCE
+ * evidence - the actual dispatch/poll mechanics live in the caller
+ * (ProjectPreviewTab), never here, so this module stays free of any
+ * network/job-polling concern and is directly unit-testable against a
+ * fake in-memory composition graph. `targetSourceCompositionId`, when
+ * given, is an optional hint letting the Worker's own script exit as soon
+ * as it finds that specific nested composition, rather than exhaustively
+ * classifying every layer (live QA, 2026-09-10: since FIX 2 below already
+ * knows exactly which composition it is looking for from the manifest's
+ * own graph, there is never a need to enumerate every layer of a large
+ * composition just to confirm one already-expected edge).
+ */
+export type SceneEvidenceFetcher = (
+  compositionId: string,
+  targetSourceCompositionId?: string
+) => Promise<{ ok: true; response: SceneEvidenceResponse } | { ok: false; message: string }>;
 
-export type DiscoverPathResult =
-  | { ok: true; path: DiscoveredPathHop[]; visitedResults: Map<string, SceneEvidenceResponse> }
-  | { ok: false; reason: string };
+/** One composition's own identity + real, AE-confirmed parent edges, as already recorded in the project's own manifest (TemplateManifest['compositions'][number], narrowed to only the fields this module needs). */
+export interface ManifestCompositionRef {
+  compositionId: string;
+  parentCompositionIds: readonly string[];
+}
+
+export type ManifestPathResult = { ok: true; path: string[] } | { ok: false; reason: string };
 
 /**
- * Preview Timing Analysis composition-graph discovery (live QA,
- * 2026-09-10 real incident, session a7fee3d9: "Could not discover which
- * layer in comp-210 hosts comp-1" - the root render composition did NOT
- * directly expose Scene 1 as a child at all; a real deeper wrapper
- * composition sat between them). Finds the REAL path of layer hops from
- * `rootCompositionId` down to `targetCompositionId` by breadth-first
- * search over the ACTUAL composition-nesting graph, discovered one
- * `fetchCompositionEvidence` call at a time - never assumes a direct hop,
- * never fabricates a hop from scene names/order/UI grouping.
+ * Preview Timing Analysis composition-graph discovery, FIX 2 (live QA,
+ * 2026-09-10): the PRIMARY source for the real path from
+ * `rootCompositionId` down to `targetCompositionId` is the project's own
+ * manifest - `parentCompositionIds`, already AE-confirmed by the
+ * original, already-successful INSPECT_TEMPLATE inspection, entirely
+ * independent of (and immune to) the live layer-scan timeout that caused
+ * the real 2026-09-10 incident. No live dispatch of any kind - pure data.
  *
- * Deterministic: children within a composition are always visited in
- * ascending layerIndex order (`listNestedCompositionChildren`'s own
- * sort), and compositions are explored breadth-first (a FIFO queue) - so
- * if multiple real graph paths to the target exist, the shortest one is
- * always found, and ties at the same depth are always broken the same
- * way for the same real project state. Fails clearly (never guesses) if
- * no real path is found within `maxSteps` distinct compositions visited,
- * or if any individual fetch fails.
+ * Builds a parent -> children adjacency by inverting every composition's
+ * own `parentCompositionIds`, then walks it breadth-first from the root.
+ * Deterministic: children are always visited in a FIXED order (sorted by
+ * compositionId), and compositions are explored breadth-first (a FIFO
+ * queue) - so if multiple real graph paths to the target exist, the
+ * shortest is always found, and ties at the same depth are always broken
+ * the same way for the same real project state (this IS the "handle
+ * multiple paths deterministically" requirement - there is never a
+ * genuinely unresolvable ambiguity given a fixed composition list). Fails
+ * clearly (never guesses, never falls back to a live scan) when no real
+ * manifest-recorded path connects the two composition ids at all.
  */
-export async function discoverPathToComposition(
+export function deriveManifestContainmentPath(
+  compositions: readonly ManifestCompositionRef[],
   rootCompositionId: string,
-  targetCompositionId: string,
-  fetchCompositionEvidence: SceneEvidenceFetcher,
-  maxSteps: number
-): Promise<DiscoverPathResult> {
+  targetCompositionId: string
+): ManifestPathResult {
   if (rootCompositionId === targetCompositionId) {
-    return { ok: true, path: [], visitedResults: new Map() };
+    return { ok: true, path: [rootCompositionId] };
+  }
+
+  const childrenByParent = new Map<string, string[]>();
+  for (const composition of compositions) {
+    for (const parentId of composition.parentCompositionIds) {
+      let children = childrenByParent.get(parentId);
+      if (!children) {
+        children = [];
+        childrenByParent.set(parentId, children);
+      }
+      children.push(composition.compositionId);
+    }
+  }
+  for (const children of childrenByParent.values()) {
+    children.sort();
   }
 
   const visited = new Set<string>([rootCompositionId]);
-  const queue: { compositionId: string; path: DiscoveredPathHop[] }[] = [{ compositionId: rootCompositionId, path: [] }];
-  const visitedResults = new Map<string, SceneEvidenceResponse>();
-  let steps = 0;
+  const queue: { compositionId: string; path: string[] }[] = [{ compositionId: rootCompositionId, path: [rootCompositionId] }];
 
   while (queue.length > 0) {
-    if (steps >= maxSteps) {
-      return { ok: false, reason: `Could not find a real path from "${rootCompositionId}" to "${targetCompositionId}" within ${maxSteps} composition(s) searched - refusing to guess.` };
-    }
-    steps++;
     const current = queue.shift()!;
-    const result = await fetchCompositionEvidence(current.compositionId);
-    if (!result.ok) {
-      return { ok: false, reason: result.message };
-    }
-    visitedResults.set(current.compositionId, result.response);
-
-    const children = listNestedCompositionChildren(result.response.layerDetails ?? []);
+    const children = childrenByParent.get(current.compositionId) ?? [];
     for (const child of children) {
-      const newPath: DiscoveredPathHop[] = [...current.path, { compositionId: current.compositionId, layerIndex: child.layerIndex }];
-      if (child.compositionId === targetCompositionId) {
-        return { ok: true, path: newPath, visitedResults };
+      const newPath = [...current.path, child];
+      if (child === targetCompositionId) {
+        return { ok: true, path: newPath };
       }
-      if (!visited.has(child.compositionId)) {
-        visited.add(child.compositionId);
-        queue.push({ compositionId: child.compositionId, path: newPath });
+      if (!visited.has(child)) {
+        visited.add(child);
+        queue.push({ compositionId: child, path: newPath });
       }
     }
   }
 
-  return { ok: false, reason: `"${targetCompositionId}" was never found as a real nested composition reachable from "${rootCompositionId}" - no path exists in the discovered composition graph.` };
+  return { ok: false, reason: `"${targetCompositionId}" has no real containment path from "${rootCompositionId}" in the current project manifest's own composition graph - refusing to guess.` };
+}
+
+export type FindHostingLayerResult = { ok: true; layerIndex: number; response: SceneEvidenceResponse } | { ok: false; reason: string };
+
+/**
+ * Preview Timing Analysis composition-graph discovery, FIX 1 (live QA,
+ * 2026-09-10 real incident): finds the REAL layer index inside
+ * `parentCompositionId` that hosts `childCompositionId` - the ONE fact
+ * the manifest itself cannot supply (it records real containment edges,
+ * never AE layer indices). This is the ONLY live evidence this feature's
+ * graph-discovery step ever needs, since FIX 2's
+ * `deriveManifestContainmentPath` already supplies the full composition
+ * SEQUENCE from durable, pre-confirmed data.
+ *
+ * The critical correctness fix: a scan FAILURE (`layerDetails === null`,
+ * e.g. a real Worker/MCP timeout inspecting a large composition) is
+ * NEVER the same thing as a scan that genuinely SUCCEEDED and found zero
+ * matching children (`layerDetails: []`, or a non-empty list that simply
+ * doesn't contain the target). The 2026-09-10 incident's own false
+ * "comp-1 is not reachable from comp-210" conclusion was exactly this
+ * conflation - a `layerDetailsFailureReason`-bearing timeout, silently
+ * treated as "found nothing". This function refuses to make that mistake:
+ * a failed scan is reported as a clear evidence gap, never as a negative
+ * structural fact.
+ */
+export async function findLayerHostingComposition(
+  parentCompositionId: string,
+  childCompositionId: string,
+  fetchCompositionEvidence: SceneEvidenceFetcher
+): Promise<FindHostingLayerResult> {
+  const result = await fetchCompositionEvidence(parentCompositionId, childCompositionId);
+  if (!result.ok) {
+    return { ok: false, reason: result.message };
+  }
+  // SCAN FAILED != EMPTY COMPOSITION - a null layerDetails means the
+  // Worker's own scan did not complete (see layerDetailsFailureReason),
+  // never that the composition genuinely has zero nested children.
+  if (result.response.layerDetails === null) {
+    return {
+      ok: false,
+      reason: `Could not determine which layer in "${parentCompositionId}" hosts "${childCompositionId}" - the Worker's own layer scan did not complete${
+        result.response.layerDetailsFailureReason ? `: ${result.response.layerDetailsFailureReason}` : ""
+      }. Refusing to treat an incomplete scan as "not found".`
+    };
+  }
+  const children = listNestedCompositionChildren(result.response.layerDetails);
+  const match = children.find((child) => child.compositionId === childCompositionId);
+  if (!match) {
+    return {
+      ok: false,
+      reason: `"${childCompositionId}" does not appear as a real nested composition inside "${parentCompositionId}" - the manifest's own containment edge could not be confirmed by live evidence.`
+    };
+  }
+  return { ok: true, layerIndex: match.layerIndex, response: result.response };
+}
+
+export type ResolveManifestPathResult =
+  | { ok: true; hops: DiscoveredPathHop[]; visitedResults: Map<string, SceneEvidenceResponse> }
+  | { ok: false; reason: string };
+
+/**
+ * Preview Timing Analysis composition-graph discovery, FIX 1 + FIX 2
+ * combined (live QA, 2026-09-10 real incident, session a7fee3d9): the
+ * PRIMARY, manifest-driven replacement for the old live-BFS
+ * `discoverPathToComposition`. Resolves the real composition SEQUENCE
+ * from `rootCompositionId` to `targetCompositionId` entirely from the
+ * manifest (`deriveManifestContainmentPath` - zero live dispatches), then
+ * makes exactly ONE targeted, evidence-failure-aware live lookup per hop
+ * (`findLayerHostingComposition`) to discover that hop's own real
+ * layerIndex - never a broad, exploratory scan of every sibling
+ * composition the way the retired BFS approach did. Live AE evidence is
+ * used ONLY for what the manifest cannot supply (the layerIndex, plus -
+ * via the SAME scan - real timing/layer properties for that index),
+ * never to rediscover graph structure the manifest already provides.
+ */
+export async function resolveManifestPathHops(
+  compositions: readonly ManifestCompositionRef[],
+  rootCompositionId: string,
+  targetCompositionId: string,
+  fetchCompositionEvidence: SceneEvidenceFetcher
+): Promise<ResolveManifestPathResult> {
+  const pathResult = deriveManifestContainmentPath(compositions, rootCompositionId, targetCompositionId);
+  if (!pathResult.ok) {
+    return { ok: false, reason: pathResult.reason };
+  }
+  const sequence = pathResult.path;
+  if (sequence.length <= 1) {
+    return { ok: true, hops: [], visitedResults: new Map() };
+  }
+
+  const hops: DiscoveredPathHop[] = [];
+  const visitedResults = new Map<string, SceneEvidenceResponse>();
+  for (let i = 0; i < sequence.length - 1; i++) {
+    const parentCompositionId = sequence[i]!;
+    const childCompositionId = sequence[i + 1]!;
+    const found = await findLayerHostingComposition(parentCompositionId, childCompositionId, fetchCompositionEvidence);
+    if (!found.ok) {
+      return { ok: false, reason: found.reason };
+    }
+    hops.push({ compositionId: parentCompositionId, layerIndex: found.layerIndex });
+    visitedResults.set(parentCompositionId, found.response);
+  }
+  return { ok: true, hops, visitedResults };
 }
 
 function toWindow(evidence: LayerEvidence): LayerWindow {

@@ -4,15 +4,18 @@ import {
   calculatePreviewTiming,
   computeChainVisibleRanges,
   derivePreviewTimingChainTargets,
-  discoverPathToComposition,
+  deriveManifestContainmentPath,
   distinctChainEntryCompositionIds,
+  findLayerHostingComposition,
   listNestedCompositionChildren,
   opacityVisibleIntervals,
+  resolveManifestPathHops,
   resolvePreviewTimingChains,
   type ChainHop,
   type DiscoveredPathHop,
   type LabeledChain,
   type LayerWindow,
+  type ManifestCompositionRef,
   type OpacityFact,
   type SceneEvidenceFetcher
 } from "./preview-timing";
@@ -181,139 +184,187 @@ describe("listNestedCompositionChildren", () => {
   });
 });
 
-/** A fake in-memory composition graph - `graph[compositionId]` lists that composition's own real nested-composition children (layerIndex + compositionId), mirroring what a real "discovery"-mode layerDetails scan would report. `calls` records the real visitation order (compositionIds, in the order fetched) so a test can assert BFS traversal order, not merely the final result. */
-function fakeGraphFetcher(graph: Record<string, { layerIndex: number; sourceCompositionId: string }[]>, calls: string[] = []): SceneEvidenceFetcher {
-  return async (compositionId) => {
-    calls.push(compositionId);
+function manifestComp(compositionId: string, parentCompositionIds: string[]): ManifestCompositionRef {
+  return { compositionId, parentCompositionIds };
+}
+
+describe("deriveManifestContainmentPath", () => {
+  it("real 2026-09-10 incident (session a7fee3d9): resolves the genuine chain purely from manifest parentCompositionIds - comp-210 -> comp-1, entirely without any live dispatch", () => {
+    const compositions = [manifestComp("comp-210", []), manifestComp("comp-1", ["comp-210"]), manifestComp("comp-1635", ["comp-1"])];
+    const result = deriveManifestContainmentPath(compositions, "comp-210", "comp-1");
+    expect(result).toEqual({ ok: true, path: ["comp-210", "comp-1"] });
+  });
+
+  it("resolves a real multi-hop path through an intermediate wrapper composition", () => {
+    const compositions = [manifestComp("comp-210", []), manifestComp("comp-999", ["comp-210"]), manifestComp("comp-1", ["comp-999"])];
+    const result = deriveManifestContainmentPath(compositions, "comp-210", "comp-1");
+    expect(result).toEqual({ ok: true, path: ["comp-210", "comp-999", "comp-1"] });
+  });
+
+  it("returns a single-element path with root===target - nothing to discover", () => {
+    expect(deriveManifestContainmentPath([manifestComp("comp-1", [])], "comp-1", "comp-1")).toEqual({ ok: true, path: ["comp-1"] });
+  });
+
+  it("finds the SHORTEST real path breadth-first when multiple real manifest paths of different depth exist", () => {
+    const compositions = [
+      manifestComp("comp-210", []),
+      manifestComp("comp-A", ["comp-210"]),
+      manifestComp("comp-B", ["comp-210"]),
+      manifestComp("comp-C", ["comp-B"]),
+      manifestComp("comp-1", ["comp-A", "comp-C"])
+    ];
+    const result = deriveManifestContainmentPath(compositions, "comp-210", "comp-1");
+    expect(result).toEqual({ ok: true, path: ["comp-210", "comp-A", "comp-1"] });
+  });
+
+  it("fails clearly (never guesses, never falls back to a live scan) when no real manifest-recorded path connects the two composition ids", () => {
+    const compositions = [manifestComp("comp-210", []), manifestComp("comp-999", [])];
+    const result = deriveManifestContainmentPath(compositions, "comp-210", "comp-999");
+    expect(result).toEqual({ ok: false, reason: expect.stringContaining("no real containment path") });
+  });
+
+  it("never revisits the same composition twice, even when reachable via a composition referenced from multiple parents", () => {
+    const compositions = [
+      manifestComp("comp-210", []),
+      manifestComp("comp-A", ["comp-210"]),
+      manifestComp("comp-B", ["comp-210"]),
+      manifestComp("comp-shared", ["comp-A", "comp-B"]),
+      manifestComp("comp-1", ["comp-shared"])
+    ];
+    const result = deriveManifestContainmentPath(compositions, "comp-210", "comp-1");
+    expect(result).toEqual({ ok: true, path: ["comp-210", "comp-A", "comp-shared", "comp-1"] });
+  });
+});
+
+/** A fake in-memory composition graph - `graph[compositionId]` lists that composition's own real nested-composition children (layerIndex + compositionId), mirroring what a real "discovery"-mode layerDetails scan would report. `calls` records every real fetch (compositionId + optional target hint). `failureFor`, when set, makes the fetch for that one compositionId report a scan FAILURE (layerDetails: null) rather than a real result - simulating the exact real 2026-09-10 incident shape (a timeout). */
+function fakeGraphFetcher(
+  graph: Record<string, { layerIndex: number; sourceCompositionId: string }[]>,
+  options: { calls?: { compositionId: string; target?: string | undefined }[]; failureFor?: string } = {}
+): SceneEvidenceFetcher {
+  return async (compositionId, targetSourceCompositionId) => {
+    options.calls?.push({ compositionId, target: targetSourceCompositionId });
+    if (compositionId === options.failureFor) {
+      return {
+        ok: true,
+        response: sceneEvidence({ manifestCompositionId: compositionId, layerDetails: null, layerDetailsFailureReason: "ae_run_jsx failed: MCP error -32001: Request timed out" })
+      };
+    }
     const children = graph[compositionId] ?? [];
-    return {
-      ok: true,
-      response: sceneEvidence({
-        manifestCompositionId: compositionId,
-        layerDetails: children.map((c) => layerDetail({ layerIndex: c.layerIndex, sourceCompositionId: c.sourceCompositionId }))
-      })
-    };
+    return { ok: true, response: sceneEvidence({ manifestCompositionId: compositionId, layerDetails: children.map((c) => layerDetail({ layerIndex: c.layerIndex, sourceCompositionId: c.sourceCompositionId })) }) };
   };
 }
 
-describe("discoverPathToComposition", () => {
-  it("real 2026-09-10 incident (session a7fee3d9): the root render composition does NOT directly expose the target as a child, but a real deeper wrapper composition does - finds the genuine two-hop path via BFS, never assumes a direct hop", async () => {
-    const calls: string[] = [];
-    // comp-210 (!Render) has NO direct child named comp-1 - only a real
-    // wrapper "comp-999" (e.g. a genuine intermediate grouping
-    // composition) which itself hosts comp-1 (Scene 1) at its own layer 4.
-    const fetcher = fakeGraphFetcher(
-      {
-        "comp-210": [
-          { layerIndex: 1, sourceCompositionId: "comp-777" },
-          { layerIndex: 2, sourceCompositionId: "comp-999" }
-        ],
-        "comp-999": [{ layerIndex: 4, sourceCompositionId: "comp-1" }]
-      },
-      calls
-    );
-
-    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+describe("findLayerHostingComposition", () => {
+  it("finds the real layerIndex hosting the known target composition", async () => {
+    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 9, sourceCompositionId: "comp-1" }] });
+    const result = await findLayerHostingComposition("comp-210", "comp-1", fetcher);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.path).toEqual([
-      { compositionId: "comp-210", layerIndex: 2 },
-      { compositionId: "comp-999", layerIndex: 4 }
-    ]);
-    // comp-777 (a sibling with no path to the target) is visited too -
-    // real breadth-first search visits every same-depth sibling before
-    // going deeper, never a shortcut that only follows the "right" branch
-    // in hindsight - but comp-1 itself is never separately fetched, since
-    // it's identified as soon as it appears as comp-999's own child.
-    expect(calls).toEqual(["comp-210", "comp-777", "comp-999"]);
-    expect([...result.visitedResults.keys()]).toEqual(["comp-210", "comp-777", "comp-999"]);
+    expect(result.layerIndex).toBe(9);
   });
 
-  it("resolves a direct single-hop path exactly as before when the root DOES directly expose the target", async () => {
-    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 3, sourceCompositionId: "comp-1" }] });
-    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
-    expect(result).toEqual({ ok: true, path: [{ compositionId: "comp-210", layerIndex: 3 }], visitedResults: expect.any(Map) });
-  });
-
-  it("returns an empty path with zero fetches when the root already IS the target - nothing to discover", async () => {
-    const calls: string[] = [];
-    const fetcher = fakeGraphFetcher({}, calls);
-    const result = await discoverPathToComposition("comp-1", "comp-1", fetcher, 20);
-    expect(result).toEqual({ ok: true, path: [], visitedResults: new Map() });
-    expect(calls).toEqual([]);
-  });
-
-  it("finds the SHORTEST real path breadth-first when multiple real paths of different depth exist", async () => {
-    const calls: string[] = [];
-    const fetcher = fakeGraphFetcher(
-      {
-        // comp-210 has a direct 1-hop path to comp-1 via comp-A, AND a
-        // longer 2-hop path via comp-B -> comp-C -> comp-1 - BFS must
-        // find the direct one first and never even need to explore comp-C.
-        "comp-210": [
-          { layerIndex: 1, sourceCompositionId: "comp-A" },
-          { layerIndex: 2, sourceCompositionId: "comp-B" }
-        ],
-        "comp-A": [{ layerIndex: 1, sourceCompositionId: "comp-1" }],
-        "comp-B": [{ layerIndex: 1, sourceCompositionId: "comp-C" }],
-        "comp-C": [{ layerIndex: 1, sourceCompositionId: "comp-1" }]
-      },
-      calls
-    );
-    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
-    expect(result).toEqual({
-      ok: true,
-      path: [
-        { compositionId: "comp-210", layerIndex: 1 },
-        { compositionId: "comp-A", layerIndex: 1 }
-      ],
-      visitedResults: expect.any(Map)
-    });
-    expect(calls).not.toContain("comp-C");
-  });
-
-  it("fails clearly (never guesses) when the target is never found anywhere in the real reachable graph", async () => {
-    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 1, sourceCompositionId: "comp-A" }], "comp-A": [] });
-    const result = await discoverPathToComposition("comp-210", "comp-does-not-exist", fetcher, 20);
+  it("FIX 1 (live QA, 2026-09-10 real incident): SCAN FAILED != EMPTY COMPOSITION - a null layerDetails (real timeout shape) is reported as a clear evidence failure, never silently treated as \"not found\"", async () => {
+    const fetcher = fakeGraphFetcher({}, { failureFor: "comp-210" });
+    const result = await findLayerHostingComposition("comp-210", "comp-1", fetcher);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("never found");
+    expect(result.reason).toContain("did not complete");
+    expect(result.reason).toContain("MCP error -32001");
+    // The message may explain that it refuses to draw this conclusion,
+    // but must never actually CONCLUDE "does not appear" / "never found" -
+    // that conclusion is reserved for a scan that genuinely succeeded.
+    expect(result.reason).not.toMatch(/does not appear as a real nested composition|never found/i);
   });
 
-  it("fails clearly when the search exceeds maxSteps, rather than searching forever", async () => {
-    // A long chain, each composition pointing only to the next - never reaches the target within a small maxSteps bound.
-    const graph: Record<string, { layerIndex: number; sourceCompositionId: string }[]> = {};
-    for (let i = 0; i < 10; i++) {
-      graph[`comp-${i}`] = [{ layerIndex: 1, sourceCompositionId: `comp-${i + 1}` }];
-    }
-    const fetcher = fakeGraphFetcher(graph);
-    const result = await discoverPathToComposition("comp-0", "comp-9", fetcher, 3);
+  it("a scan that genuinely SUCCEEDS with a non-null, empty layerDetails ([]) is a real \"not found\" - distinct from a failed scan", async () => {
+    const fetcher = fakeGraphFetcher({ "comp-210": [] });
+    const result = await findLayerHostingComposition("comp-210", "comp-1", fetcher);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("within 3 composition");
+    expect(result.reason).toContain("does not appear as a real nested composition");
   });
 
-  it("propagates a real fetch failure (e.g. a Worker/job error) as its own message, never silently treating it as \"not found\"", async () => {
+  it("a scan that succeeds but simply doesn't contain the target among its real children also fails clearly, distinct from a scan failure", async () => {
+    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 1, sourceCompositionId: "comp-other" }] });
+    const result = await findLayerHostingComposition("comp-210", "comp-1", fetcher);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("does not appear as a real nested composition");
+  });
+
+  it("propagates a real fetch failure (e.g. a Worker/job dispatch error) as its own message", async () => {
     const fetcher: SceneEvidenceFetcher = async () => ({ ok: false, message: "simulated Worker offline" });
-    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+    const result = await findLayerHostingComposition("comp-210", "comp-1", fetcher);
     expect(result).toEqual({ ok: false, reason: "simulated Worker offline" });
   });
 
-  it("never revisits the same composition twice, even when reachable via multiple sibling edges", async () => {
-    const calls: string[] = [];
-    const fetcher = fakeGraphFetcher(
-      {
-        "comp-210": [
-          { layerIndex: 1, sourceCompositionId: "comp-shared" },
-          { layerIndex: 2, sourceCompositionId: "comp-shared" }
-        ],
-        "comp-shared": [{ layerIndex: 1, sourceCompositionId: "comp-1" }]
-      },
-      calls
-    );
-    const result = await discoverPathToComposition("comp-210", "comp-1", fetcher, 20);
+  it("passes the target compositionId through to the fetcher, enabling the Worker's own early-exit optimization", async () => {
+    const calls: { compositionId: string; target?: string | undefined }[] = [];
+    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 1, sourceCompositionId: "comp-1" }] }, { calls });
+    await findLayerHostingComposition("comp-210", "comp-1", fetcher);
+    expect(calls).toEqual([{ compositionId: "comp-210", target: "comp-1" }]);
+  });
+});
+
+describe("resolveManifestPathHops", () => {
+  it("real 2026-09-10 incident (session a7fee3d9), end to end: resolves comp-210 -> comp-1 using the manifest for the SEQUENCE and exactly ONE targeted live lookup for the real layerIndex - never a broad scan of every sibling composition", async () => {
+    const compositions = [manifestComp("comp-210", []), manifestComp("comp-1", ["comp-210"])];
+    const calls: { compositionId: string; target?: string | undefined }[] = [];
+    const fetcher = fakeGraphFetcher({ "comp-210": [{ layerIndex: 9, sourceCompositionId: "comp-1" }] }, { calls });
+
+    const result = await resolveManifestPathHops(compositions, "comp-210", "comp-1", fetcher);
     expect(result.ok).toBe(true);
-    expect(calls.filter((c) => c === "comp-shared")).toHaveLength(1);
+    if (!result.ok) return;
+    expect(result.hops).toEqual([{ compositionId: "comp-210", layerIndex: 9 }]);
+    expect(calls).toEqual([{ compositionId: "comp-210", target: "comp-1" }]);
+    expect([...result.visitedResults.keys()]).toEqual(["comp-210"]);
+  });
+
+  it("resolves a real multi-hop manifest path with one targeted lookup PER hop", async () => {
+    const compositions = [manifestComp("comp-210", []), manifestComp("comp-999", ["comp-210"]), manifestComp("comp-1", ["comp-999"])];
+    const calls: { compositionId: string; target?: string | undefined }[] = [];
+    const fetcher = fakeGraphFetcher(
+      { "comp-210": [{ layerIndex: 2, sourceCompositionId: "comp-999" }], "comp-999": [{ layerIndex: 4, sourceCompositionId: "comp-1" }] },
+      { calls }
+    );
+
+    const result = await resolveManifestPathHops(compositions, "comp-210", "comp-1", fetcher);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.hops).toEqual([
+      { compositionId: "comp-210", layerIndex: 2 },
+      { compositionId: "comp-999", layerIndex: 4 }
+    ]);
+    expect(calls).toEqual([
+      { compositionId: "comp-210", target: "comp-999" },
+      { compositionId: "comp-999", target: "comp-1" }
+    ]);
+  });
+
+  it("returns zero hops and zero fetches when root already IS the target", async () => {
+    const calls: { compositionId: string; target?: string | undefined }[] = [];
+    const fetcher = fakeGraphFetcher({}, { calls });
+    const result = await resolveManifestPathHops([manifestComp("comp-1", [])], "comp-1", "comp-1", fetcher);
+    expect(result).toEqual({ ok: true, hops: [], visitedResults: new Map() });
+    expect(calls).toEqual([]);
+  });
+
+  it("fails clearly, with zero live dispatches, when the manifest itself has no path - never falls back to a live scan", async () => {
+    const calls: { compositionId: string; target?: string | undefined }[] = [];
+    const fetcher = fakeGraphFetcher({}, { calls });
+    const result = await resolveManifestPathHops([manifestComp("comp-210", []), manifestComp("comp-999", [])], "comp-210", "comp-999", fetcher);
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("FIX 1, end to end: a real Worker scan timeout on one hop propagates as a clear evidence-failure reason, never a false \"not reachable\"", async () => {
+    const compositions = [manifestComp("comp-210", []), manifestComp("comp-1", ["comp-210"])];
+    const fetcher = fakeGraphFetcher({}, { failureFor: "comp-210" });
+    const result = await resolveManifestPathHops(compositions, "comp-210", "comp-1", fetcher);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("did not complete");
+    expect(result.reason).not.toMatch(/not reachable|never found/i);
   });
 });
 

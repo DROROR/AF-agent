@@ -955,10 +955,25 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
 export function buildInspectCompositionLayerDetailsScript(
   aeProjectItemIndex: number,
   compositionName: string,
-  mode: "full" | "discovery" = "full"
+  mode: "full" | "discovery" = "full",
+  targetSourceCompositionId?: string
 ): FixedJsxScript {
   const compIndexLiteral = String(aeProjectItemIndex);
   const compNameLiteral = JSON.stringify(compositionName);
+  // FIX 2 (live QA, 2026-09-10 real incident): when the caller already
+  // knows exactly which nested composition it is looking for (from the
+  // manifest's own already-confirmed containment graph - see
+  // deriveManifestContainmentPath/findLayerHostingComposition in
+  // apps/web/src/lib/preview-timing.ts), the scan stops as soon as that
+  // ONE layer is found, rather than exhaustively classifying every
+  // remaining layer of a potentially large composition. This is a pure
+  // performance optimization for the KNOWN-target case - `layerDetails`
+  // is a strict PREFIX of what a full scan would have found, ordered the
+  // same way, so a caller not using this parameter sees no change at all.
+  const earlyExitLiteral =
+    targetSourceCompositionId !== undefined
+      ? `if (__sourceCompositionId === ${JSON.stringify(targetSourceCompositionId)}) { break; }`
+      : "";
   // "discovery" mode skips the stretch/timeRemapEnabled/opacity/sourceText
   // property reads entirely (real incident, 2026-09-10, session a7fee3d9):
   // a large top-level render composition (!Render, ~40+ layers) made the
@@ -1066,6 +1081,7 @@ export function buildInspectCompositionLayerDetailsScript(
             opacityStatic: __opacityStatic,
             opacityKeyframes: __opacityKeyframes
           });
+          ${earlyExitLiteral}
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole composition's
           // result - it is simply not reported.

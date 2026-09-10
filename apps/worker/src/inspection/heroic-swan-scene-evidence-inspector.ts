@@ -26,9 +26,10 @@ async function fetchLayerDetails(
   client: HeroicSwanMcpClient,
   aeProjectItemIndex: number,
   compositionName: string,
-  mode: "full" | "discovery" = "full"
+  mode: "full" | "discovery" = "full",
+  targetSourceCompositionId?: string
 ): Promise<{ ok: true; layerDetails: LayerDetailFact[] } | { ok: false; reason: string }> {
-  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName, mode);
+  const script = buildInspectCompositionLayerDetailsScript(aeProjectItemIndex, compositionName, mode, targetSourceCompositionId);
   const result = await client.runFixedInspectionScript(script);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
@@ -234,7 +235,8 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           client,
           request.aeProjectItemIndex,
           parsedComp.value.name,
-          request.discoverLayerDetailsMode === "discovery" ? "discovery" : "full"
+          request.discoverLayerDetailsMode === "discovery" ? "discovery" : "full",
+          request.discoverLayerDetailsTargetCompositionId
         );
         if (layerDetailsResult.ok) {
           layerDetails = layerDetailsResult.layerDetails;
