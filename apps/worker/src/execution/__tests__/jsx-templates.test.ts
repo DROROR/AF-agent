@@ -12,6 +12,7 @@ import {
   buildFindHostLayersScript,
   buildDescribeCompositionSummaryScript,
   buildInspectLayerTransformScript,
+  buildScanProjectEffectsScript,
   buildOpenProjectScript
 } from "../jsx-templates.js";
 
@@ -975,6 +976,135 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
 
   it("never contains a `break` - scans every layer to completion, same convention as buildDescribeCompositionSummaryScript", () => {
     const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    expect(script).not.toMatch(/break;/);
+  });
+});
+
+describe("buildScanProjectEffectsScript (real 2026-09-11 incident: 51-composition candidate too large to check one composition at a time)", () => {
+  const PROJECT_SCAN_SETUP = `
+    function CompItem() {}
+
+    function makeEffectsGroup(effects) {
+      return {
+        numProperties: effects.length,
+        property: function (i) {
+          var e = effects[i - 1];
+          return { name: e.name, matchName: e.matchName, enabled: e.enabled };
+        }
+      };
+    }
+
+    function makeLayer(index, name, effects) {
+      var layer = { index: index, name: name, enabled: true };
+      if (effects) {
+        layer.property = function (propName) {
+          if (propName === "ADBE Effect Parade") {
+            return makeEffectsGroup(effects);
+          }
+          return null;
+        };
+      }
+      return layer;
+    }
+
+    // Comp A: one layer with a real third-party effect (mirrors the real
+    // Element 3D incident's own matchName), one layer with a native effect,
+    // one with no effects group at all.
+    var __compA = new CompItem();
+    __compA.id = 210;
+    __compA.name = "!Render";
+    __compA.numLayers = 3;
+    var __compALayers = {
+      1: makeLayer(1, "Element 3D", [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: true }]),
+      2: makeLayer(2, "Blur Layer", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }]),
+      3: makeLayer(3, "Plain Layer", null)
+    };
+    __compA.layer = function (i) { return __compALayers[i]; };
+
+    // Comp B: nested, no effects anywhere - should not appear in the result at all.
+    var __compB = new CompItem();
+    __compB.id = 99;
+    __compB.name = "Pre-comp 3";
+    __compB.numLayers = 1;
+    var __compBLayers = { 1: makeLayer(1, "Solid", null) };
+    __compB.layer = function (i) { return __compBLayers[i]; };
+
+    // A non-composition project item (e.g. a FootageItem) - must be skipped, never treated as a comp.
+    function FootageItem() {}
+    var __footage = new FootageItem();
+    __footage.name = "some-image.png";
+
+    // A layer whose own effects read throws - must not fail the whole scan.
+    var __compC = new CompItem();
+    __compC.id = 7;
+    __compC.name = "Broken Comp";
+    __compC.numLayers = 1;
+    var __brokenLayer = { index: 1, name: "Broken Layer" };
+    Object.defineProperty(__brokenLayer, "property", { get: function () { throw new Error("simulated unreadable effects group"); } });
+    __compC.layer = function () { return __brokenLayer; };
+
+    var __itemsByIndex = { 1: __compA, 2: __compB, 3: __footage, 4: __compC };
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: {
+        numItems: 4,
+        item: function (i) { return __itemsByIndex[i]; }
+      }
+    };
+  `;
+
+  it("scans every composition in the project (not just one), reporting only layers/compositions that actually have effects", () => {
+    const script = buildScanProjectEffectsScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.compositionCount).toBe(4);
+    expect(result.compositionsWithEffects.map((c: { compositionName: string }) => c.compositionName)).toEqual(["!Render"]);
+  });
+
+  it("reports each effect's real name/matchName/enabled - proving an effect was applied, e.g. the real Element 3D matchName from the unrelated 2026-09-11 incident", () => {
+    const script = buildScanProjectEffectsScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    const render = result.compositionsWithEffects.find((c: { compositionName: string }) => c.compositionName === "!Render");
+    expect(render.compositionId).toBe(210);
+    const elementLayer = render.layers.find((l: { layerName: string }) => l.layerName === "Element 3D");
+    expect(elementLayer.effects).toEqual([{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: true }]);
+    const blurLayer = render.layers.find((l: { layerName: string }) => l.layerName === "Blur Layer");
+    expect(blurLayer.effects).toEqual([{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }]);
+    // "Plain Layer" (no effects group at all) never appears - only layers with real effects are reported.
+    expect(render.layers.map((l: { layerName: string }) => l.layerName)).toEqual(["Element 3D", "Blur Layer"]);
+  });
+
+  it("skips non-composition project items (e.g. footage) without treating them as compositions", () => {
+    const script = buildScanProjectEffectsScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "some-image.png")).toBe(false);
+  });
+
+  it("skips a layer whose effects cannot be read, rather than failing the whole scan", () => {
+    const script = buildScanProjectEffectsScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "Broken Comp")).toBe(false);
+  });
+
+  it("is deterministic - takes no arguments, always produces byte-identical JSX", () => {
+    expect(buildScanProjectEffectsScript()).toBe(buildScanProjectEffectsScript());
+  });
+
+  it("never mutates the project - contains no .setSource/.remove()/.setValue call", () => {
+    const script = buildScanProjectEffectsScript();
+    expect(script).not.toMatch(/\.setSource\s*\(/);
+    expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
+    expect(script).not.toMatch(/\.setValue\s*\(/);
+  });
+
+  it("never uses `break` - scans every project item and every layer to completion", () => {
+    const script = buildScanProjectEffectsScript();
     expect(script).not.toMatch(/break;/);
   });
 });

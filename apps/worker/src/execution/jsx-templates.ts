@@ -1733,6 +1733,99 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
 }
 
 /**
+ * Real 2026-09-11 incident (candidate "dro-tempelate-converted-v26.aep",
+ * 51 compositions, 50 nested under one top-level scene): checking every
+ * composition's own effects one at a time via
+ * buildInspectLayerTransformScript (through the dashboard's "Describe Any
+ * Composition" diagnostic) would need dozens of separate round trips, AND
+ * that diagnostic itself is gated behind an already-executed scene
+ * preview (a real mutation) - disproportionate just to check for a
+ * third-party plugin dependency before any scene mapping/execution
+ * decision has even been made. This script instead scans EVERY
+ * composition in the project, and every layer within each, in ONE
+ * ae_run_jsx call - all the iteration happens inside AE's own JS engine
+ * (no per-composition MCP round trip at all), so it carries none of the
+ * "one more round trip per composition" MCP-timeout risk this codebase
+ * has hit before (see build-project-facts.ts's own pluginReferences doc
+ * comment) - this is a single call regardless of composition count.
+ *
+ * Purely read-only - never intended to run against a session's real
+ * working copy; callers open a disposable scratch copy first (see
+ * apps/worker/src/diagnostics/scan-project-effects-cli.ts). Wrapped in
+ * app.beginUndoGroup/endUndoGroup for the same auditability convention
+ * every other script in this file uses, though nothing here mutates
+ * project state.
+ *
+ * Same effect-enumeration approach as buildInspectLayerTransformScript
+ * (the "ADBE Effect Parade" property group, `.matchName`) - proves an
+ * effect was genuinely APPLIED in the project file, never that its
+ * rendering binary is installed/functional on this machine (see that
+ * function's own doc comment for the same honest limitation). Every
+ * genuine Adobe-native effect's own matchName is "ADBE "-prefixed (a
+ * well-established, consistently observed After Effects scripting
+ * convention, not a documented guarantee this worker can cite a single
+ * Adobe spec for) - a non-"ADBE "-prefixed matchName (e.g. the real
+ * "VIDEOCOPILOT 3DArray" proven for the unrelated Element 3D incident)
+ * is strong, but not absolute, evidence of a third-party plugin. This
+ * script reports the raw matchName for every effect found and lets the
+ * caller apply that judgment - it never itself asserts "plugin-free".
+ */
+export function buildScanProjectEffectsScript(): FixedJsxScript {
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO SCAN_PROJECT_EFFECTS")});
+  var __result = null;
+  try {
+    var __compositions = [];
+    for (var __itemIndex = 1; __itemIndex <= app.project.numItems; __itemIndex++) {
+      var __item = null;
+      try {
+        __item = app.project.item(__itemIndex);
+      } catch (__itemLookupError) {
+        continue;
+      }
+      if (!(__item instanceof CompItem)) {
+        continue;
+      }
+      var __layers = [];
+      for (var __i = 1; __i <= __item.numLayers; __i++) {
+        try {
+          var __layer = __item.layer(__i);
+          var __effects = [];
+          try {
+            var __effectsGroup = __layer.property("ADBE Effect Parade");
+            if (__effectsGroup) {
+              for (var __e = 1; __e <= __effectsGroup.numProperties; __e++) {
+                var __eff = __effectsGroup.property(__e);
+                __effects.push({ name: __eff.name, matchName: __eff.matchName, enabled: __eff.enabled });
+              }
+            }
+          } catch (__effectsError) {
+            // No effects group on this layer type - never fails the rest of the scan.
+          }
+          if (__effects.length > 0) {
+            __layers.push({ layerIndex: __layer.index, layerName: __layer.name, enabled: __layer.enabled, effects: __effects });
+          }
+        } catch (__layerReadError) {
+          // A single unreadable layer never fails the whole scan.
+        }
+      }
+      if (__layers.length > 0) {
+        __compositions.push({ aeProjectItemIndex: __itemIndex, compositionId: __item.id, compositionName: __item.name, layers: __layers });
+      }
+    }
+    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositionsWithEffects: __compositions });
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * The single entry point every caller must use - dispatches on the
  * operation's own `type` (already a closed, Zod-validated discriminated
  * union), so adding a new SceneEditOperationType without a corresponding
