@@ -1,5 +1,6 @@
 import { existsSync, unlinkSync, copyFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { loadWorkerEnv } from "../env.js";
 import { ensureWorkRoot, safeJoin, sessionWorkspacePath } from "../workspace/work-root.js";
 import { sessionWorkingCopyPath } from "../workspace/working-copy.js";
@@ -257,7 +258,20 @@ async function main(): Promise<void> {
 // computeDiagnosticFrameRange) without immediately running main() - main()
 // only runs when this file is executed directly, e.g.
 // `node dist/diagnostics/element3d-ab-test-cli.js`.
-const isDirectlyExecuted = process.argv[1] !== undefined && import.meta.url === `file://${path.resolve(process.argv[1])}`;
+//
+// REAL BUG (2026-09-11, first attempted run on FAHADNAKASH): the previous
+// version of this check built the comparison URL by hand as
+// `file://${path.resolve(process.argv[1])}` - on Windows, path.resolve
+// returns a backslash path (e.g. "C:\DYO-Agent\..."), producing
+// "file://C:\DYO-Agent\..." which can NEVER equal Node's own real
+// import.meta.url for that same file (Node always normalizes to forward
+// slashes with a triple-slash drive prefix and percent-encoding, e.g.
+// "file:///C:/DYO-Agent/..."). isDirectlyExecuted was therefore always
+// false on Windows, main() never ran, and `node ...cli.js` exited 0
+// immediately with no output at all - exactly the symptom observed.
+// pathToFileURL is Node's own platform-correct converter for exactly this
+// comparison; never hand-build a file:// URL again.
+const isDirectlyExecuted = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectlyExecuted) {
   main().catch((error) => {
     fail(error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error));
