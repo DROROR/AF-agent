@@ -1610,6 +1610,129 @@ export function buildResolveCompositionIndexScript(expectedCompositionId: number
 }
 
 /**
+ * Real 2026-09-11 nested-content audit (session a7fee3d9): a full-frame
+ * black cut with opacity=100 and no in/out boundary nearby (comp-1600's
+ * own "Cam Support"/"Camera 1"/"Back"/"Top"/"Element 3D" layers all
+ * proved innocent on THOSE two fronts) is only explainable by something
+ * this worker has never read before - transform animation (a layer/
+ * camera move that changes what's actually visible even though opacity
+ * never changes) or a missing/altered effect (Element 3D is a
+ * third-party plugin; its own effect can exist in the project file while
+ * its rendering binary is absent from THIS machine).
+ *
+ * Reads `.numKeys`/`.keyTime(i)`/`.keyValue(i)` on transform.position/
+ * scale/rotation/anchorPoint - the EXACT same generic Property API this
+ * file's own BUILD_REELS_COMPOSITION/BUILD_HORIZONTAL_COMPOSITION scripts
+ * already read (`transform.position.numKeys`/`transform.scale.numKeys`,
+ * see the "refusing to overwrite existing animation" guard above) and
+ * buildInspectCompositionLayerDetailsScript's own opacity keyframe scan
+ * already reads (`layer.opacity.numKeys`/`.keyTime`/`.keyValue`) - never
+ * a new, unproven ExtendScript pattern. For a CameraLayer, also reads
+ * pointOfInterest/zoom the same generic way (both are ordinary animatable
+ * Property objects on a camera, per the same API).
+ *
+ * Effects are enumerated via the standard `"ADBE Effect Parade"` property
+ * group (already the documented read path for pluginReferences - see
+ * allowed-inspection-queries.ts's own `layer.property.effects` entry,
+ * never previously wired to an actual script until now) - `matchName`
+ * proves an effect (e.g. a Video Copilot Element 3D instance) was
+ * genuinely APPLIED in the original project file. It does NOT prove the
+ * plugin's own rendering binary is currently installed/functional on
+ * this specific machine - ExtendScript's effect object exposes no
+ * documented "is this plugin missing" flag this worker can rely on
+ * without inventing one, so this honestly stops at "applied: yes/no",
+ * never a guessed availability verdict.
+ */
+export function buildInspectLayerTransformScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_LAYER_TRANSFORM")});
+  var __result = null;
+  function __readAnimatableProp(__prop) {
+    try {
+      if (__prop.numKeys > 0) {
+        var __keys = [];
+        for (var __k = 1; __k <= __prop.numKeys; __k++) {
+          __keys.push({ timeSeconds: __prop.keyTime(__k), value: __prop.keyValue(__k) });
+        }
+        return { animated: true, currentValue: __prop.value, keyframes: __keys };
+      }
+      return { animated: false, currentValue: __prop.value, keyframes: null };
+    } catch (__propError) {
+      return null;
+    }
+  }
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition"
+      });
+    } else {
+      var __layers = [];
+      for (var __i = 1; __i <= __comp.numLayers; __i++) {
+        try {
+          var __layer = __comp.layer(__i);
+          var __isCamera = __layer instanceof CameraLayer;
+          var __effects = [];
+          try {
+            var __effectsGroup = __layer.property("ADBE Effect Parade");
+            if (__effectsGroup) {
+              for (var __e = 1; __e <= __effectsGroup.numProperties; __e++) {
+                var __eff = __effectsGroup.property(__e);
+                __effects.push({ name: __eff.name, matchName: __eff.matchName, enabled: __eff.enabled });
+              }
+            }
+          } catch (__effectsError) {
+            // No effects group on this layer type (e.g. some camera/light
+            // configurations) - never fails the rest of the scan.
+          }
+          __layers.push({
+            layerIndex: __layer.index,
+            layerName: __layer.name,
+            enabled: __layer.enabled,
+            threeDLayer: __layer.threeDLayer === true,
+            isCameraLayer: __isCamera,
+            position: __readAnimatableProp(__layer.transform.position),
+            scale: __isCamera ? null : __readAnimatableProp(__layer.transform.scale),
+            rotation: __isCamera ? null : __readAnimatableProp(__layer.transform.rotation),
+            anchorPoint: __readAnimatableProp(__layer.transform.anchorPoint),
+            pointOfInterest: __isCamera ? __readAnimatableProp(__layer.pointOfInterest) : null,
+            zoom: __isCamera ? __readAnimatableProp(__layer.zoom) : null,
+            effects: __effects
+          });
+        } catch (__layerReadError) {
+          // A single unreadable layer never fails the whole scan - same
+          // fail-partial posture as every other read-only inspection
+          // script in this file.
+        }
+      }
+      __result = JSON.stringify({ ok: true, layers: __layers });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * The single entry point every caller must use - dispatches on the
  * operation's own `type` (already a closed, Zod-validated discriminated
  * union), so adding a new SceneEditOperationType without a corresponding

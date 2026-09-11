@@ -11,6 +11,7 @@ import {
   buildInspectCompositionLayerDetailsScript,
   buildFindHostLayersScript,
   buildDescribeCompositionSummaryScript,
+  buildInspectLayerTransformScript,
   buildOpenProjectScript
 } from "../jsx-templates.js";
 
@@ -825,6 +826,155 @@ describe("buildDescribeCompositionSummaryScript (real 2026-09-10 incident, sessi
 
   it("never contains a `break` - scans every layer to completion, same convention as buildFindHostLayersScript", () => {
     const script = buildDescribeCompositionSummaryScript(1, COMP_NAME);
+    expect(script).not.toMatch(/break;/);
+  });
+});
+
+describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit, session a7fee3d9: comp-1600's own Camera 1/Element 3D layers)", () => {
+  const TRANSFORM_APP_SETUP = `
+    function CompItem() {}
+    function AVLayer() {}
+    function CameraLayer() {}
+
+    function makeAnimatableProp(staticValue, keyframes) {
+      var __keys = keyframes || [];
+      return {
+        numKeys: __keys.length,
+        value: staticValue,
+        keyTime: function (i) { return __keys[i - 1].time; },
+        keyValue: function (i) { return __keys[i - 1].value; }
+      };
+    }
+
+    function makeEffectsGroup(effects) {
+      return {
+        numProperties: effects.length,
+        property: function (i) {
+          var e = effects[i - 1];
+          return { name: e.name, matchName: e.matchName, enabled: e.enabled };
+        }
+      };
+    }
+
+    var __camera = new CameraLayer();
+    __camera.index = 2;
+    __camera.name = "Camera 1";
+    __camera.enabled = true;
+    __camera.threeDLayer = true;
+    __camera.transform = {
+      position: makeAnimatableProp([960, 540, -1000], [
+        { time: 0, value: [960, 540, -1000] },
+        { time: 2.612, value: [960, 540, -300] }
+      ]),
+      anchorPoint: makeAnimatableProp([0, 0, 0], [])
+    };
+    __camera.pointOfInterest = makeAnimatableProp([960, 540, 0], []);
+    __camera.zoom = makeAnimatableProp(2779, [
+      { time: 0, value: 2779 },
+      { time: 2.612, value: 800 }
+    ]);
+
+    var __elementLayer = new AVLayer();
+    __elementLayer.index = 5;
+    __elementLayer.name = "Element 3D";
+    __elementLayer.enabled = true;
+    __elementLayer.threeDLayer = false;
+    __elementLayer.transform = {
+      position: makeAnimatableProp([960, 540], []),
+      scale: makeAnimatableProp([100, 100], []),
+      rotation: makeAnimatableProp(0, []),
+      anchorPoint: makeAnimatableProp([0, 0], [])
+    };
+    __elementLayer.property = function (name) {
+      if (name === "ADBE Effect Parade") {
+        return makeEffectsGroup([{ name: "Element", matchName: "Video Copilot.Element", enabled: true }]);
+      }
+      return null;
+    };
+
+    var __brokenLayer = new AVLayer();
+    __brokenLayer.index = 6;
+    __brokenLayer.name = "Broken Layer";
+    Object.defineProperty(__brokenLayer, "transform", { get: function () { throw new Error("simulated unreadable layer"); } });
+
+    var __fakeComp = new CompItem();
+    __fakeComp.name = ${JSON.stringify(COMP_NAME)};
+    __fakeComp.numLayers = 3;
+    var __layersByIndex = { 1: __camera, 2: __elementLayer, 3: __brokenLayer };
+    __fakeComp.layer = function (i) { return __layersByIndex[i]; };
+
+    var app = {
+      beginUndoGroup: function () {},
+      endUndoGroup: function () {},
+      project: { item: function (i) { return i === 1 ? __fakeComp : null; } }
+    };
+  `;
+
+  it("reports a camera's own animated position and zoom keyframes, with scale/rotation left null (cameras have no such properties)", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    const camera = result.layers.find((l: { layerName: string }) => l.layerName === "Camera 1");
+    expect(camera.isCameraLayer).toBe(true);
+    expect(camera.scale).toBeNull();
+    expect(camera.rotation).toBeNull();
+    expect(camera.position.animated).toBe(true);
+    expect(camera.position.keyframes).toEqual([
+      { timeSeconds: 0, value: [960, 540, -1000] },
+      { timeSeconds: 2.612, value: [960, 540, -300] }
+    ]);
+    expect(camera.zoom.animated).toBe(true);
+    expect(camera.zoom.keyframes).toEqual([
+      { timeSeconds: 0, value: 2779 },
+      { timeSeconds: 2.612, value: 800 }
+    ]);
+  });
+
+  it("reports a non-camera layer's static (non-animated) transform properties and its real applied effects, with pointOfInterest/zoom left null", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP);
+    const result = JSON.parse(resultText);
+    const element = result.layers.find((l: { layerName: string }) => l.layerName === "Element 3D");
+    expect(element.isCameraLayer).toBe(false);
+    expect(element.pointOfInterest).toBeNull();
+    expect(element.zoom).toBeNull();
+    expect(element.position).toEqual({ animated: false, currentValue: [960, 540], keyframes: null });
+    expect(element.scale).toEqual({ animated: false, currentValue: [100, 100], keyframes: null });
+    expect(element.effects).toEqual([{ name: "Element", matchName: "Video Copilot.Element", enabled: true }]);
+  });
+
+  it("skips (rather than fails the whole scan for) a layer whose transform cannot be read - best-effort, never crashes", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const resultText = runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.layers.map((l: { layerName: string }) => l.layerName)).toEqual(["Camera 1", "Element 3D"]);
+  });
+
+  it("resolves and name-verifies the composition before touching anything, the same as every other script", () => {
+    const script = buildInspectLayerTransformScript(1, "Wrong Expected Name");
+    const resultText = runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("refusing to report facts about the wrong composition");
+  });
+
+  it("is deterministic - the same composition index/name always produces byte-identical JSX", () => {
+    const a = buildInspectLayerTransformScript(3, COMP_NAME);
+    const b = buildInspectLayerTransformScript(3, COMP_NAME);
+    expect(a).toBe(b);
+  });
+
+  it("never mutates the project - contains no .setSource/.remove()/.setValue call", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    expect(script).not.toMatch(/\.setSource\s*\(/);
+    expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
+    expect(script).not.toMatch(/\.setValue\s*\(/);
+  });
+
+  it("never contains a `break` - scans every layer to completion, same convention as buildDescribeCompositionSummaryScript", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
     expect(script).not.toMatch(/break;/);
   });
 });

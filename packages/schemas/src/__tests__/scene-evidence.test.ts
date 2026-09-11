@@ -62,6 +62,8 @@ function validResponse(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
     hostLayerRecordsFailureReason: null,
     compositionSummary: null,
     compositionSummaryFailureReason: null,
+    layerTransformFacts: null,
+    layerTransformFactsFailureReason: null,
     capturedAt: "2026-08-26T00:00:00.000Z",
     ...overrides
   };
@@ -427,5 +429,83 @@ describe("compositionSummarySchema / sceneEvidenceResponseSchema - compositionSu
     if (!parsedFailed.success) return;
     expect(parsedFailed.data.compositionSummary).toBeNull();
     expect(parsedFailed.data.compositionSummaryFailureReason).toContain("timed out");
+  });
+});
+
+describe("layerTransformFactSchema / sceneEvidenceResponseSchema - layerTransformFacts (real 2026-09-11 nested-content audit, session a7fee3d9)", () => {
+  it("accepts a real, fully-populated set of layer transform facts, including an animated camera and a non-camera layer with no camera-only properties", () => {
+    const response = validResponse({
+      layerTransformFacts: [
+        {
+          layerIndex: 2,
+          layerName: "Camera 1",
+          enabled: true,
+          threeDLayer: true,
+          isCameraLayer: true,
+          position: { animated: true, currentValue: [960, 540, -1000], keyframes: [{ timeSeconds: 0, value: [960, 540, -1000] }, { timeSeconds: 2.612, value: [960, 540, -300] }] },
+          scale: null,
+          rotation: null,
+          anchorPoint: { animated: false, currentValue: [0, 0, 0], keyframes: null },
+          pointOfInterest: { animated: false, currentValue: [960, 540, 0], keyframes: null },
+          zoom: { animated: true, currentValue: 2779, keyframes: [{ timeSeconds: 0, value: 2779 }, { timeSeconds: 2.612, value: 800 }] },
+          effects: []
+        },
+        {
+          layerIndex: 5,
+          layerName: "Element 3D",
+          enabled: true,
+          threeDLayer: false,
+          isCameraLayer: false,
+          position: { animated: false, currentValue: [960, 540], keyframes: null },
+          scale: { animated: false, currentValue: [100, 100], keyframes: null },
+          rotation: { animated: false, currentValue: 0, keyframes: null },
+          anchorPoint: { animated: false, currentValue: [0, 0], keyframes: null },
+          pointOfInterest: null,
+          zoom: null,
+          effects: [{ name: "Element", matchName: "Video Copilot.Element", enabled: true }]
+        }
+      ]
+    });
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.layerTransformFacts).toHaveLength(2);
+    expect(parsed.data.layerTransformFacts?.[0]?.zoom?.keyframes).toHaveLength(2);
+    expect(parsed.data.layerTransformFacts?.[1]?.effects[0]?.matchName).toBe("Video Copilot.Element");
+  });
+
+  it("Worker/API version-skew tolerance: accepts layerTransformFacts/layerTransformFactsFailureReason being entirely absent - normalizes to null, never a hard parse failure", () => {
+    const response = {
+      verifiedSourceProjectSha256: SHA,
+      manifestCompositionId: "comp-1600",
+      aeProjectItemIndex: 30,
+      compositionName: "Pre-comp 2",
+      layers: [],
+      preview: null,
+      previewFailureReason: null,
+      layerDetails: null,
+      layerDetailsFailureReason: null,
+      capturedAt: "2026-09-11T00:00:00.000Z"
+    };
+    const parsed = sceneEvidenceResponseSchema.safeParse(response);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.layerTransformFacts).toBeNull();
+    expect(parsed.data.layerTransformFactsFailureReason).toBeNull();
+  });
+
+  it("a genuinely empty layerTransformFacts scan is distinct from a failed one", () => {
+    const empty = validResponse({ layerTransformFacts: [] });
+    const parsedEmpty = sceneEvidenceResponseSchema.safeParse(empty);
+    expect(parsedEmpty.success).toBe(true);
+    if (!parsedEmpty.success) return;
+    expect(parsedEmpty.data.layerTransformFacts).toEqual([]);
+
+    const failed = validResponse({ layerTransformFacts: null, layerTransformFactsFailureReason: "ae_run_jsx failed: MCP error -32001: Request timed out" });
+    const parsedFailed = sceneEvidenceResponseSchema.safeParse(failed);
+    expect(parsedFailed.success).toBe(true);
+    if (!parsedFailed.success) return;
+    expect(parsedFailed.data.layerTransformFacts).toBeNull();
+    expect(parsedFailed.data.layerTransformFactsFailureReason).toContain("timed out");
   });
 });

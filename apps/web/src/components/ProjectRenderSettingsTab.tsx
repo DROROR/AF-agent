@@ -413,7 +413,7 @@ function DescribeCompositionTimelineCard({
  * file: only ever dispatches INSPECT_SCENE_EVIDENCE, never mutates
  * anything.
  */
-type DescribeAnyCompositionMode = "timing" | "layerDetails";
+type DescribeAnyCompositionMode = "timing" | "layerDetails" | "transforms";
 
 function DescribeAnyCompositionCard({ projectId, session }: { projectId: string; session: ExecutionSessionDto | null }): ReactElement | null {
   const { data: dashboardStatus } = useDashboardStatusContext();
@@ -443,7 +443,11 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
       projectId,
       scenePlanId,
       previewTimingDiscoverCompositionId: targetId,
-      ...(mode === "timing" ? { previewTimingDescribeCompositionSummary: true } : { previewTimingDiscoverLayerDetails: true })
+      ...(mode === "timing"
+        ? { previewTimingDescribeCompositionSummary: true }
+        : mode === "layerDetails"
+          ? { previewTimingDiscoverLayerDetails: true }
+          : { previewTimingDescribeLayerTransforms: true })
     });
     if (!dispatched.ok) {
       setIsDispatching(false);
@@ -484,16 +488,45 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
           setResult({ jobId: dispatched.data.jobId, text });
           return;
         }
-        if (!parsedResult.data.layerDetails) {
-          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerDetailsFailureReason ?? "no layerDetails in result" });
+        if (mode === "layerDetails") {
+          if (!parsedResult.data.layerDetails) {
+            setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerDetailsFailureReason ?? "no layerDetails in result" });
+            return;
+          }
+          const layerLines = parsedResult.data.layerDetails
+            .map((l) => {
+              const kf = l.opacityKeyframes ? l.opacityKeyframes.map((k) => `${k.timeSeconds.toFixed(3)}s->${k.valuePercent}%`).join(", ") : "none";
+              return `#${l.layerIndex} "${l.layerName}" type=${l.layerType ?? "?"} opacity=${l.opacityStatic ?? "keyframed"} opacityKeyframes=[${kf}] stretch=${l.stretchPercent ?? "?"}% timeRemap=${l.timeRemapEnabled ?? "?"}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}` : ""}${l.sourceText ? ` text=${JSON.stringify(l.sourceText)}` : ""}`;
+            })
+            .join("\n");
+          setResult({ jobId: dispatched.data.jobId, text: layerLines });
           return;
         }
-        const layerLines = parsedResult.data.layerDetails
+        if (!parsedResult.data.layerTransformFacts) {
+          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerTransformFactsFailureReason ?? "no layerTransformFacts in result" });
+          return;
+        }
+        const formatProp = (name: string, p: (typeof parsedResult.data.layerTransformFacts)[number]["position"]): string => {
+          if (!p) return `${name}=n/a`;
+          if (!p.animated) return `${name}=${JSON.stringify(p.currentValue)}`;
+          const kf = (p.keyframes ?? []).map((k) => `${k.timeSeconds.toFixed(3)}s->${JSON.stringify(k.value)}`).join(", ");
+          return `${name}=ANIMATED[${kf}]`;
+        };
+        const layerLines = parsedResult.data.layerTransformFacts
           .map((l) => {
-            const kf = l.opacityKeyframes ? l.opacityKeyframes.map((k) => `${k.timeSeconds.toFixed(3)}s->${k.valuePercent}%`).join(", ") : "none";
-            return `#${l.layerIndex} "${l.layerName}" type=${l.layerType ?? "?"} opacity=${l.opacityStatic ?? "keyframed"} opacityKeyframes=[${kf}] stretch=${l.stretchPercent ?? "?"}% timeRemap=${l.timeRemapEnabled ?? "?"}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}` : ""}${l.sourceText ? ` text=${JSON.stringify(l.sourceText)}` : ""}`;
+            const effects = l.effects.length > 0 ? l.effects.map((e) => `${e.name}(${e.matchName})${e.enabled ? "" : " DISABLED"}`).join(", ") : "none";
+            return [
+              `#${l.layerIndex} "${l.layerName}" enabled=${l.enabled} camera=${l.isCameraLayer} 3d=${l.threeDLayer}`,
+              `  ${formatProp("position", l.position)}`,
+              `  ${formatProp("scale", l.scale)}`,
+              `  ${formatProp("rotation", l.rotation)}`,
+              `  ${formatProp("anchorPoint", l.anchorPoint)}`,
+              `  ${formatProp("pointOfInterest", l.pointOfInterest)}`,
+              `  ${formatProp("zoom", l.zoom)}`,
+              `  effects=[${effects}]`
+            ].join("\n");
           })
-          .join("\n");
+          .join("\n\n");
         setResult({ jobId: dispatched.data.jobId, text: layerLines });
         return;
       }
@@ -505,8 +538,9 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
     <Card className="overview-section">
       <CardHeader title="Describe any composition (by manifest composition ID)" />
       <p>
-        Read-only. Reports either the real, worker-observed duration/work-area and every top-level layer&apos;s own timing (&quot;Timing&quot;), or each top-level
-        layer&apos;s own opacity/keyframes/stretch/source (&quot;Layer details&quot;), for ANY composition in this project&apos;s manifest - e.g. a nested scene like
+        Read-only. Reports the real, worker-observed duration/work-area and every top-level layer&apos;s own timing (&quot;Timing&quot;), each top-level
+        layer&apos;s own opacity/keyframes/stretch/source (&quot;Layer details&quot;), or each top-level layer&apos;s own position/scale/rotation/anchor-point/camera
+        zoom keyframes plus applied effects (&quot;Transform/Camera/Effects&quot;), for ANY composition in this project&apos;s manifest - e.g. a nested scene like
         &quot;comp-1&quot; (Scene 1) or a deeper precomp like &quot;comp-1600&quot;, not just the configured Landscape/Reels masters.
       </p>
       {!worker ? <EmptyState title="No worker available" description="This project's assigned worker is not currently reporting INSPECT_SCENE_EVIDENCE." /> : null}
@@ -518,11 +552,12 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
         <Select
           id="describe-any-composition-mode"
           value={mode}
-          onChange={(e) => setMode(e.target.value === "layerDetails" ? "layerDetails" : "timing")}
+          onChange={(e) => setMode(e.target.value === "layerDetails" ? "layerDetails" : e.target.value === "transforms" ? "transforms" : "timing")}
           disabled={isDispatching}
         >
           <option value="timing">Timing (duration/work-area/layer in-out)</option>
           <option value="layerDetails">Layer details (opacity/keyframes/stretch/source)</option>
+          <option value="transforms">Transform/Camera/Effects (position/scale/rotation/zoom/plugins)</option>
         </Select>
       </Field>
       <div className="overview-actions">

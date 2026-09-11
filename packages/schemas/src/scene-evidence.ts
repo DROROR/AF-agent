@@ -138,7 +138,18 @@ export const sceneEvidenceRequestSchema = z
      * exclusive with discoverLayerDetails/findHostLayersForChildCompositionId
      * by construction (the resolver never sets more than one).
      */
-    describeCompositionSummary: z.boolean().optional()
+    describeCompositionSummary: z.boolean().optional(),
+    /**
+     * Real 2026-09-11 nested-content audit (session a7fee3d9) - a full-
+     * frame black cut with opacity=100 and no in/out boundary nearby is
+     * only explainable by transform animation (position/scale/rotation/
+     * anchorPoint, or a camera's own pointOfInterest/zoom) or a missing/
+     * altered effect (buildInspectLayerTransformScript). Mutually
+     * exclusive with discoverLayerDetails/describeCompositionSummary/
+     * findHostLayersForChildCompositionId by construction (the resolver
+     * never sets more than one).
+     */
+    describeLayerTransforms: z.boolean().optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
@@ -360,6 +371,63 @@ export const compositionSummarySchema = z
   .strict();
 export type CompositionSummary = z.infer<typeof compositionSummarySchema>;
 
+/** A Property's own value (position/scale/anchorPoint are 2- or 3-element arrays; rotation/zoom are plain numbers) - never re-shaped, passed through exactly as AE's own scripting API returns it. */
+const propertyValueSchema = z.union([z.number(), z.array(z.number())]);
+
+/** One recorded keyframe on an animatable Property, from `numKeys`/`keyTime`/`keyValue` - the exact same generic Property API this module's own opacityKeyframes (layerDetailFactSchema) already reads, applied to transform/camera properties instead of opacity. */
+const propertyKeyframeSchema = z
+  .object({
+    timeSeconds: z.number(),
+    value: propertyValueSchema
+  })
+  .strict();
+
+/** Real 2026-09-11 nested-content audit (session a7fee3d9) - null only when the property itself could not be read (e.g. a layer type that genuinely lacks it); `animated: false` is a real, confirmed "this property has no keyframes", never a failed read. */
+export const animatablePropertyFactSchema = z
+  .object({
+    animated: z.boolean(),
+    currentValue: propertyValueSchema,
+    keyframes: z.array(propertyKeyframeSchema).nullable()
+  })
+  .strict();
+export type AnimatablePropertyFact = z.infer<typeof animatablePropertyFactSchema>;
+
+/** One effect applied to a layer, from the standard "ADBE Effect Parade" property group - `matchName` proves the effect (e.g. a Video Copilot Element 3D instance) was genuinely applied in the original project file. Does NOT prove the plugin's own rendering binary is installed/functional on this machine - ExtendScript exposes no documented "is this plugin missing" flag this worker relies on; that remains a real, honest limitation (see buildInspectLayerTransformScript's own doc comment). */
+export const layerEffectFactSchema = z
+  .object({
+    name: z.string(),
+    matchName: z.string(),
+    enabled: z.boolean()
+  })
+  .strict();
+export type LayerEffectFact = z.infer<typeof layerEffectFactSchema>;
+
+/**
+ * Real 2026-09-11 nested-content audit (session a7fee3d9) - one top-level
+ * layer's transform/camera/effects facts, from `describeLayerTransforms`'s
+ * own scan (buildInspectLayerTransformScript). `scale`/`rotation` are
+ * null for a camera layer (cameras have no such properties in AE's own
+ * scripting model); `pointOfInterest`/`zoom` are null for every non-camera
+ * layer.
+ */
+export const layerTransformFactSchema = z
+  .object({
+    layerIndex: z.number().int().positive(),
+    layerName: z.string(),
+    enabled: z.boolean(),
+    threeDLayer: z.boolean(),
+    isCameraLayer: z.boolean(),
+    position: animatablePropertyFactSchema.nullable(),
+    scale: animatablePropertyFactSchema.nullable(),
+    rotation: animatablePropertyFactSchema.nullable(),
+    anchorPoint: animatablePropertyFactSchema.nullable(),
+    pointOfInterest: animatablePropertyFactSchema.nullable(),
+    zoom: animatablePropertyFactSchema.nullable(),
+    effects: z.array(layerEffectFactSchema)
+  })
+  .strict();
+export type LayerTransformFact = z.infer<typeof layerTransformFactSchema>;
+
 export const scenePreviewSchema = z
   .object({
     timestampSeconds: z.number().nonnegative(),
@@ -435,6 +503,24 @@ export const sceneEvidenceResponseSchema = z
       .transform((value) => value ?? null),
     /** Present only when describeCompositionSummary was requested but the script call could not complete - kept distinct from `compositionSummary: null` meaning "not requested". Same absent-key tolerance as compositionSummary above. */
     compositionSummaryFailureReason: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /**
+     * Real 2026-09-11 nested-content audit (session a7fee3d9) - null
+     * whenever `describeLayerTransforms` was not requested, or the scan
+     * failed (see `layerTransformFactsFailureReason` below). Same
+     * absent-key Worker/API version-skew tolerance as every other Preview
+     * Timing Analysis field on this schema.
+     */
+    layerTransformFacts: z
+      .array(layerTransformFactSchema)
+      .nullable()
+      .optional()
+      .transform((value) => value ?? null),
+    /** Present only when describeLayerTransforms was requested but the script call could not complete - kept distinct from `layerTransformFacts: null` meaning "not requested". Same absent-key tolerance as layerTransformFacts above. */
+    layerTransformFactsFailureReason: z
       .string()
       .nullable()
       .optional()

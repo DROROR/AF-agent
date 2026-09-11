@@ -223,7 +223,17 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * previewTimingFindHostLayersChildCompositionId - the resolver
        * checks this field first, never sets more than one.
        */
-      previewTimingDiscoverLayerDetails: z.boolean().optional()
+      previewTimingDiscoverLayerDetails: z.boolean().optional(),
+      /**
+       * Real 2026-09-11 nested-content audit (session a7fee3d9) - a
+       * FOURTH thing previewTimingDiscoverCompositionId can be used for:
+       * run the same generic describeLayerTransforms scan (position/
+       * scale/rotation/anchorPoint/camera-zoom keyframes plus effects per
+       * top-level layer) against an ARBITRARY manifest composition.
+       * Mutually exclusive with the other three sub-modes by
+       * construction - the resolver never sets more than one.
+       */
+      previewTimingDescribeLayerTransforms: z.boolean().optional()
     })
     .strict(),
   z.object({

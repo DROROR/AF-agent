@@ -225,6 +225,31 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     });
   }
 
+  // CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9): the
+  // same durable-CompItem.id resolution CREATE_PREVIEW/RENDER/
+  // INSPECT_SCENE_EVIDENCE already use - request.aeProjectItemIndex is
+  // only ever a snapshot of the manifest's own last-observed ordinal
+  // position, and a LATER BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_COMPOSITION
+  // shifts it (proven: comp-1/"Scene 1"). Resolved ONCE here, before any
+  // operation in the loop below, never per-operation - the composition's
+  // own real index cannot change again mid-job (only a LATER, separate
+  // job's own composition-creating operation could shift it further).
+  // `resolved: false` (no durable id - e.g. a BUILD_HORIZONTAL_COMPOSITION/
+  // BUILD_REELS_COMPOSITION-derived master) keeps request.aeProjectItemIndex
+  // unchanged - identical to this executor's prior behavior, no regression.
+  const resolvedIndex = await deps.aeEditBridge.resolveCompositionIndex(request.manifestCompositionId, request.compositionName);
+  if (!resolvedIndex.ok) {
+    checkpoint = markFailed(checkpoint, `could not re-resolve composition "${request.manifestCompositionId}" by its durable id: ${resolvedIndex.failureReason}`, deps.now());
+    return finish({
+      sourceProjectSha256: workingCopy.sourceProjectSha256,
+      workingProjectPath: workingCopy.workingProjectPath,
+      workingProjectSha256: workingCopy.workingProjectSha256,
+      previewFramePath: null,
+      previewTimestampSeconds: null
+    });
+  }
+  const effectiveAeProjectItemIndex = resolvedIndex.resolved ? resolvedIndex.aeProjectItemIndex : request.aeProjectItemIndex;
+
   let pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
   while (pendingIndex !== null) {
     const intent = request.operations[pendingIndex];
@@ -259,7 +284,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     const operation = resolved.operation;
 
     const outcome = await deps.aeEditBridge.applyOperation({
-      aeProjectItemIndex: request.aeProjectItemIndex,
+      aeProjectItemIndex: effectiveAeProjectItemIndex,
       compositionName: request.compositionName,
       operation
     });
@@ -469,7 +494,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   }
 
   const previewResult = await deps.previewCapture.capture({
-    aeProjectItemIndex: request.aeProjectItemIndex,
+    aeProjectItemIndex: effectiveAeProjectItemIndex,
     timestampSeconds: request.previewTimestampSeconds ?? DEFAULT_PREVIEW_TIMESTAMP_SECONDS
   });
   if (!previewResult.ok) {

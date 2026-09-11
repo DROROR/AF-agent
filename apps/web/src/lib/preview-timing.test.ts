@@ -128,6 +128,8 @@ function sceneEvidence(overrides: Partial<SceneEvidenceResponse> = {}): SceneEvi
     hostLayerRecordsFailureReason: null,
     compositionSummary: null,
     compositionSummaryFailureReason: null,
+    layerTransformFacts: null,
+    layerTransformFactsFailureReason: null,
     capturedAt: NOW_ISO,
     ...overrides
   };

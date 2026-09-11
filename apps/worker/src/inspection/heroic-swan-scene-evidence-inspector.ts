@@ -1,12 +1,17 @@
 import { stat } from "node:fs/promises";
 import { z } from "zod";
-import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord, CompositionSummary } from "@dyo/schemas";
-import { compositionSummarySchema, hostLayerRecordSchema, layerDetailFactSchema } from "@dyo/schemas";
+import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord, CompositionSummary, LayerTransformFact } from "@dyo/schemas";
+import { compositionSummarySchema, hostLayerRecordSchema, layerDetailFactSchema, layerTransformFactSchema } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
-import { buildDescribeCompositionSummaryScript, buildFindHostLayersScript, buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
+import {
+  buildDescribeCompositionSummaryScript,
+  buildFindHostLayersScript,
+  buildInspectCompositionLayerDetailsScript,
+  buildInspectLayerTransformScript
+} from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
@@ -129,6 +134,41 @@ async function fetchCompositionSummary(
   };
 }
 
+const inspectLayerTransformScriptResultSchema = z.union([
+  z.object({ ok: z.literal(true), layers: z.array(layerTransformFactSchema) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/**
+ * Real 2026-09-11 nested-content audit (session a7fee3d9) - best-effort,
+ * never throws, mirrors fetchCompositionSummary's own shape exactly. A
+ * failure here is reported via layerTransformFactsFailureReason and
+ * never fails the rest of the evidence result.
+ */
+async function fetchLayerTransforms(
+  client: HeroicSwanMcpClient,
+  aeProjectItemIndex: number,
+  compositionName: string
+): Promise<{ ok: true; layers: LayerTransformFact[] } | { ok: false; reason: string }> {
+  const script = buildInspectLayerTransformScript(aeProjectItemIndex, compositionName);
+  const result = await client.runFixedInspectionScript(script);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  const parsed = inspectLayerTransformScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success) {
+    return { ok: false, reason: `inspect-layer-transform script response did not match the expected shape: ${parsed.error.message}` };
+  }
+  if (!parsed.data.ok) {
+    return { ok: false, reason: parsed.data.failureReason };
+  }
+  return { ok: true, layers: parsed.data.layers };
+}
+
 /**
  * Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B).
  * Reaches ae-mcp only through HeroicSwanMcpClient's allowlisted
@@ -231,7 +271,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let effectiveAeProjectItemIndex = request.aeProjectItemIndex;
       const stableNumericId = parseStableCompositionNumericId(request.manifestCompositionId);
       if (stableNumericId !== null) {
-        const resolved = await resolveCompositionIndex(client, stableNumericId, request.compositionName);
+        const resolved = await resolveCompositionIndex((script) => client.runFixedInspectionScript(script), stableNumericId, request.compositionName);
         if (!resolved.ok) {
           return { kind: "failure", reason: `could not re-resolve composition "${request.manifestCompositionId}" by its durable id: ${resolved.reason}` };
         }
@@ -381,6 +421,17 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         }
       }
 
+      let layerTransformFacts: LayerTransformFact[] | null = null;
+      let layerTransformFactsFailureReason: string | null = null;
+      if (request.describeLayerTransforms === true) {
+        const transformsResult = await fetchLayerTransforms(client, effectiveAeProjectItemIndex, parsedComp.value.name);
+        if (transformsResult.ok) {
+          layerTransformFacts = transformsResult.layers;
+        } else {
+          layerTransformFactsFailureReason = transformsResult.reason;
+        }
+      }
+
       return {
         kind: "evidence",
         response: {
@@ -397,6 +448,8 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           hostLayerRecordsFailureReason,
           compositionSummary,
           compositionSummaryFailureReason,
+          layerTransformFacts,
+          layerTransformFactsFailureReason,
           capturedAt: new Date().toISOString()
         }
       };

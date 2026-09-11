@@ -264,4 +264,91 @@ describe("NotAvailableAeEditBridge", () => {
     );
     await expect(bridge.saveProject()).rejects.toBeInstanceOf(AeMutationTransportUnavailableError);
   });
+
+  it("never fabricates a result for resolveCompositionIndex either", async () => {
+    const bridge = new NotAvailableAeEditBridge();
+    await expect(bridge.resolveCompositionIndex("comp-1", COMP_NAME)).rejects.toBeInstanceOf(AeMutationTransportUnavailableError);
+  });
+});
+
+/**
+ * CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9): the
+ * same durable-CompItem.id resolution CREATE_PREVIEW/RENDER/
+ * INSPECT_SCENE_EVIDENCE already use, now on EXECUTE_FRAME's own
+ * mutation channel (real 2026-09-11 EXECUTE_FRAME durable-identity fix).
+ * Deliberately bypasses this bridge's own `runScript` (that helper's
+ * scriptResultSchema expects the mutation-script envelope
+ * {ok,previousValue,resultingValue,failureReason} - the shared resolve
+ * script returns its own top-level fields directly, see
+ * resolve-composition-index.ts) - these tests prove the real
+ * connect/run/close lifecycle around that separate path.
+ */
+describe("HeroicSwanAeEditBridge.resolveCompositionIndex (real 2026-09-11 EXECUTE_FRAME durable-identity fix)", () => {
+  it("never even connects to ae-mcp when manifestCompositionId carries no durable numeric id (e.g. a BUILD_HORIZONTAL_COMPOSITION-derived master) - resolved:false, no regression", async () => {
+    const fake = new FakeMutationClient({ ok: true, content: [] });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.resolveCompositionIndex("landscape-master-derived-abc123", COMP_NAME);
+
+    expect(result).toEqual({ ok: true, resolved: false });
+    expect(fake.connectCalls).toBe(0);
+  });
+
+  it("resolves a real durable numeric id to its current aeProjectItemIndex, and always closes the client", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resolvedAeProjectItemIndex: 48, name: COMP_NAME, widthPx: 1920, heightPx: 1080, frameRate: 29.97, durationSeconds: 7.007 })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.resolveCompositionIndex("comp-1", COMP_NAME);
+
+    expect(result).toEqual({ ok: true, resolved: true, aeProjectItemIndex: 48 });
+    expect(fake.connectCalls).toBe(1);
+    expect(fake.closeCalls).toBe(1);
+  });
+
+  it("fails closed with the script's own honest reason when the id no longer resolves to anything - never fabricates a resolved index", async () => {
+    const fake = new FakeMutationClient({ ok: true, content: hostRunJsxContent({ ok: false, failureReason: "no composition with id 1 exists in this project" }) });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.resolveCompositionIndex("comp-1", COMP_NAME);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failureReason).toContain("no composition with id 1 exists");
+    expect(fake.closeCalls).toBe(1);
+  });
+
+  it("fails closed (and still closes the client) when the mutation call itself errors", async () => {
+    const fake = new FakeMutationClient({ ok: false, error: { code: "TOOL_ERROR", message: "simulated ae_run_jsx failure" } });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.resolveCompositionIndex("comp-1", COMP_NAME);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failureReason).toContain("simulated ae_run_jsx failure");
+    expect(fake.closeCalls).toBe(1);
+  });
+
+  it("fails closed when connect() itself throws, and still closes the client", async () => {
+    const throwingClient: AeMutationClient = {
+      connect: async () => {
+        throw new Error("simulated connect failure");
+      },
+      close: async () => {},
+      runFixedOperation: async () => ({ ok: true, content: [] })
+    };
+    let closeCalls = 0;
+    const trackedClient: AeMutationClient = { ...throwingClient, close: async () => { closeCalls++; } };
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => trackedClient });
+
+    const result = await bridge.resolveCompositionIndex("comp-1", COMP_NAME);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failureReason).toContain("could not connect to ae-mcp");
+    expect(closeCalls).toBe(1);
+  });
 });

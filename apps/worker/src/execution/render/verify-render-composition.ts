@@ -153,7 +153,7 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
       let effectiveAeProjectItemIndex = params.aeProjectItemIndex;
       const stableNumericId = parseStableCompositionNumericId(params.manifestCompositionId);
       if (stableNumericId !== null) {
-        const resolved = await resolveCompositionIndex(client, stableNumericId, params.compositionName);
+        const resolved = await resolveCompositionIndex((script) => client.runFixedInspectionScript(script), stableNumericId, params.compositionName);
         if (!resolved.ok) {
           return { ok: false, reason: `could not re-resolve composition "${params.manifestCompositionId}" by its durable id: ${resolved.reason}` };
         }

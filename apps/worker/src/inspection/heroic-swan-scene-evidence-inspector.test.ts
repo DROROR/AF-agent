@@ -58,7 +58,7 @@ async function writeFakeServer(
     captureShape?: "image" | "fallback" | "none";
     previewFilePath?: string;
     /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "compositionSummary" returns a real {ok:true, compDurationSeconds, ...} envelope matching buildDescribeCompositionSummaryScript's own response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
-    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "error";
+    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
     /** Real 2026-09-11 incident fix - overrides the resolve-by-id script's own canned response. "drifted" simulates the real incident: the id resolves to a DIFFERENT index than aeProjectItemIndex requested (index 48, not 14), proving the inspector uses the freshly-resolved index rather than the stale one. "notFound" simulates the id no longer existing at all. Default (omitted) resolves to the same index/name ae_get_composition already reports - every pre-existing test's own behavior, unchanged. */
@@ -168,9 +168,24 @@ async function writeFakeServer(
                   { layerIndex: 1, layerName: "Scene 1", enabled: true, inPointSeconds: 1.635, outPointSeconds: 8.642, startTimeSeconds: 1.635, sourceCompositionId: "comp-1", sourceDurationSeconds: 7.007007007007 }
                 ]
               }) }) }] };`
-            : options.runJsxResult === "error"
-              ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
-              : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
+            : options.runJsxResult === "layerTransforms"
+              ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({
+                  ok: true,
+                  layers: [
+                    {
+                      layerIndex: 2, layerName: "Camera 1", enabled: true, threeDLayer: true, isCameraLayer: true,
+                      position: { animated: true, currentValue: [960, 540, -1000], keyframes: [{ timeSeconds: 0, value: [960, 540, -1000] }, { timeSeconds: 2.612, value: [960, 540, -300] }] },
+                      scale: null, rotation: null,
+                      anchorPoint: { animated: false, currentValue: [0, 0, 0], keyframes: null },
+                      pointOfInterest: { animated: false, currentValue: [960, 540, 0], keyframes: null },
+                      zoom: { animated: true, currentValue: 2779, keyframes: [{ timeSeconds: 0, value: 2779 }, { timeSeconds: 2.612, value: 800 }] },
+                      effects: []
+                    }
+                  ]
+                }) }) }] };`
+              : options.runJsxResult === "error"
+                ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
+                : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
     }
   });
 
@@ -411,6 +426,48 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.response.compositionSummary).toBeNull();
     expect(result.response.compositionSummaryFailureReason).toMatch(/ae_run_jsx failed/);
     // A failed composition-summary scan never fails the rest of the evidence result.
+    expect(result.response.layers).toHaveLength(1);
+  });
+
+  /**
+   * Real 2026-09-11 nested-content audit (session a7fee3d9) - comp-1600's
+   * own Camera 1 layer is exactly this shape: an animated 3D camera
+   * position/zoom, no scale/rotation (cameras have none).
+   */
+  it("live QA: successfully parses real layer transform/camera facts returned by ae_run_jsx into response.layerTransformFacts when describeLayerTransforms is requested", async () => {
+    await writeFakeServer(dir, { runJsxResult: "layerTransforms" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeLayerTransforms: true }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layerTransformFactsFailureReason).toBeNull();
+    expect(result.response.layerTransformFacts).toEqual([
+      {
+        layerIndex: 2,
+        layerName: "Camera 1",
+        enabled: true,
+        threeDLayer: true,
+        isCameraLayer: true,
+        position: { animated: true, currentValue: [960, 540, -1000], keyframes: [{ timeSeconds: 0, value: [960, 540, -1000] }, { timeSeconds: 2.612, value: [960, 540, -300] }] },
+        scale: null,
+        rotation: null,
+        anchorPoint: { animated: false, currentValue: [0, 0, 0], keyframes: null },
+        pointOfInterest: { animated: false, currentValue: [960, 540, 0], keyframes: null },
+        zoom: { animated: true, currentValue: 2779, keyframes: [{ timeSeconds: 0, value: 2779 }, { timeSeconds: 2.612, value: 800 }] },
+        effects: []
+      }
+    ]);
+  });
+
+  it("reports layerTransformFactsFailureReason (never fabricates layerTransformFacts) when describeLayerTransforms is requested but the underlying ae_run_jsx call fails", async () => {
+    await writeFakeServer(dir, { runJsxResult: "error" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeLayerTransforms: true }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.layerTransformFacts).toBeNull();
+    expect(result.response.layerTransformFactsFailureReason).toMatch(/ae_run_jsx failed/);
+    // A failed layer-transform scan never fails the rest of the evidence result.
     expect(result.response.layers).toHaveLength(1);
   });
 

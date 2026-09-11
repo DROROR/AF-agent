@@ -5,6 +5,7 @@ import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
 import { buildOperationScript, buildOpenProjectScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
 import { HeroicSwanAeMutationClient, type MutationCallResult } from "./heroic-swan-ae-mutation-client.js";
 import { describeMcpFailure } from "./classify-mcp-failure.js";
+import { parseStableCompositionNumericId, resolveCompositionIndex } from "./resolve-composition-index.js";
 
 /** The minimal shape HeroicSwanAeEditBridge needs from a mutation client - HeroicSwanAeMutationClient's real implementation satisfies this; tests inject a fake one instead of spawning a real ae-mcp process. */
 export interface AeMutationClient {
@@ -63,6 +64,26 @@ const openProjectResultValueSchema = z
 export type OpenProjectResult = { ok: true; openedPath: string } | { ok: false; failureReason: string };
 
 /**
+ * CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9): the
+ * SAME durable-CompItem.id resolution CREATE_PREVIEW/RENDER/
+ * INSPECT_SCENE_EVIDENCE already use (see resolve-composition-index.ts's
+ * own doc comment for the full incident trace) - EXECUTE_FRAME's own
+ * `aeProjectItemIndex` is equally exposed: a persisted index is only a
+ * snapshot of `app.project.item(n)`'s ordinal position, and a LATER
+ * BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_COMPOSITION shifts it, exactly
+ * as proven for comp-1/"Scene 1". `resolved: false` (never a failure) is
+ * returned when `manifestCompositionId` carries no durable numeric id
+ * (a BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_COMPOSITION-derived
+ * master) - the caller keeps using its own already-known index unchanged
+ * in that case, identical to this bridge's prior behavior; never a
+ * silent guess otherwise.
+ */
+export type ResolveCompositionIndexResult =
+  | { ok: true; resolved: true; aeProjectItemIndex: number }
+  | { ok: true; resolved: false }
+  | { ok: false; failureReason: string };
+
+/**
  * Applies allowlisted SceneEditOperations, and saves, the AE project
  * currently open through ae-mcp.
  *
@@ -95,6 +116,13 @@ export interface AeEditBridge {
    * closed (never proceeds) if AE reports any other path, or none at all.
    */
   openProject(expectedPath: string): Promise<OpenProjectResult>;
+  /**
+   * Real 2026-09-11 incident fix - re-resolves a possibly-stale
+   * aeProjectItemIndex from the manifest's durable numeric composition
+   * id BEFORE any mutation is attempted. See ResolveCompositionIndexResult's
+   * own doc comment.
+   */
+  resolveCompositionIndex(manifestCompositionId: string, expectedName: string): Promise<ResolveCompositionIndexResult>;
   applyOperation(params: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }): Promise<OperationExecutionResult>;
   /** Saves the currently-open project IN PLACE (the working copy - see buildSaveProjectScript's own doc comment for why this can never reach the original source, and openProject's own doc comment for why that guarantee now actually holds). */
   saveProject(): Promise<SaveProjectResult>;
@@ -110,6 +138,9 @@ export class AeMutationTransportUnavailableError extends Error {
 /** Honest stub - never fabricates a mutation result. Mirrors NotAvailableTemplateInspector's own contract. */
 export class NotAvailableAeEditBridge implements AeEditBridge {
   async openProject(_expectedPath: string): Promise<OpenProjectResult> {
+    throw new AeMutationTransportUnavailableError();
+  }
+  async resolveCompositionIndex(_manifestCompositionId: string, _expectedName: string): Promise<ResolveCompositionIndexResult> {
     throw new AeMutationTransportUnavailableError();
   }
   async applyOperation(_params: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }): Promise<OperationExecutionResult> {
@@ -150,6 +181,39 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
       };
     }
     return { ok: true, openedPath: parsed.data.openedPath as string };
+  }
+
+  async resolveCompositionIndex(manifestCompositionId: string, expectedName: string): Promise<ResolveCompositionIndexResult> {
+    const numericId = parseStableCompositionNumericId(manifestCompositionId);
+    if (numericId === null) {
+      return { ok: true, resolved: false };
+    }
+    const client = this.createMutationClient();
+    try {
+      await client.connect();
+    } catch (error) {
+      await client.close();
+      return { ok: false, failureReason: `could not connect to ae-mcp: ${describeMcpFailure(error)}` };
+    }
+    try {
+      // Deliberately bypasses this.runScript - that helper's own
+      // scriptResultSchema expects the MUTATION-script envelope
+      // ({ok, previousValue, resultingValue, failureReason}), but
+      // buildResolveCompositionIndexScript (shared verbatim with
+      // CREATE_PREVIEW/RENDER/INSPECT_SCENE_EVIDENCE) returns its own
+      // top-level fields directly on success - resolveCompositionIndex
+      // (resolve-composition-index.ts) already knows how to parse that
+      // real shape, reused here unchanged via the shared RunResolveScript
+      // callback contract (MutationCallResult/ToolCallResult are
+      // structurally identical).
+      const resolved = await resolveCompositionIndex((script) => client.runFixedOperation(script), numericId, expectedName);
+      if (!resolved.ok) {
+        return { ok: false, failureReason: resolved.reason };
+      }
+      return { ok: true, resolved: true, aeProjectItemIndex: resolved.resolvedAeProjectItemIndex };
+    } finally {
+      await client.close();
+    }
   }
 
   async applyOperation({

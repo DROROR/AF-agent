@@ -24,6 +24,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   previewTimingDescribeCompositionSummary?: boolean;
   /** Real 2026-09-11 nested-content audit (session a7fee3d9) - a THIRD thing previewTimingDiscoverCompositionId can be used for: run the SAME generic discoverLayerDetails scan (buildInspectCompositionLayerDetailsScript, opacity/stretch/timeRemap/sourceText per top-level layer) against an ARBITRARY manifest composition, not only a real scenePlan's own manifestCompositionId. Mutually exclusive with previewTimingDescribeCompositionSummary/previewTimingFindHostLayersChildCompositionId by construction - see the branch below. */
   previewTimingDiscoverLayerDetails?: boolean;
+  /** Real 2026-09-11 nested-content audit (session a7fee3d9) - a FOURTH thing previewTimingDiscoverCompositionId can be used for: run the SAME generic describeLayerTransforms scan (buildInspectLayerTransformScript, position/scale/rotation/anchorPoint/camera-zoom keyframes plus effects per top-level layer) against an ARBITRARY manifest composition. Mutually exclusive with the other three sub-modes by construction - see the branch below. */
+  previewTimingDescribeLayerTransforms?: boolean;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -79,7 +81,8 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     previewTimingDiscoverCompositionId,
     previewTimingFindHostLayersChildCompositionId,
     previewTimingDescribeCompositionSummary,
-    previewTimingDiscoverLayerDetails
+    previewTimingDiscoverLayerDetails,
+    previewTimingDescribeLayerTransforms
   } = input;
 
   if (!currentPlan) {
@@ -180,10 +183,33 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       };
     }
 
+    // Real 2026-09-11 nested-content audit (session a7fee3d9) - a FOURTH
+    // thing previewTimingDiscoverCompositionId can be used for: run the
+    // SAME generic describeLayerTransforms scan (buildInspectLayerTransformScript,
+    // position/scale/rotation/anchorPoint/camera-zoom keyframes plus
+    // effects per top-level layer) against an ARBITRARY manifest
+    // composition. Checked before the "requires X, Y, Z, or W" error:
+    // mutually exclusive with the other three sub-modes by construction.
+    if (previewTimingDescribeLayerTransforms === true) {
+      return {
+        ok: true,
+        payload: {
+          sourceProjectPath: currentProjectManifest.sourceProject.path,
+          sourceProjectSha256: currentPlan.sourceProjectSha256,
+          manifestCompositionId: previewTimingDiscoverCompositionId,
+          aeProjectItemIndex: parentComposition.aeProjectItemIndex,
+          compositionName: parentComposition.name,
+          layerIndices: [],
+          previewTimestampSeconds: null,
+          describeLayerTransforms: true
+        }
+      };
+    }
+
     if (previewTimingFindHostLayersChildCompositionId === undefined) {
       return {
         ok: false,
-        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId, previewTimingDescribeCompositionSummary, or previewTimingDiscoverLayerDetails alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child, a composition summary always names which composition to describe, and a layer-details scan always names which composition to scan."
+        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId, previewTimingDescribeCompositionSummary, previewTimingDiscoverLayerDetails, or previewTimingDescribeLayerTransforms alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child, a composition summary always names which composition to describe, a layer-details scan always names which composition to scan, and a layer-transform scan always names which composition to scan."
       };
     }
     const knownChild = currentProjectManifest.compositions.some((c) => c.compositionId === previewTimingFindHostLayersChildCompositionId);

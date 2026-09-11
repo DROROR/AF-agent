@@ -568,6 +568,7 @@ describe("executeJob - EXECUTE_FRAME", () => {
         openedPath = expectedPath;
         return { ok: true, openedPath: expectedPath };
       }),
+      resolveCompositionIndex: vi.fn().mockResolvedValue({ ok: true, resolved: false }),
       applyOperation: vi.fn().mockResolvedValue({ ok: true, operationType: "SET_TEXT", previousValue: null, resultingValue: "Hello" }),
       // Simulates a REAL mutation actually landing on disk - see
       // execute-scene-edit-executor.test.ts's own FakeAeEditBridge for why
@@ -595,6 +596,7 @@ describe("executeJob - EXECUTE_FRAME", () => {
     const { job, workRoot } = executeFrameJob();
     const fakeBridge = {
       openProject: vi.fn().mockImplementation(async (expectedPath: string) => ({ ok: true, openedPath: expectedPath })),
+      resolveCompositionIndex: vi.fn().mockResolvedValue({ ok: true, resolved: false }),
       applyOperation: vi.fn().mockResolvedValue({ ok: false, operationType: "SET_TEXT", failureReason: "layer not found" }),
       saveProject: vi.fn()
     };

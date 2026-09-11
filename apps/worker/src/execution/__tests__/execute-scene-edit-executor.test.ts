@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperation, SceneEditOperationIntent } from "@dyo/schemas";
 import { executeSceneEdit, type ResolveOperation } from "../execute-scene-edit-executor.js";
-import type { AeEditBridge, OpenProjectResult, OperationExecutionResult, SaveProjectResult } from "../ae-edit-bridge.js";
+import type { AeEditBridge, OpenProjectResult, OperationExecutionResult, SaveProjectResult, ResolveCompositionIndexResult } from "../ae-edit-bridge.js";
 import type { PreviewCapture, PreviewCaptureResult } from "../preview-capture.js";
 
 /** No MAP_FOOTAGE in these fixtures - every intent is already a resolved operation, so this is a pure pass-through (the real resolver's own asset-download/verification behavior is covered separately, in resolve-scene-edit-operation.test.ts). */
@@ -58,19 +58,27 @@ class FakeAeEditBridge implements AeEditBridge {
   calls: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }[] = [];
   saveCalls = 0;
   openProjectCalls: string[] = [];
+  resolveCompositionIndexCalls: { manifestCompositionId: string; expectedName: string }[] = [];
   private workingCopyPath: string | null = null;
 
   constructor(
     private readonly opResult: (operation: SceneEditOperation, callIndex: number) => OperationExecutionResult,
     private readonly saveResult: SaveProjectResult = { ok: true, resultingValue: null },
     /** Default: confirms whatever path the executor asked to open - real per-test coverage of a MISMATCHED/failed open lives in the dedicated "explicitly opens the session working copy" describe block below. */
-    private readonly openResult: (expectedPath: string) => OpenProjectResult = (expectedPath) => ({ ok: true, openedPath: expectedPath })
+    private readonly openResult: (expectedPath: string) => OpenProjectResult = (expectedPath) => ({ ok: true, openedPath: expectedPath }),
+    /** Default: "no durable id to re-resolve by" - the exact same effect as this bridge's own prior behavior (the executor keeps using whatever aeProjectItemIndex it was already given), so every pre-existing test in this file keeps exercising exactly what it already did. Real per-test coverage of the actual resolution/drift/failure behavior lives in the dedicated real 2026-09-11 EXECUTE_FRAME durable-identity describe block below. */
+    private readonly resolveIndexResult: (manifestCompositionId: string, expectedName: string) => ResolveCompositionIndexResult = () => ({ ok: true, resolved: false })
   ) {}
 
   async openProject(expectedPath: string): Promise<OpenProjectResult> {
     this.openProjectCalls.push(expectedPath);
     this.workingCopyPath = expectedPath;
     return this.openResult(expectedPath);
+  }
+
+  async resolveCompositionIndex(manifestCompositionId: string, expectedName: string): Promise<ResolveCompositionIndexResult> {
+    this.resolveCompositionIndexCalls.push({ manifestCompositionId, expectedName });
+    return this.resolveIndexResult(manifestCompositionId, expectedName);
   }
 
   async applyOperation({
@@ -812,6 +820,9 @@ describe("executeSceneEdit", () => {
         async openProject(expectedPath: string) {
           return { ok: true, openedPath: expectedPath };
         },
+        async resolveCompositionIndex() {
+          return { ok: true, resolved: false };
+        },
         async applyOperation({ operation }) {
           return { ok: true, operationType: operation.type, previousValue: null, resultingValue: null };
         },
@@ -1124,6 +1135,91 @@ describe("executeSceneEdit", () => {
       );
 
       expect(result.workingCopyFailureCode).toBe("SOURCE_PROJECT_MUTATED");
+    });
+  });
+
+  /**
+   * CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9): the
+   * same durable-CompItem.id resolution CREATE_PREVIEW/RENDER/
+   * INSPECT_SCENE_EVIDENCE already use, applied to EXECUTE_FRAME -
+   * request.aeProjectItemIndex is only ever a snapshot of the manifest's
+   * own last-observed ordinal position, and a LATER
+   * BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_COMPOSITION shifts it
+   * (proven: comp-1/"Scene 1"'s own real incident). These tests prove
+   * the executor resolves once, before any operation, and uses the
+   * FRESH index for every applyOperation/preview-capture call - never
+   * the stale one - and fails closed (never silently mutates the wrong
+   * composition) if resolution itself fails.
+   */
+  describe("resolveCompositionIndex (real 2026-09-11 EXECUTE_FRAME durable-identity fix)", () => {
+    it("uses the freshly-resolved aeProjectItemIndex for every applyOperation call when the bridge reports a drifted index, never the stale request.aeProjectItemIndex", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const bridge = new FakeAeEditBridge(alwaysSucceed, undefined, undefined, () => ({ ok: true, resolved: true, aeProjectItemIndex: 48 }));
+
+      const result = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: bridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, aeProjectItemIndex: 1, manifestCompositionId: "comp-1", compositionName: "Scene 1" })
+      );
+
+      expect(result.failureReason).toBeNull();
+      expect(bridge.resolveCompositionIndexCalls).toEqual([{ manifestCompositionId: "comp-1", expectedName: "Scene 1" }]);
+      expect(bridge.calls.every((c) => c.aeProjectItemIndex === 48)).toBe(true);
+      expect(bridge.calls.some((c) => c.aeProjectItemIndex === 1)).toBe(false);
+    });
+
+    it("falls back to the request's own aeProjectItemIndex unchanged when the bridge reports no durable id available (e.g. a BUILD_HORIZONTAL_COMPOSITION-derived master) - no regression", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const bridge = new FakeAeEditBridge(alwaysSucceed, undefined, undefined, () => ({ ok: true, resolved: false }));
+
+      const result = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: bridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, aeProjectItemIndex: 3, manifestCompositionId: "landscape-master-derived-abc123" })
+      );
+
+      expect(result.failureReason).toBeNull();
+      expect(bridge.calls.every((c) => c.aeProjectItemIndex === 3)).toBe(true);
+    });
+
+    it("fails closed (never applies any operation) with an honest, specific reason when the durable id no longer resolves to anything", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const bridge = new FakeAeEditBridge(alwaysSucceed, undefined, undefined, () => ({ ok: false, failureReason: "no composition with id 1 exists in this project" }));
+
+      const result = await executeSceneEdit(
+        {
+          workRoot,
+          aeEditBridge: bridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, manifestCompositionId: "comp-1" })
+      );
+
+      expect(result.failureReason).toContain("could not re-resolve composition");
+      expect(result.failureReason).toContain("comp-1");
+      expect(result.failureReason).toContain("no composition with id 1 exists");
+      expect(bridge.calls).toHaveLength(0);
     });
   });
 });

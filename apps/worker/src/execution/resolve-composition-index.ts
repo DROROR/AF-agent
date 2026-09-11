@@ -1,7 +1,21 @@
 import { z } from "zod";
-import type { HeroicSwanMcpClient } from "../inspection/heroic-swan-mcp-client.js";
+import type { FixedJsxScript } from "./jsx-templates.js";
 import { buildResolveCompositionIndexScript } from "./jsx-templates.js";
 import { unwrapJsxResult } from "./unwrap-jsx-result.js";
+
+/**
+ * The one thing this module needs from EITHER real transport -
+ * `HeroicSwanMcpClient.runFixedInspectionScript` (read-only inspection,
+ * used by CREATE_PREVIEW/RENDER/INSPECT_SCENE_EVIDENCE) and
+ * `HeroicSwanAeMutationClient.runFixedOperation` (EXECUTE_FRAME's own
+ * mutation channel) return the exact same real shape
+ * (`{ok:true,content}|{ok:false,error:{message}}` - ToolCallResult and
+ * MutationCallResult are structurally identical, just named differently
+ * per module) - a plain callback here, rather than either concrete
+ * client type, lets ONE resolver implementation serve both, real
+ * 2026-09-11 EXECUTE_FRAME durable-identity fix included.
+ */
+export type RunResolveScript = (script: FixedJsxScript) => Promise<{ ok: true; content: unknown } | { ok: false; error: { message: string } }>;
 
 /** What buildResolveCompositionIndexScript's own JSON.stringify(...) result actually contains. */
 const resolveCompositionIndexScriptResultSchema = z.union([
@@ -78,12 +92,12 @@ export function parseStableCompositionNumericId(manifestCompositionId: string): 
  * rationale, including the duplicate-name case).
  */
 export async function resolveCompositionIndex(
-  client: HeroicSwanMcpClient,
+  runScript: RunResolveScript,
   expectedCompositionNumericId: number,
   expectedName: string
 ): Promise<ResolveCompositionIndexResult> {
   const script = buildResolveCompositionIndexScript(expectedCompositionNumericId, expectedName);
-  const result = await client.runFixedInspectionScript(script);
+  const result = await runScript(script);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed while resolving composition id ${String(expectedCompositionNumericId)}: ${result.error.message}` };
   }
