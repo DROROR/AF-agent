@@ -1,5 +1,9 @@
+import { z } from "zod";
 import { HeroicSwanMcpClient } from "../../inspection/heroic-swan-mcp-client.js";
 import { parseCompositionList } from "../../inspection/parse-mcp-shapes.js";
+import { windowsPathsEqual } from "../../inspection/canonical-windows-path.js";
+import { buildOpenProjectScript } from "../jsx-templates.js";
+import { unwrapJsxResult } from "../unwrap-jsx-result.js";
 
 export interface VerifyRenderCompositionParams {
   workingProjectPath: string;
@@ -24,13 +28,28 @@ export type VerifyRenderCompositionResult =
     }
   | { ok: false; reason: string };
 
+/** What buildOpenProjectScript's own JSON.stringify(...) result actually contains - mirrors ae-edit-bridge.ts's openProjectResultValueSchema/heroic-swan-template-inspector.ts's openProjectScriptResultSchema exactly (this file goes through HeroicSwanMcpClient.runFixedInspectionScript + unwrapJsxResult, neither of theirs, so it needs its own copy rather than importing a module-private schema). */
+const openProjectScriptResultSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      resultingValue: z.object({ openedPath: z.string().nullable(), openedName: z.string().nullable() })
+    })
+    .strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
 /**
- * Canonical composition addressing safety net for RENDER (render-engine
- * phase section 6): aerender itself only ever addresses a composition by
- * NAME (`-comp <name>` - see aerender-args.ts), so before ever invoking it
- * this worker independently, read-only-ly (never a mutation - only the
- * allowlisted `ae_list_compositions` tool) proves:
+ * Canonical composition addressing safety net for RENDER/CREATE_PREVIEW
+ * (render-engine phase section 6): aerender itself only ever addresses a
+ * composition by NAME (`-comp <name>` - see aerender-args.ts), so before
+ * ever invoking it this worker independently, read-only-ly (never a
+ * mutation - only the allowlisted `ae_list_compositions` tool, plus the
+ * one fixed, versioned `buildOpenProjectScript` open-check below) proves:
  *
+ *   0. the session's own real WORKING COPY - never the immutable source
+ *      .aep, and never "whatever happens to already be open" - is
+ *      actually open in AE right now (see below).
  *   1. the composition at the canonical `aeProjectItemIndex` genuinely has
  *      the expected `compositionName` (never trusted from a stale/wrong
  *      manifest alone), and
@@ -39,9 +58,34 @@ export type VerifyRenderCompositionResult =
  *      also holds, since aerender's own name-only addressing could
  *      otherwise resolve to the wrong one of two identically-named comps.
  *
- * This assumes ae-mcp is already reachable against the WORKING COPY (the
- * same project execute-scene-edit-executor.ts already opened/edited) -
- * this worker never opens a second, separate AE instance for render.
+ * CRITICAL SAFETY FIX (real 2026-09-11 incident, job 47b0b42f...): this
+ * function previously never opened/checked the AE project itself - it
+ * called `ae_list_compositions` against whatever project happened to
+ * already be open, on the same unenforced assumption
+ * execute-scene-edit-executor.ts's own doc comment already documented and
+ * fixed for EXECUTE_FRAME (see AeEditBridge.openProject's doc comment).
+ * The real incident proved this assumption false for CREATE_PREVIEW too:
+ * AE was sitting on Untitled/Home (no project open) when this job ran,
+ * `ae_list_compositions` returned nothing at the working copy's own
+ * expected aeProjectItemIndex, and the job failed with a confusing
+ * "does not resolve to any composition" error rather than the real cause.
+ * `params.workingProjectPath` was already part of this function's own
+ * signature (used by every caller for on-disk hashing) but was never
+ * actually read here - it now is: reuses buildOpenProjectScript verbatim
+ * (the SAME fixed, versioned, already-shipped script both INSPECT_TEMPLATE
+ * and EXECUTE_FRAME's AeEditBridge.openProject already use) via THIS
+ * client's own `runFixedInspectionScript` (a read-only `ae_run_jsx`
+ * channel - see that method's own doc comment - never the mutation
+ * client), then independently verifies AE's own self-reported opened path
+ * against `params.workingProjectPath` via the same canonical
+ * `windowsPathsEqual` comparison EXECUTE_FRAME's own model uses. Fails
+ * closed (never proceeds to `ae_list_compositions`) if AE reports any
+ * other path, or none at all - never the source .aep, since
+ * `params.workingProjectPath` is the only path this function is ever
+ * given and it is always the session's own derived working-copy path
+ * (see create-full-preview-executor.ts/render-project-executor.ts's own
+ * `sessionWorkingCopyPath` call sites - this function itself never
+ * derives or accepts sourceProjectPath).
  */
 export interface CompositionVerifier {
   verify(params: VerifyRenderCompositionParams): Promise<VerifyRenderCompositionResult>;
@@ -60,6 +104,36 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
     }
 
     try {
+      // Step 0 (the real 2026-09-11 fix): never trust "whatever project is
+      // currently open in AE" - explicitly (re-)open the session's own
+      // working copy and independently verify AE's own self-reported path
+      // matches it exactly, BEFORE ever resolving a composition against it.
+      const openScript = buildOpenProjectScript(params.workingProjectPath);
+      const openResult = await client.runFixedInspectionScript(openScript);
+      if (!openResult.ok) {
+        return { ok: false, reason: `could not confirm the session working copy is open in After Effects: ae_run_jsx failed: ${openResult.error.message}` };
+      }
+      const unwrappedOpen = unwrapJsxResult(openResult.content);
+      if (!unwrappedOpen.ok) {
+        return { ok: false, reason: `could not confirm the session working copy is open in After Effects: ${unwrappedOpen.reason}` };
+      }
+      const parsedOpen = openProjectScriptResultSchema.safeParse(unwrappedOpen.value);
+      if (!parsedOpen.success) {
+        return {
+          ok: false,
+          reason: `could not confirm the session working copy is open in After Effects: open-project script's response did not match the expected shape: ${parsedOpen.error.message}`
+        };
+      }
+      if (!parsedOpen.data.ok) {
+        return { ok: false, reason: `could not confirm the session working copy is open in After Effects: ${parsedOpen.data.failureReason}` };
+      }
+      if (!windowsPathsEqual(parsedOpen.data.resultingValue.openedPath, params.workingProjectPath)) {
+        return {
+          ok: false,
+          reason: `AE reports "${parsedOpen.data.resultingValue.openedPath ?? "no project"}" is open, not the requested working copy ("${params.workingProjectPath}") - refusing to verify a composition against the wrong project`
+        };
+      }
+
       const result = await client.callTool("ae_list_compositions");
       if (!result.ok) {
         return { ok: false, reason: `ae_list_compositions failed: ${result.error.message}` };
