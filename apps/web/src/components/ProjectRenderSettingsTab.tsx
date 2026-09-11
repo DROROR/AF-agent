@@ -84,6 +84,7 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
       <InspectRenderCapabilitiesCard />
       <BuildHorizontalCompositionCard projectId={projectId} session={session} />
       <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
+      <DescribeAnyCompositionCard projectId={projectId} session={session} />
       {RENDER_OUTPUT_VARIANTS.map((variant) => (
         <VariantConfigCard
           key={variant}
@@ -392,6 +393,119 @@ function DescribeCompositionTimelineCard({
           </div>
         );
       })}
+    </Card>
+  );
+}
+
+/**
+ * Real 2026-09-11 audit incident: DescribeCompositionTimelineCard above
+ * only ever targets the two configured render-output master compositions
+ * (LANDSCAPE/REELS) - auditing why a nested scene (e.g. "Scene 1"/comp-1)
+ * goes black partway through its own timeline needs the SAME
+ * describeCompositionSummary capability pointed at an arbitrary NESTED
+ * composition instead. resolveInspectSceneEvidenceDispatch.ts's own
+ * previewTimingDiscoverCompositionId resolution is already fully generic
+ * - it validates any caller-supplied compositionId against the project's
+ * OWN current manifest (never an arbitrary/unvalidated string) and
+ * resolves its real aeProjectItemIndex/name server-side - so this needed
+ * zero backend or worker changes, only a UI to reach a target other than
+ * the two masters. Read-only, same as every other diagnostic in this
+ * file: only ever dispatches INSPECT_SCENE_EVIDENCE, never mutates
+ * anything.
+ */
+function DescribeAnyCompositionCard({ projectId, session }: { projectId: string; session: ExecutionSessionDto | null }): ReactElement | null {
+  const { data: dashboardStatus } = useDashboardStatusContext();
+  const [compositionId, setCompositionId] = useState("");
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ jobId: string; text: string } | { jobId: string; error: string } | null>(null);
+
+  if (!session || session.latestPreviewScenePlanId === null) {
+    return null;
+  }
+  const scenePlanId = session.latestPreviewScenePlanId;
+  const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", session.assignedWorkerId);
+
+  async function handleDescribe(): Promise<void> {
+    const targetId = compositionId.trim();
+    if (!worker || targetId.length === 0) {
+      return;
+    }
+    setIsDispatching(true);
+    setDispatchError(null);
+    setResult(null);
+    const dispatched = await dispatchJob({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId: worker.workerId,
+      projectId,
+      scenePlanId,
+      previewTimingDiscoverCompositionId: targetId,
+      previewTimingDescribeCompositionSummary: true
+    });
+    if (!dispatched.ok) {
+      setIsDispatching(false);
+      setDispatchError(dispatched.message);
+      return;
+    }
+    for (;;) {
+      const status = await fetchJobStatus(dispatched.data.jobId);
+      if (!status.ok) {
+        setIsDispatching(false);
+        setResult({ jobId: dispatched.data.jobId, error: status.message });
+        return;
+      }
+      if (status.data.status === "SUCCEEDED" || status.data.status === "FAILED" || status.data.status === "CANCELLED") {
+        setIsDispatching(false);
+        if (status.data.status !== "SUCCEEDED") {
+          setResult({ jobId: dispatched.data.jobId, error: status.data.error?.message ?? status.data.status });
+          return;
+        }
+        const parsedResult = sceneEvidenceResponseSchema.safeParse(status.data.result);
+        if (!parsedResult.success) {
+          setResult({ jobId: dispatched.data.jobId, error: "result did not match the expected shape" });
+          return;
+        }
+        if (!parsedResult.data.compositionSummary) {
+          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? "no compositionSummary in result" });
+          return;
+        }
+        const s = parsedResult.data.compositionSummary;
+        const layerLines = s.layers
+          .map(
+            (l) =>
+              `#${l.layerIndex} "${l.layerName}" enabled=${l.enabled} in=${l.inPointSeconds.toFixed(3)} out=${l.outPointSeconds.toFixed(3)} start=${l.startTimeSeconds.toFixed(3)}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}(${l.sourceDurationSeconds?.toFixed(3)}s)` : ""}`
+          )
+          .join("\n");
+        const text = `compDuration=${s.compDurationSeconds.toFixed(6)}s workAreaStart=${s.workAreaStartSeconds.toFixed(6)}s workAreaDuration=${s.workAreaDurationSeconds.toFixed(6)}s frameRate=${s.frameRate.toFixed(6)}\n${layerLines}`;
+        setResult({ jobId: dispatched.data.jobId, text });
+        return;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  return (
+    <Card className="overview-section">
+      <CardHeader title="Describe any composition (by manifest composition ID)" />
+      <p>Read-only. Reports the real, worker-observed duration/work-area and every top-level layer&apos;s own timing for ANY composition in this project&apos;s manifest - e.g. a nested scene like &quot;comp-1&quot; (Scene 1), not just the configured Landscape/Reels masters.</p>
+      {!worker ? <EmptyState title="No worker available" description="This project's assigned worker is not currently reporting INSPECT_SCENE_EVIDENCE." /> : null}
+      {dispatchError ? <ErrorState title="Dispatch failed" description={dispatchError} /> : null}
+      <Field label="Manifest composition ID" htmlFor="describe-any-composition-id">
+        <Input id="describe-any-composition-id" value={compositionId} onChange={(e) => setCompositionId(e.target.value)} placeholder="e.g. comp-1" disabled={isDispatching} />
+      </Field>
+      <div className="overview-actions">
+        <Button variant="secondary" disabled={!worker || isDispatching || compositionId.trim().length === 0} onClick={() => void handleDescribe()}>
+          {isDispatching ? "Dispatching…" : "Describe composition"}
+        </Button>
+      </div>
+      {result ? (
+        <div>
+          <p>
+            <strong>{compositionId.trim()}</strong> (job {result.jobId}):
+          </p>
+          <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem" }}>{"text" in result ? result.text : `ERROR: ${result.error}`}</pre>
+        </div>
+      ) : null}
     </Card>
   );
 }

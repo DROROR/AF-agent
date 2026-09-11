@@ -145,6 +145,100 @@ describe("ProjectRenderSettingsTab - Final Outputs", () => {
   });
 });
 
+/**
+ * Real 2026-09-11 audit incident: this card lets an operator point the
+ * SAME describeCompositionSummary capability at an arbitrary NESTED
+ * composition (e.g. "comp-1"/Scene 1) rather than only the two configured
+ * render-output masters - needed to audit why a nested scene goes black
+ * partway through its own timeline. Read-only: only ever dispatches
+ * INSPECT_SCENE_EVIDENCE, never touches plan/mappings/session state.
+ */
+describe("ProjectRenderSettingsTab - Describe any composition (by manifest composition ID)", () => {
+  it("dispatches INSPECT_SCENE_EVIDENCE with the operator-typed compositionId, and renders the real per-layer timing facts once it succeeds", async () => {
+    const workerId = "44444444-4444-4444-4444-444444444444";
+    const jobId = "55555555-5555-5555-5555-555555555555";
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [workerWithCapabilities(["INSPECT_SCENE_EVIDENCE"])] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(workerId) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      "/api/jobs": {
+        status: 201,
+        body: { jobId, workerId, operation: "INSPECT_SCENE_EVIDENCE", status: "QUEUED", createdAt: new Date().toISOString() }
+      },
+      [`/api/jobs/${jobId}`]: {
+        status: 200,
+        body: {
+          job: {
+            jobId,
+            workerId,
+            projectId: PROJECT_ID,
+            operation: "INSPECT_SCENE_EVIDENCE",
+            status: "SUCCEEDED",
+            payload: {},
+            result: {
+              verifiedSourceProjectSha256: SOURCE_SHA,
+              manifestCompositionId: "comp-1",
+              aeProjectItemIndex: 1,
+              compositionName: "Scene 1",
+              layers: [],
+              preview: null,
+              layerDetails: null,
+              hostLayerRecords: null,
+              previewFailureReason: null,
+              layerDetailsFailureReason: null,
+              hostLayerRecordsFailureReason: null,
+              compositionSummaryFailureReason: null,
+              compositionSummary: {
+                compDurationSeconds: 7.00700700700701,
+                workAreaStartSeconds: 0,
+                workAreaDurationSeconds: 7.00700700700701,
+                frameRate: 29.9700012207031,
+                layers: [
+                  { layerIndex: 1, layerName: "Control Color", enabled: true, inPointSeconds: 2.602, outPointSeconds: 7.007, startTimeSeconds: 2.602, sourceCompositionId: null, sourceDurationSeconds: null }
+                ]
+              },
+              capturedAt: new Date().toISOString()
+            },
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderTab();
+    const input = await screen.findByLabelText("Manifest composition ID");
+    fireEvent.change(input, { target: { value: "comp-1" } });
+    const button = screen.getByRole("button", { name: "Describe composition" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+
+    let capturedBody: Record<string, unknown> | null = null;
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      expect(jobsCall).toBeDefined();
+      capturedBody = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
+    });
+    expect(capturedBody).toEqual({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId,
+      projectId: PROJECT_ID,
+      scenePlanId: "s1",
+      previewTimingDiscoverCompositionId: "comp-1",
+      previewTimingDescribeCompositionSummary: true
+    });
+
+    await screen.findByText(/Control Color/);
+    expect(screen.getByText(/in=2\.602/)).toBeTruthy();
+  });
+});
+
 describe("ProjectRenderSettingsTab", () => {
   it("shows the honest no-compositions state when the manifest has none", async () => {
     stubWorkspace({}, manifestWithNoCompositions());
@@ -401,3 +495,4 @@ describe("ProjectRenderSettingsTab", () => {
     expect(titles).toHaveLength(2);
   });
 });
+
