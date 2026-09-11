@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeroicSwanTemplateInspector } from "./heroic-swan-template-inspector.js";
 import type { ManifestInspectionResult, RawInspectionCapture } from "./template-inspector.js";
 import { buildOpenProjectScript } from "../execution/jsx-templates.js";
+import { conversionCopyPath } from "./legacy-project-conversion.js";
 
 let dir: string;
 
@@ -239,9 +242,13 @@ async function writeRealShapeFakeServer(
      * simulates AE opening a DIFFERENT project than requested (proves the
      * P0 verify step fails closed rather than trusting the open call
      * blindly); "op-fails" simulates the script itself reporting
-     * app.open() did not succeed.
+     * app.open() did not succeed; "requires-conversion" (real 2026-09-11
+     * incident, AE version 23.2.1 -> 26.3x87 candidate) simulates the open
+     * command itself reporting SUCCESS (no failureReason) but with
+     * openedPath: null - the exact signature of a project requiring an
+     * interactive AE-level confirmation that dialog suppression blocks.
      */
-    openBehavior?: "success" | "wrong-path" | "op-fails";
+    openBehavior?: "success" | "wrong-path" | "op-fails" | "requires-conversion";
   } = {}
 ): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
@@ -340,6 +347,15 @@ async function writeRealShapeFakeServer(
       if (openBehavior === "op-fails") {
         return {
           content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: false, failureReason: "app.open() did not return an opened project" }) }) }]
+        };
+      }
+      if (openBehavior === "requires-conversion") {
+        // Real 2026-09-11 incident: app.open() itself does NOT throw/report
+        // failure, but AE ends up with no project associated at all -
+        // openedPath: null, openedName reflecting AE's own blank-project
+        // default.
+        return {
+          content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { openedPath: null, openedName: "Untitled Project" } }) }) }]
         };
       }
       var resultingOpenedPath = openBehavior === "wrong-path" ? "C:\\\\DYO-Agent\\\\some-other-unrelated-project.aep" : openedPath;
@@ -549,6 +565,59 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     // ae_health check.
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]?.tool).toBe("ae_health");
+  });
+
+  it("4b. real 2026-09-11 incident (AE version 23.2.1 -> 26.3x87 candidate): open succeeds but no project is associated afterward -> classified as requiring interactive confirmation, a safe disposable copy is created, original source untouched", async () => {
+    const sourceProjectPath = join(dir, "dro tempelate.aep");
+    const sourceContent = "fake legacy AE 23.2.1 project bytes";
+    await writeFile(sourceProjectPath, sourceContent);
+    await writeRealShapeFakeServer(dir, { openBehavior: "requires-conversion" });
+    const workRoot = join(dir, "work-root");
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir, workRoot });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+    expect(result.kind).toBe("raw_capture");
+    expect(result.projectOpenEvidence?.matched).toBe(false);
+    expect(result.projectOpenEvidence?.actualOpenedPath).toBeNull();
+    expect(result.projectOpenEvidence?.requiresInteractiveConfirmation).toBe(true);
+    expect(result.note).toMatch(/interactive one-time confirmation/i);
+    // Explicitly disclaims corruption as the cause - never asserts corruption without human confirmation.
+    expect(result.note).toMatch(/never automatic file corruption/i);
+
+    const conversionCopy = result.projectOpenEvidence?.conversionCopy;
+    expect(conversionCopy?.ok).toBe(true);
+    if (!conversionCopy?.ok) return;
+    const expectedSha256 = createHash("sha256").update(sourceContent).digest("hex");
+    expect(conversionCopy.sourceSha256).toBe(expectedSha256);
+    expect(conversionCopy.path).toBe(conversionCopyPath(workRoot, expectedSha256));
+
+    // The disposable copy really exists on disk with the source's real bytes.
+    expect(existsSync(conversionCopy.path)).toBe(true);
+    expect(await readFile(conversionCopy.path, "utf8")).toBe(sourceContent);
+
+    // The ORIGINAL source file itself was never touched - same bytes, same hash, still at its own path.
+    expect(await readFile(sourceProjectPath, "utf8")).toBe(sourceContent);
+
+    // No further discovery tool was attempted from evidence that might belong to the wrong project.
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]?.tool).toBe("ae_health");
+  });
+
+  it("4c. same signature, but with no workRoot configured -> still classified correctly, no copy is attempted (never crashes)", async () => {
+    const sourceProjectPath = join(dir, "dro tempelate.aep");
+    await writeFile(sourceProjectPath, "fake legacy AE 23.2.1 project bytes");
+    await writeRealShapeFakeServer(dir, { openBehavior: "requires-conversion" });
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
+
+    expect(result.kind).toBe("raw_capture");
+    expect(result.projectOpenEvidence?.matched).toBe(false);
+    // No workRoot was configured, so requiresInteractiveConfirmation/conversionCopy are never set -
+    // this is the same, pre-existing generic mismatch message, not a crash.
+    expect(result.projectOpenEvidence?.requiresInteractiveConfirmation).toBeUndefined();
+    expect(result.projectOpenEvidence?.conversionCopy).toBeUndefined();
   });
 
   it("5. the project-open operation itself fails -> inspection fails clearly, closed, no manifest", async () => {

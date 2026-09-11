@@ -99,7 +99,22 @@ export const projectOpenEvidenceSchema = z.object({
   actualOpenedPath: z.string().nullable(),
   reused: z.boolean(),
   matched: z.boolean(),
-  note: z.string().optional()
+  note: z.string().optional(),
+  /**
+   * Real 2026-09-11 incident fix: true only for the specific signature of
+   * a project that needs an interactive AE-level confirmation (a
+   * version-conversion dialog, or an unacknowledged missing-font/plugin
+   * warning) that dialog suppression blocks - see
+   * legacy-project-conversion.ts's own doc comment. Absent/false for the
+   * unrelated "some other project is already open" case.
+   */
+  requiresInteractiveConfirmation: z.boolean().optional(),
+  conversionCopy: z
+    .union([
+      z.object({ ok: z.literal(true), path: z.string(), sourceSha256: z.string() }).strict(),
+      z.object({ ok: z.literal(false), reason: z.string() }).strict()
+    ])
+    .optional()
 });
 export type ProjectOpenEvidence = z.infer<typeof projectOpenEvidenceSchema>;
 

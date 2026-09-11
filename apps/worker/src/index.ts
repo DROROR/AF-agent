@@ -159,7 +159,8 @@ async function main(): Promise<void> {
   const templateInspector = new HeroicSwanTemplateInspector({
     aeMcpPath: env.aeMcpPath,
     logger: workerLogger,
-    jobExecutionRegistry
+    jobExecutionRegistry,
+    workRoot: env.workRoot
   });
 
   // Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B) -

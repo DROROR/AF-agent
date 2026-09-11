@@ -45,6 +45,22 @@ export interface ProjectOpenEvidence {
   reused: boolean;
   matched: boolean;
   note?: string;
+  /**
+   * Real 2026-09-11 incident fix: true only when `app.open()` itself did
+   * NOT throw but afterward `app.project.file` was null (never merely "some
+   * other project is open" - that is a different, unrelated case and
+   * leaves this false/absent) - the specific signature of a project that
+   * requires an interactive AE-level confirmation (most commonly a
+   * version-conversion dialog, possibly a missing-font/plugin
+   * acknowledgment) that dialog suppression blocks from ever appearing.
+   * See legacy-project-conversion.ts's own doc comment - never asserted as
+   * definite corruption OR definite conversion-required, since no
+   * documented API distinguishes them without a human actually opening the
+   * file.
+   */
+  requiresInteractiveConfirmation?: boolean;
+  /** Present only when requiresInteractiveConfirmation is true - see legacy-project-conversion.ts's prepareConversionCopy. */
+  conversionCopy?: { ok: true; path: string; sourceSha256: string } | { ok: false; reason: string };
 }
 
 /**

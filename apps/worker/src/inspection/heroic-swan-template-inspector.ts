@@ -22,6 +22,7 @@ import {
   type CompositionSummary
 } from "./parse-mcp-shapes.js";
 import { buildInspectCompositionPrecompsScript, buildOpenProjectScript } from "../execution/jsx-templates.js";
+import { prepareConversionCopy } from "./legacy-project-conversion.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
@@ -186,6 +187,16 @@ export interface HeroicSwanTemplateInspectorConfig {
   openProjectOptions?: OpenProjectOptions;
   /** Registers the ae-mcp child process this inspect() call owns so a watchdog/shutdown can abort it - optional (omitted in most tests), but should be provided in production (see index.ts). Same P0/P1 stuck-job-recovery mechanism as heroic-swan-scene-evidence-inspector.ts. */
   jobExecutionRegistry?: JobExecutionRegistry;
+  /**
+   * Real 2026-09-11 incident fix: required so ensureTargetProjectOpen can
+   * create a disposable conversion-copy (legacy-project-conversion.ts) at a
+   * deterministic path when it detects a project that requires an
+   * interactive AE-level confirmation to open. Optional only so existing
+   * tests that never exercise that path keep working unchanged - production
+   * always provides it (see index.ts, the same env.workRoot every other
+   * filesystem-touching capability already uses).
+   */
+  workRoot?: string;
 }
 
 export class HeroicSwanTemplateInspector implements TemplateInspector {
@@ -195,6 +206,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
   private readonly mcpTimeoutMs: number | undefined;
   private readonly openProjectOptions: OpenProjectOptions | undefined;
   private readonly jobExecutionRegistry: JobExecutionRegistry | undefined;
+  private readonly workRoot: string | undefined;
 
   constructor(config: HeroicSwanTemplateInspectorConfig) {
     this.aeMcpPath = config.aeMcpPath;
@@ -203,6 +215,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
     this.mcpTimeoutMs = config.mcpTimeoutMs;
     this.openProjectOptions = config.openProjectOptions;
     this.jobExecutionRegistry = config.jobExecutionRegistry;
+    this.workRoot = config.workRoot;
   }
 
   async inspect(request: InspectTemplateRequest): Promise<InspectTemplateResult> {
@@ -260,7 +273,8 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         healthCapture,
         this.logger,
         this.retryOptions,
-        this.openProjectOptions
+        this.openProjectOptions,
+        this.workRoot
       );
       if (!openEvidence.matched) {
         return rawCaptureFor(
@@ -595,7 +609,8 @@ async function ensureTargetProjectOpen(
   healthCapture: RawToolCallCapture,
   logger: pino.Logger | undefined,
   retryOptions: TransientRetryOptions | undefined,
-  openProjectOptions: OpenProjectOptions | undefined
+  openProjectOptions: OpenProjectOptions | undefined,
+  workRoot: string | undefined
 ): Promise<ProjectOpenEvidence> {
   const parsedHealth = healthCapture.ok ? parseCurrentProjectFromHealth(healthCapture.content) : null;
   if (parsedHealth?.ok && parsedHealth.value.projectOpen && windowsPathsEqual(parsedHealth.value.projectPath, sourceProjectPath)) {
@@ -667,16 +682,52 @@ async function ensureTargetProjectOpen(
 
   const actualOpenedPath = parsed.data.resultingValue.openedPath;
   const matched = windowsPathsEqual(actualOpenedPath, sourceProjectPath);
+  if (matched) {
+    return { requestedPath: sourceProjectPath, actualOpenedPath, reused: false, matched: true };
+  }
+
+  // Real 2026-09-11 incident fix: app.open() did NOT throw (parsed.data.ok
+  // is true - reached this branch at all), but AE ended up with NO project
+  // associated at all (actualOpenedPath === null) - distinct from "some
+  // OTHER real project is open" (actualOpenedPath is a non-null,
+  // non-matching path - the generic message below still applies to that
+  // case unchanged). This exact signature matches a project that requires
+  // an interactive AE-level confirmation (a version-conversion dialog, or
+  // an unacknowledged missing-font/plugin warning) that
+  // app.beginSuppressDialogs() blocks from ever appearing - see
+  // legacy-project-conversion.ts's own doc comment. Never asserted as
+  // definite corruption OR definite conversion-required; a human must
+  // confirm which by opening the file directly.
+  if (actualOpenedPath === null && workRoot !== undefined) {
+    const conversionCopyAttempt = await prepareConversionCopy({ workRoot, sourceProjectPath });
+    const conversionCopy: ProjectOpenEvidence["conversionCopy"] = conversionCopyAttempt.ok
+      ? { ok: true, path: conversionCopyAttempt.conversionCopyPath, sourceSha256: conversionCopyAttempt.sourceSha256 }
+      : { ok: false, reason: conversionCopyAttempt.reason };
+    const conversionNote = conversionCopy.ok
+      ? `A safe, disposable copy of the source project has been created at "${conversionCopy.path}" (the original source was never touched). ` +
+        "To continue: open that copy directly in After Effects, respond to whatever dialog appears (e.g. a version-conversion prompt), " +
+        `then use File > Save As to save it back to that SAME path, then re-run Inspect Template with sourceProjectPath set to "${conversionCopy.path}".`
+      : `A disposable copy could not be created automatically (${conversionCopy.reason}) - a human must still resolve this interactively, but no safe copy path is available yet.`;
+    return {
+      requestedPath: sourceProjectPath,
+      actualOpenedPath,
+      reused: false,
+      matched: false,
+      requiresInteractiveConfirmation: true,
+      conversionCopy,
+      note:
+        "AE reports no project open after the open attempt, though the open command itself did not fail - this matches a project that requires an " +
+        "interactive one-time confirmation in AE (most commonly a version-conversion dialog for an older-version project, or an unacknowledged " +
+        `missing-font/plugin warning) that is blocked by this worker's own dialog suppression, never automatic file corruption. ${conversionNote}`
+    };
+  }
+
   return {
     requestedPath: sourceProjectPath,
     actualOpenedPath,
     reused: false,
-    matched,
-    ...(matched
-      ? {}
-      : {
-          note: "the project AE reports having open after the open attempt does not exactly match the requested sourceProjectPath - refusing to inspect the wrong project"
-        })
+    matched: false,
+    note: "the project AE reports having open after the open attempt does not exactly match the requested sourceProjectPath - refusing to inspect the wrong project"
   };
 }
 
