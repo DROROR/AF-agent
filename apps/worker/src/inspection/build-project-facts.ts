@@ -25,6 +25,19 @@ export interface BuildProjectFactsInput {
    * parentCompositionIds simply stay false/[], and no layer is excluded).
    */
   precompFacts?: readonly (readonly { layerIndex: number; sourceCompositionId: string }[] | null)[];
+  /**
+   * Real third-party effect matchNames found anywhere in the project, from
+   * ONE buildScanProjectEffectsScript call (see
+   * parse-project-effects-scan.ts's own doc comment for why this is
+   * finally real rather than the empty stub it was for this project's
+   * whole prior history). Omitted only when that scan was never attempted
+   * or genuinely failed - in which case the caller MUST surface that as an
+   * unknownItems entry (heroic-swan-template-inspector.ts does), because
+   * an empty list here would otherwise be indistinguishable from a
+   * confirmed-plugin-free project, the exact false negative that caused a
+   * real misdiagnosis on 2026-09-11.
+   */
+  pluginReferences?: readonly string[];
 }
 
 /**
@@ -137,16 +150,17 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
     sourceProjectName: input.sourceProjectName,
     projectSha256: input.projectSha256,
     compositions: compositionsWithNesting,
-    // Not determinable from the currently allowlisted read-only tools'
-    // confirmed shapes (fonts require TextLayer.sourceText, footage
-    // references require FootageItem fields, plugins require layer effect
-    // enumeration - none of which ae_get_composition's confirmed shape
-    // exposes). Left honestly empty rather than guessed; build-manifest.ts's
-    // own unknownItems (one per "unknown" placeholder) already surfaces
-    // this gap per-layer.
+    // Fonts/footage remain honestly empty: neither is determinable from the
+    // currently allowlisted read-only tools' confirmed shapes (fonts require
+    // TextLayer.sourceText, footage references require FootageItem fields -
+    // neither exposed by ae_get_composition's confirmed shape). Left empty
+    // rather than guessed; build-manifest.ts's own unknownItems (one per
+    // "unknown" placeholder) already surfaces this gap per-layer.
     requiredFonts: [],
     footageReferenced: [],
     missingFootage: [],
-    pluginReferences: []
+    // pluginReferences, unlike the three above, IS now real whenever the
+    // caller performed the scan - see this input field's own doc comment.
+    pluginReferences: input.pluginReferences ? [...input.pluginReferences] : []
   };
 }

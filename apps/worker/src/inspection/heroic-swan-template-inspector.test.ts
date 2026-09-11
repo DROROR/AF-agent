@@ -249,6 +249,8 @@ async function writeRealShapeFakeServer(
      * interactive AE-level confirmation that dialog suppression blocks.
      */
     openBehavior?: "success" | "wrong-path" | "op-fails" | "requires-conversion";
+    /** Real plugin detection (2026-09-11): "element3d" returns a real third-party effect, "native-only" returns only an ADBE-prefixed one, omitted leaves the scan failing (the honest "could not confirm" path). */
+    pluginScan?: "element3d" | "native-only";
   } = {}
 ): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
@@ -362,6 +364,25 @@ async function writeRealShapeFakeServer(
       return {
         content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { openedPath: resultingOpenedPath, openedName: "fixture" } }) }) }]
       };
+    }
+    // Real plugin detection (2026-09-11): INSPECT_TEMPLATE now makes
+    // exactly one project-wide effects-scan call. Answered here per the
+    // fixture's own pluginScan option; when absent, this falls through
+    // to the generic "unexpected script target" failure below, which is
+    // itself the scan-failed path the dedicated test asserts on.
+    if (args.code.indexOf("DYO SCAN_PROJECT_EFFECTS") !== -1 && ${JSON.stringify(options.pluginScan ?? "none")} !== "none") {
+      var pluginScanMode = ${JSON.stringify(options.pluginScan ?? "none")};
+      var scanEffects = pluginScanMode === "element3d"
+        ? [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: true }]
+        : [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }];
+      var scanPayload = JSON.stringify({
+        ok: true,
+        compositionCount: 2,
+        compositionsWithEffects: [
+          { aeProjectItemIndex: 3, compositionId: 42, compositionName: "Comp A", layers: [{ layerIndex: 1, layerName: "FX Layer", enabled: true, effects: scanEffects }] }
+        ]
+      });
+      return { content: [{ type: "text", text: JSON.stringify({ result: scanPayload }) }] };
     }
     if (args.code.indexOf("app.project.item(" + ${JSON.stringify(options.precompFailsForIndex ?? -1)} + ")") !== -1) {
       scriptResult = JSON.stringify({ ok: false, failureReason: "simulated precomp script failure" });
@@ -876,6 +897,53 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     expect(compA?.parentCompositionIds).toEqual([]);
   });
 
+  it("real plugin detection (2026-09-11): populates preflight.pluginReferences from a real project-wide effects scan, and surfaces the dependency as explicit evidence", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    await writeRealShapeFakeServer(dir, { pluginScan: "element3d" });
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+
+    expect(result.kind).toBe("manifest");
+    expect(result.response.manifest.preflight.pluginReferences).toEqual(["VIDEOCOPILOT 3DArray"]);
+    expect(result.response.summary.pluginReferenceCount).toBe(1);
+    const dependencyNote = result.response.manifest.unknownItems.find((item) => item.reason.includes("third-party effect"));
+    expect(dependencyNote?.reason).toContain("VIDEOCOPILOT 3DArray");
+    expect(dependencyNote?.reason).toContain("Comp A");
+  });
+
+  it("real plugin detection: a project whose every effect is Adobe-native yields a genuinely confirmed-empty pluginReferences, with no false dependency warning", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    await writeRealShapeFakeServer(dir, { pluginScan: "native-only" });
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+
+    expect(result.response.manifest.preflight.pluginReferences).toEqual([]);
+    expect(result.response.manifest.unknownItems.some((item) => item.reason.includes("third-party effect"))).toBe(false);
+    // Critically, it must ALSO not claim the scan failed - this really is a confirmed-empty result.
+    expect(result.response.manifest.unknownItems.some((item) => item.reason.includes("plugin/effect scan did not complete"))).toBe(false);
+  });
+
+  it("real plugin detection: a FAILED scan is never silently reported as zero plugins - it is surfaced as an explicit unknownItems warning (the exact 2026-09-11 false negative)", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    // No pluginScan option -> the fixture's generic "unexpected script target" failure.
+    await writeRealShapeFakeServer(dir, {});
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+
+    expect(result.kind).toBe("manifest");
+    // The array is empty, but the manifest says loudly that this is NOT a confirmed-empty result.
+    expect(result.response.manifest.preflight.pluginReferences).toEqual([]);
+    const warning = result.response.manifest.unknownItems.find((item) => item.reason.includes("plugin/effect scan did not complete"));
+    expect(warning).toBeDefined();
+    expect(warning?.reason).toContain("must not be read as proof this template is plugin-free");
+  });
+
   it("a failed precomps-script call for one composition never blocks the manifest - that composition's own nesting facts simply stay false/[]", async () => {
     await writeRealShapeFakeServer(dir, { precompFailsForIndex: 3 });
     const sourceProjectPath = join(dir, "template-copy.aep");
@@ -1217,7 +1285,14 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
     const source = await readFile(new URL("./heroic-swan-template-inspector.ts", import.meta.url), "utf8");
     const fnStart = source.indexOf("async function ensureTargetProjectOpen(");
     expect(fnStart).toBeGreaterThan(-1);
-    const fnEnd = source.indexOf("\nfunction rawCaptureFor(", fnStart);
+    // Ends at whatever top-level function declaration comes next, rather
+    // than at one specific hardcoded neighbour - so inserting an unrelated
+    // helper between the two can never silently widen this slice and make
+    // the assertion below fail (or, worse, pass) for the wrong function.
+    const nextDeclarationIndexes = ["\nfunction ", "\nasync function "]
+      .map((marker) => source.indexOf(marker, fnStart + 1))
+      .filter((index) => index !== -1);
+    const fnEnd = nextDeclarationIndexes.length > 0 ? Math.min(...nextDeclarationIndexes) : -1;
     const fnBody = source.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
     // The open call itself is a bare client.runFixedInspectionScript(...)
     // - never wrapped in callWithTransientRetry, which is the generic

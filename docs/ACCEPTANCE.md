@@ -12,12 +12,37 @@ incomplete, see note) · REAL-HARDWARE-PROOF-PENDING (code is real/tested
 against fakes, never yet run against the real Windows/AE machine) ·
 MISSING (no real implementing code).
 
-Last updated: 2026-09-02.
+Last updated: 2026-09-11.
 
 ## Three-template validation
 | Criterion | Status | Evidence |
 |---|---|---|
-| Complete workflow run on three different plugin-free templates | REAL-HARDWARE-PROOF-PENDING | `evals/README.md` + `evals/template-case.template.json` (extended 2026-09-02 with real-scene storyboard evidence, separate First/Final Preview approval fields, and an overallResult summary) track this; zero real runs completed yet. Current, specific blocker: the first real client-machine update attempt surfaced a real "JSON is undefined" ExtendScript failure in INSPECT_RENDER_CAPABILITIES (fixed - see Outputs section below), then a second real attempt failed the updater's own AE/MCP health gate for a cause not yet proven from client-side evidence alone - a preserved diagnostic log from the client machine is the next input needed before a further Worker package is built |
+| Complete workflow run on three different plugin-free templates | BLOCKED - NO PLUGIN-FREE TEMPLATE AVAILABLE | `evals/README.md` + `evals/template-case.template.json` track this; zero qualifying runs completed. **Blocker as of 2026-09-11: every `.aep` available on the QA machine is Element 3D-dependent, so none can count toward this criterion.** See "Plugin-dependency findings" below. Supplying at least one genuinely different, plugin-free `.aep` on FAHADNAKASH is now the single unavoidable external input this criterion is waiting on - it cannot be satisfied by any further engineering |
+
+### Plugin-dependency findings (2026-09-11, real evidence)
+
+Both `.aep` files available on the QA machine (FAHADNAKASH) are proven
+Element 3D-dependent and **must not count toward the three plugin-free
+templates** above. Neither file was modified; both remain byte-identical
+to their recorded hashes (every check ran against a disposable scratch
+copy).
+
+| File | SHA256 | Finding |
+|---|---|---|
+| `dro-template-converted.aep` (project `t`) | `67e1b708...` | The engagement's canonical source. `comp-1600` layer "Element 3D" carries `VIDEOCOPILOT 3DArray`; no `Element*.aex` exists anywhere on the machine, so it renders as a pink "missing effect" frame - the proven cause of the black hard cut at Scene 1 local ~2.612s. Confirmed by an A/B render (layer enabled = pink error frame, disabled = solid black). |
+| `dro tempelate.aep` → `dro-tempelate-converted-v26.aep` | `47de85ca...` → `c6c27aa7...` | A different file, but the same dependency. Authored in AE 23.2.1, required an interactive version-conversion dialog to open (fixed generically - see `legacy-project-conversion.ts`). A full project-wide scan of the converted copy found **18 enabled `VIDEOCOPILOT 3DArray` instances across 11 compositions** (phone, phone xxx, phoneee, phpone xxxzz, Pre-comp 1, Pre-comp 2, Pre-comp 4, Scene 4, Scene 7, Scene 8, Scene 9) out of 83 project items / 25 compositions carrying effects. Also has unresolvable fonts (Evolventa-Bold/Regular) and 2 expression errors. Appears to be an older variant of the same template. |
+
+Resolution options for the Element 3D dependency itself (separate from
+the acceptance blocker above): install a genuine licensed Element 3D on
+the render machine, or replace the dependent design. Pending client
+confirmation of whether they already own a license.
+
+**`preflight.pluginReferences` was an empty stub until this incident** and
+a real operator read `pluginReferenceCount: 0` as proof of plugin-free
+status while the template was Element 3D-dependent throughout. It is now
+populated from a real project-wide effect scan, and a failed scan is
+surfaced as an explicit `unknownItems` warning rather than looking like
+zero - see `parse-project-effects-scan.ts`.
 
 ## Source safety
 | Criterion | Status | Evidence |

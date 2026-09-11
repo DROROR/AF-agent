@@ -21,8 +21,9 @@ import {
   type CompositionDetail,
   type CompositionSummary
 } from "./parse-mcp-shapes.js";
-import { buildInspectCompositionPrecompsScript, buildOpenProjectScript } from "../execution/jsx-templates.js";
+import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectEffectsScript } from "../execution/jsx-templates.js";
 import { prepareConversionCopy } from "./legacy-project-conversion.js";
+import { parseProjectEffectsScan, type ParseProjectEffectsScanResult } from "./parse-project-effects-scan.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
@@ -354,6 +355,16 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         precompFacts.push(await fetchPrecompFacts(client, summary, this.logger, this.retryOptions));
       }
 
+      // Real plugin detection (2026-09-11): exactly ONE additional
+      // ae_run_jsx call that enumerates every composition's applied
+      // effects inside AE's own JS engine - never a round trip per
+      // composition (see parse-project-effects-scan.ts's own doc comment
+      // for why this is finally affordable, and why an empty
+      // pluginReferences was a genuinely dangerous false negative before).
+      // A failed scan never blocks the manifest: it is surfaced as an
+      // explicit unknownItems entry below instead.
+      const pluginScan = await scanProjectPluginEvidence(client, this.logger, this.retryOptions);
+
       const facts = buildProjectFacts({
         templateId: request.templateId,
         sourceProjectPath: hashResult.value.path,
@@ -362,7 +373,8 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         aeVersion,
         discovered,
         details,
-        precompFacts
+        precompFacts,
+        ...(pluginScan.ok ? { pluginReferences: pluginScan.evidence.pluginReferences } : {})
       });
 
       let manifest: TemplateManifest;
@@ -390,6 +402,31 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
             });
           }
         }
+      }
+      if (!pluginScan.ok) {
+        // CRITICAL (real 2026-09-11 misdiagnosis): without this, a failed
+        // scan leaves preflight.pluginReferences as [] - indistinguishable
+        // from a genuinely plugin-free project, which a real operator did
+        // read that way while the template was in fact Element 3D-dependent
+        // throughout. An empty list must only ever mean "really scanned,
+        // really none".
+        manifest.unknownItems.push({
+          context: "(project)",
+          reason:
+            `the project-wide plugin/effect scan did not complete (${pluginScan.reason}) - ` +
+            "preflight.pluginReferences below is NOT a confirmed-empty result and must not be read as proof this template is plugin-free"
+        });
+      } else if (pluginScan.evidence.pluginReferences.length > 0) {
+        // Real, evidence-backed dependency - surfaced prominently rather
+        // than left for a human to notice inside the preflight array.
+        manifest.unknownItems.push({
+          context: "(project)",
+          reason:
+            `this template depends on ${pluginScan.evidence.pluginReferences.length} third-party effect(s) ` +
+            `(${pluginScan.evidence.pluginReferences.join(", ")}) applied ${pluginScan.evidence.thirdPartyEffectInstanceCount} time(s) across ` +
+            `composition(s): ${pluginScan.evidence.affectedCompositionNames.join(", ")} - rendering this template requires those plugins ` +
+            "to be installed and licensed on the render machine"
+        });
       }
       if (truncatedCompositionCount > 0) {
         manifest.unknownItems.push({
@@ -729,6 +766,32 @@ async function ensureTargetProjectOpen(
     matched: false,
     note: "the project AE reports having open after the open attempt does not exactly match the requested sourceProjectPath - refusing to inspect the wrong project"
   };
+}
+
+/**
+ * Real plugin detection for preflight.pluginReferences (2026-09-11) -
+ * exactly ONE ae_run_jsx call for the whole project, retried on a
+ * transient MCP timeout the same way every other real inspection call in
+ * this file is. Never throws and never blocks the manifest: every failure
+ * mode (transport, envelope/parse, or the script's own typed
+ * failureReason) is returned as a typed failure the caller surfaces as an
+ * unknownItems entry, never as a silently empty plugin list.
+ */
+async function scanProjectPluginEvidence(
+  client: HeroicSwanMcpClient,
+  logger: pino.Logger | undefined,
+  retryOptions: TransientRetryOptions | undefined
+): Promise<ParseProjectEffectsScanResult> {
+  const script = buildScanProjectEffectsScript();
+  const result = await callWithTransientRetry("project_effects_scan", logger, () => client.runFixedInspectionScript(script), retryOptions);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  return parseProjectEffectsScan(unwrapped.value);
 }
 
 function rawCaptureFor(toolCalls: RawToolCallCapture[], note: string, projectOpenEvidence?: ProjectOpenEvidence): RawInspectionCapture {
