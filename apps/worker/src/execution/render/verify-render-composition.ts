@@ -4,9 +4,12 @@ import { parseCompositionList } from "../../inspection/parse-mcp-shapes.js";
 import { windowsPathsEqual } from "../../inspection/canonical-windows-path.js";
 import { buildOpenProjectScript } from "../jsx-templates.js";
 import { unwrapJsxResult } from "../unwrap-jsx-result.js";
+import { parseStableCompositionNumericId, resolveCompositionIndex } from "../resolve-composition-index.js";
 
 export interface VerifyRenderCompositionParams {
   workingProjectPath: string;
+  /** The manifest's own durable composition identity - see resolve-composition-index.ts's own doc comment. Used to re-resolve a possibly-stale aeProjectItemIndex before ever trusting it (real 2026-09-11 incident). */
+  manifestCompositionId: string;
   aeProjectItemIndex: number;
   compositionName: string;
 }
@@ -134,6 +137,29 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
         };
       }
 
+      // CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9):
+      // params.aeProjectItemIndex is only ever a snapshot of the
+      // manifest's/render-output-config's own last-observed position -
+      // see resolve-composition-index.ts's own doc comment for the full
+      // incident trace (BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_
+      // COMPOSITION insert a new top-level item and shift every later
+      // index; nothing re-scans a pre-existing composition's own index
+      // afterward). Re-resolve by the manifest's durable numeric id
+      // before ever trusting the caller-supplied index. A composition
+      // with no durable id captured (e.g. a derived Landscape/Reels
+      // master - see that parser's own doc comment) falls back to the
+      // caller-supplied index unchanged - identical to this function's
+      // prior behavior, no regression.
+      let effectiveAeProjectItemIndex = params.aeProjectItemIndex;
+      const stableNumericId = parseStableCompositionNumericId(params.manifestCompositionId);
+      if (stableNumericId !== null) {
+        const resolved = await resolveCompositionIndex(client, stableNumericId, params.compositionName);
+        if (!resolved.ok) {
+          return { ok: false, reason: `could not re-resolve composition "${params.manifestCompositionId}" by its durable id: ${resolved.reason}` };
+        }
+        effectiveAeProjectItemIndex = resolved.resolvedAeProjectItemIndex;
+      }
+
       const result = await client.callTool("ae_list_compositions");
       if (!result.ok) {
         return { ok: false, reason: `ae_list_compositions failed: ${result.error.message}` };
@@ -143,14 +169,14 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
         return { ok: false, reason: `ae_list_compositions response did not match the confirmed shape: ${parsed.reason}` };
       }
 
-      const atIndex = parsed.value.find((c) => c.index === params.aeProjectItemIndex);
+      const atIndex = parsed.value.find((c) => c.index === effectiveAeProjectItemIndex);
       if (!atIndex) {
-        return { ok: false, reason: `aeProjectItemIndex ${params.aeProjectItemIndex} does not resolve to any composition in this project` };
+        return { ok: false, reason: `aeProjectItemIndex ${effectiveAeProjectItemIndex} does not resolve to any composition in this project` };
       }
       if (atIndex.name !== params.compositionName) {
         return {
           ok: false,
-          reason: `aeProjectItemIndex ${params.aeProjectItemIndex} resolved to composition "${atIndex.name}", expected "${params.compositionName}" - refusing to render the wrong composition`
+          reason: `aeProjectItemIndex ${effectiveAeProjectItemIndex} resolved to composition "${atIndex.name}", expected "${params.compositionName}" - refusing to render the wrong composition`
         };
       }
 

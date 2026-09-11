@@ -1524,6 +1524,92 @@ export function buildDescribeCompositionSummaryScript(aeProjectItemIndex: number
 }
 
 /**
+ * CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9): a
+ * persisted `aeProjectItemIndex` (in the manifest, in a plan's
+ * `render_outputs`, or echoed into any dispatch payload) is only ever a
+ * SNAPSHOT of `app.project.item(n)`'s ordinal position at the moment it
+ * was captured - `app.project.item(idx)` is positional, 1-based across
+ * ALL project items (see this file's own module doc comment), and AE
+ * renumbers every later item whenever an EARLIER item is inserted or
+ * removed. BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_COMPOSITION each
+ * insert a brand-new top-level composition item - proven, real incident:
+ * after a Landscape build, aeProjectItemIndex 48 (persisted for
+ * "Scene 1"/comp-1) resolved to "Pre-comp 5" instead. Nothing anywhere in
+ * this codebase ever re-scans/refreshes a PRE-EXISTING composition's own
+ * aeProjectItemIndex after such an insertion (register-horizontal-
+ * composition.ts/register-reels-composition.ts only ever ADD their own
+ * new derived manifest entry - see their own doc comments) - so a stale
+ * index is a real, expected, un-self-healing drift, not a one-off glitch.
+ *
+ * This script is the fix: it never trusts a persisted index at all. It
+ * resolves the target composition by AE's own PERSISTENT `CompItem.id`
+ * (confirmed present on `ae_get_composition`'s real response - see
+ * parse-mcp-shapes.ts's own CompositionDetail.compId doc comment - and
+ * already how this codebase's own `manifestCompositionId` values are
+ * built: `"comp-" + item.id`, never `"comp-" + index`) - an id AE
+ * guarantees unique per project and which survives reordering/insertion,
+ * unlike the index. Scans every project item fresh, right now, and
+ * returns the CURRENT real index alongside the composition's own current
+ * name/dimensions/frameRate/duration - callers must use THIS resolved
+ * index for the rest of the job, never the one they were given. Fails
+ * closed (never guesses/falls back to the stale index) if: no item with
+ * the expected id exists any more (composition was deleted/never had a
+ * real id), or an item with that id exists but its name no longer
+ * matches what the manifest last recorded (a duplicate-name situation, or
+ * a manifest confused about which id maps to which composition, is never
+ * silently trusted - see this project's own established "ambiguous name"
+ * fail-closed precedent in verify-render-composition.ts).
+ */
+export function buildResolveCompositionIndexScript(expectedCompositionId: number, expectedName: string): FixedJsxScript {
+  const expectedIdLiteral = String(expectedCompositionId);
+  const expectedNameLiteral = JSON.stringify(expectedName);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO RESOLVE_COMPOSITION_INDEX")});
+  var __result = null;
+  try {
+    var __found = null;
+    var __foundIndex = null;
+    for (var __i = 1; __i <= app.project.numItems; __i++) {
+      var __candidate = app.project.item(__i);
+      if (__candidate instanceof CompItem && __candidate.id === ${expectedIdLiteral}) {
+        __found = __candidate;
+        __foundIndex = __i;
+        break;
+      }
+    }
+    if (__found === null) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "no composition with id " + ${expectedIdLiteral} + " exists in this project (expected name \\"" + ${expectedNameLiteral} + "\\") - it may have been deleted, or this project never assigned that composition a real id"
+      });
+    } else if (__found.name !== ${expectedNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "composition id " + ${expectedIdLiteral} + " now has name \\"" + __found.name + "\\", expected \\"" + ${expectedNameLiteral} + "\\" - refusing to trust an id match with a mismatched name"
+      });
+    } else {
+      __result = JSON.stringify({
+        ok: true,
+        resolvedAeProjectItemIndex: __foundIndex,
+        name: __found.name,
+        widthPx: __found.width,
+        heightPx: __found.height,
+        frameRate: __found.frameRate,
+        durationSeconds: __found.duration
+      });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * The single entry point every caller must use - dispatches on the
  * operation's own `type` (already a closed, Zod-validated discriminated
  * union), so adding a new SceneEditOperationType without a corresponding

@@ -79,6 +79,8 @@ export const renderProjectRequestSchema = z
     executionSessionId: z.string().uuid(),
     /** Re-verified from the real file on disk before rendering - never merely trusted from the request (section 5/6: "working-copy SHA matches expected"). Always non-null for RENDER (a session with no completed scene edit yet cannot be dispatched - see resolve-render-dispatch.ts's READY_TO_RENDER gate). */
     expectedWorkingProjectSha256: z.string().min(1),
+    /** The manifest's own durable composition identity - real 2026-09-11 incident fix: lets the worker re-resolve a possibly-stale aeProjectItemIndex by AE's own persistent CompItem.id before ever trusting it (see resolve-composition-index.ts). */
+    manifestCompositionId: z.string().min(1),
     aeProjectItemIndex: z.number().int().positive(),
     compositionName: z.string().min(1),
     renderSettingsTemplateName: z.string().min(1),

@@ -173,6 +173,7 @@ export function resolveCreateFullPreviewDispatch(input: ResolveCreateFullPreview
       sourceProjectPath: currentProjectSourceProjectPath,
       sourceProjectSha256: currentProjectSourceProjectSha256,
       expectedWorkingProjectSha256: session.latestWorkingProjectSha256,
+      manifestCompositionId: config.manifestCompositionId,
       aeProjectItemIndex: config.aeProjectItemIndex,
       compositionName: config.compositionName,
       renderSettingsTemplateName: config.renderSettingsTemplateName,

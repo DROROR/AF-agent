@@ -93,6 +93,7 @@ export async function executeCreateFullPreview(deps: CreateFullPreviewExecutorDe
   // VERIFY_COMPOSITION - see verify-render-composition.ts.
   const verified = await deps.compositionVerifier.verify({
     workingProjectPath,
+    manifestCompositionId: request.manifestCompositionId,
     aeProjectItemIndex: request.aeProjectItemIndex,
     compositionName: request.compositionName
   });

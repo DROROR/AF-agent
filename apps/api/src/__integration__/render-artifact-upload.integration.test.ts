@@ -144,6 +144,7 @@ async function createRunningRenderJob(workerId: string, projectId: string, varia
         sourceProjectSha256: "a".repeat(64),
         executionSessionId: randomUUID(),
         expectedWorkingProjectSha256: "b".repeat(64),
+        manifestCompositionId: "comp-1",
         aeProjectItemIndex: 1,
         compositionName: "Master",
         renderSettingsTemplateName: "Best Settings",

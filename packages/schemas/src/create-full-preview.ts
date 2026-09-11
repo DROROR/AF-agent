@@ -31,6 +31,8 @@ export const createFullPreviewRequestSchema = z
     sourceProjectSha256: z.string().min(1),
     /** Re-verified from the real file on disk before rendering - never merely trusted from the request (same "VERIFY_WORKING_COPY" contract as RENDER). */
     expectedWorkingProjectSha256: z.string().min(1),
+    /** The manifest's own durable composition identity - real 2026-09-11 incident fix: lets the worker re-resolve a possibly-stale aeProjectItemIndex by AE's own persistent CompItem.id before ever trusting it (see resolve-composition-index.ts). */
+    manifestCompositionId: z.string().min(1),
     aeProjectItemIndex: z.number().int().positive(),
     compositionName: z.string().min(1),
     renderSettingsTemplateName: z.string().min(1),

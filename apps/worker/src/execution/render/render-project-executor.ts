@@ -149,6 +149,7 @@ export async function executeRenderProject(
       // VERIFY_COMPOSITION - see verify-render-composition.ts.
       const verified = await deps.compositionVerifier.verify({
         workingProjectPath,
+        manifestCompositionId: request.manifestCompositionId,
         aeProjectItemIndex: request.aeProjectItemIndex,
         compositionName: request.compositionName
       });
@@ -191,6 +192,7 @@ export async function executeRenderProject(
       // cross-resume state" reasoning just below).
       const revalidated = await deps.compositionVerifier.verify({
         workingProjectPath,
+        manifestCompositionId: request.manifestCompositionId,
         aeProjectItemIndex: request.aeProjectItemIndex,
         compositionName: request.compositionName
       });

@@ -23,6 +23,7 @@ function fullPreviewPayload(executionSessionId: string) {
     sourceProjectPath: "C:\\vidio agent\\White App Promo.aep",
     sourceProjectSha256: "a".repeat(64),
     expectedWorkingProjectSha256: "d".repeat(64),
+    manifestCompositionId: "comp-1",
     aeProjectItemIndex: 5,
     compositionName: "Landscape Master",
     renderSettingsTemplateName: "Best Settings",

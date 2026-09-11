@@ -116,6 +116,7 @@ describe("resolveCreateFullPreviewDispatch", () => {
       sourceProjectPath: SOURCE_PATH,
       sourceProjectSha256: SHA,
       expectedWorkingProjectSha256: WORKING_SHA,
+      manifestCompositionId: "comp-1",
       aeProjectItemIndex: 5,
       compositionName: "Landscape Master",
       renderSettingsTemplateName: "Best Settings",

@@ -118,6 +118,7 @@ describe("resolveRenderDispatch", () => {
       sourceProjectSha256: SHA,
       executionSessionId: SESSION_ID,
       expectedWorkingProjectSha256: WORKING_SHA,
+      manifestCompositionId: "comp-1",
       aeProjectItemIndex: 5,
       compositionName: "Landscape Master",
       renderSettingsTemplateName: "Best Settings",

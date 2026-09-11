@@ -38,9 +38,18 @@ function baseRequest(overrides: Record<string, unknown> = {}) {
 /**
  * A real fake ae-mcp MCP server exercising the real allowlisted
  * ae_get_composition/ae_get_layer/ae_capture_frame tools in their real
- * confirmed shapes (see parse-mcp-shapes.ts) - also registers ae_run_jsx
- * to prove this inspector never calls it, matching
- * heroic-swan-template-inspector.test.ts's approach.
+ * confirmed shapes (see parse-mcp-shapes.ts). Also registers ae_run_jsx -
+ * real 2026-09-11 incident fix: this inspector now ALWAYS sends the
+ * fixed, read-only resolve-composition-by-id script first (see
+ * resolve-composition-index.ts), before ever trusting
+ * request.aeProjectItemIndex, whenever manifestCompositionId carries a
+ * real durable numeric AE id ("comp-<N>" - baseRequest()'s own
+ * "comp-275" always does) - so ae_run_jsx is no longer something this
+ * inspector "never calls"; only the OPT-IN scripts (discoverLayerDetails/
+ * findHostLayersForChildCompositionId/describeCompositionSummary) remain
+ * conditional on their own request flag. `ae_get_composition`'s own
+ * fixed `id: 275` below is what the resolve script matches against
+ * baseRequest()'s "comp-275" - keep them in sync.
  */
 async function writeFakeServer(
   aeMcpPath: string,
@@ -52,6 +61,8 @@ async function writeFakeServer(
     runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
+    /** Real 2026-09-11 incident fix - overrides the resolve-by-id script's own canned response. "drifted" simulates the real incident: the id resolves to a DIFFERENT index than aeProjectItemIndex requested (index 48, not 14), proving the inspector uses the freshly-resolved index rather than the stale one. "notFound" simulates the id no longer existing at all. Default (omitted) resolves to the same index/name ae_get_composition already reports - every pre-existing test's own behavior, unchanged. */
+    resolveBehavior?: "drifted" | "notFound";
   } = {}
 ): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
@@ -67,8 +78,19 @@ async function writeFakeServer(
   const server = new McpServer({ name: "fake-ae-mcp-scene-evidence", version: "0.0.0" });
   let calls = [];
 
-  server.registerTool("ae_get_composition", { description: "d" }, async () => {
+  server.registerTool(
+    "ae_get_composition",
+    { description: "d", inputSchema: { comp_index: z.number().optional(), response_format: z.string().optional() } },
+    async (args) => {
     calls.push("ae_get_composition");
+    // "drifted" (real 2026-09-11 incident shape): index 48 is where
+    // "Text 01"/id 275 REALLY lives now; the stale index 14 this fixture
+    // used to live at now belongs to an unrelated composition - proves
+    // the inspector uses the freshly-RESOLVED index, never the stale
+    // caller-supplied one.
+    if (${JSON.stringify(options.resolveBehavior === "drifted")} && args && args.comp_index !== 48) {
+      return { content: [{ type: "text", text: JSON.stringify({ name: "Some Unrelated Composition", id: 999, width: 640, height: 480, frameRate: 24, duration: 2, numLayers: 1 }) }] };
+    }
     return { content: [{ type: "text", text: JSON.stringify({ name: "Text 01", id: 275, width: 1080, height: 1920, frameRate: 30, duration: 4, numLayers: 1 }) }] };
   });
 
@@ -105,6 +127,25 @@ async function writeFakeServer(
       options.captureReceivedJsxCodeToFile
         ? `require("node:fs").writeFileSync(${JSON.stringify(options.captureReceivedJsxCodeToFile)}, String(args && args.code));`
         : ""
+    }
+    // Real 2026-09-11 incident fix: this inspector always sends this
+    // resolve-by-id script first, before ae_get_composition, whenever a
+    // durable numeric id is available. Resolves "comp-275" (baseRequest's
+    // own manifestCompositionId) to exactly the same index/name
+    // ae_get_composition below already reports, so every pre-existing
+    // test in this file keeps exercising the SAME composition identity
+    // it always did - no behavior change for any of them.
+    if (String(args && args.code).indexOf("DYO RESOLVE_COMPOSITION_INDEX") !== -1) {
+      const resolveBehavior = ${JSON.stringify(options.resolveBehavior ?? null)};
+      let inner;
+      if (resolveBehavior === "notFound") {
+        inner = JSON.stringify({ ok: false, failureReason: "no composition with id 275 exists in this project" });
+      } else if (resolveBehavior === "drifted") {
+        inner = JSON.stringify({ ok: true, resolvedAeProjectItemIndex: 48, name: "Text 01", widthPx: 1080, heightPx: 1920, frameRate: 30, durationSeconds: 4 });
+      } else {
+        inner = JSON.stringify({ ok: true, resolvedAeProjectItemIndex: 14, name: "Text 01", widthPx: 1080, heightPx: 1920, frameRate: 30, durationSeconds: 4 });
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
     }
     ${
       options.runJsxResult === "success"
@@ -169,6 +210,41 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.reason).toContain("resolved to composition");
     expect(result.reason).toContain("Text 01");
     expect(result.reason).toContain("Some Other Scene");
+  });
+
+  /**
+   * CRITICAL SAFETY FIX (real 2026-09-11 incident, job
+   * 47b0b42f-bbec-4ee5-a6f1-0132591a4a89): "comp-1" (Scene 1)'s own
+   * persisted aeProjectItemIndex went stale after a later
+   * BUILD_HORIZONTAL_COMPOSITION inserted a new project item and shifted
+   * every later index - the request's own aeProjectItemIndex (14) now
+   * points at a totally different, unrelated composition. This test
+   * proves the fix end to end through the real inspector: evidence is
+   * still correctly reported for the RIGHT composition, because the
+   * durable numeric id ("comp-275") is used to re-resolve the CURRENT
+   * real index (48) before ae_get_composition/ae_get_layer are ever
+   * called - never the stale one.
+   */
+  it("real 2026-09-11 incident fix: still succeeds against the RIGHT composition even though the caller-supplied aeProjectItemIndex has drifted to point at a totally different one", async () => {
+    await writeFakeServer(dir, { resolveBehavior: "drifted" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest())) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.compositionName).toBe("Text 01");
+    expect(result.response.aeProjectItemIndex).toBe(48);
+  });
+
+  it("real 2026-09-11 incident: fails closed with an honest, specific reason (never falls back to the stale index, never fabricates evidence) when the durable id no longer resolves to anything", async () => {
+    await writeFakeServer(dir, { resolveBehavior: "notFound" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = await inspector.inspect(baseRequest());
+
+    expect(result.kind).toBe("failure");
+    if (result.kind !== "failure") return;
+    expect(result.reason).toContain("could not re-resolve composition");
+    expect(result.reason).toContain("comp-275");
+    expect(result.reason).toContain("no composition with id 275 exists");
   });
 
   it("never calls ae_run_jsx when discoverLayerDetails is not requested, even though the (fake, hostile-capable) server offers it", async () => {
@@ -241,13 +317,15 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(receivedCode).not.toMatch(/\bbreak;/);
   });
 
-  it("omitting findHostLayersForChildCompositionId (and discoverLayerDetails) never calls ae_run_jsx at all - no find-host-layers script is ever sent", async () => {
+  it("omitting findHostLayersForChildCompositionId (and discoverLayerDetails) never sends the find-host-layers script - the only ae_run_jsx call that happens is the mandatory id-based composition resolution (real 2026-09-11 fix)", async () => {
     const capturePath = join(dir, "received-jsx-code-no-find-host-layers.txt");
     await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
     await inspector.inspect(baseRequest());
 
-    await expect(readFile(capturePath, "utf8")).rejects.toThrow();
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/DYO RESOLVE_COMPOSITION_INDEX/);
+    expect(receivedCode).not.toMatch(/DYO FIND_HOST_LAYERS/);
   });
 
   it("live QA: successfully parses real matches returned by ae_run_jsx into response.hostLayerRecords when findHostLayersForChildCompositionId is requested", async () => {
@@ -297,13 +375,15 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(receivedCode).not.toMatch(/\bbreak;/);
   });
 
-  it("omitting describeCompositionSummary (and every other opt-in flag) never calls ae_run_jsx at all", async () => {
+  it("omitting describeCompositionSummary (and every other opt-in flag) never sends the describe-composition-summary script - the only ae_run_jsx call that happens is the mandatory id-based composition resolution (real 2026-09-11 fix)", async () => {
     const capturePath = join(dir, "received-jsx-code-no-describe-summary.txt");
     await writeFakeServer(dir, { runJsxResult: "success", captureReceivedJsxCodeToFile: capturePath });
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
     await inspector.inspect(baseRequest());
 
-    await expect(readFile(capturePath, "utf8")).rejects.toThrow();
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/DYO RESOLVE_COMPOSITION_INDEX/);
+    expect(receivedCode).not.toMatch(/DYO DESCRIBE_COMPOSITION_SUMMARY/);
   });
 
   it("live QA: successfully parses a real composition summary returned by ae_run_jsx into response.compositionSummary when describeCompositionSummary is requested", async () => {

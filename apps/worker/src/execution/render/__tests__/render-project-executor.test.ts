@@ -58,6 +58,7 @@ function makeRequest(fixture: ReturnType<typeof makeFixture>, overrides: Partial
     sourceProjectSha256: fixture.sourceSha,
     executionSessionId: EXECUTION_SESSION_ID,
     expectedWorkingProjectSha256: fixture.workingSha,
+    manifestCompositionId: "comp-5",
     aeProjectItemIndex: 5,
     compositionName: "Landscape Master",
     renderSettingsTemplateName: "Best Settings",

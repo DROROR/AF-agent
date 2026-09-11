@@ -221,6 +221,7 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
       sourceProjectSha256: currentPlan.sourceProjectSha256,
       executionSessionId: session.id,
       expectedWorkingProjectSha256: session.latestWorkingProjectSha256,
+      manifestCompositionId: config.manifestCompositionId,
       aeProjectItemIndex: config.aeProjectItemIndex,
       compositionName: config.compositionName,
       renderSettingsTemplateName: config.renderSettingsTemplateName,

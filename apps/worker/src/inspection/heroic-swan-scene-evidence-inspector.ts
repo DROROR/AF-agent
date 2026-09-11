@@ -8,6 +8,7 @@ import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./p
 import { hashSourceProject } from "./hash-source-project.js";
 import { buildDescribeCompositionSummaryScript, buildFindHostLayersScript, buildInspectCompositionLayerDetailsScript } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
+import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
 
 const layerDetailsScriptResultSchema = z.union([
@@ -206,8 +207,39 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
     verifiedSourceProjectSha256: string
   ): Promise<SceneEvidenceResult> {
     try {
+      // CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9):
+      // request.aeProjectItemIndex is only ever a snapshot of the
+      // manifest's own last-observed position - BUILD_HORIZONTAL_
+      // COMPOSITION/BUILD_REELS_COMPOSITION each insert a new top-level
+      // composition item and shift every later index, and nothing
+      // re-scans/refreshes a pre-existing composition's own manifest
+      // index afterward (see resolve-composition-index.ts's own doc
+      // comment for the full incident trace). Before ever trusting the
+      // request's own index, try to re-resolve it from the manifest's
+      // durable numeric composition id (parsed from manifestCompositionId
+      // - "comp-" + AE's own persistent CompItem.id, never the ordinal
+      // position). A composition whose id was never captured this way
+      // (e.g. a BUILD_HORIZONTAL_COMPOSITION/BUILD_REELS_COMPOSITION
+      // derived master - see that parser's own doc comment) has no
+      // durable id to re-resolve by, so this falls back to the
+      // request's own index unchanged for exactly that case - identical
+      // to this function's prior behavior, no regression. When a durable
+      // id DOES exist, resolution is authoritative: a failure here
+      // (deleted composition, or a name mismatch even after an id match)
+      // fails the whole request closed immediately, never silently
+      // falling through to try the stale index anyway.
+      let effectiveAeProjectItemIndex = request.aeProjectItemIndex;
+      const stableNumericId = parseStableCompositionNumericId(request.manifestCompositionId);
+      if (stableNumericId !== null) {
+        const resolved = await resolveCompositionIndex(client, stableNumericId, request.compositionName);
+        if (!resolved.ok) {
+          return { kind: "failure", reason: `could not re-resolve composition "${request.manifestCompositionId}" by its durable id: ${resolved.reason}` };
+        }
+        effectiveAeProjectItemIndex = resolved.resolvedAeProjectItemIndex;
+      }
+
       const compResult = await client.callTool("ae_get_composition", {
-        comp_index: request.aeProjectItemIndex,
+        comp_index: effectiveAeProjectItemIndex,
         response_format: "concise"
       });
       if (!compResult.ok) {
@@ -223,18 +255,21 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       // project item, or an off-by-one could resolve to the WRONG
       // composition that merely happens to be present at that index. The
       // resolved CompItem's own name must match what the caller expects
-      // BEFORE any evidence is ever reported as fact.
+      // BEFORE any evidence is ever reported as fact. Still checked even
+      // after a successful id-based resolution above (belt-and-suspenders
+      // - resolveCompositionIndex already checked the name itself, but
+      // this keeps the two code paths' own guarantees independent).
       if (parsedComp.value.name !== request.compositionName) {
         return {
           kind: "failure",
-          reason: `aeProjectItemIndex ${request.aeProjectItemIndex} resolved to composition "${parsedComp.value.name}", expected "${request.compositionName}" - refusing to report evidence for the wrong composition`
+          reason: `aeProjectItemIndex ${effectiveAeProjectItemIndex} resolved to composition "${parsedComp.value.name}", expected "${request.compositionName}" - refusing to report evidence for the wrong composition`
         };
       }
 
       const layers = [];
       for (const layerIndex of request.layerIndices) {
         const layerResult = await client.callTool("ae_get_layer", {
-          comp_index: request.aeProjectItemIndex,
+          comp_index: effectiveAeProjectItemIndex,
           layer_index: layerIndex,
           response_format: "detailed"
         });
@@ -276,7 +311,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let previewFailureReason: string | null = null;
       if (request.previewTimestampSeconds !== null) {
         const captureResult = await client.callTool("ae_capture_frame", {
-          comp_index: request.aeProjectItemIndex,
+          comp_index: effectiveAeProjectItemIndex,
           time: request.previewTimestampSeconds
         });
         if (!captureResult.ok) {
@@ -313,7 +348,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       if (request.discoverLayerDetails === true) {
         const layerDetailsResult = await fetchLayerDetails(
           client,
-          request.aeProjectItemIndex,
+          effectiveAeProjectItemIndex,
           parsedComp.value.name,
           request.discoverLayerDetailsMode === "discovery" ? "discovery" : "full"
         );
@@ -327,7 +362,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let hostLayerRecords: HostLayerRecord[] | null = null;
       let hostLayerRecordsFailureReason: string | null = null;
       if (request.findHostLayersForChildCompositionId !== undefined) {
-        const hostLayersResult = await fetchHostLayers(client, request.aeProjectItemIndex, parsedComp.value.name, request.findHostLayersForChildCompositionId);
+        const hostLayersResult = await fetchHostLayers(client, effectiveAeProjectItemIndex, parsedComp.value.name, request.findHostLayersForChildCompositionId);
         if (hostLayersResult.ok) {
           hostLayerRecords = hostLayersResult.matches;
         } else {
@@ -338,7 +373,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let compositionSummary: CompositionSummary | null = null;
       let compositionSummaryFailureReason: string | null = null;
       if (request.describeCompositionSummary === true) {
-        const summaryResult = await fetchCompositionSummary(client, request.aeProjectItemIndex, parsedComp.value.name);
+        const summaryResult = await fetchCompositionSummary(client, effectiveAeProjectItemIndex, parsedComp.value.name);
         if (summaryResult.ok) {
           compositionSummary = summaryResult.summary;
         } else {
@@ -351,7 +386,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         response: {
           verifiedSourceProjectSha256,
           manifestCompositionId: request.manifestCompositionId,
-          aeProjectItemIndex: request.aeProjectItemIndex,
+          aeProjectItemIndex: effectiveAeProjectItemIndex,
           compositionName: parsedComp.value.name,
           layers,
           preview,
