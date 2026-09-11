@@ -1770,16 +1770,30 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
  * script reports the raw matchName for every effect found and lets the
  * caller apply that judgment - it never itself asserts "plugin-free".
  */
-export function buildScanProjectEffectsScript(): FixedJsxScript {
+export function buildScanProjectPreflightScript(): FixedJsxScript {
   const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO SCAN_PROJECT_EFFECTS")});
   var __result = null;
   try {
     var __compositions = [];
+    var __fonts = [];
+    var __footage = [];
     for (var __itemIndex = 1; __itemIndex <= app.project.numItems; __itemIndex++) {
       var __item = null;
       try {
         __item = app.project.item(__itemIndex);
       } catch (__itemLookupError) {
+        continue;
+      }
+      if (__item instanceof FootageItem) {
+        try {
+          __footage.push({
+            name: __item.name,
+            path: __item.file ? __item.file.fsName : null,
+            missing: __item.footageMissing === true
+          });
+        } catch (__footageReadError) {
+          // A single unreadable footage item never fails the whole scan.
+        }
         continue;
       }
       if (!(__item instanceof CompItem)) {
@@ -1789,6 +1803,18 @@ export function buildScanProjectEffectsScript(): FixedJsxScript {
       for (var __i = 1; __i <= __item.numLayers; __i++) {
         try {
           var __layer = __item.layer(__i);
+          try {
+            var __sourceText = __layer.sourceText;
+            if (__sourceText) {
+              var __textDocument = __sourceText.value;
+              if (__textDocument && __textDocument.font) {
+                __fonts.push(__textDocument.font);
+              }
+            }
+          } catch (__fontReadError) {
+            // Not a text layer (or its sourceText is unreadable) - never
+            // fails the rest of the scan.
+          }
           var __effects = [];
           try {
             var __effectsGroup = __layer.property("ADBE Effect Parade");
@@ -1812,7 +1838,7 @@ export function buildScanProjectEffectsScript(): FixedJsxScript {
         __compositions.push({ aeProjectItemIndex: __itemIndex, compositionId: __item.id, compositionName: __item.name, layers: __layers });
       }
     }
-    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositionsWithEffects: __compositions });
+    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositionsWithEffects: __compositions, fonts: __fonts, footage: __footage });
   } catch (__unexpectedError) {
     __result = JSON.stringify({
       ok: false,

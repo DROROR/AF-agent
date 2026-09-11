@@ -21,9 +21,9 @@ import {
   type CompositionDetail,
   type CompositionSummary
 } from "./parse-mcp-shapes.js";
-import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectEffectsScript } from "../execution/jsx-templates.js";
+import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript } from "../execution/jsx-templates.js";
 import { prepareConversionCopy } from "./legacy-project-conversion.js";
-import { parseProjectEffectsScan, type ParseProjectEffectsScanResult } from "./parse-project-effects-scan.js";
+import { parseProjectPreflightScan, type ParseProjectPreflightScanResult } from "./parse-project-preflight-scan.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
@@ -363,7 +363,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       // pluginReferences was a genuinely dangerous false negative before).
       // A failed scan never blocks the manifest: it is surfaced as an
       // explicit unknownItems entry below instead.
-      const pluginScan = await scanProjectPluginEvidence(client, this.logger, this.retryOptions);
+      const preflightScan = await scanProjectPreflightEvidence(client, this.logger, this.retryOptions);
 
       const facts = buildProjectFacts({
         templateId: request.templateId,
@@ -374,7 +374,18 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         discovered,
         details,
         precompFacts,
-        ...(pluginScan.ok ? { pluginReferences: pluginScan.evidence.pluginReferences } : {})
+        ...(preflightScan.ok
+          ? {
+              pluginReferences: preflightScan.evidence.pluginReferences,
+              ...(preflightScan.evidence.fontAndFootageScanned
+                ? {
+                    requiredFonts: preflightScan.evidence.requiredFonts,
+                    footageReferenced: preflightScan.evidence.footageReferenced,
+                    missingFootage: preflightScan.evidence.missingFootage
+                  }
+                : {})
+            }
+          : {})
       });
 
       let manifest: TemplateManifest;
@@ -403,7 +414,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
           }
         }
       }
-      if (!pluginScan.ok) {
+      if (!preflightScan.ok) {
         // CRITICAL (real 2026-09-11 misdiagnosis): without this, a failed
         // scan leaves preflight.pluginReferences as [] - indistinguishable
         // from a genuinely plugin-free project, which a real operator did
@@ -413,18 +424,18 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         manifest.unknownItems.push({
           context: "(project)",
           reason:
-            `the project-wide plugin/effect scan did not complete (${pluginScan.reason}) - ` +
-            "preflight.pluginReferences below is NOT a confirmed-empty result and must not be read as proof this template is plugin-free"
+            `the project-wide preflight scan did not complete (${preflightScan.reason}) - ` +
+            "preflight.pluginReferences/requiredFonts/footageReferenced/missingFootage below are NOT confirmed-empty results and must not be read as proof this template is plugin-free or fully resolved"
         });
-      } else if (pluginScan.evidence.pluginReferences.length > 0) {
+      } else if (preflightScan.evidence.pluginReferences.length > 0) {
         // Real, evidence-backed dependency - surfaced prominently rather
         // than left for a human to notice inside the preflight array.
         manifest.unknownItems.push({
           context: "(project)",
           reason:
-            `this template depends on ${pluginScan.evidence.pluginReferences.length} third-party effect(s) ` +
-            `(${pluginScan.evidence.pluginReferences.join(", ")}) applied ${pluginScan.evidence.thirdPartyEffectInstanceCount} time(s) across ` +
-            `composition(s): ${pluginScan.evidence.affectedCompositionNames.join(", ")} - rendering this template requires those plugins ` +
+            `this template depends on ${preflightScan.evidence.pluginReferences.length} third-party effect(s) ` +
+            `(${preflightScan.evidence.pluginReferences.join(", ")}) applied ${preflightScan.evidence.thirdPartyEffectInstanceCount} time(s) across ` +
+            `composition(s): ${preflightScan.evidence.affectedCompositionNames.join(", ")} - rendering this template requires those plugins ` +
             "to be installed and licensed on the render machine"
         });
       }
@@ -777,13 +788,13 @@ async function ensureTargetProjectOpen(
  * failureReason) is returned as a typed failure the caller surfaces as an
  * unknownItems entry, never as a silently empty plugin list.
  */
-async function scanProjectPluginEvidence(
+async function scanProjectPreflightEvidence(
   client: HeroicSwanMcpClient,
   logger: pino.Logger | undefined,
   retryOptions: TransientRetryOptions | undefined
-): Promise<ParseProjectEffectsScanResult> {
-  const script = buildScanProjectEffectsScript();
-  const result = await callWithTransientRetry("project_effects_scan", logger, () => client.runFixedInspectionScript(script), retryOptions);
+): Promise<ParseProjectPreflightScanResult> {
+  const script = buildScanProjectPreflightScript();
+  const result = await callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script), retryOptions);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
   }
@@ -791,7 +802,7 @@ async function scanProjectPluginEvidence(
   if (!unwrapped.ok) {
     return { ok: false, reason: unwrapped.reason };
   }
-  return parseProjectEffectsScan(unwrapped.value);
+  return parseProjectPreflightScan(unwrapped.value);
 }
 
 function rawCaptureFor(toolCalls: RawToolCallCapture[], note: string, projectOpenEvidence?: ProjectOpenEvidence): RawInspectionCapture {

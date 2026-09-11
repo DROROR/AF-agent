@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildOpenProjectScript as realBuildOpenProjectScript, buildScanProjectEffectsScript as realBuildScanProjectEffectsScript } from "../../execution/jsx-templates.js";
-import { buildOpenProjectScript, buildScanProjectEffectsScript } from "../scan-project-effects-cli.js";
+import { buildOpenProjectScript as realBuildOpenProjectScript, buildScanProjectPreflightScript as realBuildScanProjectEffectsScript } from "../../execution/jsx-templates.js";
+import { buildOpenProjectScript, buildScanProjectPreflightScript } from "../scan-project-effects-cli.js";
 
 /**
  * Real 2026-09-11 incident: this standalone CLI deliberately duplicates
@@ -9,7 +9,7 @@ import { buildOpenProjectScript, buildScanProjectEffectsScript } from "../scan-p
  * an already-installed Worker machine (see the CLI's own doc comment for
  * the full incident - copying only the new .js file onto an older
  * install broke with "does not provide an export named
- * buildScanProjectEffectsScript"). That deliberate duplication is only
+ * buildScanProjectPreflightScript"). That deliberate duplication is only
  * safe as long as the two copies never silently drift apart - these
  * tests fail loudly the moment they do, forcing an intentional,
  * synchronized update to both files rather than an unnoticed divergence.
@@ -20,7 +20,7 @@ describe("scan-project-effects-cli.ts's duplicated scripts stay byte-identical t
     expect(buildOpenProjectScript(path)).toBe(realBuildOpenProjectScript(path) as unknown as string);
   });
 
-  it("buildScanProjectEffectsScript produces the exact same JSX as jsx-templates.ts's real function", () => {
-    expect(buildScanProjectEffectsScript()).toBe(realBuildScanProjectEffectsScript() as unknown as string);
+  it("buildScanProjectPreflightScript produces the exact same JSX as jsx-templates.ts's real function", () => {
+    expect(buildScanProjectPreflightScript()).toBe(realBuildScanProjectEffectsScript() as unknown as string);
   });
 });

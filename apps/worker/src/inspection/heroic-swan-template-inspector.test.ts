@@ -380,6 +380,11 @@ async function writeRealShapeFakeServer(
         compositionCount: 2,
         compositionsWithEffects: [
           { aeProjectItemIndex: 3, compositionId: 42, compositionName: "Comp A", layers: [{ layerIndex: 1, layerName: "FX Layer", enabled: true, effects: scanEffects }] }
+        ],
+        fonts: ["Evolventa-Bold", "Evolventa-Regular", "Evolventa-Bold"],
+        footage: [
+          { name: "logo.png", path: "C:\\\\assets\\\\logo.png", missing: false },
+          { name: "gone.mp4", path: "C:\\\\assets\\\\gone.mp4", missing: true }
         ]
       });
       return { content: [{ type: "text", text: JSON.stringify({ result: scanPayload }) }] };
@@ -913,6 +918,26 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     expect(dependencyNote?.reason).toContain("Comp A");
   });
 
+  it("real font/footage preflight (2026-09-11, same single scan): populates requiredFonts (deduped) and separates resolvable footage from AE's own footageMissing items", async () => {
+    const sourceProjectPath = join(dir, "template-copy.aep");
+    await writeFile(sourceProjectPath, "sanitized fixture bytes");
+    await writeRealShapeFakeServer(dir, { pluginScan: "native-only" });
+
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
+
+    // Real fonts, deduped and sorted - the exact class of fact that was
+    // invisible (requiredFontCount: 0) while the 2026-09-11 candidate
+    // genuinely had unresolvable Evolventa fonts.
+    expect(result.response.manifest.preflight.requiredFonts).toEqual(["Evolventa-Bold", "Evolventa-Regular"]);
+    expect(result.response.summary.requiredFontCount).toBe(2);
+
+    // Resolvable footage and AE-reported-missing footage are never conflated.
+    expect(result.response.manifest.preflight.footageReferenced).toEqual(["C:\\assets\\logo.png"]);
+    expect(result.response.manifest.preflight.missingFootage).toEqual([{ name: "gone.mp4", expectedPath: "C:\\assets\\gone.mp4" }]);
+    expect(result.response.summary.missingFootageCount).toBe(1);
+  });
+
   it("real plugin detection: a project whose every effect is Adobe-native yields a genuinely confirmed-empty pluginReferences, with no false dependency warning", async () => {
     const sourceProjectPath = join(dir, "template-copy.aep");
     await writeFile(sourceProjectPath, "sanitized fixture bytes");
@@ -924,7 +949,7 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     expect(result.response.manifest.preflight.pluginReferences).toEqual([]);
     expect(result.response.manifest.unknownItems.some((item) => item.reason.includes("third-party effect"))).toBe(false);
     // Critically, it must ALSO not claim the scan failed - this really is a confirmed-empty result.
-    expect(result.response.manifest.unknownItems.some((item) => item.reason.includes("plugin/effect scan did not complete"))).toBe(false);
+    expect(result.response.manifest.unknownItems.some((item) => item.reason.includes("preflight scan did not complete"))).toBe(false);
   });
 
   it("real plugin detection: a FAILED scan is never silently reported as zero plugins - it is surfaced as an explicit unknownItems warning (the exact 2026-09-11 false negative)", async () => {
@@ -939,7 +964,7 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     expect(result.kind).toBe("manifest");
     // The array is empty, but the manifest says loudly that this is NOT a confirmed-empty result.
     expect(result.response.manifest.preflight.pluginReferences).toEqual([]);
-    const warning = result.response.manifest.unknownItems.find((item) => item.reason.includes("plugin/effect scan did not complete"));
+    const warning = result.response.manifest.unknownItems.find((item) => item.reason.includes("preflight scan did not complete"));
     expect(warning).toBeDefined();
     expect(warning?.reason).toContain("must not be read as proof this template is plugin-free");
   });

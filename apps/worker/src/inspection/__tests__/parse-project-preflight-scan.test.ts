@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isThirdPartyEffectMatchName, parseProjectEffectsScan } from "../parse-project-effects-scan.js";
+import { isThirdPartyEffectMatchName, parseProjectPreflightScan } from "../parse-project-preflight-scan.js";
 
 function layer(layerIndex: number, layerName: string, effects: { name: string; matchName: string; enabled: boolean }[]) {
   return { layerIndex, layerName, enabled: true, effects };
@@ -24,9 +24,9 @@ describe("isThirdPartyEffectMatchName", () => {
   });
 });
 
-describe("parseProjectEffectsScan", () => {
+describe("parseProjectPreflightScan", () => {
   it("derives distinct, sorted third-party matchNames plus real affected-composition evidence, ignoring native effects entirely", () => {
-    const result = parseProjectEffectsScan({
+    const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 83,
       compositionsWithEffects: [
@@ -52,7 +52,7 @@ describe("parseProjectEffectsScan", () => {
   });
 
   it("returns a genuinely empty, confirmed result for a project whose every effect is native", () => {
-    const result = parseProjectEffectsScan({
+    const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 12,
       compositionsWithEffects: [composition(2, 1, "Main", [layer(1, "Blur", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }])])]
@@ -65,7 +65,7 @@ describe("parseProjectEffectsScan", () => {
   });
 
   it("counts a disabled third-party effect too - it is still a real dependency of the project file", () => {
-    const result = parseProjectEffectsScan({
+    const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 2,
       compositionsWithEffects: [composition(2, 1, "Main", [layer(1, "E", [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: false }])])]
@@ -76,15 +76,47 @@ describe("parseProjectEffectsScan", () => {
     expect(result.evidence.pluginReferences).toEqual(["VIDEOCOPILOT 3DArray"]);
   });
 
+  it("dedupes and sorts fonts, and separates resolvable footage from AE's own footageMissing items", () => {
+    const result = parseProjectPreflightScan({
+      ok: true,
+      compositionCount: 4,
+      compositionsWithEffects: [],
+      fonts: ["Evolventa-Regular", "Evolventa-Bold", "Evolventa-Regular"],
+      footage: [
+        { name: "logo.png", path: "C:\\assets\\logo.png", missing: false },
+        { name: "gone.mp4", path: "C:\\assets\\gone.mp4", missing: true },
+        { name: "solid", path: null, missing: false }
+      ]
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.evidence.requiredFonts).toEqual(["Evolventa-Bold", "Evolventa-Regular"]);
+    // A path-less item (e.g. a solid) is never reported as a referenced file.
+    expect(result.evidence.footageReferenced).toEqual(["C:\\assets\\logo.png"]);
+    expect(result.evidence.missingFootage).toEqual([{ name: "gone.mp4", expectedPath: "C:\\assets\\gone.mp4" }]);
+    expect(result.evidence.fontAndFootageScanned).toBe(true);
+  });
+
+  it("marks fontAndFootageScanned false for a response from an older worker build that only scanned effects - so empty font/footage lists are never read as confirmed", () => {
+    const result = parseProjectPreflightScan({ ok: true, compositionCount: 1, compositionsWithEffects: [] });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.evidence.fontAndFootageScanned).toBe(false);
+    expect(result.evidence.requiredFonts).toEqual([]);
+    expect(result.evidence.missingFootage).toEqual([]);
+  });
+
   it("reports a typed failure (never a silently empty plugin list) when the script itself reported failure", () => {
-    const result = parseProjectEffectsScan({ ok: false, failureReason: "unexpected error: whatever" });
+    const result = parseProjectPreflightScan({ ok: false, failureReason: "unexpected error: whatever" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toMatch(/script itself reported failure/);
   });
 
   it("reports a typed failure (never a silently empty plugin list) for an unrecognized response shape", () => {
-    const result = parseProjectEffectsScan({ totally: "unexpected" });
+    const result = parseProjectPreflightScan({ totally: "unexpected" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toMatch(/did not match the expected shape/);

@@ -38,6 +38,12 @@ export interface BuildProjectFactsInput {
    * real misdiagnosis on 2026-09-11.
    */
   pluginReferences?: readonly string[];
+  /** Real text-layer fonts from the same single scan - what the project ASKS FOR, never a claim that each is installed on this machine (AE exposes no such flag). Omitted when the scan failed/was never run. */
+  requiredFonts?: readonly string[];
+  /** Real resolvable footage paths from the same single scan. Omitted when the scan failed/was never run. */
+  footageReferenced?: readonly string[];
+  /** Footage AE itself reported as missing (`FootageItem.footageMissing`). Omitted when the scan failed/was never run. */
+  missingFootage?: readonly { name: string; expectedPath: string | null }[];
 }
 
 /**
@@ -150,17 +156,17 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
     sourceProjectName: input.sourceProjectName,
     projectSha256: input.projectSha256,
     compositions: compositionsWithNesting,
-    // Fonts/footage remain honestly empty: neither is determinable from the
-    // currently allowlisted read-only tools' confirmed shapes (fonts require
-    // TextLayer.sourceText, footage references require FootageItem fields -
-    // neither exposed by ae_get_composition's confirmed shape). Left empty
-    // rather than guessed; build-manifest.ts's own unknownItems (one per
-    // "unknown" placeholder) already surfaces this gap per-layer.
-    requiredFonts: [],
-    footageReferenced: [],
-    missingFootage: [],
-    // pluginReferences, unlike the three above, IS now real whenever the
-    // caller performed the scan - see this input field's own doc comment.
+    // All four are now REAL whenever the caller performed the project-wide
+    // preflight scan (2026-09-11) - previously every one of them was an
+    // honest empty stub, because the per-composition round trips the
+    // obvious implementation needed carried a real timeout risk. One
+    // single-pass ae_run_jsx call now supplies all of them at once. An
+    // omitted field still falls back to empty, but the caller is required
+    // to surface that as an unknownItems warning rather than let it look
+    // like a confirmed-empty result (see this input's own doc comments).
+    requiredFonts: input.requiredFonts ? [...input.requiredFonts] : [],
+    footageReferenced: input.footageReferenced ? [...input.footageReferenced] : [],
+    missingFootage: input.missingFootage ? input.missingFootage.map((item) => ({ ...item })) : [],
     pluginReferences: input.pluginReferences ? [...input.pluginReferences] : []
   };
 }

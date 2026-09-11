@@ -7,12 +7,12 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 /**
  * Real 2026-09-11 incident: the first version of this diagnostic imported
- * `buildScanProjectEffectsScript`/`buildOpenProjectScript` from
+ * `buildScanProjectPreflightScript`/`buildOpenProjectScript` from
  * ../execution/jsx-templates.js - a real compiled sibling file already
  * installed on FAHADNAKASH, but from an OLDER build that predates those
  * exports. Copying only this one new .js file onto an otherwise-unchanged
  * install broke immediately: "does not provide an export named
- * buildScanProjectEffectsScript". Fixed by making this file GENUINELY
+ * buildScanProjectPreflightScript". Fixed by making this file GENUINELY
  * self-contained - its only imports are Node built-ins and
  * @modelcontextprotocol/sdk (an npm package resolved from node_modules,
  * already installed and unchanged - not a relative sibling file that
@@ -22,7 +22,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
  *
  * The two JSX script bodies below are DELIBERATE, INTENTIONAL duplicates
  * of jsx-templates.ts's real buildOpenProjectScript/
- * buildScanProjectEffectsScript - see
+ * buildScanProjectPreflightScript - see
  * __tests__/scan-project-effects-cli.test.ts's own "byte-identical to the
  * real jsx-templates.ts functions" test, which fails loudly the moment
  * these two copies would otherwise silently drift apart.
@@ -129,16 +129,30 @@ export function buildOpenProjectScript(sourceProjectPath: string): string {
   return __result;`;
 }
 
-export function buildScanProjectEffectsScript(): string {
+export function buildScanProjectPreflightScript(): string {
   return `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO SCAN_PROJECT_EFFECTS")});
   var __result = null;
   try {
     var __compositions = [];
+    var __fonts = [];
+    var __footage = [];
     for (var __itemIndex = 1; __itemIndex <= app.project.numItems; __itemIndex++) {
       var __item = null;
       try {
         __item = app.project.item(__itemIndex);
       } catch (__itemLookupError) {
+        continue;
+      }
+      if (__item instanceof FootageItem) {
+        try {
+          __footage.push({
+            name: __item.name,
+            path: __item.file ? __item.file.fsName : null,
+            missing: __item.footageMissing === true
+          });
+        } catch (__footageReadError) {
+          // A single unreadable footage item never fails the whole scan.
+        }
         continue;
       }
       if (!(__item instanceof CompItem)) {
@@ -148,6 +162,18 @@ export function buildScanProjectEffectsScript(): string {
       for (var __i = 1; __i <= __item.numLayers; __i++) {
         try {
           var __layer = __item.layer(__i);
+          try {
+            var __sourceText = __layer.sourceText;
+            if (__sourceText) {
+              var __textDocument = __sourceText.value;
+              if (__textDocument && __textDocument.font) {
+                __fonts.push(__textDocument.font);
+              }
+            }
+          } catch (__fontReadError) {
+            // Not a text layer (or its sourceText is unreadable) - never
+            // fails the rest of the scan.
+          }
           var __effects = [];
           try {
             var __effectsGroup = __layer.property("ADBE Effect Parade");
@@ -171,7 +197,7 @@ export function buildScanProjectEffectsScript(): string {
         __compositions.push({ aeProjectItemIndex: __itemIndex, compositionId: __item.id, compositionName: __item.name, layers: __layers });
       }
     }
-    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositionsWithEffects: __compositions });
+    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositionsWithEffects: __compositions, fonts: __fonts, footage: __footage });
   } catch (__unexpectedError) {
     __result = JSON.stringify({
       ok: false,
@@ -277,7 +303,7 @@ async function main(): Promise<void> {
     }
     log("Confirmed the scratch copy is open. Scanning every composition for applied effects...");
 
-    const scanResult = await client.callTool({ name: "ae_run_jsx", arguments: { code: buildScanProjectEffectsScript(), mode: "unsafe" } }, undefined, { timeout: 120_000 });
+    const scanResult = await client.callTool({ name: "ae_run_jsx", arguments: { code: buildScanProjectPreflightScript(), mode: "unsafe" } }, undefined, { timeout: 120_000 });
     if (scanResult.isError) {
       fail(`scan script failed: ${JSON.stringify(scanResult.content)}`);
     }
@@ -295,6 +321,8 @@ async function main(): Promise<void> {
         compositionName: string;
         layers: Array<{ layerIndex: number; layerName: string; enabled: boolean; effects: Array<{ name: string; matchName: string; enabled: boolean }> }>;
       }>;
+      fonts?: string[];
+      footage?: Array<{ name: string; path: string | null; missing: boolean }>;
     };
     if (!scanValue.ok) {
       fail(`scan script reported failure: ${scanValue.failureReason ?? "unknown reason"}`);
@@ -316,6 +344,17 @@ async function main(): Promise<void> {
         }
       }
     }
+    const fonts = [...new Set(scanValue.fonts ?? [])].sort();
+    log(fonts.length === 0 ? "No text-layer fonts found." : `${fonts.length} distinct text-layer font(s): ${fonts.join(", ")}`);
+    log("(AE exposes no 'is this font installed here' flag - availability on this machine still needs a human check.)");
+
+    const footage = scanValue.footage ?? [];
+    const missingFootage = footage.filter((item) => item.missing);
+    log(`${footage.length} footage item(s), of which ${missingFootage.length} reported MISSING by After Effects itself.`);
+    for (const item of missingFootage) {
+      log(`    *** MISSING FOOTAGE *** "${item.name}" expected at: ${item.path ?? "(no path recorded)"}`);
+    }
+
     log("Full raw JSON below for independent verification:");
     console.log(JSON.stringify(scanValue));
   } finally {

@@ -52,18 +52,30 @@ const compositionEffectsSchema = z
   })
   .strict();
 
-export const projectEffectsScanResultSchema = z.union([
+const footageItemSchema = z
+  .object({
+    name: z.string(),
+    path: z.string().nullable(),
+    missing: z.boolean()
+  })
+  .strict();
+
+export const projectPreflightScanResultSchema = z.union([
   z
     .object({
       ok: z.literal(true),
       compositionCount: z.number(),
-      compositionsWithEffects: z.array(compositionEffectsSchema)
+      compositionsWithEffects: z.array(compositionEffectsSchema),
+      /** Every text layer's own font, in discovery order, with duplicates - deduped here rather than in ExtendScript (which has no Set). Absent on a response from an older worker build that only scanned effects. */
+      fonts: z.array(z.string()).optional(),
+      /** Every FootageItem in the project, with AE's own `footageMissing` flag. Absent on a response from an older worker build that only scanned effects. */
+      footage: z.array(footageItemSchema).optional()
     })
     .strict(),
   z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
 ]);
 
-export type ProjectEffectsScan = z.infer<typeof projectEffectsScanResultSchema>;
+export type ProjectPreflightScan = z.infer<typeof projectPreflightScanResultSchema>;
 
 /**
  * Every genuine Adobe-native effect's own matchName is "ADBE "-prefixed -
@@ -79,16 +91,32 @@ export function isThirdPartyEffectMatchName(matchName: string): boolean {
   return !matchName.startsWith("ADBE ");
 }
 
-export interface ProjectPluginEvidence {
+export interface ProjectPreflightEvidence {
   /** Distinct third-party effect matchNames, sorted - what preflight.pluginReferences is populated from. */
   pluginReferences: string[];
   /** Every composition name a third-party effect was found in, distinct and sorted - real evidence for a human, never a guess. */
   affectedCompositionNames: string[];
   /** How many individual third-party effect instances were found (an effect applied to five layers counts five times) - the honest scale of the dependency. */
   thirdPartyEffectInstanceCount: number;
+  /**
+   * Distinct text-layer fonts, sorted - what preflight.requiredFonts is
+   * populated from. This is what the project ASKS FOR; AE's scripting API
+   * exposes no "is this font actually installed here" flag, so an
+   * unavailable font (the real Evolventa-Bold/Evolventa-Regular case on
+   * the 2026-09-11 candidate) is indistinguishable from an available one
+   * at this layer - a human still has to confirm availability on the
+   * render machine. Never claimed otherwise.
+   */
+  requiredFonts: string[];
+  /** Distinct resolvable footage paths, sorted - what preflight.footageReferenced is populated from. */
+  footageReferenced: string[];
+  /** Footage AE itself reports as missing (`FootageItem.footageMissing`) - a real, machine-confirmed fact, not an inference. */
+  missingFootage: { name: string; expectedPath: string | null }[];
+  /** False when the responding worker build only scanned effects (no fonts/footage fields) - callers must then NOT treat empty font/footage lists as confirmed. */
+  fontAndFootageScanned: boolean;
 }
 
-export type ParseProjectEffectsScanResult = { ok: true; evidence: ProjectPluginEvidence } | { ok: false; reason: string };
+export type ParseProjectPreflightScanResult = { ok: true; evidence: ProjectPreflightEvidence } | { ok: false; reason: string };
 
 /**
  * Derives the manifest's real plugin evidence from one raw
@@ -97,13 +125,13 @@ export type ParseProjectEffectsScanResult = { ok: true; evidence: ProjectPluginE
  * caller must surface (as an unknownItems entry), never a silently empty
  * plugin list.
  */
-export function parseProjectEffectsScan(value: unknown): ParseProjectEffectsScanResult {
-  const parsed = projectEffectsScanResultSchema.safeParse(value);
+export function parseProjectPreflightScan(value: unknown): ParseProjectPreflightScanResult {
+  const parsed = projectPreflightScanResultSchema.safeParse(value);
   if (!parsed.success) {
-    return { ok: false, reason: `project effects scan response did not match the expected shape: ${parsed.error.message}` };
+    return { ok: false, reason: `project preflight scan response did not match the expected shape: ${parsed.error.message}` };
   }
   if (!parsed.data.ok) {
-    return { ok: false, reason: `the project effects scan script itself reported failure: ${parsed.data.failureReason}` };
+    return { ok: false, reason: `the project preflight scan script itself reported failure: ${parsed.data.failureReason}` };
   }
 
   const pluginReferences = new Set<string>();
@@ -123,12 +151,29 @@ export function parseProjectEffectsScan(value: unknown): ParseProjectEffectsScan
     }
   }
 
+  const footage = parsed.data.footage ?? [];
+  const footageReferenced = new Set<string>();
+  const missingFootage: { name: string; expectedPath: string | null }[] = [];
+  for (const item of footage) {
+    if (item.missing) {
+      missingFootage.push({ name: item.name, expectedPath: item.path });
+      continue;
+    }
+    if (item.path !== null) {
+      footageReferenced.add(item.path);
+    }
+  }
+
   return {
     ok: true,
     evidence: {
       pluginReferences: [...pluginReferences].sort(),
       affectedCompositionNames: [...affectedCompositionNames].sort(),
-      thirdPartyEffectInstanceCount
+      thirdPartyEffectInstanceCount,
+      requiredFonts: [...new Set(parsed.data.fonts ?? [])].sort(),
+      footageReferenced: [...footageReferenced].sort(),
+      missingFootage,
+      fontAndFootageScanned: parsed.data.fonts !== undefined && parsed.data.footage !== undefined
     }
   };
 }

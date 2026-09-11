@@ -32,10 +32,53 @@ copy).
 | `dro-template-converted.aep` (project `t`) | `67e1b708...` | The engagement's canonical source. `comp-1600` layer "Element 3D" carries `VIDEOCOPILOT 3DArray`; no `Element*.aex` exists anywhere on the machine, so it renders as a pink "missing effect" frame - the proven cause of the black hard cut at Scene 1 local ~2.612s. Confirmed by an A/B render (layer enabled = pink error frame, disabled = solid black). |
 | `dro tempelate.aep` → `dro-tempelate-converted-v26.aep` | `47de85ca...` → `c6c27aa7...` | A different file, but the same dependency. Authored in AE 23.2.1, required an interactive version-conversion dialog to open (fixed generically - see `legacy-project-conversion.ts`). A full project-wide scan of the converted copy found **18 enabled `VIDEOCOPILOT 3DArray` instances across 11 compositions** (phone, phone xxx, phoneee, phpone xxxzz, Pre-comp 1, Pre-comp 2, Pre-comp 4, Scene 4, Scene 7, Scene 8, Scene 9) out of 83 project items / 25 compositions carrying effects. Also has unresolvable fonts (Evolventa-Bold/Regular) and 2 expression errors. Appears to be an older variant of the same template. |
 
+An exhaustive read-only search of FAHADNAKASH (2026-09-11, excluding
+session working copies, auto-saves and diagnostic scratch files) found
+exactly four `.aep` files: the three above, plus
+`dro-template-converted.CORRUPTED-20260908.aep` (`f52e07b0...`, explicitly
+marked corrupted, never opened or scanned). **No plugin-free `.aep`
+exists on the QA machine** - objectively confirmed, not an assumption.
+
 Resolution options for the Element 3D dependency itself (separate from
 the acceptance blocker above): install a genuine licensed Element 3D on
 the render machine, or replace the dependent design. Pending client
 confirmation of whether they already own a license.
+
+### Supplying a new template (what a usable package must contain)
+
+Destination on FAHADNAKASH: **`C:\DYO-Agent\copies\<template-name>\`**
+(one subfolder per template, keeping the template's own original folder
+layout intact). Never place a template in `execution-sessions\`,
+`template-conversions\`, `diagnostics-scratch\`, or any `Auto-Save`
+folder - those are machine-managed, excluded from searches, and
+overwritten without warning.
+
+Required:
+1. **The `.aep` itself** - must use no third-party plugin effects. This is
+   now verified automatically at inspection (every effect's matchName must
+   be `ADBE `-prefixed); no human pre-check needed.
+2. **Its linked footage/assets**, copied with the same relative layout the
+   project expects (typically a sibling `(Footage)` folder). Missing
+   footage is now detected and reported from AE's own `footageMissing`
+   flag, but the run cannot produce correct video without the real files.
+3. **Its font list**, and those fonts installed on FAHADNAKASH. The
+   manifest now reports which fonts a project asks for, but AE exposes no
+   "is this installed here" flag, so availability remains a human check -
+   an Envato help/readme file listing them is the practical input.
+
+Preferred but not required:
+4. **Saved from AE 2026 (26.3x87).** An older-version project still works -
+   the conversion requirement is detected generically and a disposable
+   copy is prepared automatically - but it costs one manual
+   convert-and-Save-As round trip that an AE 2026-saved file avoids.
+5. **Real, separable scene structure**: distinct scene compositions with
+   named text/media placeholder layers. Independent of plugins, a template
+   whose layers carry no recognisable placeholders yields
+   `editablePlaceholderCount: 0` and cannot exercise the mapping/approval
+   stages this acceptance criterion is meant to prove.
+
+Not needed: no license keys, no plugin installs, no Creative Cloud extras,
+no pre-conversion, no particular composition naming convention.
 
 **`preflight.pluginReferences` was an empty stub until this incident** and
 a real operator read `pluginReferenceCount: 0` as proof of plugin-free

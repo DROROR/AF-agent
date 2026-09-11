@@ -12,7 +12,7 @@ import {
   buildFindHostLayersScript,
   buildDescribeCompositionSummaryScript,
   buildInspectLayerTransformScript,
-  buildScanProjectEffectsScript,
+  buildScanProjectPreflightScript,
   buildOpenProjectScript
 } from "../jsx-templates.js";
 
@@ -980,7 +980,7 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
   });
 });
 
-describe("buildScanProjectEffectsScript (real 2026-09-11 incident: 51-composition candidate too large to check one composition at a time)", () => {
+describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composition candidate too large to check one composition at a time)", () => {
   const PROJECT_SCAN_SETUP = `
     function CompItem() {}
 
@@ -1013,11 +1013,16 @@ describe("buildScanProjectEffectsScript (real 2026-09-11 incident: 51-compositio
     var __compA = new CompItem();
     __compA.id = 210;
     __compA.name = "!Render";
-    __compA.numLayers = 3;
+    __compA.numLayers = 4;
     var __compALayers = {
       1: makeLayer(1, "Element 3D", [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: true }]),
       2: makeLayer(2, "Blur Layer", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }]),
-      3: makeLayer(3, "Plain Layer", null)
+      3: makeLayer(3, "Plain Layer", null),
+      4: (function () {
+        var textLayer = makeLayer(4, "Headline", null);
+        textLayer.sourceText = { value: { font: "Evolventa-Bold" } };
+        return textLayer;
+      })()
     };
     __compA.layer = function (i) { return __compALayers[i]; };
 
@@ -1029,10 +1034,17 @@ describe("buildScanProjectEffectsScript (real 2026-09-11 incident: 51-compositio
     var __compBLayers = { 1: makeLayer(1, "Solid", null) };
     __compB.layer = function (i) { return __compBLayers[i]; };
 
-    // A non-composition project item (e.g. a FootageItem) - must be skipped, never treated as a comp.
+    // Real footage items - captured separately from compositions, with AE's own footageMissing flag.
     function FootageItem() {}
     var __footage = new FootageItem();
     __footage.name = "some-image.png";
+    __footage.file = { fsName: "C:\\\\assets\\\\some-image.png" };
+    __footage.footageMissing = false;
+
+    var __missingFootage = new FootageItem();
+    __missingFootage.name = "gone.mp4";
+    __missingFootage.file = { fsName: "C:\\\\assets\\\\gone.mp4" };
+    __missingFootage.footageMissing = true;
 
     // A layer whose own effects read throws - must not fail the whole scan.
     var __compC = new CompItem();
@@ -1043,28 +1055,28 @@ describe("buildScanProjectEffectsScript (real 2026-09-11 incident: 51-compositio
     Object.defineProperty(__brokenLayer, "property", { get: function () { throw new Error("simulated unreadable effects group"); } });
     __compC.layer = function () { return __brokenLayer; };
 
-    var __itemsByIndex = { 1: __compA, 2: __compB, 3: __footage, 4: __compC };
+    var __itemsByIndex = { 1: __compA, 2: __compB, 3: __footage, 4: __compC, 5: __missingFootage };
     var app = {
       beginUndoGroup: function () {},
       endUndoGroup: function () {},
       project: {
-        numItems: 4,
+        numItems: 5,
         item: function (i) { return __itemsByIndex[i]; }
       }
     };
   `;
 
   it("scans every composition in the project (not just one), reporting only layers/compositions that actually have effects", () => {
-    const script = buildScanProjectEffectsScript();
+    const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(true);
-    expect(result.compositionCount).toBe(4);
+    expect(result.compositionCount).toBe(5);
     expect(result.compositionsWithEffects.map((c: { compositionName: string }) => c.compositionName)).toEqual(["!Render"]);
   });
 
   it("reports each effect's real name/matchName/enabled - proving an effect was applied, e.g. the real Element 3D matchName from the unrelated 2026-09-11 incident", () => {
-    const script = buildScanProjectEffectsScript();
+    const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
     const render = result.compositionsWithEffects.find((c: { compositionName: string }) => c.compositionName === "!Render");
@@ -1078,33 +1090,52 @@ describe("buildScanProjectEffectsScript (real 2026-09-11 incident: 51-compositio
   });
 
   it("skips non-composition project items (e.g. footage) without treating them as compositions", () => {
-    const script = buildScanProjectEffectsScript();
+    const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
     expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "some-image.png")).toBe(false);
   });
 
   it("skips a layer whose effects cannot be read, rather than failing the whole scan", () => {
-    const script = buildScanProjectEffectsScript();
+    const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(true);
     expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "Broken Comp")).toBe(false);
   });
 
+  it("collects every text layer's own font in the same single pass - the fact that was invisible while the real 2026-09-11 candidate had unresolvable Evolventa fonts", () => {
+    const script = buildScanProjectPreflightScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.ok).toBe(true);
+    expect(result.fonts).toEqual(["Evolventa-Bold"]);
+  });
+
+  it("captures every FootageItem with AE's own footageMissing flag, and never treats one as a composition", () => {
+    const script = buildScanProjectPreflightScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    expect(result.footage).toEqual([
+      { name: "some-image.png", path: "C:\\assets\\some-image.png", missing: false },
+      { name: "gone.mp4", path: "C:\\assets\\gone.mp4", missing: true }
+    ]);
+    expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "gone.mp4")).toBe(false);
+  });
+
   it("is deterministic - takes no arguments, always produces byte-identical JSX", () => {
-    expect(buildScanProjectEffectsScript()).toBe(buildScanProjectEffectsScript());
+    expect(buildScanProjectPreflightScript()).toBe(buildScanProjectPreflightScript());
   });
 
   it("never mutates the project - contains no .setSource/.remove()/.setValue call", () => {
-    const script = buildScanProjectEffectsScript();
+    const script = buildScanProjectPreflightScript();
     expect(script).not.toMatch(/\.setSource\s*\(/);
     expect(script).not.toMatch(/\.remove\s*\(\s*\)/);
     expect(script).not.toMatch(/\.setValue\s*\(/);
   });
 
   it("never uses `break` - scans every project item and every layer to completion", () => {
-    const script = buildScanProjectEffectsScript();
+    const script = buildScanProjectPreflightScript();
     expect(script).not.toMatch(/break;/);
   });
 });
