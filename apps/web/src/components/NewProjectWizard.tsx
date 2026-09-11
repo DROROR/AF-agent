@@ -23,6 +23,78 @@ const TERMINAL_STATUSES = new Set<JobDto["status"]>(["SUCCEEDED", "FAILED", "CAN
 const POLL_INTERVAL_MS = 2_000;
 
 /**
+ * Real 2026-09-11 incident fix: a genuinely long-running INSPECT_TEMPLATE
+ * job (this one took ~18 minutes, a 51-composition manifest) exposed two
+ * separate bugs, both fixed together below:
+ *
+ * 1. The polling effect only rescheduled its next check by relying on
+ *    `job` state changing (see its own dependency array) - a single
+ *    transient fetchJobStatus failure (network blip, tab backgrounded,
+ *    anything) left `job` unchanged, which never re-triggered the effect,
+ *    which silently stopped ALL future polling forever - even though the
+ *    job kept running and eventually succeeded server-side. The dashboard
+ *    was then stuck showing the loading skeleton indefinitely. Fixed by
+ *    polling on a fixed recurring interval that always fires again
+ *    regardless of whether the previous attempt succeeded, only ever
+ *    stopping once a real terminal status is confirmed.
+ * 2. Nothing about an in-flight or just-completed job survived a page
+ *    refresh - all state lived in plain useState with no persistence, so
+ *    a refresh reset the whole wizard to step 1 even though the job
+ *    itself (and its full result) remained durably persisted server-side
+ *    the entire time. Fixed by remembering the in-flight job's id (and
+ *    the form fields that produced it) in localStorage, and restoring +
+ *    immediately re-checking it on mount - this never re-dispatches a new
+ *    INSPECT_TEMPLATE job, it only re-reads the existing one's real
+ *    status/result via the same read-only fetchJobStatus call polling
+ *    already uses.
+ */
+const PENDING_JOB_STORAGE_KEY = "dyo:new-project-wizard:pending-inspect-job";
+
+interface PendingJobDraft {
+  jobId: string;
+  workerId: string;
+  templateId: string;
+  sourceProjectPath: string;
+  name: string;
+}
+
+function savePendingJobDraft(draft: PendingJobDraft): void {
+  try {
+    window.localStorage.setItem(PENDING_JOB_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // Best-effort only - localStorage can be unavailable (private mode, etc.). Losing resume-after-refresh is acceptable; crashing the wizard is not.
+  }
+}
+
+function loadPendingJobDraft(): PendingJobDraft | null {
+  try {
+    const raw = window.localStorage.getItem(PENDING_JOB_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingJobDraft>;
+    if (
+      typeof parsed.jobId === "string" &&
+      typeof parsed.workerId === "string" &&
+      typeof parsed.templateId === "string" &&
+      typeof parsed.sourceProjectPath === "string" &&
+      typeof parsed.name === "string"
+    ) {
+      return parsed as PendingJobDraft;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingJobDraft(): void {
+  try {
+    window.localStorage.removeItem(PENDING_JOB_STORAGE_KEY);
+  } catch {
+    // Best-effort only, same as savePendingJobDraft above.
+  }
+}
+
+/**
  * Real project intake: a dashboard operator picks a connected Worker,
  * dispatches a real INSPECT_TEMPLATE job against a copy of a real .aep,
  * watches its real progress, and - only once it SUCCEEDS - creates the
@@ -70,28 +142,63 @@ export function NewProjectWizard(): ReactElement {
     !isDispatching &&
     (job === null || job.status === "FAILED");
 
-  // Polls the real job while non-terminal - stops itself once
-  // SUCCEEDED/FAILED/CANCELLED, and never starts a second overlapping poll
-  // (guarded by the cleanup function below, same pattern as
-  // use-dashboard-status.ts's own polling effect).
-  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Real 2026-09-11 incident fix: polls on a FIXED recurring interval that
+  // always fires again regardless of whether the previous attempt
+  // succeeded - never dependent on `job` changing to reschedule itself
+  // (the old bug: one transient fetchJobStatus failure permanently stopped
+  // all future polling, even though the job kept running server-side).
+  // Only ever stops once a real terminal status is confirmed, or the
+  // jobId itself changes/clears.
+  const jobRef = useRef(job);
+  jobRef.current = job;
   useEffect(() => {
-    if (!jobId || (job && TERMINAL_STATUSES.has(job.status))) {
+    if (!jobId) {
+      return;
+    }
+    if (jobRef.current && TERMINAL_STATUSES.has(jobRef.current.status)) {
       return;
     }
     let cancelled = false;
-    pollingRef.current = setTimeout(async () => {
+    const intervalId = setInterval(async () => {
       const result = await fetchJobStatus(jobId);
       if (cancelled) return;
       if (result.ok) {
         setJob(result.data);
+        if (TERMINAL_STATUSES.has(result.data.status)) {
+          clearInterval(intervalId);
+        }
       }
+      // On failure, deliberately do nothing but let the interval fire
+      // again on its own schedule - never let one bad poll stop every
+      // future one.
     }, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      if (pollingRef.current) clearTimeout(pollingRef.current);
+      clearInterval(intervalId);
     };
-  }, [jobId, job]);
+  }, [jobId]);
+
+  // Real 2026-09-11 incident fix: on mount, resume a job that was already
+  // in flight (or already finished) before a page refresh discarded this
+  // component's own in-memory state - never re-dispatches a new
+  // INSPECT_TEMPLATE job, only re-reads the existing one's real status via
+  // the same read-only fetchJobStatus call the polling effect above uses.
+  useEffect(() => {
+    const draft = loadPendingJobDraft();
+    if (!draft) return;
+    setName(draft.name);
+    setWorkerId(draft.workerId);
+    setTemplateId(draft.templateId);
+    setSourceProjectPath(draft.sourceProjectPath);
+    setJobId(draft.jobId);
+    setStepIndex(1);
+    void fetchJobStatus(draft.jobId).then((result) => {
+      if (result.ok) {
+        setJob(result.data);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleInspect(): Promise<void> {
     setIsDispatching(true);
@@ -109,6 +216,13 @@ export function NewProjectWizard(): ReactElement {
       return;
     }
     setJobId(result.data.jobId);
+    savePendingJobDraft({
+      jobId: result.data.jobId,
+      workerId,
+      templateId: templateId.trim(),
+      sourceProjectPath: sourceProjectPath.trim(),
+      name: name.trim()
+    });
     // Optimistic first snapshot from the dispatch response itself - the
     // poll above takes over from here.
     setJob({
@@ -159,6 +273,7 @@ export function NewProjectWizard(): ReactElement {
       setCreateProjectError(result.message);
       return;
     }
+    clearPendingJobDraft();
     window.location.href = `/projects/${result.data.projectId}`;
   }
 

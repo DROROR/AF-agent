@@ -11,6 +11,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
 function worker(overrides: Record<string, unknown> = {}) {
@@ -379,5 +380,218 @@ describe("NewProjectWizard", () => {
 
     await waitFor(() => expect(screen.getByText("bridge unreachable")).not.toBeNull(), { timeout: 5000 });
     expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  describe("real 2026-09-11 incident: a genuinely long-running INSPECT_TEMPLATE job (18 minutes, 51 compositions) exposed two bugs - a single transient poll failure permanently stopping all polling, and a page refresh discarding all knowledge of the in-flight/completed job", () => {
+    it("a transient fetchJobStatus failure mid-poll does not permanently stop polling - it keeps trying until the real terminal status lands (root cause of 'stuck loading despite SUCCEEDED')", async () => {
+      stubFetchByUrl({
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } },
+        "/api/jobs/11111111-1111-1111-1111-111111111111": [
+          {
+            status: 200,
+            body: {
+              job: {
+                jobId: "11111111-1111-1111-1111-111111111111",
+                workerId: "44444444-4444-4444-4444-444444444444",
+                projectId: null,
+                operation: "INSPECT_TEMPLATE",
+                status: "RUNNING",
+                payload: {},
+                result: null,
+                error: null,
+                checkpoint: null,
+                createdAt: new Date().toISOString(),
+                claimedAt: new Date().toISOString(),
+                startedAt: new Date().toISOString(),
+                completedAt: null,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          // A transient failure - a real network blip, or the API briefly
+          // unreachable. The OLD bug: this permanently stopped every future
+          // poll, because nothing rescheduled the next check when `job`
+          // never changed. The fix: the interval keeps firing regardless.
+          { status: 502, body: { message: "bad gateway" } },
+          { status: 502, body: { message: "bad gateway" } },
+          {
+            status: 200,
+            body: {
+              job: {
+                jobId: "11111111-1111-1111-1111-111111111111",
+                workerId: "44444444-4444-4444-4444-444444444444",
+                projectId: null,
+                operation: "INSPECT_TEMPLATE",
+                status: "SUCCEEDED",
+                payload: {},
+                result: {
+                  kind: "manifest",
+                  response: { manifest: manifest(), summary: inspectionSummary() },
+                  diagnostics: [],
+                  projectOpenEvidence: { requestedPath: "/copies/t1.aep", actualOpenedPath: "/copies/t1.aep", reused: true, matched: true }
+                },
+                error: null,
+                checkpoint: null,
+                createdAt: new Date().toISOString(),
+                claimedAt: new Date().toISOString(),
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }
+            }
+          }
+        ],
+        "/api/jobs": {
+          status: 201,
+          body: { jobId: "11111111-1111-1111-1111-111111111111", workerId: "44444444-4444-4444-4444-444444444444", operation: "INSPECT_TEMPLATE", status: "QUEUED", createdAt: new Date().toISOString() }
+        }
+      });
+
+      renderWizard();
+      await goToTemplateStep();
+      await selectWorkerAndFillTemplateFields();
+      fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+
+      await waitFor(() => expect(screen.getByText("Inspecting the real template on the Worker now...")).not.toBeNull(), { timeout: 5000 });
+      // Despite two consecutive transient poll failures in between, the
+      // wizard still reaches the real terminal result - never stuck.
+      await waitFor(() => expect(screen.getByText("Inspection result")).not.toBeNull(), { timeout: 10000 });
+    }, 15000);
+
+    it("refresh (a fresh component mount) while the job is still running resumes polling from the remembered jobId - never re-dispatches a new INSPECT_TEMPLATE job", async () => {
+      let jobsPostCount = 0;
+      stubFetchByUrl({
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } },
+        "/api/jobs/11111111-1111-1111-1111-111111111111": [
+          {
+            status: 200,
+            body: {
+              job: {
+                jobId: "11111111-1111-1111-1111-111111111111",
+                workerId: "44444444-4444-4444-4444-444444444444",
+                projectId: null,
+                operation: "INSPECT_TEMPLATE",
+                status: "RUNNING",
+                payload: {},
+                result: null,
+                error: null,
+                checkpoint: null,
+                createdAt: new Date().toISOString(),
+                claimedAt: new Date().toISOString(),
+                startedAt: new Date().toISOString(),
+                completedAt: null,
+                updatedAt: new Date().toISOString()
+              }
+            }
+          },
+          {
+            status: 200,
+            body: {
+              job: {
+                jobId: "11111111-1111-1111-1111-111111111111",
+                workerId: "44444444-4444-4444-4444-444444444444",
+                projectId: null,
+                operation: "INSPECT_TEMPLATE",
+                status: "SUCCEEDED",
+                payload: {},
+                result: {
+                  kind: "manifest",
+                  response: { manifest: manifest(), summary: inspectionSummary() },
+                  diagnostics: [],
+                  projectOpenEvidence: { requestedPath: "/copies/t1.aep", actualOpenedPath: "/copies/t1.aep", reused: true, matched: true }
+                },
+                error: null,
+                checkpoint: null,
+                createdAt: new Date().toISOString(),
+                claimedAt: new Date().toISOString(),
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }
+            }
+          }
+        ],
+        "/api/jobs": {
+          status: 201,
+          body: { jobId: "11111111-1111-1111-1111-111111111111", workerId: "44444444-4444-4444-4444-444444444444", operation: "INSPECT_TEMPLATE", status: "QUEUED", createdAt: new Date().toISOString() }
+        }
+      });
+
+      renderWizard();
+      await goToTemplateStep();
+      await selectWorkerAndFillTemplateFields();
+      fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+      await waitFor(() => expect(screen.getByText("Inspecting the real template on the Worker now...")).not.toBeNull(), { timeout: 5000 });
+
+      jobsPostCount = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
+      expect(jobsPostCount).toBe(1);
+
+      // Simulate a page refresh: unmount the old component (discarding all
+      // its in-memory state) and mount a completely fresh one - only
+      // localStorage survives.
+      cleanup();
+      renderWizard();
+
+      await waitFor(() => expect(screen.getByText("Inspection result")).not.toBeNull(), { timeout: 10000 });
+
+      // Never re-dispatched a second INSPECT_TEMPLATE job for the same resumed draft.
+      const finalJobsPostCount = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
+      expect(finalJobsPostCount).toBe(1);
+    }, 15000);
+
+    it("refresh after the job already SUCCEEDED restores the persisted manifest/result immediately, with no dispatch of any kind", async () => {
+      stubFetchByUrl({
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } },
+        "/api/jobs/11111111-1111-1111-1111-111111111111": {
+          status: 200,
+          body: {
+            job: {
+              jobId: "11111111-1111-1111-1111-111111111111",
+              workerId: "44444444-4444-4444-4444-444444444444",
+              projectId: null,
+              operation: "INSPECT_TEMPLATE",
+              status: "SUCCEEDED",
+              payload: {},
+              result: {
+                kind: "manifest",
+                response: { manifest: manifest(), summary: inspectionSummary() },
+                diagnostics: [],
+                projectOpenEvidence: { requestedPath: "/copies/t1.aep", actualOpenedPath: "/copies/t1.aep", reused: true, matched: true }
+              },
+              error: null,
+              checkpoint: null,
+              createdAt: new Date().toISOString(),
+              claimedAt: new Date().toISOString(),
+              startedAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          }
+        },
+        "/api/jobs": {
+          status: 201,
+          body: { jobId: "11111111-1111-1111-1111-111111111111", workerId: "44444444-4444-4444-4444-444444444444", operation: "INSPECT_TEMPLATE", status: "QUEUED", createdAt: new Date().toISOString() }
+        }
+      });
+
+      renderWizard();
+      await goToTemplateStep();
+      await selectWorkerAndFillTemplateFields();
+      fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+      await waitFor(() => expect(screen.getByText("Inspection result")).not.toBeNull(), { timeout: 10000 });
+
+      const jobsPostCountBeforeRefresh = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
+
+      // Simulate a page refresh AFTER success: fresh component, no clicks at all.
+      cleanup();
+      renderWizard();
+
+      await waitFor(() => expect(screen.getByText("Inspection result")).not.toBeNull(), { timeout: 10000 });
+      expect(screen.getByText("Compositions").nextElementSibling?.textContent).toBe("3");
+
+      // Reopening a completed result never enqueues a duplicate inspection.
+      const jobsPostCountAfterRefresh = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
+      expect(jobsPostCountAfterRefresh).toBe(jobsPostCountBeforeRefresh);
+    }, 15000);
   });
 });
