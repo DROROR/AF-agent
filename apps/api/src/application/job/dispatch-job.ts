@@ -255,6 +255,9 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
         : {}),
       ...(request.previewTimingDescribeCompositionSummary !== undefined
         ? { previewTimingDescribeCompositionSummary: request.previewTimingDescribeCompositionSummary }
+        : {}),
+      ...(request.previewTimingDiscoverLayerDetails !== undefined
+        ? { previewTimingDiscoverLayerDetails: request.previewTimingDiscoverLayerDetails }
         : {})
     });
     if (!resolved.ok) {

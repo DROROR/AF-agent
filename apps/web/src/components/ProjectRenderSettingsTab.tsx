@@ -413,9 +413,12 @@ function DescribeCompositionTimelineCard({
  * file: only ever dispatches INSPECT_SCENE_EVIDENCE, never mutates
  * anything.
  */
+type DescribeAnyCompositionMode = "timing" | "layerDetails";
+
 function DescribeAnyCompositionCard({ projectId, session }: { projectId: string; session: ExecutionSessionDto | null }): ReactElement | null {
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [compositionId, setCompositionId] = useState("");
+  const [mode, setMode] = useState<DescribeAnyCompositionMode>("timing");
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [result, setResult] = useState<{ jobId: string; text: string } | { jobId: string; error: string } | null>(null);
@@ -440,7 +443,7 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
       projectId,
       scenePlanId,
       previewTimingDiscoverCompositionId: targetId,
-      previewTimingDescribeCompositionSummary: true
+      ...(mode === "timing" ? { previewTimingDescribeCompositionSummary: true } : { previewTimingDiscoverLayerDetails: true })
     });
     if (!dispatched.ok) {
       setIsDispatching(false);
@@ -465,19 +468,33 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
           setResult({ jobId: dispatched.data.jobId, error: "result did not match the expected shape" });
           return;
         }
-        if (!parsedResult.data.compositionSummary) {
-          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? "no compositionSummary in result" });
+        if (mode === "timing") {
+          if (!parsedResult.data.compositionSummary) {
+            setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? "no compositionSummary in result" });
+            return;
+          }
+          const s = parsedResult.data.compositionSummary;
+          const layerLines = s.layers
+            .map(
+              (l) =>
+                `#${l.layerIndex} "${l.layerName}" enabled=${l.enabled} in=${l.inPointSeconds.toFixed(3)} out=${l.outPointSeconds.toFixed(3)} start=${l.startTimeSeconds.toFixed(3)}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}(${l.sourceDurationSeconds?.toFixed(3)}s)` : ""}`
+            )
+            .join("\n");
+          const text = `compDuration=${s.compDurationSeconds.toFixed(6)}s workAreaStart=${s.workAreaStartSeconds.toFixed(6)}s workAreaDuration=${s.workAreaDurationSeconds.toFixed(6)}s frameRate=${s.frameRate.toFixed(6)}\n${layerLines}`;
+          setResult({ jobId: dispatched.data.jobId, text });
           return;
         }
-        const s = parsedResult.data.compositionSummary;
-        const layerLines = s.layers
-          .map(
-            (l) =>
-              `#${l.layerIndex} "${l.layerName}" enabled=${l.enabled} in=${l.inPointSeconds.toFixed(3)} out=${l.outPointSeconds.toFixed(3)} start=${l.startTimeSeconds.toFixed(3)}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}(${l.sourceDurationSeconds?.toFixed(3)}s)` : ""}`
-          )
+        if (!parsedResult.data.layerDetails) {
+          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerDetailsFailureReason ?? "no layerDetails in result" });
+          return;
+        }
+        const layerLines = parsedResult.data.layerDetails
+          .map((l) => {
+            const kf = l.opacityKeyframes ? l.opacityKeyframes.map((k) => `${k.timeSeconds.toFixed(3)}s->${k.valuePercent}%`).join(", ") : "none";
+            return `#${l.layerIndex} "${l.layerName}" type=${l.layerType ?? "?"} opacity=${l.opacityStatic ?? "keyframed"} opacityKeyframes=[${kf}] stretch=${l.stretchPercent ?? "?"}% timeRemap=${l.timeRemapEnabled ?? "?"}${l.sourceCompositionId ? ` source=${l.sourceCompositionId}` : ""}${l.sourceText ? ` text=${JSON.stringify(l.sourceText)}` : ""}`;
+          })
           .join("\n");
-        const text = `compDuration=${s.compDurationSeconds.toFixed(6)}s workAreaStart=${s.workAreaStartSeconds.toFixed(6)}s workAreaDuration=${s.workAreaDurationSeconds.toFixed(6)}s frameRate=${s.frameRate.toFixed(6)}\n${layerLines}`;
-        setResult({ jobId: dispatched.data.jobId, text });
+        setResult({ jobId: dispatched.data.jobId, text: layerLines });
         return;
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 2000));
@@ -487,11 +504,26 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
   return (
     <Card className="overview-section">
       <CardHeader title="Describe any composition (by manifest composition ID)" />
-      <p>Read-only. Reports the real, worker-observed duration/work-area and every top-level layer&apos;s own timing for ANY composition in this project&apos;s manifest - e.g. a nested scene like &quot;comp-1&quot; (Scene 1), not just the configured Landscape/Reels masters.</p>
+      <p>
+        Read-only. Reports either the real, worker-observed duration/work-area and every top-level layer&apos;s own timing (&quot;Timing&quot;), or each top-level
+        layer&apos;s own opacity/keyframes/stretch/source (&quot;Layer details&quot;), for ANY composition in this project&apos;s manifest - e.g. a nested scene like
+        &quot;comp-1&quot; (Scene 1) or a deeper precomp like &quot;comp-1600&quot;, not just the configured Landscape/Reels masters.
+      </p>
       {!worker ? <EmptyState title="No worker available" description="This project's assigned worker is not currently reporting INSPECT_SCENE_EVIDENCE." /> : null}
       {dispatchError ? <ErrorState title="Dispatch failed" description={dispatchError} /> : null}
       <Field label="Manifest composition ID" htmlFor="describe-any-composition-id">
-        <Input id="describe-any-composition-id" value={compositionId} onChange={(e) => setCompositionId(e.target.value)} placeholder="e.g. comp-1" disabled={isDispatching} />
+        <Input id="describe-any-composition-id" value={compositionId} onChange={(e) => setCompositionId(e.target.value)} placeholder="e.g. comp-1600" disabled={isDispatching} />
+      </Field>
+      <Field label="What to describe" htmlFor="describe-any-composition-mode">
+        <Select
+          id="describe-any-composition-mode"
+          value={mode}
+          onChange={(e) => setMode(e.target.value === "layerDetails" ? "layerDetails" : "timing")}
+          disabled={isDispatching}
+        >
+          <option value="timing">Timing (duration/work-area/layer in-out)</option>
+          <option value="layerDetails">Layer details (opacity/keyframes/stretch/source)</option>
+        </Select>
       </Field>
       <div className="overview-actions">
         <Button variant="secondary" disabled={!worker || isDispatching || compositionId.trim().length === 0} onClick={() => void handleDescribe()}>

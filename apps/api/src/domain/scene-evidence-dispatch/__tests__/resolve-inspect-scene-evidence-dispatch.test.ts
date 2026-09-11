@@ -600,3 +600,101 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
     expect(result.ok).toBe(false);
   });
 });
+
+describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverCompositionId + previewTimingDiscoverLayerDetails (real 2026-09-11 nested-content audit, session a7fee3d9)", () => {
+  const outerManifest = validManifest({
+    compositions: [
+      { compositionId: "comp-1", aeProjectItemIndex: 14, name: "Scene 1", widthPx: 1920, heightPx: 1080, durationSeconds: 7.007, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-1600", aeProjectItemIndex: 30, name: "Pre-comp 2", widthPx: 1920, heightPx: 1080, durationSeconds: 7.007, frameRate: 29.97, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+    ]
+  });
+
+  it("resolves the requested composition identity, with zero server-supplied layerIndices (self-sufficient) and discoverLayerDetails: true - never describeCompositionSummary/findHostLayersForChildCompositionId", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-1600",
+      previewTimingDiscoverLayerDetails: true
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.manifestCompositionId).toBe("comp-1600");
+    expect(result.payload.aeProjectItemIndex).toBe(30);
+    expect(result.payload.compositionName).toBe("Pre-comp 2");
+    expect(result.payload.layerIndices).toEqual([]);
+    expect(result.payload.discoverLayerDetails).toBe(true);
+    expect(result.payload.describeCompositionSummary).toBeUndefined();
+    expect(result.payload.findHostLayersForChildCompositionId).toBeUndefined();
+  });
+
+  it("previewTimingDescribeCompositionSummary still takes priority when both are somehow present - checked first, mutually exclusive by construction (describeCompositionSummary's own pre-existing precedence is unchanged by this addition)", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-1600",
+      previewTimingDiscoverLayerDetails: true,
+      previewTimingDescribeCompositionSummary: true,
+      previewTimingFindHostLayersChildCompositionId: "comp-1"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.describeCompositionSummary).toBe(true);
+    expect(result.payload.discoverLayerDetails).toBeUndefined();
+    expect(result.payload.findHostLayersForChildCompositionId).toBeUndefined();
+  });
+
+  it("takes priority over previewTimingFindHostLayersChildCompositionId when both are somehow present (and describeCompositionSummary is absent) - checked before the host-layer-lookup branch", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-1600",
+      previewTimingDiscoverLayerDetails: true,
+      previewTimingFindHostLayersChildCompositionId: "comp-1"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.discoverLayerDetails).toBe(true);
+    expect(result.payload.findHostLayersForChildCompositionId).toBeUndefined();
+  });
+
+  it("refuses an unknown previewTimingDiscoverCompositionId - the same manifest-validated addressing safety net as the other two sub-modes", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-does-not-exist",
+      previewTimingDiscoverLayerDetails: true
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("comp-does-not-exist");
+  });
+
+  it("still requires the manifest sha256 to match the plan's - the same staleness guard as every other branch", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ sourceProjectSha256: "b".repeat(64) }),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-1600",
+      previewTimingDiscoverLayerDetails: true
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("without previewTimingDiscoverLayerDetails/previewTimingDescribeCompositionSummary, still requires previewTimingFindHostLayersChildCompositionId - the updated three-way error message names all three sub-modes", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: outerManifest,
+      previewTimingDiscoverCompositionId: "comp-1600"
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("previewTimingFindHostLayersChildCompositionId");
+    expect(result.reason).toContain("previewTimingDescribeCompositionSummary");
+    expect(result.reason).toContain("previewTimingDiscoverLayerDetails");
+  });
+});

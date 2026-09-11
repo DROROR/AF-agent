@@ -237,6 +237,106 @@ describe("ProjectRenderSettingsTab - Describe any composition (by manifest compo
     await screen.findByText(/Control Color/);
     expect(screen.getByText(/in=2\.602/)).toBeTruthy();
   });
+
+  /**
+   * Real 2026-09-11 nested-content audit: switching mode to "Layer
+   * details" dispatches previewTimingDiscoverLayerDetails instead of
+   * previewTimingDescribeCompositionSummary, and renders opacity/
+   * keyframe facts - needed to inspect a nested precomp (e.g.
+   * "comp-1600"/Pre-comp 2) that has no approved mappings of its own.
+   */
+  it('switching to "Layer details" mode dispatches previewTimingDiscoverLayerDetails instead, and renders the real opacity/keyframe facts once it succeeds', async () => {
+    const workerId = "44444444-4444-4444-4444-444444444444";
+    const jobId = "66666666-6666-6666-6666-666666666666";
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [workerWithCapabilities(["INSPECT_SCENE_EVIDENCE"])] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(workerId) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      "/api/jobs": {
+        status: 201,
+        body: { jobId, workerId, operation: "INSPECT_SCENE_EVIDENCE", status: "QUEUED", createdAt: new Date().toISOString() }
+      },
+      [`/api/jobs/${jobId}`]: {
+        status: 200,
+        body: {
+          job: {
+            jobId,
+            workerId,
+            projectId: PROJECT_ID,
+            operation: "INSPECT_SCENE_EVIDENCE",
+            status: "SUCCEEDED",
+            payload: {},
+            result: {
+              verifiedSourceProjectSha256: SOURCE_SHA,
+              manifestCompositionId: "comp-1600",
+              aeProjectItemIndex: 30,
+              compositionName: "Pre-comp 2",
+              layers: [],
+              preview: null,
+              hostLayerRecords: null,
+              previewFailureReason: null,
+              layerDetailsFailureReason: null,
+              hostLayerRecordsFailureReason: null,
+              compositionSummaryFailureReason: null,
+              compositionSummary: null,
+              layerDetails: [
+                {
+                  layerIndex: 1,
+                  layerName: "Some Layer",
+                  layerType: "AV",
+                  sourceText: null,
+                  sourceCompositionId: null,
+                  stretchPercent: 100,
+                  timeRemapEnabled: false,
+                  opacityStatic: null,
+                  opacityKeyframes: [
+                    { timeSeconds: 2.4, valuePercent: 0 },
+                    { timeSeconds: 2.61, valuePercent: 100 }
+                  ]
+                }
+              ],
+              capturedAt: new Date().toISOString()
+            },
+            error: null,
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      }
+    });
+    renderTab();
+    const input = await screen.findByLabelText("Manifest composition ID");
+    fireEvent.change(input, { target: { value: "comp-1600" } });
+    const modeSelect = screen.getByLabelText("What to describe");
+    fireEvent.change(modeSelect, { target: { value: "layerDetails" } });
+    const button = screen.getByRole("button", { name: "Describe composition" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+
+    let capturedBody: Record<string, unknown> | null = null;
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      expect(jobsCall).toBeDefined();
+      capturedBody = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
+    });
+    expect(capturedBody).toEqual({
+      operation: "INSPECT_SCENE_EVIDENCE",
+      workerId,
+      projectId: PROJECT_ID,
+      scenePlanId: "s1",
+      previewTimingDiscoverCompositionId: "comp-1600",
+      previewTimingDiscoverLayerDetails: true
+    });
+
+    await screen.findByText(/Some Layer/);
+    expect(screen.getByText(/2\.400s->0%, 2\.610s->100%/)).toBeTruthy();
+  });
 });
 
 describe("ProjectRenderSettingsTab", () => {

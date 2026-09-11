@@ -22,6 +22,8 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   previewTimingFindHostLayersChildCompositionId?: string;
   /** Real 2026-09-10 incident (session a7fee3d9) - the OTHER thing previewTimingDiscoverCompositionId can be used for: describe THAT composition's own top-level duration/work-area/layer-timing facts (buildDescribeCompositionSummaryScript), rather than looking up where it hosts some other child. Mutually exclusive with previewTimingFindHostLayersChildCompositionId by construction - see the branch below. */
   previewTimingDescribeCompositionSummary?: boolean;
+  /** Real 2026-09-11 nested-content audit (session a7fee3d9) - a THIRD thing previewTimingDiscoverCompositionId can be used for: run the SAME generic discoverLayerDetails scan (buildInspectCompositionLayerDetailsScript, opacity/stretch/timeRemap/sourceText per top-level layer) against an ARBITRARY manifest composition, not only a real scenePlan's own manifestCompositionId. Mutually exclusive with previewTimingDescribeCompositionSummary/previewTimingFindHostLayersChildCompositionId by construction - see the branch below. */
+  previewTimingDiscoverLayerDetails?: boolean;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -76,7 +78,8 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     previewTimingChainIndex,
     previewTimingDiscoverCompositionId,
     previewTimingFindHostLayersChildCompositionId,
-    previewTimingDescribeCompositionSummary
+    previewTimingDescribeCompositionSummary,
+    previewTimingDiscoverLayerDetails
   } = input;
 
   if (!currentPlan) {
@@ -148,10 +151,39 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       };
     }
 
+    // Real 2026-09-11 nested-content audit (session a7fee3d9) - the SAME
+    // generic discoverLayerDetails scan a real scene's own manifestCompositionId
+    // already gets by default (see the fallback branch at the bottom of
+    // this function), now reachable against ANY manifest composition -
+    // needed to inspect a NESTED comp (e.g. "Pre-comp 2"/comp-1600) that
+    // has no approved mappings of its own and therefore no
+    // previewTimingChainIndex target. Checked before the "requires X, Y,
+    // or Z" error: mutually exclusive with the other two sub-modes by
+    // construction (the resolver never sets more than one on the same
+    // dispatch).
+    if (previewTimingDiscoverLayerDetails === true) {
+      return {
+        ok: true,
+        payload: {
+          sourceProjectPath: currentProjectManifest.sourceProject.path,
+          sourceProjectSha256: currentPlan.sourceProjectSha256,
+          manifestCompositionId: previewTimingDiscoverCompositionId,
+          aeProjectItemIndex: parentComposition.aeProjectItemIndex,
+          compositionName: parentComposition.name,
+          // Entirely self-sufficient (the worker scans this composition's
+          // own immediate layers itself) - no caller/server-supplied
+          // layerIndices needed, same as describeCompositionSummary above.
+          layerIndices: [],
+          previewTimestampSeconds: null,
+          discoverLayerDetails: true
+        }
+      };
+    }
+
     if (previewTimingFindHostLayersChildCompositionId === undefined) {
       return {
         ok: false,
-        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId or previewTimingDescribeCompositionSummary alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child, and a composition summary always names which composition to describe."
+        reason: "Preview-timing discovery requires previewTimingFindHostLayersChildCompositionId, previewTimingDescribeCompositionSummary, or previewTimingDiscoverLayerDetails alongside previewTimingDiscoverCompositionId - a targeted host-layer lookup always names both the parent and the child, a composition summary always names which composition to describe, and a layer-details scan always names which composition to scan."
       };
     }
     const knownChild = currentProjectManifest.compositions.some((c) => c.compositionId === previewTimingFindHostLayersChildCompositionId);

@@ -210,7 +210,20 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * previewTimingFindHostLayersChildCompositionId - the resolver
        * checks this field first, never sets both.
        */
-      previewTimingDescribeCompositionSummary: z.boolean().optional()
+      previewTimingDescribeCompositionSummary: z.boolean().optional(),
+      /**
+       * Real 2026-09-11 nested-content audit (session a7fee3d9) - a THIRD
+       * thing previewTimingDiscoverCompositionId can be used for: run the
+       * same generic discoverLayerDetails scan (opacity/stretch/
+       * timeRemap/sourceText per top-level layer) a real scene's own
+       * manifestCompositionId already gets by default, against an
+       * ARBITRARY manifest composition instead - needed to inspect a
+       * nested comp with no approved mappings of its own. Mutually
+       * exclusive with previewTimingDescribeCompositionSummary/
+       * previewTimingFindHostLayersChildCompositionId - the resolver
+       * checks this field first, never sets more than one.
+       */
+      previewTimingDiscoverLayerDetails: z.boolean().optional()
     })
     .strict(),
   z.object({
