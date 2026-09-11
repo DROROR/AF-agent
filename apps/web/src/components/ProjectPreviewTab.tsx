@@ -759,7 +759,28 @@ function FinalPreviewCard({ projectId, session }: { projectId: string; session: 
       ) : (
         <>
           <VideoArtifactPlayer src={fullPreviewFileUrl(projectId, session.id)} ariaLabel={t.projectWorkspace.overview.finalPreview.title} />
+          {dispatchMessage ? <p className={dispatchMessage.isError ? "final-preview-card__error" : "field__hint"}>{dispatchMessage.text}</p> : null}
           <div className="overview-actions">
+            {/*
+              Real 2026-09-10/11 incident (session a7fee3d9): isFresh only
+              compares workingProjectSha256 - it has no way to know the
+              WORKER's own rendering behavior changed (e.g. the
+              full-duration-render fix) independently of the working copy's
+              content, so an existing artifact that still matches the
+              working copy's hash can legitimately be stale in a way this
+              check can't see. Regenerate reuses the EXACT SAME
+              handleCreatePreview/CREATE_PREVIEW dispatch as the "not
+              fresh" branch above - no new dispatch path, no change to
+              auth, plan, mappings, scene use flags, approval state,
+              session identity, or the AE project. Always available here,
+              independent of fullPreviewApproved, so a stale-but-approved
+              preview can still be regenerated without first touching its
+              approval (Request Changes/Approve stay the separate, only
+              actions that change fullPreviewApproved).
+            */}
+            <Button variant="secondary" disabled={isDispatching} onClick={() => void handleCreatePreview()}>
+              {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.finalPreview.regenerateAction}
+            </Button>
             <Button variant="secondary" disabled={currentSession.fullPreviewApproved} onClick={() => void handleRequestChanges()}>
               {t.projectWorkspace.overview.finalPreview.requestChangesAction}
             </Button>

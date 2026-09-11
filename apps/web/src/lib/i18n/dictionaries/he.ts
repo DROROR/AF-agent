@@ -517,6 +517,7 @@ export const he: Dictionary = {
         notReadyDescription: "צרו את התצוגה המקדימה המלאה כדי לבדוק את הווידאו המוגמר לפני הרינדור.",
         workerOffline: "מחשב העריכה שלכם כבוי. הפעילו אותו כדי ליצור את התצוגה המקדימה המלאה.",
         createAction: "יצירת תצוגה מקדימה מלאה",
+        regenerateAction: "יצירה מחדש של תצוגה מקדימה מלאה",
         requestChangesAction: "בקשת שינויים",
         approveAction: "אישור תצוגה מקדימה סופית",
         approvedBadge: "אושר"

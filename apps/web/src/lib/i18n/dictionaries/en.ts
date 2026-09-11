@@ -526,6 +526,7 @@ export const en = {
         notReadyDescription: "Create the complete preview to review the finished video before rendering.",
         workerOffline: "Your editing computer is offline. Turn it on to create the complete preview.",
         createAction: "Create Complete Preview",
+        regenerateAction: "Regenerate Complete Preview",
         requestChangesAction: "Request Changes",
         approveAction: "Approve Final Preview",
         approvedBadge: "Approved"

@@ -572,6 +572,86 @@ describe("ProjectPreviewTab - Final Preview", () => {
     expect(video.getAttribute("src")).toBe(`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview`);
   });
 
+  /**
+   * Real 2026-09-10/11 incident (session a7fee3d9): a Worker/render-engine
+   * fix (e.g. the full-duration-render fix) can make an existing artifact
+   * stale in a way isFresh's workingProjectSha256-only comparison can never
+   * detect, since the working copy's own content did not change. This
+   * button reuses the EXACT SAME CREATE_PREVIEW dispatch as "Create
+   * Complete Preview" (not a new endpoint/auth path), stays separate from
+   * Approve/Request Changes, and is available even though the artifact's
+   * workingProjectSha256 already matches the session's current one.
+   */
+  it('shows "Regenerate Complete Preview" alongside Approve/Request Changes once a fresh artifact exists, and it dispatches the SAME CREATE_PREVIEW job as "Create Complete Preview"', async () => {
+    stubReady({
+      "/api/dashboard/status": {
+        status: 200,
+        body: {
+          api: "ok",
+          database: "ok",
+          workers: [
+            {
+              workerId: WORKER_ID,
+              name: "worker-a",
+              status: "ONLINE",
+              lastHeartbeatAt: new Date().toISOString(),
+              aeStatus: "ONLINE",
+              mcpStatus: "ONLINE",
+              aeAvailability: "ONLINE",
+              mcpAvailability: "ONLINE",
+              aeVersion: "26.0",
+              capabilities: ["CREATE_PREVIEW"],
+              maxConcurrency: 1,
+              currentJobId: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          ]
+        }
+      },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
+        status: 200,
+        body: {
+          artifact: {
+            id: "88888888-8888-8888-8888-888888888888",
+            projectId: PROJECT_ID,
+            executionSessionId: SESSION_ID,
+            workingProjectSha256: "d".repeat(64),
+            filename: "preview.mp4",
+            mimeType: "video/mp4",
+            byteSize: 100,
+            capturedAt: new Date().toISOString(),
+            createdAt: new Date().toISOString()
+          }
+        }
+      },
+      "/api/jobs": {
+        status: 201,
+        body: { jobId: "99999999-9999-9999-9999-999999999999", workerId: WORKER_ID, operation: "CREATE_PREVIEW", status: "QUEUED", createdAt: new Date().toISOString() }
+      }
+    });
+    renderPreview();
+    await screen.findByRole("button", { name: "Approve Final Preview" });
+    // Still the fresh-artifact view, not the "not ready" empty state - proves this is additive, not a replacement for Approve/Request Changes.
+    screen.getByRole("button", { name: "Request Changes" });
+    const regenerateButton = screen.getByRole("button", { name: "Regenerate Complete Preview" });
+    fireEvent.click(regenerateButton);
+
+    let body: Record<string, unknown> | null = null;
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      expect(jobsCall).toBeDefined();
+      body = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
+    });
+    expect(body).toEqual({
+      operation: "CREATE_PREVIEW",
+      workerId: WORKER_ID,
+      projectId: PROJECT_ID,
+      executionSessionId: SESSION_ID
+    });
+  });
+
   it("a STALE artifact (captured against an older working copy) is treated as not ready - never shown as if it were the current preview", async () => {
     stubReady({
       [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
