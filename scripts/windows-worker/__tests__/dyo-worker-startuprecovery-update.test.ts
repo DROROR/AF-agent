@@ -170,6 +170,28 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 can roll back a failed update", 
     expect(updateScript.slice(fnIndex, fnIndex + 300)).toMatch(/--env-file=\.env dist\\index\.js/);
   });
 
+  it("REAL INCIDENT GUARD (2026-09-12): proves the new code physically landed before restarting or claiming success, and rolls back if it did not", () => {
+    // A rollback once restored older code into dist while leaving the newer
+    // BUILD_INFO.json behind, so the worker logged the new commit while
+    // running old code and the install looked successful.
+    expect(updateScript).toMatch(/\$newBuildMarkers = @\(/);
+    expect(updateScript).toMatch(/ae-mcp-round-trip-adapter\.js/);
+    expect(updateScript).toMatch(/ensure-ae-running\.js/);
+    const markerIndex = updateScript.indexOf("$newBuildMarkers");
+    const startIndex = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName", markerIndex);
+    // Verified BEFORE anything is restarted.
+    expect(markerIndex).toBeLessThan(startIndex);
+    const block = updateScript.slice(markerIndex, markerIndex + 900);
+    expect(block).toMatch(/Restore-BackupAndRestart -BackupDir \$backupDir/);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("defines the rollback helper before any code path calls it", () => {
+    expect(updateScript.indexOf("function Restore-BackupAndRestart")).toBeLessThan(
+      updateScript.indexOf("Restore-BackupAndRestart -BackupDir")
+    );
+  });
+
   it("backs up and restores BUILD_INFO.json together with dist, so the logged commit can never disagree with the code actually running", () => {
     // BUILD_INFO.json lives at the app root, outside dist, and is what the
     // worker logs as its running commit. Restoring dist alone would leave

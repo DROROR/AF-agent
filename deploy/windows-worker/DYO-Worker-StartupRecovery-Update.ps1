@@ -215,6 +215,34 @@ function Wait-ForHealthyWorkerTree {
   return $false
 }
 
+function Restore-BackupAndRestart {
+  param([string]$BackupDir)
+  if (-not $BackupDir -or -not (Test-Path $BackupDir)) {
+    Write-Host "[NEEDS ATTENTION] No rollback point is available - program files were left as updated."
+    return
+  }
+  Write-Host "Rolling back to the previous program files..."
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+  Stop-DyoWorkerProcessesForcibly
+  [void](Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)
+  $distPath = Join-Path $InstallDir "dist"
+  if (Test-Path $distPath) { Remove-Item -Path $distPath -Recurse -Force }
+  Copy-Item -Path $BackupDir -Destination $distPath -Recurse -Force
+  # Restored together with the code it describes - see the backup step.
+  if (Test-Path $buildInfoBackup) {
+    Copy-Item -Path $buildInfoBackup -Destination (Join-Path $InstallDir "BUILD_INFO.json") -Force
+  }
+  Start-ScheduledTask -TaskName $TaskName
+  if (Wait-ForHealthyWorkerTree -TimeoutSeconds 120) {
+    Write-Host "[OK] Rolled back to the previous program files - DYO Worker is running again."
+  } else {
+    Write-Host "[NEEDS ATTENTION] Rolled back the program files, but DYO Worker did not come back up."
+    Write-Host "Please contact DYO before using this computer."
+  }
+}
+
+
 Write-Host "================================================"
 Write-Host "  DYO Windows Worker - Startup & Recovery Update"
 Write-Host "================================================"
@@ -333,6 +361,28 @@ if ($npmExitCode -ne 0) {
 }
 Write-CheckResult $true "Runtime dependencies are up to date"
 
+# REAL INCIDENT GUARD (2026-09-12): a rollback restored older code into
+# dist while leaving the newer BUILD_INFO.json in place, so the worker
+# logged the new commit while actually running the old code - and a
+# verification that trusted the log alone reported a successful install of
+# software that was not there. The installer now proves the new code
+# physically landed, by checking for files this release actually
+# introduces, before it will restart anything or claim success.
+$newBuildMarkers = @(
+  (Join-Path $InstallDir "dist\health\ae-mcp-round-trip-adapter.js"),
+  (Join-Path $InstallDir "dist\health\ensure-ae-running.js"),
+  (Join-Path $InstallDir "dist\index.js")
+)
+foreach ($marker in $newBuildMarkers) {
+  if (-not (Test-Path $marker)) {
+    Write-Host "[NEEDS ATTENTION] The updated program files did not land correctly - missing:"
+    Write-Host "  $marker"
+    Restore-BackupAndRestart -BackupDir $backupDir
+    exit 1
+  }
+}
+Write-CheckResult $true "Verified the updated program files are actually installed"
+
 $sdkCheckPath = Join-Path $InstallDir "node_modules\@modelcontextprotocol\sdk\package.json"
 if (Test-Path $sdkCheckPath) {
   Write-CheckResult $true "@modelcontextprotocol/sdk is installed"
@@ -345,33 +395,6 @@ if (Test-Path $sdkCheckPath) {
 # ---- Step 4: start DYO Worker and verify a real, healthy tree came back ----
 Write-Host ""
 Write-Host "Starting DYO Worker..."
-
-function Restore-BackupAndRestart {
-  param([string]$BackupDir)
-  if (-not $BackupDir -or -not (Test-Path $BackupDir)) {
-    Write-Host "[NEEDS ATTENTION] No rollback point is available - program files were left as updated."
-    return
-  }
-  Write-Host "Rolling back to the previous program files..."
-  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 2
-  Stop-DyoWorkerProcessesForcibly
-  [void](Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)
-  $distPath = Join-Path $InstallDir "dist"
-  if (Test-Path $distPath) { Remove-Item -Path $distPath -Recurse -Force }
-  Copy-Item -Path $BackupDir -Destination $distPath -Recurse -Force
-  # Restored together with the code it describes - see the backup step.
-  if (Test-Path $buildInfoBackup) {
-    Copy-Item -Path $buildInfoBackup -Destination (Join-Path $InstallDir "BUILD_INFO.json") -Force
-  }
-  Start-ScheduledTask -TaskName $TaskName
-  if (Wait-ForHealthyWorkerTree -TimeoutSeconds 120) {
-    Write-Host "[OK] Rolled back to the previous program files - DYO Worker is running again."
-  } else {
-    Write-Host "[NEEDS ATTENTION] Rolled back the program files, but DYO Worker did not come back up."
-    Write-Host "Please contact DYO before using this computer."
-  }
-}
 
 Start-ScheduledTask -TaskName $TaskName
 
