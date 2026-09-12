@@ -170,6 +170,19 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 can roll back a failed update", 
     expect(updateScript.slice(fnIndex, fnIndex + 300)).toMatch(/--env-file=\.env dist\\index\.js/);
   });
 
+  it("backs up and restores BUILD_INFO.json together with dist, so the logged commit can never disagree with the code actually running", () => {
+    // BUILD_INFO.json lives at the app root, outside dist, and is what the
+    // worker logs as its running commit. Restoring dist alone would leave
+    // restored code advertising the rolled-back build's commit.
+    expect(updateScript).toMatch(/\$buildInfoBackup = "\$backupDir\.BUILD_INFO\.json"/);
+    const backupIndex = updateScript.indexOf("$buildInfoBackup = ");
+    const copyIndex = updateScript.indexOf('Copy-Item -Path (Join-Path $sourceApp "*")');
+    expect(backupIndex).toBeLessThan(copyIndex);
+    const restoreIndex = updateScript.indexOf("function Restore-BackupAndRestart");
+    const restoreBlock = updateScript.slice(restoreIndex, restoreIndex + 1200);
+    expect(restoreBlock).toMatch(/Copy-Item -Path \$buildInfoBackup/);
+  });
+
   it("never deletes the .env or the worker's state directory while rolling back - only the dist folder it replaced", () => {
     const restoreIndex = updateScript.indexOf("function Restore-BackupAndRestart");
     const block = updateScript.slice(restoreIndex, restoreIndex + 900);

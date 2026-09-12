@@ -301,8 +301,17 @@ if (-not (Test-Path (Join-Path $sourceApp "dist\index.js"))) {
 # ---- Rollback point: back up the current program files BEFORE replacing them ----
 $backupDir = Join-Path $InstallDir ("dist.backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $currentDist = Join-Path $InstallDir "dist"
+# BUILD_INFO.json lives at the app root, OUTSIDE dist, and is what the worker
+# logs as its running commit. Backing up dist alone would let a rollback
+# leave the RESTORED code reporting the commit of the build that was rolled
+# BACK - the two would silently disagree, and the log could no longer be
+# trusted to identify which code is actually running. Both are backed up and
+# restored together, always.
+$buildInfoPath = Join-Path $InstallDir "BUILD_INFO.json"
+$buildInfoBackup = "$backupDir.BUILD_INFO.json"
 if (Test-Path $currentDist) {
   Copy-Item -Path $currentDist -Destination $backupDir -Recurse -Force
+  if (Test-Path $buildInfoPath) { Copy-Item -Path $buildInfoPath -Destination $buildInfoBackup -Force }
   Write-CheckResult $true "Backed up current program files (rollback point created)"
 } else {
   $backupDir = $null
@@ -351,6 +360,10 @@ function Restore-BackupAndRestart {
   $distPath = Join-Path $InstallDir "dist"
   if (Test-Path $distPath) { Remove-Item -Path $distPath -Recurse -Force }
   Copy-Item -Path $BackupDir -Destination $distPath -Recurse -Force
+  # Restored together with the code it describes - see the backup step.
+  if (Test-Path $buildInfoBackup) {
+    Copy-Item -Path $buildInfoBackup -Destination (Join-Path $InstallDir "BUILD_INFO.json") -Force
+  }
   Start-ScheduledTask -TaskName $TaskName
   if (Wait-ForHealthyWorkerTree -TimeoutSeconds 120) {
     Write-Host "[OK] Rolled back to the previous program files - DYO Worker is running again."
