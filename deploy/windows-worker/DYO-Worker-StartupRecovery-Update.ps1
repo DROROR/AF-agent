@@ -122,43 +122,80 @@ function Get-DyoWorkerProcesses {
   }
 }
 
-function Test-ProcessAlive {
+# PID 0 (System Idle) and PID 4 (System) are never ours, under any
+# circumstances. An explicit floor, independent of every other check below.
+$SystemProcessIdFloor = 4
+
+function Get-LiveProcessById {
   param([int]$TargetProcessId)
-  return $null -ne (Get-CimInstance Win32_Process -Filter "ProcessId=$TargetProcessId" -ErrorAction SilentlyContinue)
+  return Get-CimInstance Win32_Process -Filter "ProcessId=$TargetProcessId" -ErrorAction SilentlyContinue
 }
 
-# A PID that has ALREADY exited is a success, not a failure. The previous
-# version reported "Could not terminate worker child PID ..." simply because
-# the supervisor's own tree-kill had already taken that child down moments
-# earlier - a misleading error on a completely successful stop.
+# Identity, not mere existence. Used to re-confirm a process STILL belongs to
+# DYO Worker at the moment it is about to be stopped.
+function Test-IsDyoWorkerProcess {
+  param($CandidateProcess)
+  if ($null -eq $CandidateProcess) { return $false }
+  if ($CandidateProcess.ProcessId -le $SystemProcessIdFloor) { return $false }
+  if ($CandidateProcess.Name -ne "node.exe") { return $false }
+  $cmd = $CandidateProcess.CommandLine
+  if (-not $cmd) { return $false }
+  foreach ($pattern in $WorkerProcessCommandLinePatterns) {
+    if ($cmd -match $pattern) { return $true }
+  }
+  return $false
+}
+
+# REAL INCIDENT THIS FIXES (2026-09-12): this previously checked only that
+# SOME process still held the captured PID, then killed it. Windows reuses
+# process IDs - between capturing the list and stopping it, a worker PID had
+# exited and been recycled, so the script attempted to terminate PID 188, a
+# child of PID 4 (System). Existence is not identity. A process is now
+# re-verified at the moment of the kill: same PID, same creation time, still
+# node.exe, still matching this worker's own command lines. Anything else is
+# left strictly alone.
 function Stop-OneProcessTree {
-  param([int]$TargetProcessId, [string]$Label)
-  if (-not (Test-ProcessAlive -TargetProcessId $TargetProcessId)) {
-    Write-Host "[OK] $Label (PID $TargetProcessId) had already exited"
+  param($TargetProcess, [string]$Label)
+  $targetId = $TargetProcess.ProcessId
+  if ($targetId -le $SystemProcessIdFloor) {
+    Write-Host "[OK] Refusing to touch PID $targetId - system process IDs are never DYO Worker"
     return $true
   }
-  & taskkill /F /T /PID $TargetProcessId *>$null
+  $live = Get-LiveProcessById -TargetProcessId $targetId
+  if ($null -eq $live) {
+    Write-Host "[OK] $Label (PID $targetId) had already exited"
+    return $true
+  }
+  if ($live.CreationDate -ne $TargetProcess.CreationDate -or -not (Test-IsDyoWorkerProcess -CandidateProcess $live)) {
+    Write-Host "[OK] PID $targetId is no longer the DYO Worker process it was (Windows reuses process IDs) - leaving it alone"
+    return $true
+  }
+
+  # taskkill writes to stderr in ordinary situations (for example when the
+  # tree it is walking has already partly exited). Under
+  # $ErrorActionPreference = "Stop" PowerShell turns native stderr into a
+  # TERMINATING NativeCommandError, which aborted this installer outright -
+  # so this one call is deliberately run with errors non-terminating.
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & taskkill /F /T /PID $targetId 2>&1 | Out-Null
+  } catch {
+    # Reported via the liveness re-check below, never by taskkill's own output.
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
   Start-Sleep -Milliseconds 500
-  if (Test-ProcessAlive -TargetProcessId $TargetProcessId) {
-    Write-Host "[NEEDS ATTENTION] $Label (PID $TargetProcessId) is still running after being asked to stop"
+  $stillLive = Get-LiveProcessById -TargetProcessId $targetId
+  if ($null -ne $stillLive -and (Test-IsDyoWorkerProcess -CandidateProcess $stillLive) -and $stillLive.CreationDate -eq $TargetProcess.CreationDate) {
+    Write-Host "[NEEDS ATTENTION] $Label (PID $targetId) is still running after being asked to stop"
     return $false
   }
-  Write-Host "[OK] Stopped $Label (PID $TargetProcessId)"
+  Write-Host "[OK] Stopped $Label (PID $targetId)"
   return $true
 }
 
-# REAL BUG THIS FIXES (2026-09-12, second failed install): these previously
-# used `return @(...)`. PowerShell UNROLLS an array on return, and an EMPTY
-# array unrolls to NO OUTPUT AT ALL - so the caller received $null, not an
-# empty array. $null.Count is itself $null, so every count comparison below
-# silently failed and Wait-ForHealthyWorkerTree could never return $true even
-# for a perfectly healthy worker. That forced a rollback regardless of
-# whether the update worked, and the rollback's own verification then failed
-# the same way. The diagnostic message gave it away by printing
-# "supervisor processes: " with an empty value rather than "0".
-# The leading comma returns the array itself rather than its unrolled
-# contents; every call site additionally wraps in @( ) so a single match can
-# never arrive as a bare object either.
 function Get-DyoSupervisorProcesses {
   $found = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") })
   return ,$found
@@ -177,10 +214,10 @@ function Get-DyoWorkerChildProcesses {
 # replace.
 function Stop-DyoWorkerProcessesForcibly {
   foreach ($proc in @(Get-DyoSupervisorProcesses)) {
-    [void](Stop-OneProcessTree -TargetProcessId $proc.ProcessId -Label "DYO Worker supervisor")
+    [void](Stop-OneProcessTree -TargetProcess $proc -Label "DYO Worker supervisor")
   }
   foreach ($proc in @(Get-DyoWorkerChildProcesses)) {
-    [void](Stop-OneProcessTree -TargetProcessId $proc.ProcessId -Label "DYO Worker process")
+    [void](Stop-OneProcessTree -TargetProcess $proc -Label "DYO Worker process")
   }
 }
 
@@ -242,6 +279,25 @@ function Restore-BackupAndRestart {
   }
 }
 
+
+# Every abort path that happens AFTER the Scheduled Task has been stopped
+# must leave this computer with a RUNNING worker - the existing, unmodified
+# one. An installer that gives up is never a reason for the machine to sit
+# there doing nothing.
+function Restart-ExistingWorkerAfterAbort {
+  Write-Host "Restarting the existing DYO Worker (unchanged) before exiting..."
+  try {
+    Start-ScheduledTask -TaskName $TaskName
+  } catch {
+    Write-Host "[NEEDS ATTENTION] Could not restart the existing DYO Worker automatically."
+    return
+  }
+  if (Wait-ForHealthyWorkerTree -TimeoutSeconds 120) {
+    Write-CheckResult $true "The existing DYO Worker is running again - this computer is back to how it started"
+  } else {
+    Write-Host "[NEEDS ATTENTION] The existing DYO Worker did not come back up - please contact DYO."
+  }
+}
 
 Write-Host "================================================"
 Write-Host "  DYO Windows Worker - Startup & Recovery Update"
@@ -307,10 +363,12 @@ if (-not (Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)) {
   Stop-DyoWorkerProcessesForcibly
   if (-not (Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)) {
     Write-Host "[NEEDS ATTENTION] DYO Worker processes are still running and could not be stopped:"
-    foreach ($proc in Get-DyoWorkerProcesses) { Write-Host "  PID $($proc.ProcessId): $($proc.CommandLine)" }
+    foreach ($proc in @(Get-DyoWorkerProcesses)) { Write-Host "  PID $($proc.ProcessId): $($proc.CommandLine)" }
     Write-Host ""
     Write-Host "NOTHING HAS BEEN CHANGED on this computer - the program files were deliberately"
-    Write-Host "left untouched rather than replaced underneath a running worker. Please contact DYO."
+    Write-Host "left untouched rather than replaced underneath a running worker."
+    Restart-ExistingWorkerAfterAbort
+    Write-Host "Please contact DYO."
     exit 1
   }
 }

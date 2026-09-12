@@ -57,7 +57,7 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 only ever targets DYO Worker's o
   });
 
   it("kills by exact PID via taskkill, never by a broad name-based kill", () => {
-    expect(updateScript).toMatch(/taskkill \/F \/T \/PID \$TargetProcessId/);
+    expect(updateScript).toMatch(/taskkill \/F \/T \/PID \$targetId/);
     expect(updateScript).not.toMatch(/taskkill[^\n]*\/IM/i);
   });
 
@@ -87,11 +87,12 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 stops the Worker completely BEFO
 
   it("treats an already-exited PID as success, not as the misleading 'could not terminate' error the first attempt reported", () => {
     const fnIndex = updateScript.indexOf("function Stop-OneProcessTree");
-    const block = updateScript.slice(fnIndex, fnIndex + 700);
+    const block = updateScript.slice(fnIndex, fnIndex + 2000);
     expect(block).toMatch(/had already exited/);
-    // Failure is decided by whether the process is STILL alive afterwards,
+    // Failure is decided by whether OUR process is still alive afterwards,
     // never by taskkill's own exit code.
-    expect(block).toMatch(/if \(Test-ProcessAlive/);
+    expect(block).toMatch(/\$stillLive = Get-LiveProcessById/);
+    expect(block).toMatch(/Test-IsDyoWorkerProcess -CandidateProcess \$stillLive/);
   });
 
   it("waits for every old worker process to actually exit, and replaces no file until they have", () => {
@@ -168,6 +169,43 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 can roll back a failed update", 
     const fnIndex = updateScript.indexOf("function Get-DyoWorkerChildProcesses");
     expect(fnIndex).toBeGreaterThan(-1);
     expect(updateScript.slice(fnIndex, fnIndex + 300)).toMatch(/--env-file=\.env dist\\index\.js/);
+  });
+
+  it("REAL INCIDENT GUARD (2026-09-12): never kills a recycled PID - identity is re-verified at the moment of the kill, not merely existence", () => {
+    // A captured worker PID exited and Windows recycled it, so the installer
+    // attempted to terminate PID 188, a child of PID 4 (System).
+    const fnIndex = updateScript.indexOf("function Stop-OneProcessTree");
+    const block = updateScript.slice(fnIndex, fnIndex + 2000);
+    expect(block).toMatch(/CreationDate -ne \$TargetProcess\.CreationDate/);
+    expect(block).toMatch(/Test-IsDyoWorkerProcess -CandidateProcess \$live/);
+    expect(block).toMatch(/no longer the DYO Worker process it was/);
+    // Explicit system-PID floor, independent of every other check.
+    expect(updateScript).toMatch(/\$SystemProcessIdFloor = 4/);
+    expect(block).toMatch(/-le \$SystemProcessIdFloor/);
+  });
+
+  it("identity check requires node.exe AND this worker's own command lines - never a PID alone", () => {
+    const fnIndex = updateScript.indexOf("function Test-IsDyoWorkerProcess");
+    const block = updateScript.slice(fnIndex, fnIndex + 800);
+    expect(block).toMatch(/\$CandidateProcess\.Name -ne "node\.exe"/);
+    expect(block).toMatch(/\$WorkerProcessCommandLinePatterns/);
+    expect(block).toMatch(/-le \$SystemProcessIdFloor/);
+  });
+
+  it("native taskkill stderr can never abort the installer (the real line-140 NativeCommandError)", () => {
+    const fnIndex = updateScript.indexOf("function Stop-OneProcessTree");
+    const block = updateScript.slice(fnIndex, fnIndex + 2000);
+    expect(block).toMatch(/\$ErrorActionPreference = "Continue"/);
+    expect(block).toMatch(/\$ErrorActionPreference = \$previousErrorActionPreference/);
+    expect(block).toMatch(/taskkill \/F \/T \/PID \$targetId 2>&1 \| Out-Null/);
+  });
+
+  it("every abort AFTER the task was stopped restarts the existing Worker - the machine is never left idle", () => {
+    expect(updateScript).toContain("function Restart-ExistingWorkerAfterAbort");
+    const abortIndex = updateScript.indexOf("NOTHING HAS BEEN CHANGED");
+    const block = updateScript.slice(abortIndex, abortIndex + 500);
+    expect(block).toMatch(/Restart-ExistingWorkerAfterAbort/);
+    expect(updateScript.indexOf("function Restart-ExistingWorkerAfterAbort")).toBeLessThan(abortIndex);
   });
 
   it("REAL INCIDENT GUARD (2026-09-12): proves the new code physically landed before restarting or claiming success, and rolls back if it did not", () => {
