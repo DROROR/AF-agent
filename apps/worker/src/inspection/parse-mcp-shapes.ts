@@ -177,6 +177,45 @@ export function parseCurrentProjectFromHealth(content: unknown): ParseResult<Cur
 }
 
 /**
+ * Whether ae-mcp reports its own AE bridge as connected, per ae_health's
+ * real confirmed shape. Both fields read below were captured verbatim from
+ * a real client-machine job's own ae_health output (INSPECT_TEMPLATE job
+ * 04eb2159, 2026-09-11): a top-level `connected` boolean alongside
+ * `health.connected`/`health.listening`. Used by the health probe
+ * (ae-mcp-round-trip-adapter.ts) to decide ONLINE vs OFFLINE from a real
+ * round trip rather than from a CLI exit code - see that module's own doc
+ * comment for the 2026-09-12 incident that replaced.
+ *
+ * A missing or non-boolean flag counts as NOT connected rather than
+ * assuming the bridge is up - a false ONLINE is the one outcome that must
+ * never happen.
+ */
+export interface BridgeConnectedInfo {
+  connected: boolean;
+  listening: boolean;
+}
+
+export function parseBridgeConnectedFromHealth(content: unknown): ParseResult<BridgeConnectedInfo> {
+  const parsed = parseJsonTextContent(content);
+  if (!parsed.ok) {
+    return parsed;
+  }
+  const raw = parsed.value;
+  if (!isRecord(raw)) {
+    return { ok: false, reason: "expected an object" };
+  }
+  const health = isRecord(raw["health"]) ? raw["health"] : null;
+  if (!health) {
+    return { ok: false, reason: "no health object present" };
+  }
+  // Either the top-level or the nested flag being explicitly true counts as
+  // connected - both are present in the real confirmed output, neither is
+  // invented here.
+  const connected = raw["connected"] === true || health["connected"] === true;
+  return { ok: true, value: { connected, listening: health["listening"] === true } };
+}
+
+/**
  * Real confirmed shape of one entry in ae_get_composition's nested
  * `layers` array. `compSummary` always calls `layerSummary(layer, false)`
  * for these (see host-scripts/ae-mcp-methods.jsx upstream) - so ONLY

@@ -6,7 +6,18 @@ import { runBoundedProcess } from "../infrastructure/run-bounded-process.js";
 import { detectAeHealth, type AeHealthConfig } from "./ae-health.js";
 
 const HEALTH_SUBCOMMAND = "health";
-const DEFAULT_TIMEOUT_MS = 8_000;
+/**
+ * Real 2026-09-12 incident: this was 8s, and upstream's `health`
+ * subcommand is not a cheap ping - it performs an "ensure" step (checks AE
+ * is running, ensures/kicks the bridge, counts live instances) that can
+ * legitimately run longer on a busy machine. At 8s a genuinely healthy,
+ * LISTENING/CONNECTED bridge was being killed mid-probe and reported as an
+ * ambiguous timeout, so CHECK_HEALTH could not confirm a working machine.
+ * Raised to a bounded-but-realistic ceiling that waits for the real work
+ * instead of racing it - still bounded, never unlimited (CLAUDE.md rule 9).
+ * See ae-mcp-round-trip-adapter.ts for the same fix on the heartbeat path.
+ */
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface RunCheckHealthDiagnosticsConfig extends AeHealthConfig {
   /** ae-mcp's install directory (AE_MCP_PATH) - the CLI script is always exactly `<aeMcpPath>/dist/index.js`, never a separately-configurable path. */

@@ -7,7 +7,10 @@ import { executeJobWithWatchdog } from "./domain/job-watchdog.js";
 import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
-import { HeroicSwanMcpAdapter } from "./health/heroic-swan-mcp-adapter.js";
+import { AeMcpRoundTripAdapter } from "./health/ae-mcp-round-trip-adapter.js";
+import { AeLauncher } from "./health/ensure-ae-running.js";
+import { launchAe } from "./health/launch-ae.js";
+import { HeroicSwanMcpClient } from "./inspection/heroic-swan-mcp-client.js";
 import { runCheckHealthDiagnostics } from "./health/run-check-health-diagnostics.js";
 import { readWorkerBuildInfo } from "./version.js";
 import { HeroicSwanTemplateInspector } from "./inspection/heroic-swan-template-inspector.js";
@@ -150,7 +153,26 @@ async function main(): Promise<void> {
   // instance.json file internals. Always safe to construct even with no
   // AE_MCP_PATH configured (or on a Linux dev/test machine): it reports
   // UNKNOWN rather than crashing or fabricating a status.
-  const mcpAdapter = new HeroicSwanMcpAdapter({ aeMcpPath: env.aeMcpPath });
+  // Real 2026-09-12 incident fix: the previous adapter judged the bridge by
+  // the exit code of `node <ae-mcp>/dist/index.js health` under a hard 8s
+  // ceiling, and reported a genuinely healthy bridge as UNKNOWN whenever
+  // upstream's own "ensure" work ran long - permanently blocking every
+  // dispatch whose precondition is MCP ONLINE. This performs the same real
+  // MCP round trip a job does. See ae-mcp-round-trip-adapter.ts.
+  const mcpAdapter = new AeMcpRoundTripAdapter({
+    aeMcpPath: env.aeMcpPath,
+    createClient: (aeMcpPath, timeoutMs) => new HeroicSwanMcpClient({ aeMcpPath, timeoutMs })
+  });
+
+  // Real 2026-09-12 release blocker: after a Windows restart the client was
+  // being asked to open After Effects by hand before any job could run. The
+  // worker already starts itself at logon (its Scheduled Task is registered
+  // -AtLogOn with RestartCount 999); this closes the remaining manual step.
+  // Bounded by construction - see ensure-ae-running.ts.
+  const aeLauncher = new AeLauncher(
+    { aePath: env.aePath },
+    { processLister, launchAe, now: () => Date.now() }
+  );
 
   // Real, production INSPECT_TEMPLATE implementation - see
   // docs/TEMPLATE-INSPECTOR.md. Always safe to construct even with no
@@ -343,6 +365,19 @@ async function main(): Promise<void> {
           { mcpStatus: health.mcpStatus, mcpProbeDetail: health.mcpProbeDetail, mcpConfiguredPath: health.mcpConfiguredPath },
           "mcp health probe did not report ONLINE"
         );
+      }
+      // Self-recovery (2026-09-12): AE being down is the one cause of a
+      // stalled machine this worker can safely fix itself. Every outcome is
+      // bounded and logged - a "blocked" outcome means the bounded budget is
+      // spent and a human genuinely needs to look, which is reported rather
+      // than retried forever.
+      if (health.aeStatus === "OFFLINE") {
+        const ensured = await aeLauncher.ensureRunning();
+        if (ensured.action === "blocked" || ensured.action === "unavailable") {
+          workerLogger.warn({ ensureAe: ensured }, "After Effects is not running and this worker could not start it");
+        } else if (ensured.action === "launched") {
+          workerLogger.info({ ensureAe: ensured }, "After Effects was not running - started it automatically");
+        }
       }
       return buildHeartbeatPayload(health);
     },
