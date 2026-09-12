@@ -41,6 +41,7 @@ import {
 } from "./diagnostics/collect-diagnostics.js";
 import { WORKER_LOG_RELATIVE_PATH, PREVIOUS_WORKER_LOG_RELATIVE_PATH } from "./diagnostics/run-diagnostic.js";
 import { listDyoProcessesViaCim } from "./diagnostics/list-dyo-processes.js";
+import { redactSecrets } from "./diagnostics/redact.js";
 import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
 import { JobExecutionRegistry } from "./runtime/job-execution-registry.js";
@@ -127,6 +128,26 @@ function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void
   }
 }
 
+
+/**
+ * Compact, redacted, bounded summary of an MCP tool's response content, for
+ * logging. Never the raw object: tool content is arbitrary upstream data, it
+ * can be large, and it goes straight into worker.log.
+ */
+function summarizeToolContent(content: unknown): string {
+  let text: string;
+  try {
+    text = typeof content === "string" ? content : JSON.stringify(content);
+  } catch {
+    return "response could not be serialized";
+  }
+  if (!text) {
+    return "empty response";
+  }
+  const redacted = redactSecrets(text);
+  return redacted.length > 600 ? `${redacted.slice(0, 600)}... (truncated)` : redacted;
+}
+
 /** Hard ceiling on one claim attempt - see its call site's own rationale. */
 const CLAIM_DEADLINE_MS = 30_000;
 
@@ -190,9 +211,17 @@ async function main(): Promise<void> {
       try {
         await client.connect();
         const call = await client.callTool("ae_reconnect");
-        return call.ok
-          ? { ok: true, detail: "ae_reconnect returned a response" }
-          : { ok: false, detail: `${call.error.code}: ${call.error.message}` };
+        if (!call.ok) {
+          return { ok: false, detail: `${call.error.code}: ${call.error.message}` };
+        }
+        // REAL 2026-09-12 GAP: this used to report only "ae_reconnect
+        // returned a response" and throw the body away. On the machine this
+        // was written for, the call succeeded and the bridge STILL did not
+        // register - and the reason was in the body nobody kept. A tool
+        // answering is not the same as a tool working, and the difference is
+        // exactly what an incident needs. Bounded and redacted, because this
+        // lands in worker.log.
+        return { ok: true, detail: summarizeToolContent(call.content) };
       } finally {
         await client.close().catch(() => {
           // Never let cleanup failure change the recovery verdict.

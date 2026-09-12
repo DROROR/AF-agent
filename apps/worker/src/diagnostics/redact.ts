@@ -20,8 +20,18 @@ const REDACTED = "[REDACTED]";
  * `key=value`, `key: value`, `"key":"value"` and `--key value` shapes. Kept
  * broad on purpose - "pass" catches password/passphrase/passwd.
  */
+/**
+ * The separator deliberately allows an optional CLOSING QUOTE before the
+ * `:` so that JSON - the format worker.log is actually written in - is
+ * matched. Without it, `"workerToken":"..."` did not match at all: the key
+ * name is followed by `"` before the colon. That hole went unnoticed only
+ * because the shape-based fallback below happened to catch long opaque runs
+ * anyway, which is not a guarantee (a short or digest-shaped secret would
+ * have sailed straight through). Found 2026-09-12 while fixing the git-SHA
+ * false positive, by the test that then failed.
+ */
 const SECRET_KEY_PATTERN =
-  /\b([A-Za-z0-9_.-]*(?:pass|secret|token|apikey|api_key|credential|authorization|auth|bearer|cookie|session|private_key|privatekey|signature|dsn|connection_?string)[A-Za-z0-9_.-]*)\b(\s*[:=]\s*|\s+)("[^"]*"|'[^']*'|\S+)/gi;
+  /\b([A-Za-z0-9_.-]*(?:pass|secret|token|apikey|api_key|credential|authorization|auth|bearer|cookie|session|private_key|privatekey|signature|dsn|connection_?string)[A-Za-z0-9_.-]*)\b("?\s*[:=]\s*|\s+)("[^"]*"|'[^']*'|\S+)/gi;
 
 /**
  * `Bearer <token>` and friends. This MUST run before SECRET_KEY_PATTERN:
@@ -41,8 +51,20 @@ const JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,
 /** A long opaque hex/base64ish run - the shape of a raw worker token. 32+ chars avoids eating SHA-256 file hashes we WANT to see... which are exactly 64 hex, so those are allowed back below. */
 const OPAQUE_SECRET_PATTERN = /\b[A-Za-z0-9_-]{40,}\b/g;
 
-/** A bare 64-char hex string is a SHA-256 digest - real, useful, non-secret evidence this project relies on (source .aep integrity). Never redacted. */
-const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+/**
+ * Bare hex digests are real, useful, NON-SECRET evidence this project
+ * depends on, and must survive redaction:
+ *   - 64 hex = SHA-256 (source .aep integrity, release payload hashes)
+ *   - 40 hex = a git commit SHA (which build is actually running)
+ *
+ * REAL 2026-09-12 FALSE POSITIVE, caught in live use: the 40-char git SHA in
+ * the worker's own "worker starting" line came back as
+ * `"commit":"[REDACTED]"`, destroying the one field that proves which build a
+ * machine is running - during an incident whose whole question was exactly
+ * that. Over-redaction is the safe direction for an UNKNOWN string, but a
+ * value whose shape positively identifies it as a digest is not unknown.
+ */
+const HEX_DIGEST_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i;
 
 /**
  * Redacts one string. Order matters: keyed values first (so a recognized key
@@ -55,7 +77,7 @@ export function redactSecrets(input: string): string {
     .replace(SECRET_KEY_PATTERN, (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`)
     .replace(URL_CREDENTIALS_PATTERN, (_match, scheme: string, user: string) => `${scheme}${user}:${REDACTED}@`)
     .replace(JWT_PATTERN, REDACTED)
-    .replace(OPAQUE_SECRET_PATTERN, (match) => (SHA256_PATTERN.test(match) ? match : REDACTED));
+    .replace(OPAQUE_SECRET_PATTERN, (match) => (HEX_DIGEST_PATTERN.test(match) ? match : REDACTED));
 }
 
 export function redactLines(lines: readonly string[]): string[] {

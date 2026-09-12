@@ -33,6 +33,18 @@ describe("redactSecrets", () => {
     expect(redacted).not.toContain("abc123def456ghi789jkl012mno345pqr678stu");
   });
 
+  // REAL 2026-09-12 false positive: this came back as "[REDACTED]" during an
+  // incident whose entire question was which build the machine was running.
+  it("NEVER redacts a 40-char git commit SHA - it identifies the running build", () => {
+    const sha = "86f300882164b32f0a0b49d76c71da02948d66ee";
+    expect(redactSecrets(`{"buildInfo":{"commit":"${sha}"}}`)).toContain(sha);
+  });
+
+  it("still redacts a 40-char run that is NOT hex - that shape is not a digest", () => {
+    const token = "zzTOKENzz1234567890abcdefghijklmnopqrstu";
+    expect(redactSecrets(`opaque ${token}`)).not.toContain(token);
+  });
+
   it("NEVER redacts a sha256 digest - real, non-secret integrity evidence this project depends on", () => {
     const sha = "93a47daf8c65bbde29dda6dcc66cffc5d95838d5508afabb518413528c180dc7";
     expect(redactSecrets(`package sha256 ${sha}`)).toContain(sha);
@@ -47,6 +59,20 @@ describe("redactSecrets", () => {
     const out = redactLines(["password=abc", "ordinary line"]);
     expect(out[0]).not.toContain("abc");
     expect(out[1]).toBe("ordinary line");
+  });
+
+  // The exact hole found on 2026-09-12: worker.log is JSON, so a secret key
+  // is followed by a closing quote before its colon. This must be redacted by
+  // KEY NAME, never left to the shape-based fallback - a secret that happens
+  // to look like a digest would otherwise leak.
+  it("redacts a JSON-quoted secret key even when the value is digest-shaped", () => {
+    const fortyHexToken = "9f3a2b1c4d5e6f708192a3b4c5d6e7f8091a2b3c";
+    const line = `{"msg":"starting","workerToken":"${fortyHexToken}"}`;
+    expect(redactSecrets(line)).not.toContain(fortyHexToken);
+  });
+
+  it("redacts a JSON-quoted password whose value is far too short to look opaque", () => {
+    expect(redactSecrets('{"password":"hunter2"}')).not.toContain("hunter2");
   });
 });
 
