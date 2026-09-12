@@ -23,7 +23,26 @@ const updateCodeBody = updateScript.slice(updateScript.indexOf("#>") + 2);
 describe("DYO-Worker-CombinedFix2-Update.ps1 only ever targets DYO Worker's own two known command lines", () => {
   it("matches processes by exact command-line substring, never by process name alone", () => {
     expect(updateScript).toMatch(/\[regex\]::Escape\("dist\\supervisor\\index\.js"\)/);
-    expect(updateScript).toMatch(/\[regex\]::Escape\("dist\\index\.js"\)/);
+    expect(updateScript).toMatch(/\[regex\]::Escape\("--env-file=\.env dist\\index\.js"\)/);
+  });
+
+  it("REAL BUG REGRESSION (2026-09-12): never matches on the bare \"dist\\index.js\" substring, which also matches ae-mcp's own process and killed the AE bridge", () => {
+    // ae-mcp is spawned by this worker as
+    //   node <AE_MCP_PATH>\dist\index.js serve
+    // (an ABSOLUTE path - see heroic-swan-mcp-client.ts's StdioClientTransport
+    // args), whereas the worker's own child is always
+    //   node --env-file=.env dist\index.js
+    // (a RELATIVE path preceded by --env-file - see spawn-worker-child.ts's
+    // buildWorkerChildArgs). Matching the bare tail matched BOTH, so the
+    // cleanup step killed the ae-mcp bridge and its health probe then
+    // reported exit code 1 (mcp_status OFFLINE) right after this update.
+    const patternStart = updateScript.indexOf("$WorkerProcessCommandLinePatterns");
+    expect(patternStart).toBeGreaterThan(-1);
+    const patternBlock = updateScript.slice(patternStart, patternStart + 400);
+    expect(patternBlock).not.toMatch(/Escape\("dist\\index\.js"\)/);
+    // The worker-child pattern must carry its own --env-file argument, which
+    // ae-mcp's command line never has.
+    expect(patternBlock).toContain("--env-file=.env dist\\index.js");
   });
 
   it("never references Adobe, After Effects, aerender, or ae-mcp anywhere near the process-kill logic", () => {

@@ -26,7 +26,9 @@
      `--env-file=.env dist\index.js`) - never anything else, never by
      process name alone, never Adobe/After Effects/Creative Cloud/ae-mcp
      (none of those ever run under either of those two exact command
-     lines).
+     lines). The worker child pattern deliberately includes its own
+     --env-file argument so it can never match ae-mcp, whose process also
+     ends in dist\index.js.
   2. After starting the task, re-enumerates and fails loudly (never
      silently) if more than one supervisor process is found running -
      this would mean the cleanup itself did not work, which should be
@@ -84,13 +86,25 @@ $ErrorActionPreference = "Stop"
 $TaskName = "DYO Video Worker"
 
 # The ONLY two real command lines this worker's own processes ever run
-# under (run-worker-supervisor.ps1's own fixed ProcessStartInfo, and
-# env.ts's supervisor spawning the worker child with the same fixed
-# arguments) - never a name-only match, so this can never touch Adobe
-# Creative Cloud's own background node.exe helper or anything else.
+# under: run-worker-supervisor.ps1's fixed ProcessStartInfo
+# ("node dist\supervisor\index.js"), and spawn-worker-child.ts's fixed
+# argument vector ("node --env-file=.env dist\index.js", always that
+# relative path preceded by --env-file).
+#
+# REAL BUG THIS FIXES (2026-09-12): the first version of this list matched
+# the bare substring "dist\index.js", which ALSO matches ae-mcp's own
+# process - the worker spawns that as
+# "node <AE_MCP_PATH>\dist\index.js serve" (an ABSOLUTE path, see
+# heroic-swan-mcp-client.ts's own StdioClientTransport args). The cleanup
+# step therefore killed the ae-mcp bridge along with the worker, and
+# ae-mcp's health probe reported the bridge disconnected (exit code 1 ->
+# mcp_status OFFLINE) immediately after the update that introduced it.
+# Matching on "--env-file=.env dist\index.js" is the worker child's own
+# distinctive, complete form and cannot match ae-mcp, which passes no
+# --env-file and always uses an absolute path plus a "serve" subcommand.
 $WorkerProcessCommandLinePatterns = @(
   [regex]::Escape("dist\supervisor\index.js"),
-  [regex]::Escape("dist\index.js")
+  [regex]::Escape("--env-file=.env dist\index.js")
 )
 
 function Write-CheckResult {

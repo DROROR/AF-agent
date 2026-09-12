@@ -26,7 +26,11 @@ const updateCodeBody = updateScript.slice(updateScript.indexOf("#>") + 2);
 describe("DYO-Worker-ProcessCleanupFix-Update.ps1 only ever targets DYO Worker's own two known command lines", () => {
   it("matches processes by exact command-line substring, never by process name alone", () => {
     expect(updateScript).toMatch(/\[regex\]::Escape\("dist\\supervisor\\index\.js"\)/);
-    expect(updateScript).toMatch(/\[regex\]::Escape\("dist\\index\.js"\)/);
+    // 2026-09-12: must carry its own --env-file argument, so it can never
+    // also match ae-mcp's "node <AE_MCP_PATH>\dist\index.js serve" process
+    // (the bare tail matched both and killed the AE bridge).
+    expect(updateScript).toMatch(/\[regex\]::Escape\("--env-file=\.env dist\\index\.js"\)/);
+    expect(updateScript).not.toMatch(/Escape\("dist\\index\.js"\)/);
     const filterIndex = updateScript.indexOf("function Get-DyoWorkerProcesses");
     expect(filterIndex).toBeGreaterThan(-1);
     const block = updateScript.slice(filterIndex, filterIndex + 500);
