@@ -147,12 +147,26 @@ function Stop-OneProcessTree {
   return $true
 }
 
+# REAL BUG THIS FIXES (2026-09-12, second failed install): these previously
+# used `return @(...)`. PowerShell UNROLLS an array on return, and an EMPTY
+# array unrolls to NO OUTPUT AT ALL - so the caller received $null, not an
+# empty array. $null.Count is itself $null, so every count comparison below
+# silently failed and Wait-ForHealthyWorkerTree could never return $true even
+# for a perfectly healthy worker. That forced a rollback regardless of
+# whether the update worked, and the rollback's own verification then failed
+# the same way. The diagnostic message gave it away by printing
+# "supervisor processes: " with an empty value rather than "0".
+# The leading comma returns the array itself rather than its unrolled
+# contents; every call site additionally wraps in @( ) so a single match can
+# never arrive as a bare object either.
 function Get-DyoSupervisorProcesses {
-  return @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") })
+  $found = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") })
+  return ,$found
 }
 
 function Get-DyoWorkerChildProcesses {
-  return @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("--env-file=.env dist\index.js") })
+  $found = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("--env-file=.env dist\index.js") })
+  return ,$found
 }
 
 # ORDER MATTERS: supervisors are stopped FIRST. A supervisor whose child is
@@ -162,10 +176,10 @@ function Get-DyoWorkerChildProcesses {
 # cleaned up while a live worker still holds the files it is about to
 # replace.
 function Stop-DyoWorkerProcessesForcibly {
-  foreach ($proc in Get-DyoSupervisorProcesses) {
+  foreach ($proc in @(Get-DyoSupervisorProcesses)) {
     [void](Stop-OneProcessTree -TargetProcessId $proc.ProcessId -Label "DYO Worker supervisor")
   }
-  foreach ($proc in Get-DyoWorkerChildProcesses) {
+  foreach ($proc in @(Get-DyoWorkerChildProcesses)) {
     [void](Stop-OneProcessTree -TargetProcessId $proc.ProcessId -Label "DYO Worker process")
   }
 }
@@ -192,8 +206,8 @@ function Wait-ForHealthyWorkerTree {
   param([int]$TimeoutSeconds = 120)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
-    $supervisors = Get-DyoSupervisorProcesses
-    $children = Get-DyoWorkerChildProcesses
+    $supervisors = @(Get-DyoSupervisorProcesses)
+    $children = @(Get-DyoWorkerChildProcesses)
     if ($supervisors.Count -gt 1) { return $false }
     if ($supervisors.Count -eq 1 -and $children.Count -ge 1) { return $true }
     Start-Sleep -Seconds 2
@@ -349,8 +363,8 @@ function Restore-BackupAndRestart {
 Start-ScheduledTask -TaskName $TaskName
 
 if (-not (Wait-ForHealthyWorkerTree -TimeoutSeconds 120)) {
-  $supervisors = Get-DyoSupervisorProcesses
-  $children = Get-DyoWorkerChildProcesses
+  $supervisors = @(Get-DyoSupervisorProcesses)
+  $children = @(Get-DyoWorkerChildProcesses)
   Write-Host "[NEEDS ATTENTION] DYO Worker did not come back up correctly after the update"
   Write-Host "(supervisor processes: $($supervisors.Count), worker processes: $($children.Count) - expected exactly 1 and at least 1)."
   Restore-BackupAndRestart -BackupDir $backupDir

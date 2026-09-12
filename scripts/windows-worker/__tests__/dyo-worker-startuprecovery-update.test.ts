@@ -121,6 +121,24 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 stops the Worker completely BEFO
     expect(updateScript).toMatch(/Wait-ForHealthyWorkerTree -TimeoutSeconds 120/);
   });
 
+  it("REAL BUG REGRESSION (2026-09-12, second failed install): process-list helpers never return a bare @() that PowerShell unrolls to $null", () => {
+    // `return @(...)` unrolls an EMPTY array to no output, so the caller gets
+    // $null; $null.Count is $null, so every count comparison silently fails
+    // and a healthy worker is declared dead (forcing a false rollback). The
+    // giveaway was a diagnostic printing "supervisor processes: " with an
+    // empty value instead of "0".
+    expect(updateScript).not.toMatch(/return @\(Get-DyoWorkerProcesses/);
+    // The comma operator returns the array itself rather than its contents.
+    expect(updateScript).toMatch(/return ,\$found/);
+    // And every call site additionally wraps in @( ).
+    const unwrapped = updateScript
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("function "))
+      .filter((line) => /Get-Dyo(Supervisor|WorkerChild)Processes/.test(line))
+      .filter((line) => !/@\(Get-Dyo(Supervisor|WorkerChild)Processes/.test(line));
+    expect(unwrapped, `unwrapped call sites: ${unwrapped.join(" | ")}`).toEqual([]);
+  });
+
   it("no longer describes the previous release's fixes in its own banner", () => {
     expect(updateScript).not.toMatch(/legacy-project-conversion detection/);
     expect(updateScript).not.toMatch(/restart process-cleanup fix/);
