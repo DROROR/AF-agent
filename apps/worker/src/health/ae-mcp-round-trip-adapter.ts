@@ -177,12 +177,20 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
       }
       const parsed = parseBridgeConnectedFromHealth(call.content);
       if (!parsed.ok) {
+        // The reason names the observed top-level keys (never values, never
+        // paths), so a real incident like the 2026-09-12
+        // "unrecognized-health-shape" one is diagnosable from worker.log
+        // alone rather than needing another round trip to the machine.
         // The bridge answered, but not in the confirmed shape. That is a
         // real answer about a real channel, so it is not retried as if it
         // were a transport blip - but it is never reported as ONLINE.
         return {
           terminal: true,
-          result: { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "unrecognized-health-shape" }
+          result: {
+            mcpStatus: "UNKNOWN",
+            mcpConfiguredPath: scriptPath,
+            mcpProbeDetail: `unrecognized-health-shape (${parsed.reason})`
+          }
         };
       }
       if (parsed.value.connected) {

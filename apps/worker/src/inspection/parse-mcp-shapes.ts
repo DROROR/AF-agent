@@ -205,14 +205,30 @@ export function parseBridgeConnectedFromHealth(content: unknown): ParseResult<Br
     return { ok: false, reason: "expected an object" };
   }
   const health = isRecord(raw["health"]) ? raw["health"] : null;
-  if (!health) {
-    return { ok: false, reason: "no health object present" };
+
+  // REAL 2026-09-12 DEFECT THIS FIXES: this previously REQUIRED a nested
+  // `health` object and rejected the whole response as unrecognized without
+  // one - even when the top-level `connected` flag was present and explicit.
+  // A real FAHADNAKASH probe hit exactly that and reported UNKNOWN
+  // ("unrecognized-health-shape") against a live bridge. Either location is
+  // now accepted, because both appear in ae-mcp's own real output.
+  //
+  // What is deliberately NOT relaxed: connectivity is only ever read from an
+  // EXPLICIT boolean. A missing/absent flag is never treated as connected,
+  // so a false ONLINE remains impossible - the one outcome that must never
+  // happen. A response carrying neither flag anywhere is still reported
+  // unrecognized rather than guessed at, with the observed top-level keys
+  // named so a real incident can be diagnosed from the log alone.
+  const topLevelConnected = raw["connected"];
+  const healthConnected = health ? health["connected"] : undefined;
+  const sawExplicitFlag = typeof topLevelConnected === "boolean" || typeof healthConnected === "boolean";
+  if (!sawExplicitFlag) {
+    const keys = Object.keys(raw).slice(0, 12).join(",");
+    return { ok: false, reason: `no explicit connected flag present (top-level keys: ${keys || "none"})` };
   }
-  // Either the top-level or the nested flag being explicitly true counts as
-  // connected - both are present in the real confirmed output, neither is
-  // invented here.
-  const connected = raw["connected"] === true || health["connected"] === true;
-  return { ok: true, value: { connected, listening: health["listening"] === true } };
+
+  const connected = topLevelConnected === true || healthConnected === true;
+  return { ok: true, value: { connected, listening: health ? health["listening"] === true : false } };
 }
 
 /**

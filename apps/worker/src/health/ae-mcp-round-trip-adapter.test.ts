@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AeMcpRoundTripAdapter, type HealthProbeClient } from "./ae-mcp-round-trip-adapter.js";
+import realFahadnakashHealth from "./__fixtures__/ae-health-fahadnakash-2026-09-12.json" with { type: "json" };
 
 const cleanupDirs: string[] = [];
 afterEach(() => {
@@ -64,6 +65,52 @@ function fakeClientFactory(scripts: FakeClientScript[]): {
   };
   return factory;
 }
+
+describe("AeMcpRoundTripAdapter - the REAL captured FAHADNAKASH ae_health response", () => {
+  it("accepts the exact verbatim response from the QA machine and reports ONLINE", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: realFahadnakashHealth.content }) }]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
+
+    const result = await adapter.checkHealth();
+
+    expect(result.mcpStatus).toBe("ONLINE");
+    expect(result.mcpProbeDetail).toBe("round-trip-ok");
+  });
+
+  it("accepts a response carrying ONLY the top-level connected flag - the over-strict rejection that produced a real 'unrecognized-health-shape' against a live bridge", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const noHealthObject = [{ type: "text", text: JSON.stringify({ connected: true, ae_running: true, instances: [] }) }];
+    const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: noHealthObject }) }]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
+
+    expect((await adapter.checkHealth()).mcpStatus).toBe("ONLINE");
+  });
+
+  it("still reports OFFLINE from an explicit top-level connected:false, with no health object", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const content = [{ type: "text", text: JSON.stringify({ connected: false, ae_running: true }) }];
+    const factory = fakeClientFactory([{ call: async () => ({ ok: true, content }) }]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
+
+    expect((await adapter.checkHealth()).mcpStatus).toBe("OFFLINE");
+  });
+
+  it("FALSE-ONLINE PROTECTION IS NOT WEAKENED: a response with no explicit connected flag anywhere is UNKNOWN, and names the keys it did see", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const content = [{ type: "text", text: JSON.stringify({ ae_running: true, instances: [], note: "something" }) }];
+    const factory = fakeClientFactory([{ call: async () => ({ ok: true, content }) }]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
+
+    const result = await adapter.checkHealth();
+
+    expect(result.mcpStatus).toBe("UNKNOWN");
+    expect(result.mcpProbeDetail).toMatch(/unrecognized-health-shape/);
+    // Self-diagnosing: the observed keys are named so a real incident can be
+    // read straight from worker.log, without another trip to the machine.
+    expect(result.mcpProbeDetail).toMatch(/ae_running/);
+  });
+});
 
 describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge reported UNKNOWN because the old CLI probe timed out at 8s", () => {
   it("reports ONLINE from a real round trip whose parsed response says the bridge is connected", async () => {
@@ -149,7 +196,7 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     const result = await adapter.checkHealth();
 
     expect(result.mcpStatus).toBe("UNKNOWN");
-    expect(result.mcpProbeDetail).toBe("unrecognized-health-shape");
+    expect(result.mcpProbeDetail).toMatch(/^unrecognized-health-shape/);
   });
 
   it("caches a confirmed-ONLINE answer briefly instead of spawning a bridge process on every heartbeat", async () => {
