@@ -40,7 +40,8 @@ describe("WindowsTasklistProcessLister - real 2026-09-12 incident: aeStatus flap
     const lister = new WindowsTasklistProcessLister(() => clock, runner.run);
 
     expect(await lister.isImageRunning("AfterFX.exe")).toBe("RUNNING");
-    clock += 120_000;
+    // Past the widened 5-minute reuse window - the stale answer must not stand.
+    clock += 400_000;
     expect(await lister.isImageRunning("AfterFX.exe")).toBe("UNKNOWN");
   });
 
