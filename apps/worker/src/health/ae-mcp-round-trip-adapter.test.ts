@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AeMcpRoundTripAdapter, type HealthProbeClient } from "./ae-mcp-round-trip-adapter.js";
-import realFahadnakashHealth from "./__fixtures__/ae-health-fahadnakash-2026-09-12.json" with { type: "json" };
+import { REAL_FAHADNAKASH_AE_HEALTH_CONTENT } from "./__fixtures__/ae-health-fahadnakash-2026-09-12.js";
 
 const cleanupDirs: string[] = [];
 afterEach(() => {
@@ -69,7 +69,7 @@ function fakeClientFactory(scripts: FakeClientScript[]): {
 describe("AeMcpRoundTripAdapter - the REAL captured FAHADNAKASH ae_health response", () => {
   it("accepts the exact verbatim response from the QA machine and reports ONLINE", async () => {
     const aeMcpPath = makeAeMcpInstall();
-    const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: realFahadnakashHealth.content }) }]);
+    const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: REAL_FAHADNAKASH_AE_HEALTH_CONTENT }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
     const result = await adapter.checkHealth();
