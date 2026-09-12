@@ -35,6 +35,17 @@ function healthContent(connected: boolean, listening = true): unknown {
   ];
 }
 
+/**
+ * checkHealth() deliberately never blocks (2026-09-12 fix - a hanging probe
+ * used to stop the worker registering at all), so a test that wants the real
+ * probe outcome must let the background probe finish and then read it.
+ */
+async function settledHealth(adapter: AeMcpRoundTripAdapter, waitMs = 200) {
+  await adapter.checkHealth();
+  await new Promise((resolve) => setTimeout(resolve, waitMs));
+  return adapter.checkHealth();
+}
+
 interface FakeClientScript {
   connect?: () => Promise<void>;
   call?: () => Promise<{ ok: true; content: unknown } | { ok: false; error: { code: string; message: string } }>;
@@ -66,16 +77,87 @@ function fakeClientFactory(scripts: FakeClientScript[]): {
   return factory;
 }
 
+describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a hanging probe stopped the worker registering at all", () => {
+  it("NEVER BLOCKS: a probe whose connect never resolves still returns immediately, so the first heartbeat can be sent", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    let terminatedWith: string | null = null;
+    const neverResolving: HealthProbeClient = {
+      connect: () => new Promise<void>(() => {}),        // never settles, ever
+      callTool: () => new Promise(() => {}),
+      close: async () => {},
+      terminate: async (reason: string) => {
+        terminatedWith = reason;
+      }
+    };
+    const adapter = new AeMcpRoundTripAdapter({
+      aeMcpPath,
+      createClient: () => neverResolving,
+      hardDeadlineMs: 40
+    });
+
+    // The real regression: this used to await the probe forever, so the
+    // worker logged "worker starting" and then went silent indefinitely.
+    const first = await Promise.race([
+      adapter.checkHealth(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("checkHealth blocked")), 1_000))
+    ]);
+
+    expect(first.mcpStatus).toBe("UNKNOWN");
+    expect(first.mcpProbeDetail).toBe("probe-pending");
+
+    // The abandoned probe force-kills its own ae-mcp child rather than
+    // orphaning it.
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(terminatedWith).toMatch(/hard deadline/i);
+  });
+
+  it("reports the hard-deadline outcome on the NEXT heartbeat, never a status it has not observed", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const adapter = new AeMcpRoundTripAdapter({
+      aeMcpPath,
+      createClient: () => ({ connect: () => new Promise<void>(() => {}), callTool: () => new Promise(() => {}), close: async () => {} }),
+      hardDeadlineMs: 30
+    });
+
+    expect((await adapter.checkHealth()).mcpProbeDetail).toBe("probe-pending");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const second = await adapter.checkHealth();
+
+    expect(second.mcpStatus).toBe("UNKNOWN");
+    expect(second.mcpProbeDetail).toMatch(/^hard-deadline-/);
+  });
+
+  it("a slow-but-successful probe eventually reports ONLINE on a later heartbeat", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const factory = fakeClientFactory([
+      {
+        call: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          return { ok: true, content: healthContent(true) };
+        }
+      }
+    ]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
+
+    expect((await adapter.checkHealth()).mcpProbeDetail).toBe("probe-pending");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const later = await adapter.checkHealth();
+
+    expect(later.mcpStatus).toBe("ONLINE");
+    expect(later.mcpProbeDetail).toMatch(/round-trip-ok/);
+  });
+});
+
 describe("AeMcpRoundTripAdapter - the REAL captured FAHADNAKASH ae_health response", () => {
   it("accepts the exact verbatim response from the QA machine and reports ONLINE", async () => {
     const aeMcpPath = makeAeMcpInstall();
     const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: REAL_FAHADNAKASH_AE_HEALTH_CONTENT }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("ONLINE");
-    expect(result.mcpProbeDetail).toBe("round-trip-ok");
+    expect(result.mcpProbeDetail).toMatch(/^round-trip-ok/);
   });
 
   it("accepts a response carrying ONLY the top-level connected flag - the over-strict rejection that produced a real 'unrecognized-health-shape' against a live bridge", async () => {
@@ -84,7 +166,7 @@ describe("AeMcpRoundTripAdapter - the REAL captured FAHADNAKASH ae_health respon
     const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: noHealthObject }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    expect((await adapter.checkHealth()).mcpStatus).toBe("ONLINE");
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
   });
 
   it("still reports OFFLINE from an explicit top-level connected:false, with no health object", async () => {
@@ -93,7 +175,7 @@ describe("AeMcpRoundTripAdapter - the REAL captured FAHADNAKASH ae_health respon
     const factory = fakeClientFactory([{ call: async () => ({ ok: true, content }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    expect((await adapter.checkHealth()).mcpStatus).toBe("OFFLINE");
+    expect((await settledHealth(adapter)).mcpStatus).toBe("OFFLINE");
   });
 
   it("FALSE-ONLINE PROTECTION IS NOT WEAKENED: a response with no explicit connected flag anywhere is UNKNOWN, and names the keys it did see", async () => {
@@ -102,7 +184,7 @@ describe("AeMcpRoundTripAdapter - the REAL captured FAHADNAKASH ae_health respon
     const factory = fakeClientFactory([{ call: async () => ({ ok: true, content }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("UNKNOWN");
     expect(result.mcpProbeDetail).toMatch(/unrecognized-health-shape/);
@@ -118,10 +200,10 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: healthContent(true) }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("ONLINE");
-    expect(result.mcpProbeDetail).toBe("round-trip-ok");
+    expect(result.mcpProbeDetail).toMatch(/^round-trip-ok/);
     expect(factory.closed()).toBe(1);
   });
 
@@ -140,7 +222,7 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     ]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("ONLINE");
   });
@@ -150,7 +232,7 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     const factory = fakeClientFactory([{ call: async () => ({ ok: true, content: healthContent(false) }) }]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("OFFLINE");
     expect(result.mcpProbeDetail).toBe("bridge-not-connected");
@@ -164,13 +246,16 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     const sleep = vi.fn(async () => {});
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, maxAttempts: 3, sleep });
 
-    const result = await adapter.checkHealth();
-
-    expect(result.mcpStatus).toBe("UNKNOWN");
-    expect(result.mcpProbeDetail).toBe("connect-failed-after-3-attempts");
-    // Bounded: exactly the configured number of attempts, never more.
+    await adapter.checkHealth();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Bounded: exactly the configured number of attempts for THIS probe,
+    // asserted before any later read can start a fresh one.
     expect(factory.created).toBe(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+
+    const result = await adapter.checkHealth();
+    expect(result.mcpStatus).toBe("UNKNOWN");
+    expect(result.mcpProbeDetail).toBe("connect-failed-after-3-attempts");
   });
 
   it("DISCONNECT THEN RECONNECT: a transient failure on the first attempt still resolves to ONLINE on the retry", async () => {
@@ -181,7 +266,7 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     ]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, maxAttempts: 2, sleep: async () => {} });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("ONLINE");
   });
@@ -193,7 +278,7 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     ]);
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
-    const result = await adapter.checkHealth();
+    const result = await settledHealth(adapter);
 
     expect(result.mcpStatus).toBe("UNKNOWN");
     expect(result.mcpProbeDetail).toMatch(/^unrecognized-health-shape/);
@@ -210,7 +295,7 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
       now: () => clock
     });
 
-    const first = await adapter.checkHealth();
+    const first = await settledHealth(adapter);
     clock += 10_000;
     const second = await adapter.checkHealth();
 
@@ -230,9 +315,9 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     let clock = 1_000;
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, now: () => clock });
 
-    expect((await adapter.checkHealth()).mcpStatus).toBe("OFFLINE");
+    expect((await settledHealth(adapter)).mcpStatus).toBe("OFFLINE");
     clock += 1_000;
-    expect((await adapter.checkHealth()).mcpStatus).toBe("ONLINE");
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
     expect(factory.created).toBe(2);
   });
 
@@ -269,9 +354,11 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create });
 
     const [a, b] = await Promise.all([adapter.checkHealth(), adapter.checkHealth()]);
-
-    expect(a.mcpStatus).toBe("ONLINE");
-    expect(b.mcpStatus).toBe("ONLINE");
+    // Both return immediately without blocking, and only ONE probe was started.
+    expect(a.mcpProbeDetail).toBe("probe-pending");
+    expect(b.mcpProbeDetail).toBe("probe-pending");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await adapter.checkHealth()).mcpStatus).toBe("ONLINE");
     expect(factory.created).toBe(1);
   });
 });

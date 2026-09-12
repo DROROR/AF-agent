@@ -47,12 +47,25 @@ const DEFAULT_MAX_ATTEMPTS = 2;
 const DEFAULT_RETRY_BACKOFF_MS = 1_500;
 /** A confirmed-ONLINE answer is reused for this long instead of re-spawning a bridge process on every heartbeat. Short enough that a real disconnect is still noticed promptly. */
 const DEFAULT_ONLINE_CACHE_TTL_MS = 60_000;
+/**
+ * Absolute wall-clock ceiling on one background probe, independent of any
+ * timeout the MCP SDK or the spawned child may or may not honour.
+ *
+ * REAL 2026-09-12 INCIDENT: a worker started, logged "worker starting", and
+ * then produced NOTHING - no first heartbeat, no further log, for over 100
+ * seconds. The heartbeat built its health snapshot by AWAITING this probe,
+ * and the probe's connect never resolved, so the worker never registered at
+ * all. A health check must never be able to hold the heartbeat hostage.
+ */
+const DEFAULT_HARD_DEADLINE_MS = 45_000;
 
 /** The minimal shape this adapter needs from an MCP client - HeroicSwanMcpClient satisfies it; tests inject a fake rather than spawning a real ae-mcp process. */
 export interface HealthProbeClient {
   connect(): Promise<void>;
   callTool(name: typeof HEALTH_TOOL, args?: Record<string, unknown>): Promise<{ ok: true; content: unknown } | { ok: false; error: { code: string; message: string } }>;
   close(): Promise<void>;
+  /** Force-kills the owned ae-mcp child with proof (HeroicSwanMcpClient.terminate). Used when a probe blows its hard deadline, so an unresponsive child can never be orphaned. */
+  terminate?(reason: string): Promise<unknown>;
 }
 
 export interface AeMcpRoundTripAdapterConfig {
@@ -64,6 +77,7 @@ export interface AeMcpRoundTripAdapterConfig {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   createClient?: (aeMcpPath: string, timeoutMs: number) => HealthProbeClient;
+  hardDeadlineMs?: number;
 }
 
 interface CachedResult {
@@ -80,7 +94,10 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly createClient: ((aeMcpPath: string, timeoutMs: number) => HealthProbeClient) | undefined;
+  private readonly hardDeadlineMs: number;
   private cached: CachedResult | null = null;
+  /** The client the currently running probe owns, so a blown deadline can kill its child. */
+  private activeClient: HealthProbeClient | null = null;
   /** Prevents two overlapping probes (a slow probe plus the next heartbeat) from ever spawning two bridge processes at once. */
   private inFlight: Promise<McpHealthResult> | null = null;
 
@@ -93,8 +110,22 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     this.now = config.now ?? (() => Date.now());
     this.sleep = config.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.createClient = config.createClient;
+    this.hardDeadlineMs = config.hardDeadlineMs ?? DEFAULT_HARD_DEADLINE_MS;
   }
 
+  /**
+   * NEVER BLOCKS. Returns immediately with the most recent real answer (or
+   * "probe-pending" when none has completed yet) and refreshes in the
+   * background.
+   *
+   * This is the 2026-09-12 fix: the heartbeat used to await a live probe, so
+   * a probe that never resolved stopped the worker registering at all - it
+   * logged "worker starting" and then went silent indefinitely. Health
+   * reporting is now strictly downstream of the heartbeat: the worker
+   * registers straight away, reports MCP as UNKNOWN until a real probe has
+   * actually completed, and never reports a status it has not genuinely
+   * observed.
+   */
   async checkHealth(): Promise<McpHealthResult> {
     if (!this.aeMcpPath) {
       return { mcpStatus: "UNKNOWN", mcpConfiguredPath: null, mcpProbeDetail: "not-configured" };
@@ -107,22 +138,79 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     }
 
     const cached = this.cached;
-    if (cached && cached.result.mcpStatus === "ONLINE" && this.now() - cached.at < this.onlineCacheTtlMs) {
-      return { ...cached.result, mcpProbeDetail: `${cached.result.mcpProbeDetail}-cached` };
+    const cacheIsFresh =
+      cached !== null && cached.result.mcpStatus === "ONLINE" && this.now() - cached.at < this.onlineCacheTtlMs;
+
+    // Refresh in the background unless a confirmed-ONLINE answer is still
+    // fresh, or a probe is already running. Deliberately not awaited.
+    if (!cacheIsFresh && !this.inFlight) {
+      this.inFlight = this.probeWithHardDeadline(scriptPath);
+      void this.inFlight
+        .then((result) => {
+          this.cached = { at: this.now(), result };
+        })
+        .catch(() => {
+          // probeWithHardDeadline never rejects; this only guards against a
+          // future change turning an unhandled rejection into a crash.
+        })
+        .finally(() => {
+          this.inFlight = null;
+        });
     }
 
-    // Never run two probes concurrently - a probe slower than the heartbeat
-    // interval would otherwise stack bridge processes.
-    if (this.inFlight) {
-      return this.inFlight;
+    if (cached) {
+      // Only mark it "-cached" when a still-fresh ONLINE is deliberately
+      // being reused instead of re-probing. Otherwise this IS the latest real
+      // observation, reported as-is while a fresh probe runs behind it.
+      return cacheIsFresh ? { ...cached.result, mcpProbeDetail: `${cached.result.mcpProbeDetail}-cached` } : cached.result;
     }
-    this.inFlight = this.probe(scriptPath);
+    return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "probe-pending" };
+  }
+
+  /**
+   * Hard wall-clock ceiling around the whole probe. If it expires, the owned
+   * ae-mcp child is force-terminated (never left orphaned) and UNKNOWN is
+   * reported - so a child that never answers costs one abandoned probe, not
+   * a worker that never registers.
+   */
+  private async probeWithHardDeadline(scriptPath: string): Promise<McpHealthResult> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<McpHealthResult>((resolve) => {
+      timer = setTimeout(() => {
+        void this.abandonActiveClient("probe exceeded its hard deadline");
+        resolve({
+          mcpStatus: "UNKNOWN",
+          mcpConfiguredPath: scriptPath,
+          mcpProbeDetail: `hard-deadline-${Math.round(this.hardDeadlineMs / 1000)}s`
+        });
+      }, this.hardDeadlineMs);
+    });
     try {
-      const result = await this.inFlight;
-      this.cached = { at: this.now(), result };
-      return result;
+      return await Promise.race([this.probe(scriptPath), deadline]);
+    } catch {
+      return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "probe-threw" };
     } finally {
-      this.inFlight = null;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  /** Kills the ae-mcp child a blown-deadline probe owns, preferring terminate() (which proves the process is gone) over close(). */
+  private async abandonActiveClient(reason: string): Promise<void> {
+    const client = this.activeClient;
+    this.activeClient = null;
+    if (!client) {
+      return;
+    }
+    try {
+      if (client.terminate) {
+        await client.terminate(reason);
+      } else {
+        await client.close();
+      }
+    } catch {
+      // Never let cleanup failure surface as a health verdict.
     }
   }
 
@@ -156,6 +244,7 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
         result: { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "no-client-factory" }
       };
     }
+    this.activeClient = client;
 
     try {
       await client.connect();
@@ -209,6 +298,9 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
         result: { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "call-threw" }
       };
     } finally {
+      if (this.activeClient === client) {
+        this.activeClient = null;
+      }
       await safeClose(client);
     }
   }
