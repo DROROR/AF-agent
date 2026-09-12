@@ -23,6 +23,7 @@ import {
 } from "./parse-mcp-shapes.js";
 import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript } from "../execution/jsx-templates.js";
 import { prepareConversionCopy } from "./legacy-project-conversion.js";
+import { assessUnsavedProjectBlock } from "./assess-unsaved-project-block.js";
 import { parseProjectPreflightScan, type ParseProjectPreflightScanResult } from "./parse-project-preflight-scan.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
@@ -669,6 +670,32 @@ async function ensureTargetProjectOpen(
       reused: true,
       matched: true
     };
+  }
+
+  // PRECONDITION GATE (2026-09-12, real incident - jobs 48bf41d3/77c84bcd and
+  // two more the same day): After Effects holding UNSAVED work makes
+  // app.open() raise a modal save-changes prompt that blocks the scripting
+  // bridge, turning every inspection into a 30s timeout and an opaque
+  // MANIFEST_NOT_BUILT. It is detectable from evidence ae_health has already
+  // returned, before spending those 30 seconds. See
+  // assess-unsaved-project-block.ts for the full reasoning, including why
+  // this refuses rather than closing the project for the operator.
+  if (parsedHealth?.ok) {
+    const block = assessUnsavedProjectBlock(parsedHealth.value);
+    if (block.blocked) {
+      logger?.warn(
+        { requestedPath: sourceProjectPath, openProjectName: block.projectName, openProjectItemCount: block.itemCount },
+        "refusing to open the target project - After Effects is holding unsaved work that would raise a modal save-changes prompt"
+      );
+      return {
+        requestedPath: sourceProjectPath,
+        actualOpenedPath: null,
+        reused: false,
+        matched: false,
+        requiresOperatorAction: true,
+        note: block.reason as string
+      };
+    }
   }
 
   const timeoutMs = openProjectOptions?.timeoutMs ?? OPEN_PROJECT_TIMEOUT_MS;

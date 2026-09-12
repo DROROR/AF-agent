@@ -151,6 +151,17 @@ export interface CurrentProjectInfo {
   projectOpen: boolean;
   projectPath: string | null;
   projectName: string | null;
+  /**
+   * How many items the currently-open project contains, per ae_health's own
+   * real shape (captured verbatim from job 48bf41d3: `"numItems": 46`).
+   *
+   * Combined with `projectPath: null` this is what distinguishes AE's empty
+   * default project - which app.open() replaces silently - from a project
+   * holding real UNSAVED work, where app.open() raises a modal save-changes
+   * prompt that blocks the scripting bridge entirely. Null when ae_health
+   * did not report it; a missing count is never assumed to be zero.
+   */
+  numItems: number | null;
 }
 
 export function parseCurrentProjectFromHealth(content: unknown): ParseResult<CurrentProjectInfo> {
@@ -171,7 +182,8 @@ export function parseCurrentProjectFromHealth(content: unknown): ParseResult<Cur
     value: {
       projectOpen: health["projectOpen"] === true,
       projectPath: typeof health["projectPath"] === "string" ? health["projectPath"] : null,
-      projectName: typeof health["projectName"] === "string" ? health["projectName"] : null
+      projectName: typeof health["projectName"] === "string" ? health["projectName"] : null,
+      numItems: typeof health["numItems"] === "number" ? health["numItems"] : null
     }
   };
 }

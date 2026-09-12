@@ -59,6 +59,20 @@ export interface ProjectOpenEvidence {
    * file.
    */
   requiresInteractiveConfirmation?: boolean;
+  /**
+   * Real 2026-09-12 incident fix: true when the inspection stopped BEFORE
+   * attempting app.open(), because After Effects was holding unsaved work
+   * that would have raised a modal save-changes prompt and blocked the
+   * scripting bridge (see heroic-swan-template-inspector.ts's precondition
+   * gate).
+   *
+   * Distinct from requiresInteractiveConfirmation above, which describes an
+   * open that WAS attempted and came back ambiguous. This one means nothing
+   * was attempted and nothing was changed - the accompanying `note` carries
+   * the exact operator step, and re-running the inspection afterwards is
+   * safe and sufficient.
+   */
+  requiresOperatorAction?: boolean;
   /** Present only when requiresInteractiveConfirmation is true - see legacy-project-conversion.ts's prepareConversionCopy. */
   conversionCopy?: { ok: true; path: string; sourceSha256: string } | { ok: false; reason: string };
 }
