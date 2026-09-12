@@ -29,7 +29,7 @@ describe("parseProjectPreflightScan", () => {
     const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 83,
-      compositionsWithEffects: [
+      compositions: [
         composition(2, 210, "Scene 4", [
           layer(1, "Element 3D", [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: true }]),
           layer(2, "Blur", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }])
@@ -55,7 +55,7 @@ describe("parseProjectPreflightScan", () => {
     const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 12,
-      compositionsWithEffects: [composition(2, 1, "Main", [layer(1, "Blur", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }])])]
+      compositions: [composition(2, 1, "Main", [layer(1, "Blur", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }])])]
     });
 
     expect(result.ok).toBe(true);
@@ -68,7 +68,7 @@ describe("parseProjectPreflightScan", () => {
     const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 2,
-      compositionsWithEffects: [composition(2, 1, "Main", [layer(1, "E", [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: false }])])]
+      compositions: [composition(2, 1, "Main", [layer(1, "E", [{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: false }])])]
     });
 
     expect(result.ok).toBe(true);
@@ -80,7 +80,7 @@ describe("parseProjectPreflightScan", () => {
     const result = parseProjectPreflightScan({
       ok: true,
       compositionCount: 4,
-      compositionsWithEffects: [],
+      compositions: [],
       fonts: ["Evolventa-Regular", "Evolventa-Bold", "Evolventa-Regular"],
       footage: [
         { name: "logo.png", path: "C:\\assets\\logo.png", missing: false },
@@ -99,7 +99,7 @@ describe("parseProjectPreflightScan", () => {
   });
 
   it("marks fontAndFootageScanned false for a response from an older worker build that only scanned effects - so empty font/footage lists are never read as confirmed", () => {
-    const result = parseProjectPreflightScan({ ok: true, compositionCount: 1, compositionsWithEffects: [] });
+    const result = parseProjectPreflightScan({ ok: true, compositionCount: 1, compositions: [] });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;

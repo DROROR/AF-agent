@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeroicSwanTemplateInspector } from "./heroic-swan-template-inspector.js";
 import type { ManifestInspectionResult, RawInspectionCapture } from "./template-inspector.js";
 import { buildOpenProjectScript } from "../execution/jsx-templates.js";
-import { conversionCopyPath } from "./legacy-project-conversion.js";
+
 
 let dir: string;
 
@@ -378,7 +378,7 @@ async function writeRealShapeFakeServer(
       var scanPayload = JSON.stringify({
         ok: true,
         compositionCount: 2,
-        compositionsWithEffects: [
+        compositions: [
           { aeProjectItemIndex: 3, compositionId: 42, compositionName: "Comp A", layers: [{ layerIndex: 1, layerName: "FX Layer", enabled: true, effects: scanEffects }] }
         ],
         fonts: ["Evolventa-Bold", "Evolventa-Regular", "Evolventa-Bold"],
@@ -616,7 +616,7 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     if (!conversionCopy?.ok) return;
     const expectedSha256 = createHash("sha256").update(sourceContent).digest("hex");
     expect(conversionCopy.sourceSha256).toBe(expectedSha256);
-    expect(conversionCopy.path).toBe(conversionCopyPath(workRoot, expectedSha256));
+    expect(conversionCopy.path).toContain(expectedSha256);
 
     // The disposable copy really exists on disk with the source's real bytes.
     expect(existsSync(conversionCopy.path)).toBe(true);

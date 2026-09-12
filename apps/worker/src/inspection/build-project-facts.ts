@@ -1,6 +1,15 @@
 import type { CompositionFact, LayerFact, ProjectFacts } from "./project-facts.js";
 import type { CompositionDetail, CompositionSummary } from "./parse-mcp-shapes.js";
 
+/** Mirrors the scan's own per-layer fact shape - optional/nullable exactly as the scan reports it, so an older worker build's response (no kind/footage at all) still type-checks. */
+export interface ScannedLayerFactInput {
+  kind?: string | undefined;
+  footage?:
+    | { hasVideo: boolean; hasAudio: boolean; isStill: boolean; isMissing: boolean; isSolid: boolean; widthPx: number | null; heightPx: number | null }
+    | null
+    | undefined;
+}
+
 export interface BuildProjectFactsInput {
   templateId: string;
   sourceProjectPath: string;
@@ -38,6 +47,18 @@ export interface BuildProjectFactsInput {
    * real misdiagnosis on 2026-09-11.
    */
   pluginReferences?: readonly string[];
+  /**
+   * Real per-layer type/footage facts from the single project-wide scan,
+   * keyed "<compositionId>:<layerIndex>".
+   *
+   * Before this (2026-09-12) every layer was recorded layerKind "Unknown"
+   * with footage null, because ae_get_composition's confirmed shape has no
+   * layer-type field - so classify-placeholder.ts, which is perfectly able
+   * to assign text/video/image/color, never received anything to classify
+   * and EVERY template inspected to editablePlaceholderCount: 0. A layer
+   * with no entry here still falls back to "Unknown", never a guess.
+   */
+  layerFactsByCompositionAndIndex?: ReadonlyMap<string, ScannedLayerFactInput>;
   /** Real text-layer fonts from the same single scan - what the project ASKS FOR, never a claim that each is installed on this machine (AE exposes no such flag). Omitted when the scan failed/was never run. */
   requiredFonts?: readonly string[];
   /** Real resolvable footage paths from the same single scan. Omitted when the scan failed/was never run. */
@@ -50,16 +71,18 @@ export interface BuildProjectFactsInput {
  * Turns real parsed MCP facts into the generic ProjectFacts shape
  * build-manifest.ts already knows how to turn into a TemplateManifest.
  *
- * Known, honest structural limitation (see docs/TEMPLATE-INSPECTOR.md):
- * ae_get_composition's confirmed response never reports a layer's AE type
- * (TextLayer/ShapeLayer/AVLayer/...), footage source, or fill - only
- * index/name/inPoint/outPoint/nullLayer. Every layer here is therefore
- * recorded with layerKind "Unknown", footage null, solidFill null - a
- * real, evidence-backed fact about what current tools CAN confirm
- * (timing, name, index), honestly not claiming what they cannot
- * (classifyPlaceholder() will mark every layer "unknown" until a future
- * pass adds a tool able to confirm real layer type - never invented
- * here).
+ * Layer type/footage/fill (2026-09-12): ae_get_composition's confirmed
+ * response still reports none of these - only index/name/inPoint/outPoint/
+ * nullLayer - so for this project's whole prior history every layer was
+ * recorded layerKind "Unknown"/footage null/solidFill null, and
+ * classifyPlaceholder() consequently marked EVERY layer unknown. That was
+ * honest, but it also meant every template inspected to
+ * editablePlaceholderCount: 0 and no mapping table could ever be produced.
+ * They are now supplied by `layerFactsByCompositionAndIndex`, from the one
+ * project-wide scan that already walks every layer (real
+ * `instanceof TextLayer`/`AVLayer`/... checks and real FootageItem fields -
+ * see jsx-templates.ts's buildScanProjectPreflightScript). A layer the scan
+ * did not cover still falls back to "Unknown" rather than being guessed.
  *
  * Nesting (isNestedOnlyReferenced/parentCompositionIds) IS now real,
  * evidence-based data when `precompFacts` is provided (client-facing UX
@@ -92,18 +115,45 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
       // "Whether a layer is a null object (excluded from placeholder
       // candidates)" - see allowed-inspection-queries.ts's layer.nullLayer entry.
       .filter((layer) => !layer.nullLayer && !precompLayerIndices.has(layer.index))
-      .map(
-        (layer): LayerFact => ({
+      .map((layer): LayerFact => {
+        // Real type/footage facts from the single project-wide scan, when
+        // available. A layer with no scanned entry still falls back to
+        // "Unknown"/null - never a guess.
+        const scanned = input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${layer.index}`);
+        const scannedKind = scanned?.kind;
+        const layerKind: LayerFact["layerKind"] =
+          scannedKind === "TextLayer" ||
+          scannedKind === "ShapeLayer" ||
+          scannedKind === "AVLayer" ||
+          scannedKind === "CameraLayer" ||
+          scannedKind === "LightLayer"
+            ? scannedKind
+            : "Unknown";
+        const scannedFootage = scanned?.footage ?? null;
+        return {
           name: layer.name,
           index: layer.index,
-          layerKind: "Unknown",
-          footage: null,
-          solidFill: null,
+          layerKind,
+          // A solid is an AE FootageItem too, but it is a colour placeholder
+          // rather than media - reported through solidFill, never as footage,
+          // so classify-placeholder.ts reaches its "color" branch.
+          footage:
+            scannedFootage && !scannedFootage.isSolid
+              ? {
+                  hasVideo: scannedFootage.hasVideo,
+                  hasAudio: scannedFootage.hasAudio,
+                  isStill: scannedFootage.isStill,
+                  isMissing: scannedFootage.isMissing,
+                  widthPx: scannedFootage.widthPx,
+                  heightPx: scannedFootage.heightPx
+                }
+              : null,
+          solidFill: scannedFootage?.isSolid ? { isUniformSolidFill: true } : null,
           layerPath: [],
           startTimeSeconds: layer.inPointSeconds,
           durationSeconds: Math.max(0, layer.outPointSeconds - layer.inPointSeconds)
-        })
-      );
+        };
+      });
 
     return {
       compositionId,

@@ -1815,6 +1815,36 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
             // Not a text layer (or its sourceText is unreadable) - never
             // fails the rest of the scan.
           }
+          var __kind = "Unknown";
+          var __footageFact = null;
+          try {
+            if (__layer instanceof TextLayer) { __kind = "TextLayer"; }
+            else if (__layer instanceof ShapeLayer) { __kind = "ShapeLayer"; }
+            else if (__layer instanceof CameraLayer) { __kind = "CameraLayer"; }
+            else if (__layer instanceof LightLayer) { __kind = "LightLayer"; }
+            else if (__layer instanceof AVLayer) {
+              __kind = "AVLayer";
+              var __src = __layer.source;
+              if (__src && __src instanceof FootageItem) {
+                var __isSolid = false;
+                try { __isSolid = __src.mainSource instanceof SolidSource; } catch (__solidError) { __isSolid = false; }
+                var __isStill = false;
+                try { __isStill = __src.mainSource.isStill === true; } catch (__stillError) { __isStill = false; }
+                __footageFact = {
+                  hasVideo: __src.hasVideo === true,
+                  hasAudio: __src.hasAudio === true,
+                  isStill: __isStill,
+                  isMissing: __src.footageMissing === true,
+                  isSolid: __isSolid,
+                  widthPx: __src.width,
+                  heightPx: __src.height
+                };
+              }
+            }
+          } catch (__kindError) {
+            // Layer type could not be determined - stays "Unknown" rather
+            // than being guessed, exactly as classify-placeholder.ts expects.
+          }
           var __effects = [];
           try {
             var __effectsGroup = __layer.property("ADBE Effect Parade");
@@ -1827,18 +1857,21 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
           } catch (__effectsError) {
             // No effects group on this layer type - never fails the rest of the scan.
           }
-          if (__effects.length > 0) {
-            __layers.push({ layerIndex: __layer.index, layerName: __layer.name, enabled: __layer.enabled, effects: __effects });
-          }
+          __layers.push({
+            layerIndex: __layer.index,
+            layerName: __layer.name,
+            enabled: __layer.enabled,
+            kind: __kind,
+            footage: __footageFact,
+            effects: __effects
+          });
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole scan.
         }
       }
-      if (__layers.length > 0) {
-        __compositions.push({ aeProjectItemIndex: __itemIndex, compositionId: __item.id, compositionName: __item.name, layers: __layers });
-      }
+      __compositions.push({ aeProjectItemIndex: __itemIndex, compositionId: __item.id, compositionName: __item.name, layers: __layers });
     }
-    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositionsWithEffects: __compositions, fonts: __fonts, footage: __footage });
+    __result = JSON.stringify({ ok: true, compositionCount: app.project.numItems, compositions: __compositions, fonts: __fonts, footage: __footage });
   } catch (__unexpectedError) {
     __result = JSON.stringify({
       ok: false,

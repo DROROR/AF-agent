@@ -983,6 +983,13 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
 describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composition candidate too large to check one composition at a time)", () => {
   const PROJECT_SCAN_SETUP = `
     function CompItem() {}
+    function AVLayer() {}
+    function TextLayer() {}
+    function ShapeLayer() {}
+    function CameraLayer() {}
+    function LightLayer() {}
+    function FootageItem() {}
+    function SolidSource() {}
 
     function makeEffectsGroup(effects) {
       return {
@@ -995,7 +1002,8 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     }
 
     function makeLayer(index, name, effects) {
-      var layer = { index: index, name: name, enabled: true };
+      var layer = new AVLayer();
+      layer.index = index; layer.name = name; layer.enabled = true;
       if (effects) {
         layer.property = function (propName) {
           if (propName === "ADBE Effect Parade") {
@@ -1019,7 +1027,8 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
       2: makeLayer(2, "Blur Layer", [{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }]),
       3: makeLayer(3, "Plain Layer", null),
       4: (function () {
-        var textLayer = makeLayer(4, "Headline", null);
+        var textLayer = new TextLayer();
+        textLayer.index = 4; textLayer.name = "Headline"; textLayer.enabled = true;
         textLayer.sourceText = { value: { font: "Evolventa-Bold" } };
         return textLayer;
       })()
@@ -1066,34 +1075,36 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     };
   `;
 
-  it("scans every composition in the project (not just one), reporting only layers/compositions that actually have effects", () => {
+  it("scans every composition in the project (not just one), reporting every layer so real placeholders can be classified", () => {
     const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(true);
     expect(result.compositionCount).toBe(5);
-    expect(result.compositionsWithEffects.map((c: { compositionName: string }) => c.compositionName)).toEqual(["!Render"]);
+    // Every composition is reported now, not only those carrying effects -
+    // layer type/footage facts are what placeholder classification needs.
+    expect(result.compositions.map((c: { compositionName: string }) => c.compositionName)).toEqual(["!Render", "Pre-comp 3", "Broken Comp"]);
   });
 
   it("reports each effect's real name/matchName/enabled - proving an effect was applied, e.g. the real Element 3D matchName from the unrelated 2026-09-11 incident", () => {
     const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
-    const render = result.compositionsWithEffects.find((c: { compositionName: string }) => c.compositionName === "!Render");
+    const render = result.compositions.find((c: { compositionName: string }) => c.compositionName === "!Render");
     expect(render.compositionId).toBe(210);
     const elementLayer = render.layers.find((l: { layerName: string }) => l.layerName === "Element 3D");
     expect(elementLayer.effects).toEqual([{ name: "Element", matchName: "VIDEOCOPILOT 3DArray", enabled: true }]);
     const blurLayer = render.layers.find((l: { layerName: string }) => l.layerName === "Blur Layer");
     expect(blurLayer.effects).toEqual([{ name: "Gaussian Blur", matchName: "ADBE Gaussian Blur 2", enabled: true }]);
-    // "Plain Layer" (no effects group at all) never appears - only layers with real effects are reported.
-    expect(render.layers.map((l: { layerName: string }) => l.layerName)).toEqual(["Element 3D", "Blur Layer"]);
+    // Every layer is reported, including those with no effects at all.
+    expect(render.layers.map((l: { layerName: string }) => l.layerName)).toEqual(["Element 3D", "Blur Layer", "Plain Layer", "Headline"]);
   });
 
   it("skips non-composition project items (e.g. footage) without treating them as compositions", () => {
     const script = buildScanProjectPreflightScript();
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
-    expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "some-image.png")).toBe(false);
+    expect(result.compositions.some((c: { compositionName: string }) => c.compositionName === "some-image.png")).toBe(false);
   });
 
   it("skips a layer whose effects cannot be read, rather than failing the whole scan", () => {
@@ -1101,7 +1112,21 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(true);
-    expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "Broken Comp")).toBe(false);
+    const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
+    // The layer is still reported (name/type are readable) - only its
+    // unreadable effects list comes back empty, never the whole scan failing.
+    expect(broken.layers).toHaveLength(1);
+    expect(broken.layers[0].layerName).toBe("Broken Layer");
+    expect(broken.layers[0].effects).toEqual([]);
+  });
+
+  it("reports each layer's real AE type and footage facts - what placeholder classification needs, and what was permanently 'Unknown' before", () => {
+    const script = buildScanProjectPreflightScript();
+    const resultText = runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP);
+    const result = JSON.parse(resultText);
+    const render = result.compositions.find((c: { compositionName: string }) => c.compositionName === "!Render");
+    const headline = render.layers.find((l: { layerName: string }) => l.layerName === "Headline");
+    expect(headline.kind).toBe("TextLayer");
   });
 
   it("collects every text layer's own font in the same single pass - the fact that was invisible while the real 2026-09-11 candidate had unresolvable Evolventa fonts", () => {
@@ -1120,7 +1145,7 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
       { name: "some-image.png", path: "C:\\assets\\some-image.png", missing: false },
       { name: "gone.mp4", path: "C:\\assets\\gone.mp4", missing: true }
     ]);
-    expect(result.compositionsWithEffects.some((c: { compositionName: string }) => c.compositionName === "gone.mp4")).toBe(false);
+    expect(result.compositions.some((c: { compositionName: string }) => c.compositionName === "gone.mp4")).toBe(false);
   });
 
   it("is deterministic - takes no arguments, always produces byte-identical JSX", () => {

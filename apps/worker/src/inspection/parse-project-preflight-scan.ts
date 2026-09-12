@@ -34,14 +34,31 @@ const effectFactSchema = z
   })
   .strict();
 
+const footageFactSchema = z
+  .object({
+    hasVideo: z.boolean(),
+    hasAudio: z.boolean(),
+    isStill: z.boolean(),
+    isMissing: z.boolean(),
+    isSolid: z.boolean(),
+    widthPx: z.number().nullable(),
+    heightPx: z.number().nullable()
+  })
+  .strict();
+
 const layerEffectsSchema = z
   .object({
     layerIndex: z.number(),
     layerName: z.string(),
     enabled: z.boolean(),
+    /** Real AE layer type. Absent on a response from an older worker build that only scanned effects. */
+    kind: z.enum(["TextLayer", "ShapeLayer", "AVLayer", "CameraLayer", "LightLayer", "Unknown"]).optional(),
+    footage: footageFactSchema.nullable().optional(),
     effects: z.array(effectFactSchema)
   })
   .strict();
+
+export type ScannedLayerFact = z.infer<typeof layerEffectsSchema>;
 
 const compositionEffectsSchema = z
   .object({
@@ -65,7 +82,7 @@ export const projectPreflightScanResultSchema = z.union([
     .object({
       ok: z.literal(true),
       compositionCount: z.number(),
-      compositionsWithEffects: z.array(compositionEffectsSchema),
+      compositions: z.array(compositionEffectsSchema),
       /** Every text layer's own font, in discovery order, with duplicates - deduped here rather than in ExtendScript (which has no Set). Absent on a response from an older worker build that only scanned effects. */
       fonts: z.array(z.string()).optional(),
       /** Every FootageItem in the project, with AE's own `footageMissing` flag. Absent on a response from an older worker build that only scanned effects. */
@@ -114,6 +131,18 @@ export interface ProjectPreflightEvidence {
   missingFootage: { name: string; expectedPath: string | null }[];
   /** False when the responding worker build only scanned effects (no fonts/footage fields) - callers must then NOT treat empty font/footage lists as confirmed. */
   fontAndFootageScanned: boolean;
+  /**
+   * Real per-layer type/footage facts, keyed "<compositionId>:<layerIndex>".
+   *
+   * Why this exists (2026-09-12): every layer in the manifest was recorded
+   * with layerKind "Unknown" and footage null, because ae_get_composition's
+   * confirmed shape carries no layer-type field. classify-placeholder.ts is
+   * perfectly capable of assigning text/video/image/color - it was simply
+   * never given the facts, so EVERY template inspected to
+   * editablePlaceholderCount: 0 and no mapping table could be produced. The
+   * same single scan that already walks every layer now supplies them.
+   */
+  layerFactsByCompositionAndIndex: Map<string, ScannedLayerFact>;
 }
 
 export type ParseProjectPreflightScanResult = { ok: true; evidence: ProjectPreflightEvidence } | { ok: false; reason: string };
@@ -138,7 +167,7 @@ export function parseProjectPreflightScan(value: unknown): ParseProjectPreflight
   const affectedCompositionNames = new Set<string>();
   let thirdPartyEffectInstanceCount = 0;
 
-  for (const composition of parsed.data.compositionsWithEffects) {
+  for (const composition of parsed.data.compositions) {
     for (const layer of composition.layers) {
       for (const effect of layer.effects) {
         if (!isThirdPartyEffectMatchName(effect.matchName)) {
@@ -164,9 +193,17 @@ export function parseProjectPreflightScan(value: unknown): ParseProjectPreflight
     }
   }
 
+  const layerFactsByCompositionAndIndex = new Map<string, ScannedLayerFact>();
+  for (const composition of parsed.data.compositions) {
+    for (const layer of composition.layers) {
+      layerFactsByCompositionAndIndex.set(`comp-${composition.compositionId}:${layer.layerIndex}`, layer);
+    }
+  }
+
   return {
     ok: true,
     evidence: {
+      layerFactsByCompositionAndIndex,
       pluginReferences: [...pluginReferences].sort(),
       affectedCompositionNames: [...affectedCompositionNames].sort(),
       thirdPartyEffectInstanceCount,

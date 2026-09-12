@@ -377,6 +377,7 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         ...(preflightScan.ok
           ? {
               pluginReferences: preflightScan.evidence.pluginReferences,
+              layerFactsByCompositionAndIndex: preflightScan.evidence.layerFactsByCompositionAndIndex,
               ...(preflightScan.evidence.fontAndFootageScanned
                 ? {
                     requiredFonts: preflightScan.evidence.requiredFonts,
@@ -751,8 +752,11 @@ async function ensureTargetProjectOpen(
     const conversionCopy: ProjectOpenEvidence["conversionCopy"] = conversionCopyAttempt.ok
       ? { ok: true, path: conversionCopyAttempt.conversionCopyPath, sourceSha256: conversionCopyAttempt.sourceSha256 }
       : { ok: false, reason: conversionCopyAttempt.reason };
+    const packageWarning = conversionCopyAttempt.ok && !conversionCopyAttempt.packagePreserved
+      ? ` NOTE: ${conversionCopyAttempt.packageNote ?? "only the project file itself was copied"} - any footage this template references relatively will not resolve from that copy, so a "missing footage" count from inspecting it would describe this copy, not the template.`
+      : "";
     const conversionNote = conversionCopy.ok
-      ? `A safe, disposable copy of the source project has been created at "${conversionCopy.path}" (the original source was never touched). ` +
+      ? `A safe, disposable copy of the whole template folder has been created, with its project file at "${conversionCopy.path}" (the original source was never touched).${packageWarning} ` +
         "To continue: open that copy directly in After Effects, respond to whatever dialog appears (e.g. a version-conversion prompt), " +
         `then use File > Save As to save it back to that SAME path, then re-run Inspect Template with sourceProjectPath set to "${conversionCopy.path}".`
       : `A disposable copy could not be created automatically (${conversionCopy.reason}) - a human must still resolve this interactively, but no safe copy path is available yet.`;
