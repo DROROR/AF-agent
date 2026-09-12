@@ -2,6 +2,7 @@ import { z } from "zod";
 import { checkHealthRequestSchema } from "./check-health.js";
 import { inspectTemplateRequestSchema } from "./inspect-template.js";
 import { inspectRenderCapabilitiesRequestSchema } from "./inspect-render-capabilities.js";
+import { restartWorkerSafeRequestSchema, runDiagnosticRequestSchema } from "./diagnostics.js";
 import { renderOutputVariantSchema } from "./render-project.js";
 import { jobStatusSchema } from "./job.js";
 import { MAX_PREVIEW_TIMING_CHAIN_TARGETS } from "./scene-evidence.js";
@@ -22,7 +23,11 @@ export const DISPATCHABLE_OPERATIONS = [
   "INSPECT_RENDER_CAPABILITIES",
   "EXECUTE_FRAME",
   "CREATE_PREVIEW",
-  "RENDER"
+  "RENDER",
+  /** Read-only remote evidence gathering - see diagnostics.ts. */
+  "RUN_DIAGNOSTIC",
+  /** The one mutating diagnostic - see diagnostics.ts. */
+  "RESTART_WORKER_SAFE"
 ] as const;
 export type DispatchableOperation = (typeof DISPATCHABLE_OPERATIONS)[number];
 export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
@@ -285,6 +290,29 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
       workerId: z.string().uuid(),
       projectId: z.string().uuid(),
       executionSessionId: z.string().uuid()
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("RUN_DIAGNOSTIC"),
+      workerId: z.string().uuid(),
+      /**
+       * Not project-bound (like CHECK_HEALTH): a diagnostic asks about the
+       * MACHINE, not about a project. The payload is passed through to the
+       * worker unchanged because - unlike EXECUTE_FRAME/RENDER, whose payloads
+       * carry real Windows paths and composition addressing that must always
+       * be server-resolved - it contains no addressing at all: a closed enum
+       * value and at most two bounded scalars. There is nothing here a caller
+       * could aim at an arbitrary file.
+       */
+      payload: runDiagnosticRequestSchema
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("RESTART_WORKER_SAFE"),
+      workerId: z.string().uuid(),
+      payload: restartWorkerSafeRequestSchema
     })
     .strict(),
   z

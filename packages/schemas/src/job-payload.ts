@@ -6,6 +6,7 @@ import { executeSceneEditRequestSchema } from "./execute-scene-edit.js";
 import { renderProjectRequestSchema } from "./render-project.js";
 import { createFullPreviewRequestSchema } from "./create-full-preview.js";
 import { inspectRenderCapabilitiesRequestSchema } from "./inspect-render-capabilities.js";
+import { restartWorkerSafeRequestSchema, runDiagnosticRequestSchema } from "./diagnostics.js";
 import type { WorkerCapability } from "./worker.js";
 
 /**
@@ -47,7 +48,14 @@ export const JOB_PAYLOAD_SCHEMAS: Partial<Record<WorkerCapability, z.ZodTypeAny>
   // create-full-preview-executor.ts, dispatched from job-dispatcher.ts's
   // own "CREATE_PREVIEW" case) - part of the real live pipeline, same as
   // every other operation in this map.
-  CREATE_PREVIEW: createFullPreviewRequestSchema
+  CREATE_PREVIEW: createFullPreviewRequestSchema,
+  // Remote Windows diagnostics (2026-09-12) - see diagnostics.ts. Both are
+  // strict, closed schemas: RUN_DIAGNOSTIC accepts only a member of a fixed
+  // enum plus two optional bounded scalars, and RESTART_WORKER_SAFE accepts
+  // only a literal confirmation string plus an audit reason. Neither accepts
+  // a path, a command, or any free-form field, at either validation point.
+  RUN_DIAGNOSTIC: runDiagnosticRequestSchema,
+  RESTART_WORKER_SAFE: restartWorkerSafeRequestSchema
 };
 
 export function hasJobPayloadSchema(operation: WorkerCapability): boolean {

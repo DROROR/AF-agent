@@ -6,7 +6,7 @@ const PROJECT_ID = "22222222-2222-2222-2222-222222222222";
 const SESSION_ID = "33333333-3333-3333-3333-333333333333";
 
 describe("DISPATCHABLE_OPERATIONS", () => {
-  it("includes all seven activated capabilities, in the order routes/dashboard should expect", () => {
+  it("includes every activated capability, in the order routes/dashboard should expect", () => {
     expect(DISPATCHABLE_OPERATIONS).toEqual([
       "INSPECT_TEMPLATE",
       "CHECK_HEALTH",
@@ -14,7 +14,10 @@ describe("DISPATCHABLE_OPERATIONS", () => {
       "INSPECT_RENDER_CAPABILITIES",
       "EXECUTE_FRAME",
       "CREATE_PREVIEW",
-      "RENDER"
+      "RENDER",
+      // Remote Windows diagnostics (2026-09-12) - see diagnostics.ts.
+      "RUN_DIAGNOSTIC",
+      "RESTART_WORKER_SAFE"
     ]);
   });
 });

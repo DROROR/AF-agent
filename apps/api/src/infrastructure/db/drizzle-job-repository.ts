@@ -2,7 +2,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { jobs, workers, type Database, type JobRow } from "@dyo/database";
 import { TERMINAL_JOB_STATUSES, type JobErrorCode, type JobStatus, type WorkerCapability } from "@dyo/schemas";
 import { isJobTerminal } from "../../domain/job/rules.js";
-import type { Job, JobRepository, JobStatusUpdate, NewJob } from "../../domain/job/types.js";
+import type { Job, JobFailure, JobRepository, JobStatusUpdate, NewJob } from "../../domain/job/types.js";
 
 const ACTIVE_JOB_STATUSES: readonly JobStatus[] = ["CLAIMED", "RUNNING", "WAITING_FOR_ACTION"];
 
@@ -118,6 +118,15 @@ export class DrizzleJobRepository implements JobRepository {
     return row ? toDomain(row) : null;
   }
 
+  async cancelQueued(jobId: string, error: JobFailure, now: Date): Promise<Job | null> {
+    const [row] = await this.db
+      .update(jobs)
+      .set({ status: "CANCELLED", error, completedAt: now, updatedAt: now })
+      .where(and(eq(jobs.id, jobId), eq(jobs.status, "QUEUED")))
+      .returning();
+    return row ? toDomain(row) : null;
+  }
+
   async updateCheckpoint(jobId: string, workerId: string, checkpoint: unknown, now: Date): Promise<Job | null> {
     const [row] = await this.db
       .update(jobs)
@@ -165,6 +174,16 @@ export class DrizzleJobRepository implements JobRepository {
           limit 1`
     );
     return result.rows.length > 0;
+  }
+
+  async countCreatedSinceForOperation(workerId: string, operation: WorkerCapability, since: Date): Promise<number> {
+    const result = await this.db.execute<{ count: number }>(
+      sql`select count(*)::int as count from ${jobs}
+          where ${jobs.workerId} = ${workerId}
+            and ${jobs.operation} = ${operation}
+            and ${jobs.createdAt} >= ${since}`
+    );
+    return result.rows[0]?.count ?? 0;
   }
 
   async findMostRecentForSessionKey(

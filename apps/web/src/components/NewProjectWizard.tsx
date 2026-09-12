@@ -150,7 +150,14 @@ export function NewProjectWizard(): ReactElement {
   // Only ever stops once a real terminal status is confirmed, or the
   // jobId itself changes/clears.
   const jobRef = useRef(job);
-  jobRef.current = job;
+  // Synced in an effect, never during render: mutating a ref while
+  // rendering is not safe under concurrent rendering (a render can be
+  // thrown away and re-run, leaving the ref describing a render that never
+  // committed). Declared BEFORE the polling effect below so that, in any
+  // commit where both run, the ref is already current when the poll reads it.
+  useEffect(() => {
+    jobRef.current = job;
+  }, [job]);
   useEffect(() => {
     if (!jobId) {
       return;
@@ -183,9 +190,16 @@ export function NewProjectWizard(): ReactElement {
   // component's own in-memory state - never re-dispatches a new
   // INSPECT_TEMPLATE job, only re-reads the existing one's real status via
   // the same read-only fetchJobStatus call the polling effect above uses.
+  //
+  // The restore genuinely belongs in an effect rather than in lazy
+  // useState initialisers: localStorage does not exist during Next.js's
+  // server render, so seeding initial state from it would either crash on
+  // the server or produce server/client HTML that disagrees. Restoring
+  // after mount costs one extra render and is the hydration-safe option.
   useEffect(() => {
     const draft = loadPendingJobDraft();
     if (!draft) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see the hydration note above
     setName(draft.name);
     setWorkerId(draft.workerId);
     setTemplateId(draft.templateId);
@@ -197,7 +211,6 @@ export function NewProjectWizard(): ReactElement {
         setJob(result.data);
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleInspect(): Promise<void> {

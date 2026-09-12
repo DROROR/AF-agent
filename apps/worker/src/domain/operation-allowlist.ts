@@ -35,5 +35,12 @@ export const CURRENT_WORKER_CAPABILITIES: readonly WorkerCapability[] = [
   "INSPECT_RENDER_CAPABILITIES",
   "EXECUTE_FRAME",
   "RENDER",
-  "CREATE_PREVIEW"
+  "CREATE_PREVIEW",
+  // Remote Windows diagnostics (2026-09-12) - real implementations, see
+  // ../diagnostics/. Advertised here so the API's own
+  // `worker.capabilities.includes(request.operation)` dispatch gate accepts
+  // them; a worker running an older build simply never reports these and can
+  // therefore never be handed one.
+  "RUN_DIAGNOSTIC",
+  "RESTART_WORKER_SAFE"
 ];

@@ -22,6 +22,7 @@ import { resolveCreateFullPreviewDispatch } from "../../domain/full-preview-disp
 import { resolveInspectSceneEvidenceDispatch } from "../../domain/scene-evidence-dispatch/resolve-inspect-scene-evidence-dispatch.js";
 import { createJob } from "./create-job.js";
 import { resolveExecuteFrameResumeCheckpoint, resolveRenderResumeCheckpoint } from "./resolve-resume-checkpoint.js";
+import { DIAGNOSTIC_RATE_LIMITS, isDiagnosticOperation } from "./diagnostic-rate-limit.js";
 
 export interface DispatchJobDeps {
   jobRepository: JobRepository;
@@ -124,6 +125,22 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
     throw new PreconditionNotMetError(
       `Project ${project.id} was inspected by Worker ${project.sourceWorkerId} - Worker ${worker.id} cannot run ${request.operation} for it`
     );
+  }
+
+  // REMOTE DIAGNOSTICS RATE LIMIT (2026-09-12). Read from the jobs table
+  // rather than an in-process counter, so it survives an API restart/deploy
+  // and cannot be reset by simply causing one. Applied BEFORE the duplicate
+  // and concurrency gates purely so a caller hammering the endpoint gets the
+  // most specific reason back.
+  const diagnosticLimit = isDiagnosticOperation(request.operation) ? DIAGNOSTIC_RATE_LIMITS[request.operation] : null;
+  if (diagnosticLimit) {
+    const since = new Date(now.getTime() - diagnosticLimit.windowMs);
+    const recent = await deps.jobRepository.countCreatedSinceForOperation(worker.id, request.operation, since);
+    if (recent >= diagnosticLimit.maxInWindow) {
+      throw new PreconditionNotMetError(
+        `Rate limit: ${request.operation} is limited to ${diagnosticLimit.maxInWindow} dispatches per ${Math.round(diagnosticLimit.windowMs / 60_000)} minutes for worker ${worker.id} (${recent} already dispatched in that window)`
+      );
+    }
   }
 
   // Duplicate-dispatch check first (a more specific signal than plain

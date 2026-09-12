@@ -33,7 +33,11 @@ describe("isAllowedOperation", () => {
       "INSPECT_RENDER_CAPABILITIES",
       "EXECUTE_FRAME",
       "RENDER",
-      "CREATE_PREVIEW"
+      "CREATE_PREVIEW",
+      // Remote Windows diagnostics (2026-09-12) - real implementations in
+      // ../diagnostics/, advertised so the API's dispatch gate accepts them.
+      "RUN_DIAGNOSTIC",
+      "RESTART_WORKER_SAFE"
     ]);
   });
 });

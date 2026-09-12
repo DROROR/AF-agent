@@ -9,6 +9,8 @@ import {
   type JobError,
   type McpStatus,
   type RenderProjectRequest,
+  type RestartWorkerSafeRequest,
+  type RunDiagnosticRequest,
   type SceneEvidenceRequest
 } from "@dyo/schemas";
 import { isAllowedOperation } from "./operation-allowlist.js";
@@ -28,6 +30,8 @@ import type { RenderCapabilitiesInspector } from "../execution/render/inspect-re
 import { executeCreateFullPreview } from "../execution/preview/create-full-preview-executor.js";
 import type { FullPreviewUploader } from "../execution/preview/upload-full-preview.js";
 import type { SceneEvidencePreviewUploader } from "../inspection/upload-scene-evidence-preview.js";
+import { runDiagnostic, type RunDiagnosticDeps } from "../diagnostics/run-diagnostic.js";
+import { restartWorkerSafe, type RestartWorkerSafeDeps } from "../diagnostics/restart-worker-safe.js";
 
 export interface JobExecutionResult {
   status: "SUCCEEDED" | "FAILED";
@@ -53,6 +57,15 @@ export interface LatestHealth {
 }
 
 export interface JobDispatcherDeps {
+  /**
+   * Remote Windows diagnostics (2026-09-12). Optional so every existing test
+   * that constructs JobDispatcherDeps by hand keeps compiling: when absent,
+   * the two diagnostic operations report NOT_AVAILABLE rather than pretending
+   * to have run - the same "never fabricate a result" rule every other
+   * operation here follows.
+   */
+  diagnostics?: RunDiagnosticDeps;
+  restartWorkerSafe?: RestartWorkerSafeDeps;
   templateInspector: TemplateInspector;
   sceneEvidenceInspector: SceneEvidenceInspector;
   /** Checked before INSPECT_TEMPLATE/INSPECT_SCENE_EVIDENCE/EXECUTE_FRAME ever touch ae-mcp - see their precondition gates below. */
@@ -126,6 +139,10 @@ export async function executeJob(deps: JobDispatcherDeps, job: JobDto): Promise<
       return runInspectRenderCapabilities(deps, job);
     case "CREATE_PREVIEW":
       return runCreateFullPreview(deps, job);
+    case "RUN_DIAGNOSTIC":
+      return runRemoteDiagnostic(deps, job);
+    case "RESTART_WORKER_SAFE":
+      return runRestartWorkerSafe(deps, job);
     default:
       // Every other WORKER_CAPABILITIES entry is a recognized operation
       // name with no execution handler yet - fail safely, never attempt it.
@@ -609,4 +626,73 @@ async function runCheckHealth(deps: JobDispatcherDeps, job: JobDto): Promise<Job
       }
     };
   }
+}
+
+
+/**
+ * Read-only remote evidence gathering - see diagnostics.ts.
+ *
+ * Deliberately NOT gated on getLatestHealth(): diagnosing a machine whose
+ * AE/MCP health is bad or unknown is this operation's entire purpose, exactly
+ * as for CHECK_HEALTH. It is also the one operation family that must work
+ * when everything else is broken, so it depends on nothing but the local
+ * filesystem and process table.
+ */
+async function runRemoteDiagnostic(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (!deps.diagnostics) {
+    return {
+      status: "FAILED",
+      error: { code: "NOT_AVAILABLE", message: "This worker build has no diagnostics implementation wired" }
+    };
+  }
+  let request: RunDiagnosticRequest;
+  try {
+    request = validateJobPayload("RUN_DIAGNOSTIC", job.payload) as RunDiagnosticRequest;
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: { code: "INVALID_PAYLOAD", message: error instanceof Error ? error.message : "invalid diagnostic payload" }
+    };
+  }
+
+  deps.logger?.info({ jobId: job.jobId, kind: request.kind }, "running remote diagnostic");
+  const result = await runDiagnostic(deps.diagnostics, request);
+
+  // A diagnostic that could not gather its evidence is a FAILED job carrying
+  // the real reason - never a SUCCEEDED job with an empty body, which would
+  // read as "nothing is wrong" on the dashboard.
+  if (!result.ok) {
+    return {
+      status: "FAILED",
+      result,
+      error: { code: "TRANSPORT_ERROR", message: result.failureReason ?? "diagnostic failed" }
+    };
+  }
+  return { status: "SUCCEEDED", result };
+}
+
+/** The one mutating diagnostic - see restart-worker-safe.ts for its full safety contract. */
+async function runRestartWorkerSafe(deps: JobDispatcherDeps, job: JobDto): Promise<JobExecutionResult> {
+  if (!deps.restartWorkerSafe) {
+    return {
+      status: "FAILED",
+      error: { code: "NOT_AVAILABLE", message: "This worker build has no safe-restart implementation wired" }
+    };
+  }
+  let request: RestartWorkerSafeRequest;
+  try {
+    request = validateJobPayload("RESTART_WORKER_SAFE", job.payload) as RestartWorkerSafeRequest;
+  } catch (error) {
+    return {
+      status: "FAILED",
+      error: { code: "INVALID_PAYLOAD", message: error instanceof Error ? error.message : "invalid restart payload" }
+    };
+  }
+
+  const result = restartWorkerSafe(deps.restartWorkerSafe, request);
+
+  // A refusal is a real, successful, honest answer to "may I restart?" - the
+  // operator asked a question and got a correct one, so it is not a job
+  // failure. The dashboard distinguishes the two on `outcome`.
+  return { status: "SUCCEEDED", result };
 }

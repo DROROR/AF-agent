@@ -209,6 +209,120 @@ describe("HeartbeatLoop", () => {
     expect(sendHeartbeat).not.toHaveBeenCalled();
   });
 
+  // REAL 2026-09-12 INCIDENT (FAHADNAKASH, worker accd0a71): worker.log's last
+  // line was "heartbeat succeeded" at 14:19:49Z. The process stayed alive, but
+  // the API then received NOTHING further from it - no heartbeat, no job claim
+  // - while a QUEUED job (df76c2be) sat unclaimed. The loop only re-armed its
+  // timer after its awaits settled, so one non-settling await ended it forever.
+  it("recovers from a buildPayload that NEVER settles instead of silently ending the loop", async () => {
+    const sendHeartbeat = vi.fn().mockResolvedValue(workerDto);
+    const events: HeartbeatLoopEvent[] = [];
+    let stallFirstCall = true;
+    const loop = new HeartbeatLoop({
+      buildPayload: () => {
+        if (stallFirstCall) {
+          stallFirstCall = false;
+          return new Promise<HeartbeatRequest>(() => {});
+        }
+        return Promise.resolve(payload);
+      },
+      sendHeartbeat,
+      intervalMs: 5000,
+      backoff,
+      tickDeadlineMs: 30_000,
+      onEvent: (event) => events.push(event)
+    });
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendHeartbeat).not.toHaveBeenCalled();
+
+    // The deadline turns the stall into an ordinary, observable failure...
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "heartbeat_failed", consecutiveFailures: 1 });
+
+    // ...and, critically, the loop is still armed and heartbeats again.
+    await vi.advanceTimersByTimeAsync(backoff.baseMs);
+    expect(sendHeartbeat).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toEqual({ type: "heartbeat_succeeded", worker: workerDto });
+  });
+
+  it("recovers from a sendHeartbeat that NEVER settles", async () => {
+    const events: HeartbeatLoopEvent[] = [];
+    let stallFirstCall = true;
+    const sendHeartbeat = vi.fn().mockImplementation(() => {
+      if (stallFirstCall) {
+        stallFirstCall = false;
+        return new Promise<WorkerDto>(() => {});
+      }
+      return Promise.resolve(workerDto);
+    });
+    const loop = new HeartbeatLoop({
+      buildPayload: async () => payload,
+      sendHeartbeat,
+      intervalMs: 5000,
+      backoff,
+      tickDeadlineMs: 30_000,
+      onEvent: (event) => events.push(event)
+    });
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events[0]).toMatchObject({ type: "heartbeat_failed" });
+
+    await vi.advanceTimersByTimeAsync(backoff.baseMs);
+    expect(events.at(-1)).toEqual({ type: "heartbeat_succeeded", worker: workerDto });
+  });
+
+  // index.ts triggers the whole job cycle from onEvent. A defect in that
+  // consumer must cost observability, never the worker's liveness - and must
+  // never escape as an unhandledRejection (tick()'s promise is assigned
+  // unawaited, so an escaping rejection would kill the worker process).
+  it("keeps heartbeating when the onEvent consumer throws", async () => {
+    const sendHeartbeat = vi.fn().mockResolvedValue(workerDto);
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const loop = new HeartbeatLoop({
+      buildPayload: async () => payload,
+      sendHeartbeat,
+      intervalMs: 5000,
+      backoff,
+      onEvent: () => {
+        throw new Error("job cycle trigger blew up");
+      }
+    });
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000);
+    process.off("unhandledRejection", unhandled);
+
+    expect(sendHeartbeat).toHaveBeenCalledTimes(3);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  it("does not fire the deadline on a slow-but-progressing heartbeat", async () => {
+    const events: HeartbeatLoopEvent[] = [];
+    const sendHeartbeat = vi.fn().mockImplementation(
+      () => new Promise<WorkerDto>((resolve) => setTimeout(() => resolve(workerDto), 29_000))
+    );
+    const loop = new HeartbeatLoop({
+      buildPayload: async () => payload,
+      sendHeartbeat,
+      intervalMs: 5000,
+      backoff,
+      tickDeadlineMs: 30_000,
+      onEvent: (event) => events.push(event)
+    });
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(29_000);
+
+    expect(events).toEqual([{ type: "heartbeat_succeeded", worker: workerDto }]);
+  });
+
   it("emits a loop_stopped event exactly once per stop() call", () => {
     const events: HeartbeatLoopEvent[] = [];
     const loop = new HeartbeatLoop({

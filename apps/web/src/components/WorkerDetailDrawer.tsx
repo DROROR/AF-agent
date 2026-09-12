@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { formatRelativeTime } from "../lib/relative-time";
 import { useLocale } from "./LocaleProvider";
 import { StatusBadge } from "./StatusBadge";
+import { WorkerDiagnosticsPanel } from "./WorkerDiagnosticsPanel";
 import { Dialog } from "./ui/Dialog";
 
 export interface WorkerDetailDrawerProps {
@@ -97,6 +98,8 @@ export function WorkerDetailDrawer({ worker, onClose }: WorkerDetailDrawerProps)
           </div>
         </dl>
       ) : null}
+      {/* Remote Windows diagnostics (2026-09-12) - see WorkerDiagnosticsPanel. */}
+      {worker ? <WorkerDiagnosticsPanel worker={worker} /> : null}
     </Dialog>
   );
 }

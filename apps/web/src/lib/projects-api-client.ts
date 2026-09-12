@@ -585,6 +585,27 @@ export async function fetchJobStatus(jobId: string): Promise<ApiResult<JobDto>> 
 }
 
 /**
+ * Cancels a job that is still QUEUED (POST /api/jobs/:jobId/cancel).
+ *
+ * Exists because of the real 2026-09-12 df76c2be incident: a job dispatched
+ * moments before its worker went silent was never claimed, could not be
+ * cleared from any screen, and blocked every later dispatch of the same
+ * operation for that worker. A CLAIMED/RUNNING job is deliberately NOT
+ * cancellable - see cancel-queued-job.ts.
+ */
+export async function cancelQueuedJob(jobId: string): Promise<ApiResult<JobDto>> {
+  const { status, json } = await request(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = getJobResponseSchema.safeParse({ job: json });
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected job contract" };
+  }
+  return { ok: true, data: parsed.data.job };
+}
+
+/**
  * "Job history + errors" (2026-08-29 closure requirement) - the signed-in
  * dashboard user's own full job dispatch history across every project,
  * newest first, with worker/project names and typed errors already

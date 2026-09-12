@@ -29,6 +29,17 @@ import { ApiClient } from "./infrastructure/api-client.js";
 import { CredentialStore } from "./infrastructure/credential-store.js";
 import { createProcessLister } from "./infrastructure/process-lister.js";
 import { HeartbeatLoop, type HeartbeatLoopEvent } from "./runtime/heartbeat-loop.js";
+import { withDeadline } from "./infrastructure/with-deadline.js";
+import type { RunDiagnosticDeps } from "./diagnostics/run-diagnostic.js";
+import type { ActiveWorkSnapshot, RestartWorkerSafeDeps } from "./diagnostics/restart-worker-safe.js";
+import {
+  describeJobArtifactsUnder,
+  describeLogFile,
+  readDiskSpaceFor,
+  readTextTailFromWorkRoot
+} from "./diagnostics/collect-diagnostics.js";
+import { WORKER_LOG_RELATIVE_PATH, PREVIOUS_WORKER_LOG_RELATIVE_PATH } from "./diagnostics/run-diagnostic.js";
+import { listDyoProcessesViaCim } from "./diagnostics/list-dyo-processes.js";
 import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
 import { JobExecutionRegistry } from "./runtime/job-execution-registry.js";
@@ -115,6 +126,9 @@ function logHeartbeatEvent(logger: pino.Logger, event: HeartbeatLoopEvent): void
   }
 }
 
+/** Hard ceiling on one claim attempt - see its call site's own rationale. */
+const CLAIM_DEADLINE_MS = 30_000;
+
 async function main(): Promise<void> {
   const logger = pino({ level: "info" });
   installProcessSafetyNet({ logger, exit: process.exit.bind(process), process });
@@ -184,6 +198,69 @@ async function main(): Promise<void> {
     jobExecutionRegistry,
     workRoot: env.workRoot
   });
+
+  // Remote Windows diagnostics (2026-09-12) - see diagnostics/diagnostics.ts.
+  // Every filesystem read below is resolved from workRoot by the WORKER: the
+  // request schema carries no path, so there is nothing a caller could aim
+  // anywhere. `mutating` deliberately lists only the operations that write to
+  // an AE project or render, because those are the only ones a restart can
+  // genuinely damage.
+  const diagnosticsDeps: RunDiagnosticDeps = {
+    workerId: credentials.workerId,
+    now: () => new Date(),
+    readTextTail: (relativePath, maxLines) => readTextTailFromWorkRoot(workRoot, relativePath, maxLines),
+    listDyoProcesses: () => listDyoProcessesViaCim(),
+    readDiskSpace: () => readDiskSpaceFor([workRoot, ...(env.aeMcpPath ? [env.aeMcpPath] : [])]),
+    probeAeMcpHealth: async () => {
+      const health = await mcpAdapter.checkHealth();
+      return {
+        mcpStatus: health.mcpStatus,
+        mcpProbeDetail: health.mcpProbeDetail,
+        mcpConfiguredPath: health.mcpConfiguredPath
+      };
+    },
+    describeActiveJob: async () => {
+      const active = jobExecutionRegistry.getActiveJob();
+      return {
+        activeJob: active ? { jobId: active.jobId, operation: active.operation } : null,
+        workerLog: describeLogFile(workRoot, WORKER_LOG_RELATIVE_PATH),
+        previousWorkerLog: describeLogFile(workRoot, PREVIOUS_WORKER_LOG_RELATIVE_PATH),
+        lastConfirmedHealth: latestHealth
+      };
+    },
+    describeJobArtifacts: (jobId) => describeJobArtifactsUnder(workRoot, jobId)
+  };
+
+  const MUTATING_OPERATIONS = new Set(["EXECUTE_FRAME", "RENDER", "CREATE_PREVIEW"]);
+  const restartWorkerSafeDeps: RestartWorkerSafeDeps = {
+    workerId: credentials.workerId,
+    now: () => new Date(),
+    describeActiveWork: (): ActiveWorkSnapshot => {
+      const active = jobExecutionRegistry.getActiveJob();
+      if (!active) {
+        return { jobId: null, operation: null, mutating: false, checkpointed: false };
+      }
+      return {
+        jobId: active.jobId,
+        operation: active.operation,
+        mutating: MUTATING_OPERATIONS.has(active.operation),
+        // Conservative by design: this worker does not track checkpoint
+        // progress in the registry, so a mutating job is always treated as
+        // uncheckpointed and the restart is REFUSED. Refusing a restart that
+        // would have been safe costs a wait; allowing one that was not costs
+        // a corrupted working copy or an hour of render.
+        checkpointed: false
+      };
+    },
+    scheduleExit: (delayMs, exitCode) => {
+      const timer = setTimeout(() => {
+        workerLogger.info({ exitCode }, "exiting for an operator-requested safe restart - the supervisor will start one replacement");
+        process.exit(exitCode);
+      }, delayMs);
+      timer.unref();
+    },
+    logger: workerLogger
+  };
 
   // Real, production INSPECT_SCENE_EVIDENCE implementation (Phase 7B) -
   // same "safe to construct with no AE_MCP_PATH" contract as above.
@@ -288,12 +365,24 @@ async function main(): Promise<void> {
       return;
     }
     const cyclePromise = runJobCycle({
-      claimNextJob: () => apiClient.claimNextJob(credentials.workerId, credentials.workerToken),
+      // Bounded for the same reason the heartbeat tick is (2026-09-12): a
+      // claim that never settles leaves activeJobCyclePromise non-null
+      // forever, so every later heartbeat logs "job cycle already in
+      // progress" and this worker never claims another job for the life of
+      // the process - online, healthy-looking, and permanently idle. The
+      // ceiling is generous next to a claim that normally answers in well
+      // under a second.
+      claimNextJob: () =>
+        withDeadline("claim next job", CLAIM_DEADLINE_MS, () =>
+          apiClient.claimNextJob(credentials.workerId, credentials.workerToken)
+        ),
       reportJobStatus: (jobId, body) =>
         apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
       executeJob: (job) =>
         executeJobWithWatchdog(
           {
+            diagnostics: diagnosticsDeps,
+            restartWorkerSafe: restartWorkerSafeDeps,
             templateInspector,
             sceneEvidenceInspector,
             getLatestHealth: () => latestHealth,

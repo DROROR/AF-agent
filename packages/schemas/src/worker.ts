@@ -80,7 +80,16 @@ export const WORKER_CAPABILITIES = [
   /** Read-only, preparing for final Windows Worker verification - see inspect-render-capabilities.ts's own doc comment. Never mutates, never saves, never contacts the client. */
   "INSPECT_RENDER_CAPABILITIES",
   /** Reserved/planned only - superseded by true checkpoint-carrying resume (resolve-resume-checkpoint.ts) on the existing dispatch path. */
-  "RESUME_JOB"
+  "RESUME_JOB",
+  /**
+   * Read-only remote evidence gathering over the worker's existing outbound
+   * channel - see diagnostics.ts. Never shell execution, never an arbitrary
+   * path, never secrets. Added 2026-09-12 so incidents stop depending on a
+   * human copy-pasting PowerShell output.
+   */
+  "RUN_DIAGNOSTIC",
+  /** The one MUTATING diagnostic, split into its own capability so it is authorized/rate-limited/audited separately - see diagnostics.ts. */
+  "RESTART_WORKER_SAFE"
 ] as const;
 export type WorkerCapability = (typeof WORKER_CAPABILITIES)[number];
 export const workerCapabilitySchema = z.enum(WORKER_CAPABILITIES);

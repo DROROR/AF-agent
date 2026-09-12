@@ -1,6 +1,6 @@
 import type { JobStatus, WorkerCapability } from "@dyo/schemas";
 import { canClaimAnotherJob, isJobTerminal } from "../../../domain/job/rules.js";
-import type { Job, JobRepository, JobStatusUpdate, NewJob } from "../../../domain/job/types.js";
+import type { Job, JobFailure, JobRepository, JobStatusUpdate, NewJob } from "../../../domain/job/types.js";
 
 const ACTIVE_STATUSES: readonly JobStatus[] = ["CLAIMED", "RUNNING", "WAITING_FOR_ACTION"];
 
@@ -132,6 +132,22 @@ export class InMemoryJobRepository implements JobRepository {
   async countActiveForWorker(workerId: string): Promise<number> {
     return [...this.rows.values()].filter(
       (job) => job.workerId === workerId && ACTIVE_STATUSES.includes(job.status)
+    ).length;
+  }
+
+  async cancelQueued(jobId: string, error: JobFailure, now: Date): Promise<Job | null> {
+    const job = this.rows.get(jobId);
+    if (!job || job.status !== "QUEUED") {
+      return null;
+    }
+    const cancelled: Job = { ...job, status: "CANCELLED", error, completedAt: now, updatedAt: now };
+    this.rows.set(jobId, cancelled);
+    return cancelled;
+  }
+
+  async countCreatedSinceForOperation(workerId: string, operation: WorkerCapability, since: Date): Promise<number> {
+    return [...this.rows.values()].filter(
+      (job) => job.workerId === workerId && job.operation === operation && job.createdAt.getTime() >= since.getTime()
     ).length;
   }
 

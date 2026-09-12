@@ -93,6 +93,27 @@ export interface JobRepository {
   /** True if this worker already has a non-terminal job (QUEUED or later, up to but excluding SUCCEEDED/FAILED/CANCELLED) for this exact operation - used by job dispatch to refuse a duplicate/double-submit dispatch of the same operation. */
   hasNonTerminalJobForOperation(workerId: string, operation: WorkerCapability): Promise<boolean>;
   /**
+   * How many jobs of this operation were CREATED for this worker since
+   * `since`, across every status. Backs the remote-diagnostics rate limit
+   * (see dispatch-job.ts): a durable, restart-surviving count read from the
+   * jobs table itself, rather than an in-memory window that resets to zero
+   * every time the API process restarts - which would make the limit
+   * trivially bypassable and, worse, silently absent after a deploy.
+   */
+  countCreatedSinceForOperation(workerId: string, operation: WorkerCapability, since: Date): Promise<number>;
+  /**
+   * Atomically moves a job from QUEUED to CANCELLED. Returns null if the job
+   * does not exist or is no longer QUEUED - the caller cannot distinguish
+   * those, deliberately, because they are the same real race.
+   *
+   * QUEUED-ONLY BY DESIGN: a CLAIMED/RUNNING job is being executed by a real
+   * worker process right now, and marking the row CANCELLED would not stop
+   * it - it would only make the database disagree with the machine, which is
+   * the exact failure mode the dashboard is supposed to eliminate. Aborting
+   * running work is the watchdog's/safe-restart's job, not a row update's.
+   */
+  cancelQueued(jobId: string, error: JobFailure, now: Date): Promise<Job | null>;
+  /**
    * The most recently CREATED job for this exact (operation,
    * executionSessionId, key/value) combination, across ANY status - used by
    * job dispatch to find a prior attempt's own durable checkpoint so a

@@ -19,6 +19,7 @@ import { claimNextJob } from "../application/job/claim-next-job.js";
 import { listActiveJobsForWorker } from "../application/job/list-active-jobs-for-worker.js";
 import { dispatchJob } from "../application/job/dispatch-job.js";
 import { getJobForUser } from "../application/job/get-job-for-user.js";
+import { cancelQueuedJob } from "../application/job/cancel-queued-job.js";
 import { listJobsForUser } from "../application/job/list-jobs-for-user.js";
 import { reportJobStatus } from "../application/job/report-job-status.js";
 import { reportJobCheckpoint } from "../application/job/report-job-checkpoint.js";
@@ -101,6 +102,33 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
       body,
       user.id
     );
+
+    // AUDIT (2026-09-12): every remote-diagnostics dispatch is logged
+    // explicitly, with WHO asked, WHICH worker, and WHAT was asked for.
+    // The durable audit record is the jobs row itself (createdByUserId,
+    // operation, payload, createdAt, and later its result); this log line
+    // makes the same facts greppable in the API log at the moment of the
+    // request, including for a dispatch that later fails.
+    //
+    // `kind`/`reason` are safe to log: the diagnostic request schema is
+    // closed (a fixed enum plus bounded scalars) and carries no path,
+    // command, or credential - see packages/schemas/src/diagnostics.ts.
+    if (body.operation === "RUN_DIAGNOSTIC" || body.operation === "RESTART_WORKER_SAFE") {
+      request.log.info(
+        {
+          audit: "remote_diagnostic_dispatched",
+          jobId: dto.jobId,
+          operation: body.operation,
+          workerId: body.workerId,
+          requestedByUserId: user.id,
+          ...(body.operation === "RUN_DIAGNOSTIC"
+            ? { kind: body.payload.kind }
+            : { reason: body.payload.reason })
+        },
+        "remote diagnostic dispatched"
+      );
+    }
+
     reply.status(201).send(dto);
   });
 
@@ -127,6 +155,21 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
    * anchor as GET /api/jobs/:jobId above; never accepts a caller-supplied
    * userId.
    */
+  /**
+   * Cancels a job that is still QUEUED - see cancel-queued-job.ts for why a
+   * CLAIMED/RUNNING job is deliberately NOT cancellable here.
+   */
+  app.post("/api/jobs/:jobId/cancel", async (request, reply) => {
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { jobId } = jobIdParamsSchema.parse(request.params);
+    const dto = await cancelQueuedJob({ jobRepository: deps.jobRepository, now }, user.id, jobId);
+    request.log.info(
+      { audit: "job_cancelled", jobId, requestedByUserId: user.id, operation: dto.operation },
+      "queued job cancelled by its dispatcher"
+    );
+    reply.status(200).send(dto);
+  });
+
   app.get("/api/jobs", async (request, reply) => {
     const user = await requireSessionUser(request.headers.authorization, sessionDeps);
     const result = await listJobsForUser(
