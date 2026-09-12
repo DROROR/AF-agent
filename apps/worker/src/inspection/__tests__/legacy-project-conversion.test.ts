@@ -121,6 +121,31 @@ describe("prepareConversionCopy - real 2026-09-12 incident: an .aep-only copy or
     expect(existsSync(result.conversionCopyPath)).toBe(true);
   }, 30_000);
 
+  it("MIGRATION: an existing legacy .aep-only copy no longer blocks the package - it is carried into it, preserving a conversion already done by hand", async () => {
+    const { root, sourcePath } = makeTemplatePackage();
+    const workRoot = join(root, "work-root");
+    const sha = sha256("fake-legacy-aep-bytes");
+
+    // Exactly the stale layout an earlier build produced: <dir>/converted.aep,
+    // holding a project a human already converted and saved.
+    const legacyDir = join(workRoot, "template-conversions", sha);
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(join(legacyDir, "converted.aep"), "human-converted-bytes");
+
+    const result = await prepareConversionCopy({ workRoot, sourceProjectPath: sourcePath });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The package is genuinely built this time, not short-circuited.
+    expect(result.packagePreserved).toBe(true);
+    expect(result.conversionCopyPath.endsWith("App_Promo.aep")).toBe(true);
+    // The human's converted bytes are what ends up in the package...
+    expect(readFileSync(result.conversionCopyPath, "utf8")).toBe("human-converted-bytes");
+    // ...with the footage now beside it, which was the whole problem.
+    expect(existsSync(join(result.conversionCopyPath, "..", "(Footage)", "clip1.mp4"))).toBe(true);
+    expect(result.packageNote).toMatch(/carried into this package/i);
+  });
+
   it("reports a clear failure reason (never throws) when the source file does not exist", async () => {
     const root = mkdtempSync(join(tmpdir(), "legacy-project-conversion-test-"));
     cleanupDirs.push(root);

@@ -127,16 +127,6 @@ export async function prepareConversionCopy(params: PrepareConversionCopyParams)
       packageNote: null
     };
   }
-  if (existsSync(bareProjectPath)) {
-    return {
-      ok: true,
-      sourceSha256: sourceHash.value.sha256,
-      conversionCopyPath: bareProjectPath,
-      alreadyExisted: true,
-      packagePreserved: false,
-      packageNote: "an earlier .aep-only copy already exists at this path and was left untouched"
-    };
-  }
 
   // The destination must never live inside the folder being copied, or the
   // copy would recurse into its own output. Real possibility here: work root
@@ -184,12 +174,34 @@ export async function prepareConversionCopy(params: PrepareConversionCopyParams)
     return { ok: false, reason: `the template package was copied but ${baseName} is not present at ${packageProjectPath}` };
   }
 
+  // MIGRATION (2026-09-12): an earlier build of this module copied ONLY the
+  // .aep, to <dir>/converted.aep. A human may already have opened THAT file,
+  // answered its conversion dialog and saved it - real work that must not be
+  // thrown away just because this module now prefers a package layout. If
+  // such a legacy copy exists, it is moved into the freshly-built package in
+  // place of the unconverted project file, so the conversion is preserved AND
+  // the footage now sits beside it. Without this, the legacy copy was
+  // returned forever and the package was never built at all.
+  let migratedNote: string | null = null;
+  if (existsSync(bareProjectPath)) {
+    try {
+      copyFileSync(bareProjectPath, packageProjectPath);
+      migratedNote =
+        "an earlier .aep-only conversion copy was found and has been carried into this package, " +
+        "so a conversion already performed by hand is preserved rather than being repeated";
+    } catch {
+      // The package's own (unconverted) copy of the project stays in place -
+      // the human simply converts once more. Never fails the whole operation.
+      migratedNote = null;
+    }
+  }
+
   return {
     ok: true,
     sourceSha256: sourceHash.value.sha256,
     conversionCopyPath: packageProjectPath,
     alreadyExisted: false,
     packagePreserved: true,
-    packageNote: null
+    packageNote: migratedNote
   };
 }
