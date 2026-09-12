@@ -21,13 +21,22 @@ describe("registerWorkerRequestSchema", () => {
     ).toThrow();
   });
 
-  it("rejects a capability outside the allowlist", () => {
-    expect(() =>
-      registerWorkerRequestSchema.parse({
-        name: "Worker",
-        capabilities: ["DELETE_EVERYTHING"]
-      })
-    ).toThrow();
+  // Behaviour deliberately changed 2026-09-12: this used to REJECT the whole
+  // request. Rejecting made the control plane brittle in the one direction
+  // that matters operationally - a worker newer than the API goes permanently
+  // OFFLINE on a machine nobody can reach (see
+  // worker-forward-compatibility.test.ts). The SECURITY property this test
+  // exists to protect is unchanged and asserted directly below: a capability
+  // outside the allowlist is never recorded, so dispatch-job.ts's
+  // `worker.capabilities.includes(operation)` gate can never hand one out.
+  it("never records a capability outside the allowlist", () => {
+    const parsed = registerWorkerRequestSchema.parse({
+      name: "Worker",
+      capabilities: ["DELETE_EVERYTHING", "CHECK_HEALTH"]
+    });
+
+    expect(parsed.capabilities).toEqual(["CHECK_HEALTH"]);
+    expect(parsed.capabilities).not.toContain("DELETE_EVERYTHING");
   });
 });
 

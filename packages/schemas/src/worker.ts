@@ -93,6 +93,30 @@ export const WORKER_CAPABILITIES = [
 ] as const;
 export type WorkerCapability = (typeof WORKER_CAPABILITIES)[number];
 export const workerCapabilitySchema = z.enum(WORKER_CAPABILITIES);
+const KNOWN_CAPABILITIES = new Set<string>(WORKER_CAPABILITIES);
+
+/**
+ * FORWARD COMPATIBILITY (2026-09-12). A worker reports its capabilities on
+ * every heartbeat. Validating them with a strict enum means a worker running
+ * a build NEWER than the control plane - which is the normal state of
+ * affairs for minutes or hours during any rollout, and indefinitely if an
+ * operator installs the worker update first - fails schema validation, gets
+ * a 400 on every heartbeat, and goes permanently OFFLINE. The worker is
+ * installed by a non-technical operator on a machine nobody can reach; it
+ * must never be possible to brick it by doing the right things in the wrong
+ * order.
+ *
+ * Unknown capability names are therefore DROPPED, not rejected. The
+ * consequence is exactly right: the control plane records only the
+ * capabilities it actually understands, so dispatch-job.ts's own
+ * `worker.capabilities.includes(operation)` gate still refuses to hand out
+ * an operation this API does not know about - a capability is ignored until
+ * the API that would use it is deployed, rather than taking the worker down.
+ */
+const forwardCompatibleCapabilities = z
+  .array(z.string())
+  .transform((values) => values.filter((value): value is WorkerCapability => KNOWN_CAPABILITIES.has(value)));
+
 
 /**
  * Every capability whose real execution touches ae-mcp/AE at all - the
@@ -119,7 +143,7 @@ export const AE_MCP_DEPENDENT_CAPABILITIES = new Set<WorkerCapability>([
 export const registerWorkerRequestSchema = z.object({
   name: z.string().trim().min(1).max(200),
   maxConcurrency: z.number().int().positive().max(64).default(1),
-  capabilities: z.array(workerCapabilitySchema).default([])
+  capabilities: forwardCompatibleCapabilities.default([])
 });
 export type RegisterWorkerRequest = z.infer<typeof registerWorkerRequestSchema>;
 
@@ -133,7 +157,7 @@ export const heartbeatRequestSchema = z.object({
   aeStatus: aeStatusSchema,
   mcpStatus: mcpStatusSchema,
   aeVersion: z.string().trim().min(1).max(50).nullable().default(null),
-  capabilities: z.array(workerCapabilitySchema).optional(),
+  capabilities: forwardCompatibleCapabilities.optional(),
   maxConcurrency: z.number().int().positive().max(64).optional(),
   currentJobId: z.string().uuid().nullable().default(null)
 });
