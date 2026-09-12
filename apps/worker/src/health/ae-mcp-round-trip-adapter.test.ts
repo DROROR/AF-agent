@@ -77,6 +77,70 @@ function fakeClientFactory(scripts: FakeClientScript[]): {
   return factory;
 }
 
+describe("AeMcpRoundTripAdapter - real 2026-09-12 oscillation: mcpStatus flapped UNKNOWN -> ONLINE -> UNKNOWN on a machine whose bridge was up throughout", () => {
+  it("holds a confirmed ONLINE through isolated failed probes instead of flapping - one failed spawn is not evidence the bridge died", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    let clock = 1_000;
+    const factory = fakeClientFactory([
+      { call: async () => ({ ok: true, content: healthContent(true) }) },
+      { connect: async () => { throw new Error("spawn failed"); } }
+    ]);
+    const adapter = new AeMcpRoundTripAdapter({
+      aeMcpPath,
+      createClient: factory.create,
+      now: () => clock,
+      sleep: async () => {},
+      onlineCacheTtlMs: 1
+    });
+
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
+    clock += 10_000;
+    const held = await settledHealth(adapter);
+
+    // The failed probe is recorded, but the last REAL observation still stands.
+    expect(held.mcpStatus).toBe("ONLINE");
+    expect(held.mcpProbeDetail).toMatch(/holding\(1\/3/);
+  });
+
+  it("downgrades to UNKNOWN once enough consecutive probes fail - a genuine outage is never masked indefinitely", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    let clock = 1_000;
+    const factory = fakeClientFactory([
+      { call: async () => ({ ok: true, content: healthContent(true) }) },
+      { connect: async () => { throw new Error("spawn failed"); } }
+    ]);
+    const adapter = new AeMcpRoundTripAdapter({
+      aeMcpPath,
+      createClient: factory.create,
+      now: () => clock,
+      sleep: async () => {},
+      onlineCacheTtlMs: 1,
+      failuresBeforeDowngrade: 2
+    });
+
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
+    clock += 10_000;
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");   // 1st failure held
+    clock += 10_000;
+    expect((await settledHealth(adapter)).mcpStatus).toBe("UNKNOWN");  // 2nd failure downgrades
+  });
+
+  it("an explicit bridge-not-connected answer is REAL evidence and is never debounced", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    let clock = 1_000;
+    const factory = fakeClientFactory([
+      { call: async () => ({ ok: true, content: healthContent(true) }) },
+      { call: async () => ({ ok: true, content: healthContent(false) }) }
+    ]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, now: () => clock, onlineCacheTtlMs: 1 });
+
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
+    clock += 10_000;
+    // The bridge itself says it is down - reported immediately, not held.
+    expect((await settledHealth(adapter)).mcpStatus).toBe("OFFLINE");
+  });
+});
+
 describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a hanging probe stopped the worker registering at all", () => {
   it("NEVER BLOCKS: a probe whose connect never resolves still returns immediately, so the first heartbeat can be sent", async () => {
     const aeMcpPath = makeAeMcpInstall();

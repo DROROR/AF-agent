@@ -46,7 +46,21 @@ const DEFAULT_CALL_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_ATTEMPTS = 2;
 const DEFAULT_RETRY_BACKOFF_MS = 1_500;
 /** A confirmed-ONLINE answer is reused for this long instead of re-spawning a bridge process on every heartbeat. Short enough that a real disconnect is still noticed promptly. */
-const DEFAULT_ONLINE_CACHE_TTL_MS = 60_000;
+const DEFAULT_ONLINE_CACHE_TTL_MS = 300_000;
+/**
+ * How many CONSECUTIVE failed probes are required before a previously
+ * confirmed-ONLINE bridge is downgraded.
+ *
+ * REAL 2026-09-12 OBSERVATION: mcpStatus oscillated UNKNOWN -> ONLINE ->
+ * UNKNOWN on a machine whose bridge was up throughout. Each probe spawns a
+ * fresh ae-mcp child, and on this machine that spawn intermittently fails -
+ * so a single failed spawn was overwriting a good result and reporting the
+ * bridge as unknown. One failed measurement is not evidence the bridge died.
+ * A real outage still surfaces: consecutive failures downgrade it, and an
+ * explicit "bridge not connected" answer (OFFLINE) is real evidence and is
+ * never debounced at all.
+ */
+const DEFAULT_FAILURES_BEFORE_DOWNGRADE = 3;
 /**
  * Absolute wall-clock ceiling on one background probe, independent of any
  * timeout the MCP SDK or the spawned child may or may not honour.
@@ -78,6 +92,7 @@ export interface AeMcpRoundTripAdapterConfig {
   sleep?: (ms: number) => Promise<void>;
   createClient?: (aeMcpPath: string, timeoutMs: number) => HealthProbeClient;
   hardDeadlineMs?: number;
+  failuresBeforeDowngrade?: number;
 }
 
 interface CachedResult {
@@ -95,6 +110,8 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly createClient: ((aeMcpPath: string, timeoutMs: number) => HealthProbeClient) | undefined;
   private readonly hardDeadlineMs: number;
+  private readonly failuresBeforeDowngrade: number;
+  private consecutiveFailures = 0;
   private cached: CachedResult | null = null;
   /** The client the currently running probe owns, so a blown deadline can kill its child. */
   private activeClient: HealthProbeClient | null = null;
@@ -111,6 +128,7 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     this.sleep = config.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.createClient = config.createClient;
     this.hardDeadlineMs = config.hardDeadlineMs ?? DEFAULT_HARD_DEADLINE_MS;
+    this.failuresBeforeDowngrade = config.failuresBeforeDowngrade ?? DEFAULT_FAILURES_BEFORE_DOWNGRADE;
   }
 
   /**
@@ -147,7 +165,7 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
       this.inFlight = this.probeWithHardDeadline(scriptPath);
       void this.inFlight
         .then((result) => {
-          this.cached = { at: this.now(), result };
+          this.cached = { at: this.now(), result: this.debounce(result) };
         })
         .catch(() => {
           // probeWithHardDeadline never rejects; this only guards against a
@@ -165,6 +183,33 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
       return cacheIsFresh ? { ...cached.result, mcpProbeDetail: `${cached.result.mcpProbeDetail}-cached` } : cached.result;
     }
     return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "probe-pending" };
+  }
+
+  /**
+   * Stops an unreliable MEASUREMENT being reported as a changed STATE.
+   *
+   * An ONLINE answer always wins immediately and clears the failure run. An
+   * explicit OFFLINE ("bridge not connected") is real evidence and is never
+   * debounced. Only an INCONCLUSIVE probe (connect failure, deadline) is held
+   * back, and only while a previously confirmed ONLINE is still being
+   * reported - after failuresBeforeDowngrade consecutive inconclusive
+   * probes the real UNKNOWN is reported, so a genuine outage is never
+   * masked indefinitely.
+   */
+  private debounce(result: McpHealthResult): McpHealthResult {
+    if (result.mcpStatus === "ONLINE" || result.mcpStatus === "OFFLINE") {
+      this.consecutiveFailures = 0;
+      return result;
+    }
+    this.consecutiveFailures += 1;
+    const previous = this.cached?.result;
+    if (previous?.mcpStatus === "ONLINE" && this.consecutiveFailures < this.failuresBeforeDowngrade) {
+      return {
+        ...previous,
+        mcpProbeDetail: `${previous.mcpProbeDetail}-holding(${this.consecutiveFailures}/${this.failuresBeforeDowngrade}: ${result.mcpProbeDetail})`
+      };
+    }
+    return result;
   }
 
   /**

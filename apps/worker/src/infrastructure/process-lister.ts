@@ -17,8 +17,15 @@ const PROCESS_CHECK_TIMEOUT_MS = 8_000;
  * when a fresh check could not conclude, and only for this short window.
  * Once the window passes, UNKNOWN is reported honestly rather than
  * pretending the last answer still holds.
+ *
+ * WIDENED 2026-09-12 after aeStatus was still seen oscillating: tasklist
+ * failed often enough on the real machine that a 60s window expired between
+ * successes. AE's process state does not change minute to minute, and a
+ * genuine NOT_RUNNING is still reported immediately, so a longer window
+ * costs nothing in truthfulness and stops an unreliable measurement being
+ * reported as a changed state.
  */
-const DEFINITE_RESULT_REUSE_MS = 60_000;
+const DEFINITE_RESULT_REUSE_MS = 300_000;
 
 export type ProcessRunningStatus = "RUNNING" | "NOT_RUNNING" | "UNKNOWN";
 
