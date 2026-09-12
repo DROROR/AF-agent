@@ -55,3 +55,37 @@ describe("WindowsTasklistProcessLister - real 2026-09-12 incident: aeStatus flap
     expect(await lister.isImageRunning("AfterFX.exe")).toBe("NOT_RUNNING");
   });
 });
+
+describe("WindowsTasklistProcessLister - real 2026-09-12 regression: a hanging tasklist silenced the heartbeat", () => {
+  it("NEVER waits on a hung tasklist - the whole call completes well inside a heartbeat interval", async () => {
+    // A runner that never settles, exactly like the real hung tasklist.
+    const lister = new WindowsTasklistProcessLister(() => 1_000, () => new Promise<ProcessRunningStatus>(() => {}));
+
+    const startedAt = Date.now();
+    const status = await lister.isImageRunning("AfterFX.exe");
+    const elapsed = Date.now() - startedAt;
+
+    expect(status).toBe("UNKNOWN");
+    // Two bounded attempts at 2.5s each; must never approach the 15s heartbeat.
+    expect(elapsed).toBeLessThan(9_000);
+  }, 20_000);
+
+  it("a hung check still yields to a recent definite observation instead of flapping", async () => {
+    let clock = 1_000;
+    let firstCall = true;
+    const lister = new WindowsTasklistProcessLister(
+      () => clock,
+      async () => {
+        if (firstCall) {
+          firstCall = false;
+          return "RUNNING";
+        }
+        return new Promise<ProcessRunningStatus>(() => {});
+      }
+    );
+
+    expect(await lister.isImageRunning("AfterFX.exe")).toBe("RUNNING");
+    clock += 3_000;
+    expect(await lister.isImageRunning("AfterFX.exe")).toBe("RUNNING");
+  }, 20_000);
+});

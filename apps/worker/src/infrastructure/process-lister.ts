@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const PROCESS_CHECK_TIMEOUT_MS = 15_000;
+const PROCESS_CHECK_TIMEOUT_MS = 8_000;
 /**
  * How long a DEFINITE observation may stand in for an inconclusive one.
  *
@@ -50,6 +50,20 @@ const realTasklistRunner: TasklistRunner = async (imageName) => {
   }
 };
 
+/**
+ * Hard wall-clock ceiling for ONE attempt, independent of execFile's own
+ * `timeout`.
+ *
+ * REAL 2026-09-12 REGRESSION: raising execFile's timeout and adding a retry
+ * made a HANGING tasklist block the heartbeat path for far longer - the
+ * worker heartbeated once and then went silent. execFile's timeout kills the
+ * child, but that is not a guarantee the promise settles promptly on this
+ * machine. The earlier 5s timeout was, accidentally, the only thing keeping
+ * heartbeats flowing: fast UNKNOWNs. The lesson is that the heartbeat must
+ * never await an external probe without its own ceiling.
+ */
+const ATTEMPT_DEADLINE_MS = 2_500;
+
 export class WindowsTasklistProcessLister implements ProcessLister {
   private readonly lastDefinite = new Map<string, { status: ProcessRunningStatus; at: number }>();
 
@@ -58,11 +72,30 @@ export class WindowsTasklistProcessLister implements ProcessLister {
     private readonly runOnce: TasklistRunner = realTasklistRunner
   ) {}
 
+  /** Races one attempt against a hard deadline, so a hung tasklist costs at most ATTEMPT_DEADLINE_MS rather than stalling the heartbeat. */
+  private async runBounded(imageName: string): Promise<ProcessRunningStatus> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.runOnce(imageName),
+        new Promise<ProcessRunningStatus>((resolve) => {
+          timer = setTimeout(() => resolve("UNKNOWN"), ATTEMPT_DEADLINE_MS);
+        })
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
   async isImageRunning(imageName: string): Promise<ProcessRunningStatus> {
-    let status = await this.runOnce(imageName);
+    let status = await this.runBounded(imageName);
     if (status === "UNKNOWN") {
       // One bounded retry - a single slow tasklist should not decide this.
-      status = await this.runOnce(imageName);
+      // Worst case for the whole call is therefore 2 x ATTEMPT_DEADLINE_MS,
+      // comfortably inside the heartbeat interval.
+      status = await this.runBounded(imageName);
     }
     if (status !== "UNKNOWN") {
       this.lastDefinite.set(imageName, { status, at: this.now() });
