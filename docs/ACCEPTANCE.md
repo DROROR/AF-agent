@@ -104,6 +104,28 @@ could run. Treated as a startup/recovery defect, not an operator procedure.
 | Packaged with rollback | IMPLEMENTED | Backs up `dist` **and** `BUILD_INFO.json` together, proves the new files landed before restarting, polls up to 120s for one supervisor plus a real worker child, restores and restarts automatically on failure. |
 | **Real cold-reboot acceptance on FAHADNAKASH** | **PENDING** | Deferred by the operator on 2026-09-12 (machine in use). Must show: reboot, log in, do not open AE or touch the ae-mcp panel, all three settle to ONLINE unaided, then a successful CHECK_HEALTH and a real job. |
 
+### Worker health/startup defects found and fixed on real hardware (2026-09-12)
+
+Every row below was found by a REAL failure on FAHADNAKASH, not by review.
+Several were regressions I introduced while fixing the row above them; they
+are listed because the pattern matters more than any single bug: a health
+check must never be able to block the worker, and an unreliable measurement
+must never be reported as a changed state.
+
+| Defect | Real symptom | Fix | Regression test |
+|---|---|---|---|
+| MCP probe judged the bridge by a CLI exit code under a hard 8s ceiling | A genuinely LISTENING/CONNECTED bridge reported UNKNOWN every 15s, blocking every dispatch | Real MCP round trip (`ae_health`), realistic bounded budget, bounded retries | slow-but-healthy bridge still ONLINE |
+| Health parser required a nested `health` object | `unrecognized-health-shape` against a live bridge | Accept either location; still requires an EXPLICIT boolean, so false ONLINE stays impossible | verbatim captured FAHADNAKASH response |
+| Heartbeat AWAITED the MCP probe | Worker logged "worker starting" then went silent; never registered | `checkHealth()` never blocks; background refresh; hard wall-clock deadline; owned ae-mcp child force-terminated on expiry | client whose `connect()` never settles |
+| Startup AWAITED abandoned-job reconciliation | Same silence whenever `/jobs/active` was briefly unreachable (the API itself returned 200) | Loop starts first; reconciliation runs independently; its failure is logged and changes nothing | — |
+| Raised `tasklist` timeout + added retry | **Self-inflicted:** a hanging `tasklist` stalled the heartbeat path; worker heartbeated once then went silent | Hard 2.5s per-attempt deadline independent of `execFile`'s own timeout | runner that never settles |
+| A failed probe overwrote a good state | `mcpStatus` oscillated UNKNOWN → ONLINE → UNKNOWN, and `aeStatus` dropped to UNKNOWN, while both were up throughout | Consecutive-failure debounce before downgrading a confirmed ONLINE (reported as `holding(n/3)`); widened reuse windows. An explicit OFFLINE is real evidence and is never debounced | hold, downgrade, and never-debounce-OFFLINE cases |
+
+**Honesty note on process:** an earlier build was called "stable" on the
+basis of an eight-sample window, and a package hash was once emitted from a
+build with a failing test. Neither is an acceptable standard of evidence.
+Stability claims here require a sustained sample and a fully green suite.
+
 ### Installer defects found and fixed while proving this (2026-09-12)
 
 Five defects in the update tooling itself, each found by a real failed
