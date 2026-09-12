@@ -122,28 +122,92 @@ function Get-DyoWorkerProcesses {
   }
 }
 
+function Test-ProcessAlive {
+  param([int]$TargetProcessId)
+  return $null -ne (Get-CimInstance Win32_Process -Filter "ProcessId=$TargetProcessId" -ErrorAction SilentlyContinue)
+}
+
+# A PID that has ALREADY exited is a success, not a failure. The previous
+# version reported "Could not terminate worker child PID ..." simply because
+# the supervisor's own tree-kill had already taken that child down moments
+# earlier - a misleading error on a completely successful stop.
+function Stop-OneProcessTree {
+  param([int]$TargetProcessId, [string]$Label)
+  if (-not (Test-ProcessAlive -TargetProcessId $TargetProcessId)) {
+    Write-Host "[OK] $Label (PID $TargetProcessId) had already exited"
+    return $true
+  }
+  & taskkill /F /T /PID $TargetProcessId *>$null
+  Start-Sleep -Milliseconds 500
+  if (Test-ProcessAlive -TargetProcessId $TargetProcessId) {
+    Write-Host "[NEEDS ATTENTION] $Label (PID $TargetProcessId) is still running after being asked to stop"
+    return $false
+  }
+  Write-Host "[OK] Stopped $Label (PID $TargetProcessId)"
+  return $true
+}
+
+function Get-DyoSupervisorProcesses {
+  return @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") })
+}
+
+function Get-DyoWorkerChildProcesses {
+  return @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("--env-file=.env dist\index.js") })
+}
+
+# ORDER MATTERS: supervisors are stopped FIRST. A supervisor whose child is
+# killed first immediately spawns a replacement (restarting the child is its
+# entire job), and that replacement would not appear in an already-captured
+# process list - which is exactly how an update can end up believing it
+# cleaned up while a live worker still holds the files it is about to
+# replace.
 function Stop-DyoWorkerProcessesForcibly {
-  $existing = Get-DyoWorkerProcesses
-  if (-not $existing -or $existing.Count -eq 0) {
-    Write-CheckResult $true "No leftover DYO Worker processes found before restart"
-    return
+  foreach ($proc in Get-DyoSupervisorProcesses) {
+    [void](Stop-OneProcessTree -TargetProcessId $proc.ProcessId -Label "DYO Worker supervisor")
   }
-  foreach ($proc in $existing) {
-    Write-Host "[OK] Stopping a DYO Worker process still running from a prior task instance (PID $($proc.ProcessId))..."
-    try {
-      & taskkill /F /T /PID $proc.ProcessId *>$null
-    } catch {
-      Write-Host "[NEEDS ATTENTION] Could not stop PID $($proc.ProcessId): $($_.Exception.Message)"
-    }
+  foreach ($proc in Get-DyoWorkerChildProcesses) {
+    [void](Stop-OneProcessTree -TargetProcessId $proc.ProcessId -Label "DYO Worker process")
   }
+}
+
+# Program files are NEVER replaced until every old process has genuinely
+# exited - replacing them underneath a running worker is what left the
+# machine with supervisor=1/worker=0 last time.
+function Wait-ForNoDyoWorkerProcesses {
+  param([int]$TimeoutSeconds = 30)
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if ((@(Get-DyoWorkerProcesses)).Count -eq 0) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return ((@(Get-DyoWorkerProcesses)).Count -eq 0)
+}
+
+# Polls rather than sleeping a fixed few seconds: the supervisor starts
+# first and only then spawns its worker child, so a fixed 5s sleep could
+# observe supervisor=1/worker=0 on a perfectly healthy start and trigger a
+# completely unnecessary rollback (exactly what happened on the first
+# attempt).
+function Wait-ForHealthyWorkerTree {
+  param([int]$TimeoutSeconds = 120)
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $supervisors = Get-DyoSupervisorProcesses
+    $children = Get-DyoWorkerChildProcesses
+    if ($supervisors.Count -gt 1) { return $false }
+    if ($supervisors.Count -eq 1 -and $children.Count -ge 1) { return $true }
+    Start-Sleep -Seconds 2
+  }
+  return $false
 }
 
 Write-Host "================================================"
 Write-Host "  DYO Windows Worker - Startup & Recovery Update"
 Write-Host "================================================"
 Write-Host "This updates the DYO Worker program files on this ALREADY-REGISTERED"
-Write-Host "computer with two fixes together (legacy-project-conversion detection,"
-Write-Host "and a restart process-cleanup fix). It does not ask for a registration"
+Write-Host "computer so that After Effects and the ae-mcp bridge come back"
+Write-Host "automatically after a restart, with no manual CONNECT step. It does"
+Write-Host "not ask for a registration"
 Write-Host "code, does not change which DYO Worker this computer is, and does not"
 Write-Host "open, modify, or run anything against the immutable source .aep."
 Write-Host ""
@@ -177,7 +241,40 @@ if (-not (Test-Path $envPath)) {
 }
 Write-CheckResult $true "Existing configuration found - it will not be changed"
 
-# ---- Step 2: update program files, including @modelcontextprotocol/sdk if not already present ----
+# ---- Step 2: stop the Worker COMPLETELY before touching any program file ----
+Write-Host ""
+Write-Host "Stopping DYO Worker before updating its files..."
+
+$existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if (-not $existingTask) {
+  Write-Host "[NEEDS ATTENTION] The `"$TaskName`" automatic-startup task was not found."
+  Write-Host "Please run DYO-Worker-Repair.bat (the full repair) instead, or contact DYO."
+  Write-Host "Nothing has been changed on this computer."
+  exit 1
+}
+
+if ($existingTask.State -eq "Running") {
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+}
+Stop-DyoWorkerProcessesForcibly
+
+if (-not (Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)) {
+  # One more bounded attempt - a child that respawned in the gap between
+  # the supervisor stopping and this check gets one further chance to go.
+  Stop-DyoWorkerProcessesForcibly
+  if (-not (Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)) {
+    Write-Host "[NEEDS ATTENTION] DYO Worker processes are still running and could not be stopped:"
+    foreach ($proc in Get-DyoWorkerProcesses) { Write-Host "  PID $($proc.ProcessId): $($proc.CommandLine)" }
+    Write-Host ""
+    Write-Host "NOTHING HAS BEEN CHANGED on this computer - the program files were deliberately"
+    Write-Host "left untouched rather than replaced underneath a running worker. Please contact DYO."
+    exit 1
+  }
+}
+Write-CheckResult $true "DYO Worker fully stopped - no worker processes remain"
+
+# ---- Step 3: update program files, including @modelcontextprotocol/sdk if not already present ----
 Write-Host ""
 Write-Host "Updating DYO Worker program files..."
 
@@ -222,32 +319,9 @@ if (Test-Path $sdkCheckPath) {
   exit 1
 }
 
-# ---- Step 3: restart DYO Worker, forcibly cleaning up any stale process tree first ----
+# ---- Step 4: start DYO Worker and verify a real, healthy tree came back ----
 Write-Host ""
-Write-Host "Restarting DYO Worker..."
-
-$existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if (-not $existingTask) {
-  Write-Host "[NEEDS ATTENTION] The `"$TaskName`" automatic-startup task was not found."
-  Write-Host "Program files were updated, but automatic startup could not be restarted."
-  Write-Host "Please run DYO-Worker-Repair.bat (the full repair) instead, or contact DYO."
-  exit 1
-}
-
-if ($existingTask.State -eq "Running") {
-  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 2
-}
-
-# Never trust Stop-ScheduledTask alone - Task Scheduler's own tracking of
-# the previous run can be wrong (real 2026-09-11 incident). Forcibly stop
-# any DYO Worker process still running by its own real command line before
-# ever starting a fresh one, so a restart can never produce two
-# independent trees again.
-Stop-DyoWorkerProcessesForcibly
-
-Start-ScheduledTask -TaskName $TaskName
-Start-Sleep -Seconds 5
+Write-Host "Starting DYO Worker..."
 
 function Restore-BackupAndRestart {
   param([string]$BackupDir)
@@ -259,26 +333,26 @@ function Restore-BackupAndRestart {
   Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2
   Stop-DyoWorkerProcessesForcibly
+  [void](Wait-ForNoDyoWorkerProcesses -TimeoutSeconds 30)
   $distPath = Join-Path $InstallDir "dist"
   if (Test-Path $distPath) { Remove-Item -Path $distPath -Recurse -Force }
   Copy-Item -Path $BackupDir -Destination $distPath -Recurse -Force
   Start-ScheduledTask -TaskName $TaskName
-  Start-Sleep -Seconds 5
-  Write-Host "[OK] Rolled back to the previous program files and restarted DYO Worker."
+  if (Wait-ForHealthyWorkerTree -TimeoutSeconds 120) {
+    Write-Host "[OK] Rolled back to the previous program files - DYO Worker is running again."
+  } else {
+    Write-Host "[NEEDS ATTENTION] Rolled back the program files, but DYO Worker did not come back up."
+    Write-Host "Please contact DYO before using this computer."
+  }
 }
 
-$remainingSupervisors = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") })
-$remainingChildren = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("--env-file=.env dist\index.js") })
-if ($remainingSupervisors.Count -gt 1) {
-  Write-Host "[NEEDS ATTENTION] $($remainingSupervisors.Count) DYO Worker supervisor processes are running after restart - expected exactly 1."
-  Write-Host "Process IDs: $($remainingSupervisors.ProcessId -join ', ')"
-  Restore-BackupAndRestart -BackupDir $backupDir
-  Write-Host "Please contact DYO before running any AE job - do not use this computer as-is."
-  exit 1
-}
-if ($remainingSupervisors.Count -lt 1 -or $remainingChildren.Count -lt 1) {
-  Write-Host "[NEEDS ATTENTION] DYO Worker did not come back up after the update"
-  Write-Host "(supervisor processes: $($remainingSupervisors.Count), worker processes: $($remainingChildren.Count))."
+Start-ScheduledTask -TaskName $TaskName
+
+if (-not (Wait-ForHealthyWorkerTree -TimeoutSeconds 120)) {
+  $supervisors = Get-DyoSupervisorProcesses
+  $children = Get-DyoWorkerChildProcesses
+  Write-Host "[NEEDS ATTENTION] DYO Worker did not come back up correctly after the update"
+  Write-Host "(supervisor processes: $($supervisors.Count), worker processes: $($children.Count) - expected exactly 1 and at least 1)."
   Restore-BackupAndRestart -BackupDir $backupDir
   exit 1
 }

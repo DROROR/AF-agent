@@ -57,21 +57,74 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 only ever targets DYO Worker's o
   });
 
   it("kills by exact PID via taskkill, never by a broad name-based kill", () => {
-    expect(updateScript).toMatch(/taskkill \/F \/T \/PID \$proc\.ProcessId/);
+    expect(updateScript).toMatch(/taskkill \/F \/T \/PID \$TargetProcessId/);
     expect(updateScript).not.toMatch(/taskkill[^\n]*\/IM/i);
   });
 
-  it("runs the forced-stop step before Start-ScheduledTask, and verifies exactly one supervisor remains after", () => {
-    const stopCallIndex = updateScript.indexOf("Stop-DyoWorkerProcessesForcibly");
-    const secondUse = updateScript.indexOf("Stop-DyoWorkerProcessesForcibly", stopCallIndex + 1);
-    expect(secondUse).toBeGreaterThan(-1);
-    const startCallIndex = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName", secondUse);
-    expect(startCallIndex).toBeGreaterThan(secondUse);
-    const verifyIndex = updateScript.indexOf("remainingSupervisors", startCallIndex);
+  it("runs the forced-stop step before Start-ScheduledTask, and verifies a healthy tree afterwards", () => {
+    const stopCallIndex = updateScript.indexOf("Stop-DyoWorkerProcessesForcibly\n");
+    const startCallIndex = updateScript.indexOf("Start-ScheduledTask -TaskName $TaskName", stopCallIndex);
+    expect(stopCallIndex).toBeGreaterThan(-1);
+    expect(startCallIndex).toBeGreaterThan(stopCallIndex);
+    // The guard that actually gates success (not the identically-named call
+    // inside the rollback helper defined above it).
+    const verifyIndex = updateScript.indexOf("if (-not (Wait-ForHealthyWorkerTree", startCallIndex);
     expect(verifyIndex).toBeGreaterThan(startCallIndex);
-    const verifyBlock = updateScript.slice(verifyIndex, verifyIndex + 1200);
-    expect(verifyBlock).toMatch(/-gt 1/);
-    expect(verifyBlock).toMatch(/exit 1/);
+    expect(updateScript.slice(verifyIndex, verifyIndex + 700)).toMatch(/exit 1/);
+  });
+});
+
+describe("DYO-Worker-StartupRecovery-Update.ps1 stops the Worker completely BEFORE replacing any program file (real 2026-09-12 failed install)", () => {
+  it("stops supervisors before worker children - a child killed first is immediately respawned by its supervisor", () => {
+    const fnIndex = updateScript.indexOf("function Stop-DyoWorkerProcessesForcibly");
+    const block = updateScript.slice(fnIndex, fnIndex + 600);
+    const supervisorIndex = block.indexOf("Get-DyoSupervisorProcesses");
+    const childIndex = block.indexOf("Get-DyoWorkerChildProcesses");
+    expect(supervisorIndex).toBeGreaterThan(-1);
+    expect(childIndex).toBeGreaterThan(-1);
+    expect(supervisorIndex).toBeLessThan(childIndex);
+  });
+
+  it("treats an already-exited PID as success, not as the misleading 'could not terminate' error the first attempt reported", () => {
+    const fnIndex = updateScript.indexOf("function Stop-OneProcessTree");
+    const block = updateScript.slice(fnIndex, fnIndex + 700);
+    expect(block).toMatch(/had already exited/);
+    // Failure is decided by whether the process is STILL alive afterwards,
+    // never by taskkill's own exit code.
+    expect(block).toMatch(/if \(Test-ProcessAlive/);
+  });
+
+  it("waits for every old worker process to actually exit, and replaces no file until they have", () => {
+    const waitIndex = updateScript.indexOf("Wait-ForNoDyoWorkerProcesses -TimeoutSeconds");
+    const copyIndex = updateScript.indexOf('Copy-Item -Path (Join-Path $sourceApp "*")');
+    expect(waitIndex).toBeGreaterThan(-1);
+    expect(waitIndex).toBeLessThan(copyIndex);
+  });
+
+  it("ABORTS WITHOUT TOUCHING ANY FILE when the old processes cannot be stopped", () => {
+    const guardIndex = updateScript.indexOf("still running and could not be stopped");
+    const copyIndex = updateScript.indexOf('Copy-Item -Path (Join-Path $sourceApp "*")');
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeLessThan(copyIndex);
+    const block = updateScript.slice(guardIndex, guardIndex + 600);
+    expect(block).toMatch(/NOTHING HAS BEEN CHANGED/);
+    expect(block).toMatch(/exit 1/);
+  });
+
+  it("POLLS for a healthy tree after starting instead of sleeping a fixed few seconds - the false rollback trigger on the first attempt", () => {
+    const fnIndex = updateScript.indexOf("function Wait-ForHealthyWorkerTree");
+    const block = updateScript.slice(fnIndex, fnIndex + 700);
+    // Healthy means exactly one supervisor AND at least one real worker child.
+    expect(block).toMatch(/\$supervisors\.Count -eq 1 -and \$children\.Count -ge 1/);
+    // A duplicated supervisor fails fast rather than waiting out the timeout.
+    expect(block).toMatch(/\$supervisors\.Count -gt 1/);
+    expect(updateScript).toMatch(/Wait-ForHealthyWorkerTree -TimeoutSeconds 120/);
+  });
+
+  it("no longer describes the previous release's fixes in its own banner", () => {
+    expect(updateScript).not.toMatch(/legacy-project-conversion detection/);
+    expect(updateScript).not.toMatch(/restart process-cleanup fix/);
+    expect(updateScript).toMatch(/ae-mcp bridge come back/);
   });
 });
 
@@ -86,17 +139,17 @@ describe("DYO-Worker-StartupRecovery-Update.ps1 can roll back a failed update", 
 
   it("restores the backup and restarts the Worker when it does not come back up after the update", () => {
     expect(updateScript).toContain("function Restore-BackupAndRestart");
-    const verifyIndex = updateScript.indexOf("$remainingChildren");
+    const verifyIndex = updateScript.indexOf("did not come back up correctly");
     expect(verifyIndex).toBeGreaterThan(-1);
-    const block = updateScript.slice(verifyIndex, verifyIndex + 900);
-    // Both failure modes roll back: a duplicated tree, and a Worker that never came back.
+    const block = updateScript.slice(verifyIndex, verifyIndex + 700);
     expect(block).toMatch(/Restore-BackupAndRestart -BackupDir \$backupDir/);
-    expect(block).toMatch(/did not come back up/);
     expect(block).toMatch(/exit 1/);
   });
 
   it("verifies a real worker child came back, not merely a supervisor", () => {
-    expect(updateScript).toMatch(/\$remainingChildren[\s\S]{0,200}--env-file=\.env dist\\index\.js/);
+    const fnIndex = updateScript.indexOf("function Get-DyoWorkerChildProcesses");
+    expect(fnIndex).toBeGreaterThan(-1);
+    expect(updateScript.slice(fnIndex, fnIndex + 300)).toMatch(/--env-file=\.env dist\\index\.js/);
   });
 
   it("never deletes the .env or the worker's state directory while rolling back - only the dist folder it replaced", () => {
