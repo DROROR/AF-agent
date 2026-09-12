@@ -418,13 +418,25 @@ async function main(): Promise<void> {
   // mid-job without ever reporting its own outcome. See
   // reconcile-abandoned-jobs.ts's own doc comment on the exact boundary of
   // what this proves.
-  await reconcileAbandonedJobs({
+  // REAL 2026-09-12 INCIDENT: this used to be AWAITED here, before the loop
+  // started. On a machine where /jobs/active was briefly unreachable the
+  // worker logged "worker starting" and then went silent - no first
+  // heartbeat, no registration, no polling - for as long as the bounded
+  // retries took. Worker availability must never depend on recovery
+  // succeeding: the loop starts FIRST, and reconciliation runs independently
+  // behind it. Its failure is logged loudly and changes nothing else.
+  loop.start();
+
+  void reconcileAbandonedJobs({
     listActiveJobs: () => apiClient.listActiveJobs(credentials.workerId, credentials.workerToken),
     reportJobStatus: (jobId, body) => apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
     logger: workerLogger
+  }).catch((error: unknown) => {
+    workerLogger.warn(
+      { error: error instanceof Error ? error.message : String(error) },
+      "abandoned-job reconciliation did not complete - this worker is still online and claiming work normally"
+    );
   });
-
-  loop.start();
 }
 
 main().catch((error: unknown) => {
