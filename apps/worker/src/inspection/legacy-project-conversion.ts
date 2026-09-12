@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statfsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureWorkRoot, safeJoin } from "../workspace/work-root.js";
 import { hashSourceProject } from "./hash-source-project.js";
@@ -30,6 +30,18 @@ import { hashSourceProject } from "./hash-source-project.js";
 /** Bounds so a project sitting loose in a large shared folder can never trigger a runaway copy. Exceeding either is reported honestly, never silently truncated. */
 export const MAX_PACKAGE_FILES = 5_000;
 export const MAX_PACKAGE_BYTES = 8 * 1024 * 1024 * 1024;
+/** Headroom left free after a package copy - never fill the disk to the last byte, which would break everything else on the machine. */
+export const FREE_SPACE_MARGIN_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Available bytes on the volume holding `dir`, or null when it cannot be determined (never guessed). */
+function availableBytes(dir: string): number | null {
+  try {
+    const stats = statfsSync(dir);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return null;
+  }
+}
 
 export function conversionCopyDirectory(workRoot: string, sourceSha256: string): string {
   return safeJoin(workRoot, "template-conversions", sourceSha256);
@@ -38,6 +50,8 @@ export function conversionCopyDirectory(workRoot: string, sourceSha256: string):
 export interface PrepareConversionCopyParams {
   workRoot: string;
   sourceProjectPath: string;
+  /** Overridable only so a test can demand more headroom than any machine has free, and exercise the real shortfall path. */
+  freeSpaceMarginBytes?: number;
 }
 
 export type ConversionCopyResult =
@@ -138,7 +152,29 @@ export async function prepareConversionCopy(params: PrepareConversionCopyParams)
     resolvedDestDir === resolvedSourceDir || resolvedDestDir.startsWith(resolvedSourceDir + path.sep);
 
   const measured = destInsideSource ? "too-large" : measureDirectory(sourceDir);
-  if (measured === "too-large") {
+
+  // REAL 2026-09-12 FAILURE: a template whose (Footage)\Pre-renders folder
+  // was larger than the free space on C: filled the disk mid-copy and failed
+  // with EINPROGRESS/"There is not enough space on the disk", leaving a
+  // partial package behind consuming even more of it. Size alone was bounded;
+  // ACTUAL FREE SPACE never was. Checked up front now, and the shortfall is
+  // reported in real numbers rather than as a bare copy error.
+  let insufficientSpaceNote: string | null = null;
+  if (measured !== "too-large") {
+    ensureWorkRoot(destDir);
+    const free = availableBytes(destDir);
+    const margin = params.freeSpaceMarginBytes ?? FREE_SPACE_MARGIN_BYTES;
+    const needed = measured.bytes + margin;
+    if (free !== null && free < needed) {
+      const gb = (bytes: number): string => (bytes / (1024 * 1024 * 1024)).toFixed(1);
+      insufficientSpaceNote =
+        `this template's folder needs ${gb(measured.bytes)}GB (plus ${gb(margin)}GB headroom) but only ` +
+        `${gb(free)}GB is free on the drive holding this worker's work root, so only the project file itself was copied - ` +
+        "any footage it references by relative path will NOT resolve from this copy";
+    }
+  }
+
+  if (measured === "too-large" || insufficientSpaceNote !== null) {
     ensureWorkRoot(destDir);
     try {
       copyFileSync(params.sourceProjectPath, bareProjectPath);
@@ -151,7 +187,9 @@ export async function prepareConversionCopy(params: PrepareConversionCopyParams)
       conversionCopyPath: bareProjectPath,
       alreadyExisted: false,
       packagePreserved: false,
-      packageNote: destInsideSource
+      packageNote: insufficientSpaceNote
+        ? insufficientSpaceNote
+        : destInsideSource
         ? "this worker's own conversion folder lives inside the template's folder, so copying the whole package " +
           "would copy the destination into itself - only the project file itself was copied, and any footage it " +
           "references by relative path will NOT resolve from this copy"
@@ -165,9 +203,36 @@ export async function prepareConversionCopy(params: PrepareConversionCopyParams)
   try {
     cpSync(sourceDir, packageDest, { recursive: true });
   } catch (error) {
+    // A failed package copy leaves a PARTIAL tree behind, still consuming the
+    // very disk space that most likely caused the failure. Clean it up, then
+    // degrade to an .aep-only copy so the operator still has something to
+    // convert - with the reason stated, so a resulting "missing footage"
+    // count is never mistaken for a fact about the template.
+    try {
+      rmSync(packageDest, { recursive: true, force: true });
+    } catch {
+      // Best effort - never turn cleanup failure into the reported cause.
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    try {
+      copyFileSync(params.sourceProjectPath, bareProjectPath);
+    } catch (fallbackError) {
+      return {
+        ok: false,
+        reason:
+          `could not copy the template package to ${packageDest} (${reason}), and the .aep-only fallback also failed: ` +
+          `${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+      };
+    }
     return {
-      ok: false,
-      reason: `could not copy the template package to ${packageDest}: ${error instanceof Error ? error.message : String(error)}`
+      ok: true,
+      sourceSha256: sourceHash.value.sha256,
+      conversionCopyPath: bareProjectPath,
+      alreadyExisted: false,
+      packagePreserved: false,
+      packageNote:
+        `copying the whole template folder failed (${reason}), so only the project file itself was copied and any ` +
+        "footage it references by relative path will NOT resolve from this copy - the partial copy was removed"
     };
   }
   if (!existsSync(packageProjectPath)) {

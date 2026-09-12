@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { conversionCopyDirectory, prepareConversionCopy } from "../legacy-project-conversion.js";
+import { conversionCopyDirectory, prepareConversionCopy, FREE_SPACE_MARGIN_BYTES } from "../legacy-project-conversion.js";
 
 const cleanupDirs: string[] = [];
 afterEach(() => {
@@ -144,6 +144,27 @@ describe("prepareConversionCopy - real 2026-09-12 incident: an .aep-only copy or
     // ...with the footage now beside it, which was the whole problem.
     expect(existsSync(join(result.conversionCopyPath, "..", "(Footage)", "clip1.mp4"))).toBe(true);
     expect(result.packageNote).toMatch(/carried into this package/i);
+  });
+
+  it("REAL 2026-09-12 FAILURE: never fills the disk - falls back to an .aep-only copy, naming the real shortfall, when the package will not fit", async () => {
+    const { root, sourcePath } = makeTemplatePackage();
+    const workRoot = join(root, "work-root");
+
+    // Demand more headroom than any test machine has free, which is exactly
+    // the condition the real machine hit on (Footage)\\Pre-renders.
+    const original = FREE_SPACE_MARGIN_BYTES;
+    expect(original).toBeGreaterThan(0);
+
+    const result = await prepareConversionCopy({ workRoot, sourceProjectPath: sourcePath, freeSpaceMarginBytes: Number.MAX_SAFE_INTEGER });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.packagePreserved).toBe(false);
+    expect(result.packageNote).toMatch(/is free on the drive/i);
+    expect(result.packageNote).toMatch(/will NOT resolve/i);
+    // The .aep is still there to convert, and no partial package was left behind.
+    expect(existsSync(result.conversionCopyPath)).toBe(true);
+    expect(existsSync(join(workRoot, "template-conversions", sha256("fake-legacy-aep-bytes"), "package"))).toBe(false);
   });
 
   it("reports a clear failure reason (never throws) when the source file does not exist", async () => {
