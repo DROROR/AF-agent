@@ -85,7 +85,22 @@ export const ALLOWED_INSPECTION_TOOLS = [
   "ae_list_compositions",
   "ae_get_composition",
   "ae_get_layer",
-  "ae_capture_frame"
+  "ae_capture_frame",
+  /**
+   * Re-registers an ALREADY-RUNNING After Effects with ae-mcp. Added
+   * 2026-09-12 after a real incident where AE was running but its Startup
+   * bootstrap had not loaded, so the bridge reported connected:false with
+   * zero instances on 12 consecutive probes and ae-mcp's own ensure step
+   * declined to act (`skipped: true`). ae-mcp names this tool as the
+   * supported in-place fix; without it the only remedy was a human
+   * restarting After Effects.
+   *
+   * Safe to allowlist: it neither starts, stops, nor kills After Effects,
+   * and it never opens, mutates, or saves a project - so it cannot lose
+   * unsaved work. See health/reconnect-ae-bridge.ts for the bounded policy
+   * that decides when it is called.
+   */
+  "ae_reconnect"
 ] as const;
 
 export type AllowedInspectionTool = (typeof ALLOWED_INSPECTION_TOOLS)[number];

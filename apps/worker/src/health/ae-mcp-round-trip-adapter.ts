@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { McpAdapter, McpHealthResult } from "./mcp-adapter.js";
 import { parseBridgeConnectedFromHealth } from "../inspection/parse-mcp-shapes.js";
+import type { AeBridgeReconnector } from "./reconnect-ae-bridge.js";
 
 /**
  * Real 2026-09-12 incident, and why this replaces HeroicSwanMcpAdapter's
@@ -93,6 +94,14 @@ export interface AeMcpRoundTripAdapterConfig {
   createClient?: (aeMcpPath: string, timeoutMs: number) => HealthProbeClient;
   hardDeadlineMs?: number;
   failuresBeforeDowngrade?: number;
+  /**
+   * Optional bounded self-heal for a confirmed `bridge-not-connected` (see
+   * reconnect-ae-bridge.ts). Optional so every existing test that builds this
+   * adapter keeps compiling and keeps its exact current behaviour: with no
+   * reconnector wired, a not-connected bridge is reported exactly as before
+   * and nothing is attempted.
+   */
+  bridgeReconnector?: AeBridgeReconnector;
 }
 
 interface CachedResult {
@@ -103,6 +112,7 @@ interface CachedResult {
 export class AeMcpRoundTripAdapter implements McpAdapter {
   private readonly aeMcpPath: string | undefined;
   private readonly callTimeoutMs: number;
+  private readonly bridgeReconnector: AeBridgeReconnector | undefined;
   private readonly maxAttempts: number;
   private readonly retryBackoffMs: number;
   private readonly onlineCacheTtlMs: number;
@@ -129,6 +139,7 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     this.createClient = config.createClient;
     this.hardDeadlineMs = config.hardDeadlineMs ?? DEFAULT_HARD_DEADLINE_MS;
     this.failuresBeforeDowngrade = config.failuresBeforeDowngrade ?? DEFAULT_FAILURES_BEFORE_DOWNGRADE;
+    this.bridgeReconnector = config.bridgeReconnector;
   }
 
   /**
@@ -328,14 +339,39 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
         };
       }
       if (parsed.value.connected) {
+        // A confirmed connection clears any spent reconnect budget, so a
+        // later unrelated disconnect starts fresh instead of inheriting an
+        // exhausted one.
+        this.bridgeReconnector?.noteBridgeConnected();
         return {
           terminal: true,
           result: { mcpStatus: "ONLINE", mcpConfiguredPath: scriptPath, mcpProbeDetail: "round-trip-ok" }
         };
       }
+
+      // CONFIRMED not-connected: the bridge answered, in its documented
+      // shape, and said no AE instance is registered. This is the one and
+      // only state where ae_reconnect is the right action - never on a
+      // timeout, a transport error, or an unrecognized shape, none of which
+      // are evidence that reconnecting would help (2026-09-12 incident).
+      //
+      // The verdict returned is still OFFLINE regardless of what the
+      // reconnect attempt reports: only the NEXT real probe can confirm the
+      // bridge actually registered. Reporting ONLINE off the back of a
+      // reconnect call would be exactly the false-ONLINE this adapter exists
+      // to prevent.
+      let reconnectDetail = "";
+      if (this.bridgeReconnector) {
+        const outcome = await this.bridgeReconnector.reconnect();
+        reconnectDetail = ` (ae_reconnect: ${outcome.action})`;
+      }
       return {
         terminal: true,
-        result: { mcpStatus: "OFFLINE", mcpConfiguredPath: scriptPath, mcpProbeDetail: "bridge-not-connected" }
+        result: {
+          mcpStatus: "OFFLINE",
+          mcpConfiguredPath: scriptPath,
+          mcpProbeDetail: `bridge-not-connected${reconnectDetail}`
+        }
       };
     } catch {
       return {

@@ -8,6 +8,7 @@ import { loadWorkerEnv } from "./env.js";
 import { ConfigError } from "./errors/worker-error.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { AeMcpRoundTripAdapter } from "./health/ae-mcp-round-trip-adapter.js";
+import { AeBridgeReconnector } from "./health/reconnect-ae-bridge.js";
 import { AeLauncher } from "./health/ensure-ae-running.js";
 import { launchAe } from "./health/launch-ae.js";
 import { HeroicSwanMcpClient } from "./inspection/heroic-swan-mcp-client.js";
@@ -173,9 +174,39 @@ async function main(): Promise<void> {
   // upstream's own "ensure" work ran long - permanently blocking every
   // dispatch whose precondition is MCP ONLINE. This performs the same real
   // MCP round trip a job does. See ae-mcp-round-trip-adapter.ts.
+  // Bounded self-heal for the one AE/MCP failure the worker can safely fix
+  // itself in place (2026-09-12 incident): After Effects running, but its
+  // Startup bootstrap never registered an instance, so the bridge answers
+  // `connected: false` forever and ae-mcp's own ensure step declines to act.
+  // ae_reconnect re-registers a RUNNING AE without starting, stopping or
+  // touching anything - see reconnect-ae-bridge.ts for the full safety
+  // argument and the bounded policy.
+  const bridgeReconnector = new AeBridgeReconnector({
+    callReconnect: async () => {
+      if (!env.aeMcpPath) {
+        return { ok: false, detail: "AE_MCP_PATH is not configured" };
+      }
+      const client = new HeroicSwanMcpClient({ aeMcpPath: env.aeMcpPath, timeoutMs: 30_000 });
+      try {
+        await client.connect();
+        const call = await client.callTool("ae_reconnect");
+        return call.ok
+          ? { ok: true, detail: "ae_reconnect returned a response" }
+          : { ok: false, detail: `${call.error.code}: ${call.error.message}` };
+      } finally {
+        await client.close().catch(() => {
+          // Never let cleanup failure change the recovery verdict.
+        });
+      }
+    },
+    now: () => Date.now(),
+    logger: workerLogger
+  });
+
   const mcpAdapter = new AeMcpRoundTripAdapter({
     aeMcpPath: env.aeMcpPath,
-    createClient: (aeMcpPath, timeoutMs) => new HeroicSwanMcpClient({ aeMcpPath, timeoutMs })
+    createClient: (aeMcpPath, timeoutMs) => new HeroicSwanMcpClient({ aeMcpPath, timeoutMs }),
+    bridgeReconnector
   });
 
   // Real 2026-09-12 release blocker: after a Windows restart the client was
