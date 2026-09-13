@@ -235,7 +235,7 @@ no longer matters — that is exactly what the forward-compatibility fix buys.
 
 ## 2026-09-13 - nested-composition manifest traversal
 
-Status: **implemented and tested; not yet deployed or re-inspected at the time of writing.**
+Status: **deployed (API + worker `c1245b4`) and re-inspected - structural validation PASSED. Semantic placeholder review still open (see below).**
 
 Problem (job `5441c555`, plugin-free Mixkit template): 21 compositions, ~96 layers, **1** placeholder
 (`CONTROLS`), because the scene's other layers are precomp references and nothing below them was examined.
@@ -267,3 +267,45 @@ through a nested **manifest** placeholder contributes no timing evidence, so a *
 timestamp can ignore it. This degrades a recommendation only - preview approval remains a human gate and the
 timestamp can be chosen manually. Fix: pass the manifest and treat `placeholder.nestedTarget` like
 `humanNestedTarget` in both mirrors.
+
+### Live re-inspection evidence (2026-09-13)
+
+- Deploy `c1245b4`: counts unchanged vs baseline, schema proven to preserve `nestedTarget`, no post-deploy errors.
+- Worker build confirmed remotely: worker log `"commit":"c1245b48f76bf18b5618dca4b45ea00ca7adcea3"` (unredacted).
+- Process tree (diagnostic `a3b39888`): exactly one PowerShell supervisor, one node supervisor, one worker, one AfterFX.
+- MCP after install: `bridge-not-connected` -> recovered by bounded `ae_reconnect` attempt 1 (body:
+  `"Bridge reconnected (one manual inject)", instances: 1`); bridge registered ~90s later; no attempt 2.
+- Inspection job `7889a130-6a19-4e24-a097-ed4f5f577a4e`: SUCCEEDED in 78s, exact project opened.
+- Validator (`validate-manifest.mjs`, checked against real AE `numLayers` and the composition graph): **ALL CHECKS PASS**.
+
+| Proof point | Result |
+|---|---|
+| Worker/AE/MCP ONLINE during job | 5 worker-log heartbeats inside the job window, all green; 8 server-side distinct heartbeats green |
+| Nested editable layers, correct `layerPath` | 21 nested placeholders; every chain ends at its own layer, verifies against the graph, matches `layerPath`, and every hop index exists in AE |
+| CONTROLS not the only editable | 22 editable (was 1) |
+| missingFootage / pluginReferences / unknownItems | 0 / 0 / 0 |
+| Source SHA-256 | `4172ee082c1ce15f9e180d17e128434d4b54a40b3596402e1a30e496415deafd` (unchanged) |
+
+### Not yet acceptance-ready - open semantic questions
+
+The validator proves every surfaced placeholder is a real, correctly targeted layer. It cannot prove none were
+missed or that each is the right KIND of slot:
+
+- 10 of 21 nested placeholders are `Smartphone_0X_Beauty_Pass.mov` pre-rendered videos - genuine video layers,
+  but likely phone-hardware render passes (CLAUDE.md protects phone hardware), not client media slots.
+- `_Place Image Above_*` compositions surfaced only guide-style text ("PLACE YOUR IMAGE HERE", "APP SCREEN",
+  "1", "2"); their other layers were excluded as structural, so the real screen image slot may be an excluded
+  solid.
+- `Smartphone_01` / `Smartphone_02` surfaced no "Text 1/Text 2", unlike 03-05.
+
+Resolving these needs per-layer AE evidence for the excluded layers via INSPECT_SCENE_EVIDENCE, which requires a
+real project for this template (none exists yet).
+
+### Observed gaps
+
+- `workers.current_job_id` stayed null throughout the job (the worker heartbeat always reports
+  `currentJobId: null`), so the dashboard cannot show the worker's current job.
+- Validation job `7889a130` was dispatched by direct DB insert (dashboard sessions are stored hashed and cannot
+  be reused), so it has no `created_by_user_id` and cannot be opened from the dashboard; the operator's own
+  wizard run is required to create the project.
+
