@@ -20,6 +20,17 @@ type StepId = "details" | "template";
 const STEP_IDS: readonly StepId[] = ["details", "template"];
 
 const TERMINAL_STATUSES = new Set<JobDto["status"]>(["SUCCEEDED", "FAILED", "CANCELLED"]);
+/**
+ * Terminal statuses after which the operator must be able to inspect again.
+ *
+ * REAL 2026-09-13 INCIDENT: this used to allow re-inspecting only after
+ * FAILED. The account's last wizard dispatch (df76c2be) was CANCELLED, and
+ * because the wizard restores its in-flight job from localStorage on every
+ * mount, that CANCELLED job disabled Inspect Template permanently - with no
+ * message, and nothing in the UI able to clear it. A cancelled job never ran;
+ * it is exactly as retryable as a failed one.
+ */
+const RETRYABLE_STATUSES = new Set<JobDto["status"]>(["FAILED", "CANCELLED"]);
 const POLL_INTERVAL_MS = 2_000;
 
 /**
@@ -140,7 +151,7 @@ export function NewProjectWizard(): ReactElement {
     templateId.trim() !== "" &&
     hasAepExtension(sourceProjectPath) &&
     !isDispatching &&
-    (job === null || job.status === "FAILED");
+    (job === null || RETRYABLE_STATUSES.has(job.status));
 
   // Real 2026-09-11 incident fix: polls on a FIXED recurring interval that
   // always fires again regardless of whether the previous attempt
@@ -209,9 +220,28 @@ export function NewProjectWizard(): ReactElement {
     void fetchJobStatus(draft.jobId).then((result) => {
       if (result.ok) {
         setJob(result.data);
+        return;
+      }
+      // The remembered job no longer exists for this account (deleted, or not
+      // this user's). Same stale-draft class as a CANCELLED job: forget it and
+      // stop polling rather than polling a 404 forever. The restored form
+      // fields are kept so the operator can simply inspect again.
+      if (result.status === 404) {
+        clearPendingJobDraft();
+        setJobId(null);
       }
     });
   }, []);
+
+  // A CANCELLED job never ran and has no result to resume, so there is nothing
+  // for the remembered draft to restore on the next visit. Forget it the
+  // moment that status is known, so a refresh can never re-lock the wizard.
+  const jobStatus = job?.status;
+  useEffect(() => {
+    if (jobStatus === "CANCELLED") {
+      clearPendingJobDraft();
+    }
+  }, [jobStatus]);
 
   async function handleInspect(): Promise<void> {
     setIsDispatching(true);
@@ -384,10 +414,15 @@ export function NewProjectWizard(): ReactElement {
                 </Field>
 
                 {dispatchError ? <ErrorState title={t.projectsNew.template.inspectionFailedTitle} description={dispatchError} /> : null}
+                {job?.status === "CANCELLED" ? (
+                  <p role="status" className="field__hint">
+                    {t.projectsNew.template.previousInspectionCancelled}
+                  </p>
+                ) : null}
 
                 <div className="overview-actions">
                   <Button variant="primary" disabled={!canInspect} onClick={() => void handleInspect()}>
-                    {isDispatching ? t.projectsNew.template.inspecting : job?.status === "FAILED" ? t.projectsNew.template.retryAction : t.projectsNew.template.inspectAction}
+                    {isDispatching ? t.projectsNew.template.inspecting : job !== null && RETRYABLE_STATUSES.has(job.status) ? t.projectsNew.template.retryAction : t.projectsNew.template.inspectAction}
                   </Button>
                 </div>
 

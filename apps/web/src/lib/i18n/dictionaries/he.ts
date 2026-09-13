@@ -180,7 +180,8 @@ export const he: Dictionary = {
       createProjectAction: "יצירת פרויקט",
       creatingProject: "יוצר…",
       createProjectFailedTitle: "לא ניתן היה ליצור את הפרויקט",
-      retryAction: "בדיקה נוספת"
+      retryAction: "בדיקה נוספת",
+      previousInspectionCancelled: "הבדיקה הקודמת בוטלה לפני שהתחילה. אפשר לבדוק שוב."
     },
     stepNotAvailableTitle: "לא זמין",
     stepNotAvailableDescription: "שלב זה עדיין לא מומש."

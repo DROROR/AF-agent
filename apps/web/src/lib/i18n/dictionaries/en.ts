@@ -186,7 +186,8 @@ export const en = {
       createProjectAction: "Create Project",
       creatingProject: "Creating…",
       createProjectFailedTitle: "Could not create the project",
-      retryAction: "Inspect again"
+      retryAction: "Inspect again",
+      previousInspectionCancelled: "The previous inspection was cancelled before it ran. You can inspect again."
     },
     stepNotAvailableTitle: "Not available",
     stepNotAvailableDescription: "This step is not yet implemented."
