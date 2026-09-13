@@ -345,6 +345,270 @@ describe("buildTemplateManifest - nested composition traversal (Mixkit-shaped re
   });
 });
 
+/**
+ * Real client-slot classification (2026-09-13). The structure below copies
+ * the real layer inventory persisted by inspection job 3ef5cbe9 on the Mixkit
+ * template: real composition ids, layer indices, disabled/guide flags and
+ * track-matte wiring. The human decision recorded against that evidence is
+ * exactly 9 client slots: the 6 phone 03-05 texts and 3 screen cards.
+ */
+describe("buildTemplateManifest - evidence-backed Mixkit client slots", () => {
+  const R = {
+    main: "comp-2144961805",
+    s: { 1: "comp-2144954688", 2: "comp-2144954612", 3: "comp-2144960108", 4: "comp-2144954673", 5: "comp-2144954793" },
+    pre: { 1: "comp-2144955123", 2: "comp-2144954880", 3: "comp-2144959908", 4: "comp-2144955085", 5: "comp-2144955389" },
+    ph: { 1: "comp-2144951525", 2: "comp-2144961857", 3: "comp-2144950771", 4: "comp-2144951144", 5: "comp-2144956937" },
+    ph01_1: "comp-749",
+    ph01_2: "comp-773",
+    mobile: "comp-252",
+    app01: "comp-3270",
+    app02: "comp-3284"
+  } as const;
+  type PhoneNumber = 1 | 2 | 3 | 4 | 5;
+  const PHONES: PhoneNumber[] = [1, 2, 3, 4, 5];
+
+  const renderVideo: FootageFact = { hasVideo: true, hasAudio: false, isStill: false, isMissing: false, widthPx: 1920, heightPx: 1080 };
+  const solid = (index: number, name: string, extra: Partial<LayerFact> = {}) =>
+    layer({ index, name, layerKind: "AVLayer", solidFill: { isUniformSolidFill: true }, ...extra });
+  const matteClip = (index: number, name: string) =>
+    layer({ index, name, layerKind: "AVLayer", footage: renderVideo, enabled: false, trackMatte: { isTrackMatte: true, hasTrackMatte: false, matteLayerIndex: null } });
+  const mattedClip = (index: number, name: string, matteLayerIndex: number | null, clipFootage: FootageFact = renderVideo) =>
+    layer({ index, name, layerKind: "AVLayer", footage: clipFootage, trackMatte: { isTrackMatte: false, hasTrackMatte: true, matteLayerIndex } });
+  const camera = (index: number) => layer({ index, name: "Camera 1", layerKind: "CameraLayer" });
+  const mattedPrecomp = (layerIndex: number, layerName: string, sourceCompositionId: string): PrecompChildFact => ({
+    ...precomp(layerIndex, layerName, sourceCompositionId),
+    hasTrackMatte: true
+  });
+
+  function realMixkit(): CompositionFact[] {
+    const beauty = (n: number) => `Smartphone_0${n}_Beauty_Pass.mov`;
+    return [
+      composition({
+        compositionId: R.main,
+        name: "Main_Comp",
+        isNestedOnlyReferenced: false,
+        layers: [solid(1, "CONTROLS", { enabled: false, guideLayer: true })],
+        precompChildren: PHONES.map((n) => precomp(7 - n, `Smartphone_0${n}`, R.s[n]))
+      }),
+      composition({
+        compositionId: R.s[1],
+        name: "Smartphone_01",
+        parentCompositionIds: [R.main],
+        layers: [solid(5, "BG Color 2"), solid(6, "BG Color 1")],
+        precompChildren: [
+          precomp(1, "Smartphone_01_PreComp", R.pre[1]),
+          precomp(2, "Placeholder_01", R.ph[1], false),
+          precomp(3, "Placeholder_01-1", R.ph01_1, false),
+          precomp(4, "Placeholder_01-2", R.ph01_2, false)
+        ]
+      }),
+      composition({
+        compositionId: R.s[2],
+        name: "Smartphone_02",
+        parentCompositionIds: [R.main],
+        layers: [solid(3, "BG Color 2"), solid(4, "BG Color 1")],
+        precompChildren: [precomp(1, "Smartphone_02_PreComp", R.pre[2]), precomp(2, "Placeholder_02", R.ph[2], false)]
+      }),
+      ...([3, 4, 5] as const).map((n) =>
+        composition({
+          compositionId: R.s[n],
+          name: `Smartphone_0${n}`,
+          parentCompositionIds: [R.main],
+          layers: [text(1, "Text 2"), text(2, "Text 1"), solid(5, "BG Color 2"), solid(6, "BG Color 1")],
+          precompChildren: [precomp(3, `Smartphone_0${n}_PreComp`, R.pre[n]), precomp(4, `Placeholder_0${n}`, R.ph[n], false)]
+        })
+      ),
+      composition({
+        compositionId: R.pre[1],
+        name: "Smartphone_01_PreComp",
+        parentCompositionIds: [R.s[1]],
+        layers: [
+          camera(1),
+          matteClip(3, "Smartphone_01_All_Placeholders_Mask.mov"),
+          mattedClip(4, beauty(1), 3),
+          matteClip(6, "Smartphone_01_Placeholder_Mask_1+2.mov"),
+          matteClip(9, "Smartphone_01_Placeholder_Mask_1+2.mov"),
+          matteClip(11, "Smartphone_01_Placeholder_Mask.mov"),
+          matteClip(13, "Smartphone_01_Mask.mov"),
+          mattedClip(14, beauty(1), 13)
+        ],
+        precompChildren: [
+          mattedPrecomp(7, "Placeholder_01-1", R.ph01_1),
+          mattedPrecomp(10, "Placeholder_01-2", R.ph01_2),
+          mattedPrecomp(12, "Placeholder_01", R.ph[1])
+        ]
+      }),
+      ...([2, 3, 4, 5] as const).map((n) =>
+        composition({
+          compositionId: R.pre[n],
+          name: `Smartphone_0${n}_PreComp`,
+          parentCompositionIds: [R.s[n]],
+          layers: [
+            camera(1),
+            matteClip(3, `Smartphone_0${n}_Placeholder_Mask.mov`),
+            mattedClip(4, beauty(n), 3),
+            matteClip(5, `Smartphone_0${n}_Placeholder_Mask.mov`),
+            matteClip(7, `Smartphone_0${n}_Mask.mov`),
+            mattedClip(8, beauty(n), 7)
+          ],
+          precompChildren: [mattedPrecomp(6, `Placeholder_0${n}`, R.ph[n])]
+        })
+      ),
+      ...PHONES.map((n) =>
+        composition({
+          compositionId: R.ph[n],
+          name: `Placeholder_0${n}`,
+          parentCompositionIds: [R.pre[n], R.s[n]],
+          precompChildren: [precomp(1, "_Place_Image_Above_Mobile", R.mobile)]
+        })
+      ),
+      composition({
+        compositionId: R.ph01_1,
+        name: "Placeholder_01-1",
+        parentCompositionIds: [R.pre[1], R.s[1]],
+        precompChildren: [precomp(1, "_Place Image Above_App Screen 01", R.app01)]
+      }),
+      composition({
+        compositionId: R.ph01_2,
+        name: "Placeholder_01-2",
+        parentCompositionIds: [R.pre[1], R.s[1]],
+        precompChildren: [precomp(1, "_Place Image Above_App Screen 02", R.app02)]
+      }),
+      composition({
+        compositionId: R.mobile,
+        name: "_Place_Image_Above_Mobile",
+        parentCompositionIds: PHONES.map((n) => R.ph[n]),
+        layers: [text(1, "PLACE YOUR IMAGE HERE"), solid(2, "BG")]
+      }),
+      composition({
+        compositionId: R.app01,
+        name: "_Place Image Above_App Screen 01",
+        parentCompositionIds: [R.ph01_1],
+        layers: [text(1, "APP SCREEN "), text(2, "1"), solid(3, "Placeholder")]
+      }),
+      composition({
+        compositionId: R.app02,
+        name: "_Place Image Above_App Screen 02",
+        parentCompositionIds: [R.ph01_2],
+        layers: [text(1, "APP SCREEN "), text(2, "2"), solid(3, "Placeholder")]
+      })
+    ];
+  }
+
+  const slot = (p: Placeholder) => `${p.compositionId}#${p.layerIndex} ${p.layerName} (${p.placeholderType})`;
+
+  it("exposes exactly 9 client slots - 6 phone 03-05 texts and 3 screen cards - in AE stacking order", () => {
+    const manifest = buildTemplateManifest(facts(realMixkit()), fixedNow);
+    const placeholders = scenePlaceholders(manifest);
+
+    expect(placeholders.map(slot)).toEqual([
+      `${R.s[5]}#1 Text 2 (text)`,
+      `${R.s[5]}#2 Text 1 (text)`,
+      `${R.mobile}#2 BG (image)`,
+      `${R.s[4]}#1 Text 2 (text)`,
+      `${R.s[4]}#2 Text 1 (text)`,
+      `${R.s[3]}#1 Text 2 (text)`,
+      `${R.s[3]}#2 Text 1 (text)`,
+      `${R.app01}#3 Placeholder (image)`,
+      `${R.app02}#3 Placeholder (image)`
+    ]);
+    expect(placeholders.every((p) => p.editable)).toBe(true);
+    expect(computeInspectionSummary(manifest).editablePlaceholderCount).toBe(9);
+    expect(manifest.unknownItems).toEqual([]);
+  });
+
+  it("excludes all 10 Beauty_Pass uses, every guide label, and CONTROLS", () => {
+    const names = scenePlaceholders(buildTemplateManifest(facts(realMixkit()), fixedNow)).map((p) => p.layerName);
+
+    expect(names.filter((name) => name.includes("Beauty_Pass"))).toEqual([]);
+    for (const guide of ["PLACE YOUR IMAGE HERE", "APP SCREEN ", "1", "2", "CONTROLS"]) {
+      expect(names).not.toContain(guide);
+    }
+    // 22 before = 10 Beauty_Pass + 5 guide labels + CONTROLS + 6 texts; the 5 guide labels are
+    // replaced by the 3 card slots they sat on, so 22 - 10 - 5 - 1 + 3 = 9.
+    expect(names).toHaveLength(22 - 10 - 5 - 1 + 3);
+  });
+
+  it("targets each screen card through a chain dispatch accepts, via the enabled matted route only", () => {
+    const manifest = buildTemplateManifest(facts(realMixkit()), fixedNow);
+    const cards = scenePlaceholders(manifest).filter((p) => p.placeholderType === "image");
+
+    expect(cards.find((p) => p.compositionId === R.mobile)!.nestedTarget).toEqual([
+      { compositionId: R.s[5], layerIndex: 3 },
+      { compositionId: R.pre[5], layerIndex: 6 },
+      { compositionId: R.ph[5], layerIndex: 1 },
+      { compositionId: R.mobile, layerIndex: 2 }
+    ]);
+    for (const card of cards) {
+      assertChainVerifies(manifest, R.main, card.nestedTarget!);
+      expect(card.evidence.source).toBe("inferred");
+    }
+  });
+
+  it("keeps a title card that is NOT shown through a matte as a text slot - the card rule needs the matte", () => {
+    const manifest = buildTemplateManifest(
+      facts([
+        composition({ compositionId: "comp-root", name: "Root", isNestedOnlyReferenced: false, precompChildren: [precomp(1, "Lower Third", "comp-lt")] }),
+        composition({ compositionId: "comp-lt", name: "Lower Third", parentCompositionIds: ["comp-root"], layers: [text(1, "Name"), solid(2, "Bar")] })
+      ]),
+      fixedNow
+    );
+
+    expect(manifest.scenes[0]!.placeholders.map(slot)).toEqual(["comp-lt#1 Name (text)"]);
+  });
+
+  it("keeps a client video cut by a solid matte as a video slot - only a VIDEO matte marks a pre-rendered pass", () => {
+    const manifest = buildTemplateManifest(
+      facts([
+        composition({ compositionId: "comp-root", name: "Root", isNestedOnlyReferenced: false, precompChildren: [precomp(1, "Window", "comp-w")] }),
+        composition({
+          compositionId: "comp-w",
+          name: "Window",
+          parentCompositionIds: ["comp-root"],
+          layers: [solid(1, "Window Mask", { enabled: false, trackMatte: { isTrackMatte: true, hasTrackMatte: false, matteLayerIndex: null } }), mattedClip(2, "client.mp4", 1, video)]
+        })
+      ]),
+      fixedNow
+    );
+
+    expect(manifest.scenes[0]!.placeholders.map(slot)).toEqual(["comp-w#2 client.mp4 (video)"]);
+  });
+
+  it("never treats a matted composition with its own matte wiring as a screen card - filling it would reorder layers and break the matte", () => {
+    const manifest = buildTemplateManifest(
+      facts([
+        composition({ compositionId: "comp-root", name: "Root", isNestedOnlyReferenced: false, precompChildren: [mattedPrecomp(1, "Screen", "comp-screen")] }),
+        composition({
+          compositionId: "comp-screen",
+          name: "Screen",
+          parentCompositionIds: ["comp-root"],
+          layers: [
+            solid(1, "Inner Mask", { enabled: false, trackMatte: { isTrackMatte: true, hasTrackMatte: false, matteLayerIndex: null } }),
+            text(2, "Status Bar Time", { trackMatte: { isTrackMatte: false, hasTrackMatte: true, matteLayerIndex: 1 } }),
+            solid(3, "Card")
+          ]
+        })
+      ]),
+      fixedNow
+    );
+
+    expect(manifest.scenes[0]!.placeholders.map(slot)).toEqual(["comp-screen#2 Status Bar Time (text)"]);
+  });
+
+  it("recognises a pre-rendered pass on an AE build without trackMatteLayer, where the matte is the layer directly above", () => {
+    const manifest = buildTemplateManifest(
+      facts([
+        composition({ compositionId: "comp-root", name: "Root", isNestedOnlyReferenced: false, precompChildren: [precomp(1, "Rig", "comp-rig")] }),
+        composition({ compositionId: "comp-rig", name: "Rig", parentCompositionIds: ["comp-root"], layers: [matteClip(1, "Body_Mask.mov"), mattedClip(2, "Body_Pass.mov", null)] })
+      ]),
+      fixedNow
+    );
+
+    expect(manifest.scenes[0]!.placeholders).toEqual([]);
+    expect(manifest.unknownItems).toEqual([]);
+  });
+});
+
 describe("buildTemplateManifest - nested traversal honesty and safety bounds", () => {
   const scene = (precompChildren: PrecompChildFact[]) =>
     composition({ compositionId: "comp-root", name: "Root", isNestedOnlyReferenced: false, precompChildren });

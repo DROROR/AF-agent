@@ -240,10 +240,48 @@ function buildMapFootageBody(assetPath: string): string {
             __result = JSON.stringify({ ok: false, failureReason: "asset file does not exist on the worker filesystem: " + __assetFile.fsName });
           } else {
             var __previousSourceName = (__layer.source && __layer.source.name) ? __layer.source.name : null;
+            // A uniform solid being replaced is a screen card (the manifest's
+            // "place image above" slot): its own size is the area to fill.
+            var __solidCard = null;
+            try {
+              if (__layer.source && __layer.source.mainSource instanceof SolidSource) {
+                __solidCard = { width: __layer.source.width, height: __layer.source.height };
+              }
+            } catch (__solidCardError) {
+              __solidCard = null;
+            }
             var __importOptions = new ImportOptions(__assetFile);
             var __newFootageItem = app.project.importFile(__importOptions);
             __layer.replaceSource(__newFootageItem, false);
-            __result = JSON.stringify({ ok: true, previousValue: __previousSourceName, resultingValue: __newFootageItem.name });
+            var __fitFailure = null;
+            if (__solidCard !== null) {
+              // Scale the media to COVER the card (keeping the card's own
+              // relative anchor), then raise it above the card's guide labels.
+              var __transformGroup = __layer.property("ADBE Transform Group");
+              var __scaleProp = __transformGroup.property("ADBE Scale");
+              var __anchorProp = __transformGroup.property("ADBE Anchor Point");
+              if (__scaleProp.numKeys > 0 || __anchorProp.numKeys > 0) {
+                __fitFailure = "screen card layer has animated scale or anchor point - refusing to guess how to fit the media";
+              } else if (!(__newFootageItem.width > 0 && __newFootageItem.height > 0 && __solidCard.width > 0 && __solidCard.height > 0)) {
+                __fitFailure = "screen card or imported media has no usable pixel size";
+              } else {
+                var __cover = Math.max(__solidCard.width / __newFootageItem.width, __solidCard.height / __newFootageItem.height);
+                var __oldAnchor = __anchorProp.value;
+                var __oldScale = __scaleProp.value;
+                var __newAnchor = [__oldAnchor[0] * __newFootageItem.width / __solidCard.width, __oldAnchor[1] * __newFootageItem.height / __solidCard.height];
+                var __newScale = [__oldScale[0] * __cover, __oldScale[1] * __cover];
+                if (__oldAnchor.length > 2) { __newAnchor.push(__oldAnchor[2]); }
+                if (__oldScale.length > 2) { __newScale.push(__oldScale[2]); }
+                __anchorProp.setValue(__newAnchor);
+                __scaleProp.setValue(__newScale);
+                __layer.moveToBeginning();
+              }
+            }
+            if (__fitFailure !== null) {
+              __result = JSON.stringify({ ok: false, failureReason: __fitFailure });
+            } else {
+              __result = JSON.stringify({ ok: true, previousValue: __previousSourceName, resultingValue: __newFootageItem.name });
+            }
           }
         }`;
 }

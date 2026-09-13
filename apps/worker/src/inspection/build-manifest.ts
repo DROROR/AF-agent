@@ -53,6 +53,7 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
 
   const unknownItems: TemplateManifest["unknownItems"] = [];
   const compositionById = new Map(facts.compositions.map((c) => [c.compositionId, c]));
+  const maskedCompositionIds = collectMaskedCompositionIds(facts.compositions, compositionById);
 
   const scenes: Scene[] = facts.compositions
     .filter((c) => !c.isNestedOnlyReferenced)
@@ -60,7 +61,11 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
       // The scene's OWN layers - unchanged behaviour, unchanged IDs, still a
       // prefix of the placeholder list, so nothing that already references a
       // top-level placeholder can shift.
-      const placeholders: Placeholder[] = composition.layers.map((layer) => {
+      // A disabled or guide layer never renders, so it is never a client slot
+      // (real Mixkit case: CONTROLS in Main_Comp is both). Filtering keeps
+      // every other top-level placeholder's ID unchanged - IDs hash the index.
+      const renderedLayers = composition.layers.filter((layer) => layer.enabled !== false && layer.guideLayer !== true);
+      const placeholders: Placeholder[] = renderedLayers.map((layer) => {
         const classification = classifyPlaceholder(layer);
         if (classification.placeholderType === "unknown") {
           unknownItems.push({
@@ -78,7 +83,7 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
         });
       });
 
-      placeholders.push(...collectNestedPlaceholders(composition, compositionById, unknownItems));
+      placeholders.push(...collectNestedPlaceholders(composition, compositionById, maskedCompositionIds, unknownItems));
 
       return {
         sceneId: deterministicId([composition.compositionId, String(originalOrderIndex)]),
@@ -142,11 +147,14 @@ type NestedLayerDecision =
  * those becomes an unknownItem: genuine uncertainty is reported, never
  * silently hidden.
  */
-function decideNestedLayer(layer: LayerFact): NestedLayerDecision {
-  if (layer.enabled === false) {
+function decideNestedLayer(layer: LayerFact, layersByIndex: ReadonlyMap<number, LayerFact>): NestedLayerDecision {
+  if (layer.enabled === false || layer.guideLayer === true || layer.trackMatte?.isTrackMatte === true) {
     return { kind: "structural" };
   }
   if (layer.layerKind === "ShapeLayer" || layer.layerKind === "CameraLayer" || layer.layerKind === "LightLayer") {
+    return { kind: "structural" };
+  }
+  if (isPreRenderedPass(layer, layersByIndex)) {
     return { kind: "structural" };
   }
   if (layer.solidFill?.isUniformSolidFill) {
@@ -165,6 +173,100 @@ function decideNestedLayer(layer: LayerFact): NestedLayerDecision {
     reason: `nested layer could not be confirmed as either structural or an editable placeholder: ${classification.evidence.reason}`
   };
 }
+
+/**
+ * A pre-rendered composite pass: video footage cut by a matte that is itself
+ * video footage. Real Mixkit evidence (2026-09-13 layer inventory): every
+ * `Smartphone_0X_Beauty_Pass.mov` use is exactly this - the phone body cut by
+ * `Smartphone_0X_Mask.mov`, and its screen glare (Screen blend, 40-50%) cut by
+ * `..._Placeholder_Mask.mov`. The matte and the media are frames of one
+ * render, so replacing the media breaks the composite; it is template
+ * hardware, not a client slot. A client video window cut by a drawn shape or
+ * solid mask is unaffected, because its matte is not video footage.
+ */
+function isPreRenderedPass(layer: LayerFact, layersByIndex: ReadonlyMap<number, LayerFact>): boolean {
+  if (layer.layerKind !== "AVLayer" || layer.footage?.hasVideo !== true || layer.trackMatte?.hasTrackMatte !== true) {
+    return false;
+  }
+  const matteIndex = layer.trackMatte.matteLayerIndex ?? layer.index - 1;
+  return layersByIndex.get(matteIndex)?.footage?.hasVideo === true;
+}
+
+/**
+ * Every composition shown through a track matte: the target of an enabled
+ * precomp-reference layer that is cut by a matte, plus everything nested
+ * below it. Computed over the whole graph up front, so a composition's status
+ * never depends on which path the scene walk happens to reach it by first.
+ */
+function collectMaskedCompositionIds(
+  compositions: readonly CompositionFact[],
+  compositionById: ReadonlyMap<string, CompositionFact>
+): Set<string> {
+  const masked = new Set<string>();
+  const pending: string[] = [];
+  for (const composition of compositions) {
+    for (const child of composition.precompChildren) {
+      if (child.enabled !== false && child.hasTrackMatte === true) {
+        pending.push(child.sourceCompositionId);
+      }
+    }
+  }
+  while (pending.length > 0) {
+    const compositionId = pending.pop() as string;
+    if (masked.has(compositionId)) {
+      continue;
+    }
+    masked.add(compositionId);
+    for (const child of compositionById.get(compositionId)?.precompChildren ?? []) {
+      if (child.enabled !== false) {
+        pending.push(child.sourceCompositionId);
+      }
+    }
+  }
+  return masked;
+}
+
+/**
+ * A "place image above" screen card: a composition shown through a matte
+ * whose rendered layers are only text and uniform solids. Real Mixkit
+ * evidence: `_Place_Image_Above_Mobile` ("PLACE YOUR IMAGE HERE" + a 1242x2688
+ * solid) and both `_Place Image Above_App Screen 0X` compositions ("APP
+ * SCREEN", "1"/"2" + the same solid). Such a composition has no client
+ * content of its own - its texts are guide labels and its solid is the card
+ * the client's image replaces - so it is ONE image slot, targeting the
+ * bottom-most solid. Requiring the matte keeps an ordinary title card (text
+ * over a background solid, not shown through a matte) a text slot.
+ */
+function findScreenCardSlot(composition: CompositionFact, maskedCompositionIds: ReadonlySet<string>): LayerFact | null {
+  if (!maskedCompositionIds.has(composition.compositionId)) {
+    return null;
+  }
+  // Filling a card raises the media to the top of its composition. Any matte
+  // wiring inside would be broken by that reorder, so such a composition is
+  // never treated as a card.
+  if (composition.layers.some((layer) => layer.trackMatte?.isTrackMatte === true || layer.trackMatte?.hasTrackMatte === true)) {
+    return null;
+  }
+  const rendered = composition.layers.filter(
+    (layer) => layer.enabled !== false && layer.guideLayer !== true && layer.trackMatte?.isTrackMatte !== true
+  );
+  const solids = rendered.filter((layer) => layer.solidFill?.isUniformSolidFill === true && layer.footage === null);
+  const onlyTextAndSolids = rendered.every((layer) => layer.layerKind === "TextLayer" || solids.includes(layer));
+  if (solids.length === 0 || !onlyTextAndSolids) {
+    return null;
+  }
+  return solids.reduce((bottom, candidate) => (candidate.index > bottom.index ? candidate : bottom));
+}
+
+const SCREEN_CARD_CLASSIFICATION: Classification = {
+  placeholderType: "image",
+  editable: true,
+  evidence: {
+    source: "inferred",
+    reason:
+      "composition is shown through a track matte and contains only text and uniform solid layers - its solid is the screen card a client image replaces, and its text layers are guide labels"
+  }
+};
 
 /**
  * Depth-first descent through a scene's precomp references, collecting the
@@ -221,6 +323,7 @@ function decideNestedLayer(layer: LayerFact): NestedLayerDecision {
 function collectNestedPlaceholders(
   scene: CompositionFact,
   compositionById: ReadonlyMap<string, CompositionFact>,
+  maskedCompositionIds: ReadonlySet<string>,
   unknownItems: TemplateManifest["unknownItems"]
 ): Placeholder[] {
   const placeholders: Placeholder[] = [];
@@ -247,6 +350,8 @@ function collectNestedPlaceholders(
       ...composition.layers.map((layer) => ({ index: layer.index, layer, child: null })),
       ...composition.precompChildren.map((child) => ({ index: child.layerIndex, layer: null, child }))
     ].sort((a, b) => a.index - b.index);
+    const layersByIndex = new Map(composition.layers.map((layer) => [layer.index, layer]));
+    const screenCard = findScreenCardSlot(composition, maskedCompositionIds);
 
     for (const entry of entries) {
       if (entry.child !== null) {
@@ -266,7 +371,12 @@ function collectNestedPlaceholders(
       }
       seenLayers.add(identity);
 
-      const decision = decideNestedLayer(layer);
+      const decision: NestedLayerDecision =
+        screenCard === null
+          ? decideNestedLayer(layer, layersByIndex)
+          : layer === screenCard
+            ? { kind: "surface", classification: SCREEN_CARD_CLASSIFICATION }
+            : { kind: "structural" };
       if (decision.kind === "structural") {
         continue;
       }

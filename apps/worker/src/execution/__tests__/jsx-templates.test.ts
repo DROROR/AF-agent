@@ -1384,6 +1384,82 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     expect(result.resultingValue).toBe("/real/dyo-logo.png");
   });
 
+  describe("screen card replacement (Mixkit 'place image above' slots: a 1242x2688 solid under guide labels)", () => {
+    const cardSetup = (options: { animatedScale?: boolean } = {}) => `
+      ${NESTED_FAKE_APP_SETUP}
+      function SolidSource() {}
+      var __moved = false;
+      var __anchorValue = [621, 1344, 0];
+      var __scaleValue = [100, 100, 100];
+      var __card = new AVLayer();
+      __card.index = 3;
+      __card.source = { name: "Placeholder", width: 1242, height: 2688, mainSource: new SolidSource() };
+      __card.replaceSource = function (newItem) { this.source = newItem; };
+      __card.moveToBeginning = function () { __moved = true; };
+      __card.property = function (name) {
+        if (name !== "ADBE Transform Group") { return null; }
+        return {
+          property: function (inner) {
+            if (inner === "ADBE Scale") { return { numKeys: ${options.animatedScale ? 2 : 0}, value: __scaleValue, setValue: function (v) { __scaleValue = v; } }; }
+            if (inner === "ADBE Anchor Point") { return { numKeys: 0, value: __anchorValue, setValue: function (v) { __anchorValue = v; } }; }
+            return null;
+          }
+        };
+      };
+      __logoLayersByIndex[3] = __card;
+      app.project.importFile = function (opts) { return { name: opts.file.fsName, width: 1080, height: 2340 }; };
+    `;
+    const cardOp: SceneEditOperation = {
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: [
+        { compositionId: "comp-1635", aeProjectItemIndex: 11, layerIndex: 4 },
+        { compositionId: "comp-1113", aeProjectItemIndex: 22, layerIndex: 3 }
+      ],
+      assetPath: "/real/app-screenshot.png"
+    };
+    // ExtendScript has no JSON.parse (only the stringify polyfill), so the
+    // step's own result travels back as a string and is parsed out here.
+    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue });";
+
+    function runProbed(op: SceneEditOperation, options: { animatedScale?: boolean } = {}) {
+      const script = buildOperationScript(999, "irrelevant", op);
+      // Reads the fake's state after the real script body ran, inside the same function.
+      const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
+      expect(probed).not.toBe(script);
+      const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, cardSetup(options)));
+      return { ...outcome, step: JSON.parse(outcome.step) };
+    }
+
+    const runCard = (options: { animatedScale?: boolean } = {}) => runProbed(cardOp, options);
+
+    it("scales the media to cover the card's own area, keeps the card's relative anchor, and raises it above the guide labels", () => {
+      const outcome = runCard();
+      expect(outcome.step).toEqual({ ok: true, previousValue: "Placeholder", resultingValue: "/real/app-screenshot.png" });
+      // cover = max(1242/1080, 2688/2340) = 1.15
+      expect(outcome.scale[0]).toBeCloseTo(115, 6);
+      expect(outcome.scale[1]).toBeCloseTo(115, 6);
+      expect(outcome.scale[2]).toBe(100);
+      expect(outcome.anchor).toEqual([540, 1170, 0]);
+      expect(outcome.moved).toBe(true);
+    });
+
+    it("refuses to guess a fit for a card with animated scale, and says so", () => {
+      const outcome = runCard({ animatedScale: true });
+      expect(outcome.step.ok).toBe(false);
+      expect(outcome.step.failureReason).toMatch(/animated scale or anchor/);
+      expect(outcome.moved).toBe(false);
+    });
+
+    it("leaves ordinary footage replacement untouched - no fit, no reordering", () => {
+      const outcome = runProbed({ ...cardOp, nestedTarget: [cardOp.nestedTarget![0]!, { ...cardOp.nestedTarget![1]!, layerIndex: 2 }] });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.moved).toBe(false);
+      expect(outcome.scale).toEqual([100, 100, 100]);
+    });
+  });
+
   it("multi-hop traversal: a 3-hop chain resolves through two intermediate precomp hops before reaching the final layer", () => {
     const threeHopSetup = `
       function CompItem() {}

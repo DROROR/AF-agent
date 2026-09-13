@@ -42,10 +42,23 @@ export interface LayerFact {
    * never assumed either way.
    */
   enabled: boolean | null;
+  /** AE's own track-matte wiring for this layer, from the project scan. Absent/null when the scan did not read it - never assumed. */
+  trackMatte?: TrackMatteFact | null;
+  /** AE's own `layer.guideLayer`: a guide layer never renders in output. Null/absent when unread. */
+  guideLayer?: boolean | null;
   /** Nesting context by composition name, outermost first - empty if directly in the top-level composition. */
   layerPath: readonly string[];
   startTimeSeconds: number;
   durationSeconds: number;
+}
+
+export interface TrackMatteFact {
+  /** This layer IS another layer's matte (it never renders itself). */
+  isTrackMatte: boolean | null;
+  /** This layer is cut by a matte. */
+  hasTrackMatte: boolean | null;
+  /** Index of the matte layer in the same composition; null on AE builds without `trackMatteLayer`, where the matte is the layer directly above. */
+  matteLayerIndex: number | null;
 }
 
 export interface CompositionFact {
@@ -96,6 +109,8 @@ export interface PrecompChildFact {
    * the scan has no entry: never assumed either way.
    */
   enabled: boolean | null;
+  /** Whether THIS precomp-reference layer is cut by a track matte - what makes its content a masked window (e.g. a phone screen). Null/absent when unread. */
+  hasTrackMatte?: boolean | null;
 }
 
 export interface MissingFootageFact {

@@ -10,6 +10,10 @@ export interface ScannedLayerFactInput {
     | undefined;
   /** AE's own layer.enabled from the project scan - see LayerFact.enabled. Optional: a scan from an older worker build may not carry it. */
   enabled?: boolean;
+  /** Layer-role facts from the same scan (only the ones classification uses). Absent on an older worker build's scan. */
+  detail?:
+    | { isTrackMatte: boolean | null; hasTrackMatte: boolean | null; trackMatteLayerIndex: number | null; guideLayer: boolean | null }
+    | undefined;
 }
 
 export interface BuildProjectFactsInput {
@@ -152,6 +156,14 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
               : null,
           solidFill: scannedFootage?.isSolid ? { isUniformSolidFill: true } : null,
           enabled: scanned?.enabled ?? null,
+          trackMatte: scanned?.detail
+            ? {
+                isTrackMatte: scanned.detail.isTrackMatte,
+                hasTrackMatte: scanned.detail.hasTrackMatte,
+                matteLayerIndex: scanned.detail.trackMatteLayerIndex
+              }
+            : null,
+          guideLayer: scanned?.detail?.guideLayer ?? null,
           layerPath: [],
           startTimeSeconds: layer.inPointSeconds,
           durationSeconds: Math.max(0, layer.outPointSeconds - layer.inPointSeconds)
@@ -178,7 +190,8 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
           layerIndex: entry.layerIndex,
           layerName: detail?.layers?.find((l) => l.index === entry.layerIndex)?.name ?? `layer ${entry.layerIndex}`,
           sourceCompositionId: entry.sourceCompositionId,
-          enabled: input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${entry.layerIndex}`)?.enabled ?? null
+          enabled: input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${entry.layerIndex}`)?.enabled ?? null,
+          hasTrackMatte: input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${entry.layerIndex}`)?.detail?.hasTrackMatte ?? null
         }))
         .sort((a, b) => a.layerIndex - b.layerIndex)
     };

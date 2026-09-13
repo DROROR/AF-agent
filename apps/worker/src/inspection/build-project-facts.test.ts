@@ -248,8 +248,8 @@ describe("buildProjectFacts - inputs for nested composition traversal (2026-09-1
     });
 
     expect(facts.compositions[0]!.precompChildren).toEqual([
-      { layerIndex: 3, layerName: "Smartphone_01", sourceCompositionId: "comp-s01", enabled: null },
-      { layerIndex: 4, layerName: "Smartphone_02", sourceCompositionId: "comp-s02", enabled: null }
+      { layerIndex: 3, layerName: "Smartphone_01", sourceCompositionId: "comp-s01", enabled: null, hasTrackMatte: null },
+      { layerIndex: 4, layerName: "Smartphone_02", sourceCompositionId: "comp-s02", enabled: null, hasTrackMatte: null }
     ]);
     // Still excluded from the composition's own placeholder candidates.
     expect(facts.compositions[0]!.layers.map((l) => l.name)).not.toContain("Smartphone_01");
@@ -309,6 +309,60 @@ describe("buildProjectFacts - inputs for nested composition traversal (2026-09-1
     });
 
     expect(facts.compositions[0]!.precompChildren.map((c) => c.enabled)).toEqual([false, null]);
+  });
+
+  it("carries the scan's track-matte and guide facts for layers and precomp references, and null when the scan did not read them", () => {
+    const detail = (overrides: Partial<NonNullable<ScannedLayerFact["detail"]>>): NonNullable<ScannedLayerFact["detail"]> => ({
+      isTrackMatte: null,
+      hasTrackMatte: null,
+      trackMatteType: null,
+      trackMatteLayerIndex: null,
+      guideLayer: null,
+      adjustmentLayer: null,
+      nullLayer: null,
+      shy: null,
+      threeDLayer: null,
+      blendingMode: null,
+      preserveTransparency: null,
+      parentLayerIndex: null,
+      sourceName: null,
+      sourceCompositionId: null,
+      inPointSeconds: null,
+      outPointSeconds: null,
+      opacityAtInPoint: null,
+      opacityKeyframeCount: null,
+      textPreview: null,
+      ...overrides
+    });
+    const mattedLayer: ScannedLayerFact = {
+      layerIndex: 1,
+      layerName: "Beauty_Pass.mov",
+      enabled: true,
+      kind: "AVLayer",
+      footage: null,
+      effects: [],
+      detail: detail({ hasTrackMatte: true, trackMatteType: "LUMA", trackMatteLayerIndex: 2, guideLayer: false })
+    };
+    const mattedPrecomp: ScannedLayerFact = { layerIndex: 3, layerName: "Placeholder_01", enabled: true, kind: "AVLayer", footage: null, effects: [], detail: detail({ hasTrackMatte: true }) };
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA],
+      details: [detailWithPrecomps],
+      precompFacts: [[{ layerIndex: 3, sourceCompositionId: "comp-s01" }, { layerIndex: 4, sourceCompositionId: "comp-s02" }]],
+      layerFactsByCompositionAndIndex: new Map([
+        ["comp-42:1", mattedLayer],
+        ["comp-42:3", mattedPrecomp]
+      ])
+    });
+
+    const layers = facts.compositions[0]!.layers;
+    expect(layers.find((l) => l.index === 1)).toMatchObject({ trackMatte: { isTrackMatte: null, hasTrackMatte: true, matteLayerIndex: 2 }, guideLayer: false });
+    expect(layers.find((l) => l.index === 5)).toMatchObject({ trackMatte: null, guideLayer: null });
+    expect(facts.compositions[0]!.precompChildren.map((c) => c.hasTrackMatte)).toEqual([true, null]);
   });
 });
 
