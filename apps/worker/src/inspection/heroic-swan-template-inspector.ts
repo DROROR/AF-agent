@@ -24,7 +24,7 @@ import {
 import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript } from "../execution/jsx-templates.js";
 import { prepareConversionCopy } from "./legacy-project-conversion.js";
 import { assessUnsavedProjectBlock } from "./assess-unsaved-project-block.js";
-import { parseProjectPreflightScan, type ParseProjectPreflightScanResult } from "./parse-project-preflight-scan.js";
+import { boundLayerInventory, parseProjectPreflightScan, type ParseProjectPreflightScanResult } from "./parse-project-preflight-scan.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
@@ -454,7 +454,8 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         kind: "manifest",
         response: { manifest, summary: computeInspectionSummary(manifest) },
         diagnostics: discovery,
-        projectOpenEvidence: openEvidence
+        projectOpenEvidence: openEvidence,
+        ...(preflightScan.ok ? { layerInventory: boundLayerInventory(preflightScan.evidence.layerInventory) } : {})
       };
       return result;
     } finally {

@@ -916,6 +916,10 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     const dependencyNote = result.response.manifest.unknownItems.find((item) => item.reason.includes("third-party effect"));
     expect(dependencyNote?.reason).toContain("VIDEOCOPILOT 3DArray");
     expect(dependencyNote?.reason).toContain("Comp A");
+    // The same scan's raw per-layer facts are persisted as evidence alongside the manifest.
+    expect(result.layerInventory?.omittedCompositionCount).toBe(0);
+    expect(result.layerInventory?.compositions.map((c) => c.compositionName)).toEqual(["Comp A"]);
+    expect(result.layerInventory?.compositions[0]?.layers[0]?.layerName).toBe("FX Layer");
   });
 
   it("real font/footage preflight (2026-09-11, same single scan): populates requiredFonts (deduped) and separates resolvable footage from AE's own footageMissing items", async () => {
@@ -967,6 +971,8 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
     const warning = result.response.manifest.unknownItems.find((item) => item.reason.includes("preflight scan did not complete"));
     expect(warning).toBeDefined();
     expect(warning?.reason).toContain("must not be read as proof this template is plugin-free");
+    // No scan, no inventory - never an empty one that could be read as "no layers".
+    expect(result.layerInventory).toBeUndefined();
   });
 
   it("a failed precomps-script call for one composition never blocks the manifest - that composition's own nesting facts simply stay false/[]", async () => {

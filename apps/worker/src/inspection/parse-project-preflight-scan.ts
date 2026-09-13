@@ -46,6 +46,38 @@ const footageFactSchema = z
   })
   .strict();
 
+/**
+ * Read-only layer-role facts (2026-09-13). Every field is null when this AE
+ * version or layer type does not expose it - null means "not readable",
+ * never "false". Enum-valued facts carry AE's own enum key name (e.g.
+ * TrackMatteType "ALPHA"), so no numeric enum value is ever interpreted here.
+ */
+const layerDetailSchema = z
+  .object({
+    isTrackMatte: z.boolean().nullable(),
+    hasTrackMatte: z.boolean().nullable(),
+    trackMatteType: z.string().nullable(),
+    trackMatteLayerIndex: z.number().nullable(),
+    guideLayer: z.boolean().nullable(),
+    adjustmentLayer: z.boolean().nullable(),
+    nullLayer: z.boolean().nullable(),
+    shy: z.boolean().nullable(),
+    threeDLayer: z.boolean().nullable(),
+    blendingMode: z.string().nullable(),
+    preserveTransparency: z.boolean().nullable(),
+    parentLayerIndex: z.number().nullable(),
+    sourceName: z.string().nullable(),
+    sourceCompositionId: z.number().nullable(),
+    inPointSeconds: z.number().nullable(),
+    outPointSeconds: z.number().nullable(),
+    opacityAtInPoint: z.number().nullable(),
+    opacityKeyframeCount: z.number().nullable(),
+    textPreview: z.string().nullable()
+  })
+  .strict();
+
+export type ScannedLayerDetail = z.infer<typeof layerDetailSchema>;
+
 const layerEffectsSchema = z
   .object({
     layerIndex: z.number(),
@@ -54,11 +86,21 @@ const layerEffectsSchema = z
     /** Real AE layer type. Absent on a response from an older worker build that only scanned effects. */
     kind: z.enum(["TextLayer", "ShapeLayer", "AVLayer", "CameraLayer", "LightLayer", "Unknown"]).optional(),
     footage: footageFactSchema.nullable().optional(),
-    effects: z.array(effectFactSchema)
+    effects: z.array(effectFactSchema),
+    /** Layer-role evidence. Absent on a response from an older worker build that did not read it. */
+    detail: layerDetailSchema.optional()
   })
   .strict();
 
 export type ScannedLayerFact = z.infer<typeof layerEffectsSchema>;
+
+/** One composition's complete, raw per-layer facts, in AE layer order - persisted as evidence, never classified here. */
+export interface ScannedCompositionInventory {
+  aeProjectItemIndex: number;
+  compositionId: number;
+  compositionName: string;
+  layers: ScannedLayerFact[];
+}
 
 const compositionEffectsSchema = z
   .object({
@@ -143,9 +185,47 @@ export interface ProjectPreflightEvidence {
    * same single scan that already walks every layer now supplies them.
    */
   layerFactsByCompositionAndIndex: Map<string, ScannedLayerFact>;
+  /**
+   * Every scanned composition's raw per-layer facts, in scan order - the
+   * persisted layer-by-layer evidence a human (or a later classification
+   * change) can check a placeholder decision against.
+   */
+  layerInventory: ScannedCompositionInventory[];
 }
 
 export type ParseProjectPreflightScanResult = { ok: true; evidence: ProjectPreflightEvidence } | { ok: false; reason: string };
+
+/**
+ * Byte budget for the layer inventory persisted with an INSPECT_TEMPLATE
+ * result. The worker's job-status report is capped at 1 MB end to end
+ * (nginx client_max_body_size on worker-api, Fastify's default bodyLimit);
+ * the largest real inspection result persisted so far is ~94 KB without an
+ * inventory, so 400 KB keeps a large template's report well inside the cap
+ * rather than letting evidence collection fail the inspection itself.
+ */
+export const MAX_LAYER_INVENTORY_BYTES = 400_000;
+
+export interface BoundedLayerInventory {
+  compositions: ScannedCompositionInventory[];
+  /** Compositions left out because the budget was reached - 0 means the inventory is complete. */
+  omittedCompositionCount: number;
+}
+
+/** Keeps whole compositions, in scan order, until the byte budget is reached - never a partial composition, never a silent cut. */
+export function boundLayerInventory(inventory: readonly ScannedCompositionInventory[], maxBytes = MAX_LAYER_INVENTORY_BYTES): BoundedLayerInventory {
+  const compositions: ScannedCompositionInventory[] = [];
+  let usedBytes = 2;
+  for (let i = 0; i < inventory.length; i++) {
+    const entry = inventory[i] as ScannedCompositionInventory;
+    const entryBytes = Buffer.byteLength(JSON.stringify(entry), "utf8") + 1;
+    if (usedBytes + entryBytes > maxBytes) {
+      return { compositions, omittedCompositionCount: inventory.length - i };
+    }
+    compositions.push(entry);
+    usedBytes += entryBytes;
+  }
+  return { compositions, omittedCompositionCount: 0 };
+}
 
 /**
  * Derives the manifest's real plugin evidence from one raw
@@ -204,6 +284,7 @@ export function parseProjectPreflightScan(value: unknown): ParseProjectPreflight
     ok: true,
     evidence: {
       layerFactsByCompositionAndIndex,
+      layerInventory: parsed.data.compositions,
       pluginReferences: [...pluginReferences].sort(),
       affectedCompositionNames: [...affectedCompositionNames].sort(),
       thirdPartyEffectInstanceCount,

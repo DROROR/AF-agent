@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isThirdPartyEffectMatchName, parseProjectPreflightScan } from "../parse-project-preflight-scan.js";
+import { boundLayerInventory, isThirdPartyEffectMatchName, parseProjectPreflightScan } from "../parse-project-preflight-scan.js";
 
 function layer(layerIndex: number, layerName: string, effects: { name: string; matchName: string; enabled: boolean }[]) {
   return { layerIndex, layerName, enabled: true, effects };
@@ -120,5 +120,75 @@ describe("parseProjectPreflightScan", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toMatch(/did not match the expected shape/);
+  });
+});
+
+const NULL_DETAIL = {
+  isTrackMatte: null,
+  hasTrackMatte: null,
+  trackMatteType: null,
+  trackMatteLayerIndex: null,
+  guideLayer: null,
+  adjustmentLayer: null,
+  nullLayer: null,
+  shy: null,
+  threeDLayer: null,
+  blendingMode: null,
+  preserveTransparency: null,
+  parentLayerIndex: null,
+  sourceName: null,
+  sourceCompositionId: null,
+  inPointSeconds: null,
+  outPointSeconds: null,
+  opacityAtInPoint: null,
+  opacityKeyframeCount: null,
+  textPreview: null
+};
+
+describe("parseProjectPreflightScan layer inventory", () => {
+  it("exposes every composition's raw layer facts, including layer-role detail, in scan order", () => {
+    const matte = { ...layer(1, "Mask", []), detail: { ...NULL_DETAIL, isTrackMatte: true, sourceName: "Smartphone_01_Placeholder_Mask_1.mov" } };
+    const result = parseProjectPreflightScan({
+      ok: true,
+      compositionCount: 2,
+      compositions: [composition(5, 40, "Smartphone_01", [matte]), composition(6, 50, "Screen", [layer(1, "Text", [])])]
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.evidence.layerInventory.map((c) => c.compositionName)).toEqual(["Smartphone_01", "Screen"]);
+    expect(result.evidence.layerInventory[0]?.layers[0]?.detail).toMatchObject({ isTrackMatte: true, sourceName: "Smartphone_01_Placeholder_Mask_1.mov" });
+    // A layer from an older worker build carries no detail at all - still accepted.
+    expect(result.evidence.layerInventory[1]?.layers[0]?.detail).toBeUndefined();
+  });
+
+  it("rejects an unrecognized detail field rather than silently dropping evidence", () => {
+    const withUnknownDetailField = { ...layer(1, "L", []), detail: { ...NULL_DETAIL, surprise: true } };
+    const result = parseProjectPreflightScan({
+      ok: true,
+      compositionCount: 1,
+      compositions: [composition(1, 1, "Main", [withUnknownDetailField])]
+    });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("boundLayerInventory", () => {
+  const inventory = [1, 2, 3].map((id) => ({ ...composition(id, id, `Comp ${id}`, [layer(1, "x".repeat(100), [])]) }));
+
+  it("keeps the whole inventory when it fits", () => {
+    expect(boundLayerInventory(inventory)).toEqual({ compositions: inventory, omittedCompositionCount: 0 });
+  });
+
+  it("keeps whole compositions in order and reports exactly how many were left out once the budget is reached", () => {
+    const oneEntryBytes = Buffer.byteLength(JSON.stringify(inventory[0]), "utf8") + 1;
+    const bounded = boundLayerInventory(inventory, 2 + oneEntryBytes * 2);
+    expect(bounded.compositions.map((c) => c.compositionId)).toEqual([1, 2]);
+    expect(bounded.omittedCompositionCount).toBe(1);
+  });
+
+  it("counts multi-byte text by its real UTF-8 size, not its character count", () => {
+    const hebrew = [composition(1, 1, "מבית DYO App".repeat(20), [])];
+    const characters = JSON.stringify(hebrew[0]).length + 3;
+    expect(boundLayerInventory(hebrew, characters).omittedCompositionCount).toBe(1);
   });
 });

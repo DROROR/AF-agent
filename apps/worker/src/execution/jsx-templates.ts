@@ -1770,8 +1770,46 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
  * script reports the raw matchName for every effect found and lets the
  * caller apply that judgment - it never itself asserts "plugin-free".
  */
+/** Bounds each text layer's reported preview, so the persisted layer inventory stays small on text-heavy templates. */
+const LAYER_TEXT_PREVIEW_MAX_LENGTH = 120;
+
+/** AE scripting's documented TrackMatteType keys. */
+const TRACK_MATTE_TYPE_KEYS = ["NO_TRACK_MATTE", "ALPHA", "ALPHA_INVERTED", "LUMA", "LUMA_INVERTED"] as const;
+
+/** AE scripting's documented BlendingMode keys, including AE's own "SILHOUETE_ALPHA" spelling. */
+const BLENDING_MODE_KEYS = [
+  "NORMAL", "DISSOLVE", "DANCING_DISSOLVE", "DARKEN", "MULTIPLY", "COLOR_BURN", "CLASSIC_COLOR_BURN", "LINEAR_BURN",
+  "DARKER_COLOR", "ADD", "LIGHTEN", "SCREEN", "COLOR_DODGE", "CLASSIC_COLOR_DODGE", "LINEAR_DODGE", "LIGHTER_COLOR",
+  "OVERLAY", "SOFT_LIGHT", "HARD_LIGHT", "LINEAR_LIGHT", "VIVID_LIGHT", "PIN_LIGHT", "HARD_MIX", "DIFFERENCE",
+  "CLASSIC_DIFFERENCE", "EXCLUSION", "SUBTRACT", "DIVIDE", "HUE", "SATURATION", "COLOR", "LUMINOSITY",
+  "STENCIL_ALPHA", "STENCIL_LUMA", "SILHOUETE_ALPHA", "SILHOUETTE_LUMA", "ALPHA_ADD", "LUMINESCENT_PREMUL"
+] as const;
+
 export function buildScanProjectPreflightScript(): FixedJsxScript {
-  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO SCAN_PROJECT_EFFECTS")});
+  const script = `${JSON_STRINGIFY_POLYFILL}function __readFact(read) {
+    try {
+      var __value = read();
+      return __value === undefined ? null : __value;
+    } catch (__readError) {
+      return null;
+    }
+  }
+  function __readBooleanFact(read) { var __value = __readFact(read); return typeof __value === "boolean" ? __value : null; }
+  function __readNumberFact(read) { var __value = __readFact(read); return typeof __value === "number" && isFinite(__value) ? __value : null; }
+  function __readStringFact(read) { var __value = __readFact(read); return typeof __value === "string" ? __value : null; }
+  function __enumLabel(enumObject, value, knownKeys) {
+    if (enumObject === null || enumObject === undefined) { return null; }
+    // AE's native enum objects are not guaranteed to have enumerable keys,
+    // so the documented key names are checked directly first.
+    for (var __knownIndex = 0; __knownIndex < knownKeys.length; __knownIndex++) {
+      if (enumObject[knownKeys[__knownIndex]] === value) { return knownKeys[__knownIndex]; }
+    }
+    for (var __key in enumObject) {
+      if (enumObject[__key] === value) { return __key; }
+    }
+    return null;
+  }
+  app.beginUndoGroup(${JSON.stringify("DYO SCAN_PROJECT_EFFECTS")});
   var __result = null;
   try {
     var __compositions = [];
@@ -1857,13 +1895,45 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
           } catch (__effectsError) {
             // No effects group on this layer type - never fails the rest of the scan.
           }
+          // Read-only layer-role evidence (2026-09-13): track-matte wiring,
+          // guide/adjustment/null flags and source identity are what decide
+          // whether a surfaced layer is a genuine client slot or a template
+          // mechanism (a matte, a pre-rendered hardware pass, a guide). Every
+          // fact is read independently and reported as null when this AE
+          // version or layer type does not expose it - never guessed.
+          var __detail = {
+            isTrackMatte: __readBooleanFact(function () { return __layer.isTrackMatte; }),
+            hasTrackMatte: __readBooleanFact(function () { return __layer.hasTrackMatte; }),
+            trackMatteType: __readFact(function () { return __enumLabel(TrackMatteType, __layer.trackMatteType, ${JSON.stringify(TRACK_MATTE_TYPE_KEYS)}); }),
+            trackMatteLayerIndex: __readNumberFact(function () { return __layer.trackMatteLayer ? __layer.trackMatteLayer.index : null; }),
+            guideLayer: __readBooleanFact(function () { return __layer.guideLayer; }),
+            adjustmentLayer: __readBooleanFact(function () { return __layer.adjustmentLayer; }),
+            nullLayer: __readBooleanFact(function () { return __layer.nullLayer; }),
+            shy: __readBooleanFact(function () { return __layer.shy; }),
+            threeDLayer: __readBooleanFact(function () { return __layer.threeDLayer; }),
+            blendingMode: __readFact(function () { return __enumLabel(BlendingMode, __layer.blendingMode, ${JSON.stringify(BLENDING_MODE_KEYS)}); }),
+            preserveTransparency: __readBooleanFact(function () { return __layer.preserveTransparency; }),
+            parentLayerIndex: __readNumberFact(function () { return __layer.parent ? __layer.parent.index : null; }),
+            sourceName: __readStringFact(function () { return __layer.source ? __layer.source.name : null; }),
+            sourceCompositionId: __readNumberFact(function () { return __layer.source && __layer.source instanceof CompItem ? __layer.source.id : null; }),
+            inPointSeconds: __readNumberFact(function () { return __layer.inPoint; }),
+            outPointSeconds: __readNumberFact(function () { return __layer.outPoint; }),
+            opacityAtInPoint: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Opacity").valueAtTime(__layer.inPoint, false); }),
+            opacityKeyframeCount: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Opacity").numKeys; }),
+            textPreview: __readStringFact(function () {
+              if (!(__layer instanceof TextLayer)) { return null; }
+              var __previewText = __layer.sourceText.value.text;
+              return typeof __previewText === "string" ? __previewText.substring(0, ${LAYER_TEXT_PREVIEW_MAX_LENGTH}) : null;
+            })
+          };
           __layers.push({
             layerIndex: __layer.index,
             layerName: __layer.name,
             enabled: __layer.enabled,
             kind: __kind,
             footage: __footageFact,
-            effects: __effects
+            effects: __effects,
+            detail: __detail
           });
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole scan.

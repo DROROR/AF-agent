@@ -1163,6 +1163,123 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     const script = buildScanProjectPreflightScript();
     expect(script).not.toMatch(/break;/);
   });
+
+  it("reports every layer-role fact as null (never false, never a failed scan) when this AE build or layer type does not expose it", () => {
+    const script = buildScanProjectPreflightScript();
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(script, PROJECT_SCAN_SETUP));
+    expect(result.ok).toBe(true);
+    const render = result.compositions.find((c: { compositionName: string }) => c.compositionName === "!Render");
+    const plain = render.layers.find((l: { layerName: string }) => l.layerName === "Plain Layer");
+    // No TrackMatteType/BlendingMode globals and no layer properties in this
+    // fixture - every fact is unreadable, so every fact is null.
+    expect(Object.values(plain.detail).every((value) => value === null)).toBe(true);
+    expect(Object.keys(plain.detail)).toHaveLength(19);
+    const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
+    expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
+  });
+
+  describe("layer-role evidence (2026-09-13 Mixkit classification questions: mattes, pre-rendered passes, guide texts)", () => {
+    const LAYER_ROLE_SETUP = `
+      function CompItem() {}
+      function AVLayer() {}
+      function TextLayer() {}
+      function ShapeLayer() {}
+      function CameraLayer() {}
+      function LightLayer() {}
+      function FootageItem() {}
+      function SolidSource() {}
+      // Non-enumerable, like a native AE enum may be - labels must still resolve.
+      var TrackMatteType = {};
+      Object.defineProperty(TrackMatteType, "ALPHA", { value: 5012, enumerable: false });
+      Object.defineProperty(TrackMatteType, "ALPHA_INVERTED", { value: 5013, enumerable: false });
+      Object.defineProperty(TrackMatteType, "LUMA", { value: 5014, enumerable: false });
+      Object.defineProperty(TrackMatteType, "LUMA_INVERTED", { value: 5015, enumerable: false });
+      Object.defineProperty(TrackMatteType, "NO_TRACK_MATTE", { value: 5016, enumerable: false });
+      var BlendingMode = { NORMAL: 5212, STENCIL_ALPHA: 5220 };
+
+      function withTransform(layer, opacity, numKeys) {
+        layer.property = function (name) {
+          if (name === "ADBE Transform Group") {
+            return { property: function (inner) { return inner === "ADBE Opacity" ? { numKeys: numKeys, valueAtTime: function () { return opacity; } } : null; } };
+          }
+          return null;
+        };
+        return layer;
+      }
+
+      var __screenComp = new CompItem();
+      __screenComp.id = 50; __screenComp.name = "_Place Image Above_1"; __screenComp.numLayers = 0;
+      __screenComp.layer = function () { return null; };
+
+      var __maskFootage = new FootageItem();
+      __maskFootage.name = "Smartphone_01_Placeholder_Mask_1.mov"; __maskFootage.hasVideo = true; __maskFootage.mainSource = {};
+
+      var __mask = withTransform(new AVLayer(), 100, 0);
+      __mask.index = 1; __mask.name = "Mask"; __mask.enabled = false; __mask.source = __maskFootage;
+      __mask.isTrackMatte = true; __mask.hasTrackMatte = false; __mask.trackMatteType = TrackMatteType.NO_TRACK_MATTE; __mask.trackMatteLayer = null;
+      __mask.guideLayer = false; __mask.adjustmentLayer = false; __mask.nullLayer = false; __mask.shy = false; __mask.threeDLayer = false;
+      __mask.blendingMode = BlendingMode.NORMAL; __mask.preserveTransparency = false; __mask.parent = null; __mask.inPoint = 0; __mask.outPoint = 4.5;
+
+      var __screen = withTransform(new AVLayer(), 100, 2);
+      __screen.index = 2; __screen.name = "_Place Image Above_1"; __screen.enabled = true; __screen.source = __screenComp;
+      __screen.isTrackMatte = false; __screen.hasTrackMatte = true; __screen.trackMatteType = TrackMatteType.LUMA; __screen.trackMatteLayer = __mask;
+      __screen.blendingMode = BlendingMode.NORMAL; __screen.parent = __mask; __screen.inPoint = 0.5; __screen.outPoint = 4.5;
+
+      var __guide = withTransform(new TextLayer(), 0, 0);
+      __guide.index = 3; __guide.name = "PLACE YOUR IMAGE HERE"; __guide.enabled = true; __guide.guideLayer = true;
+      __guide.sourceText = { value: { font: "Montserrat-Bold", text: "PLACE YOUR IMAGE HERE " + new Array(201).join("x") } };
+
+      var __unreadableMatte = withTransform(new AVLayer(), 100, 0);
+      __unreadableMatte.index = 4; __unreadableMatte.name = "Unreadable matte"; __unreadableMatte.enabled = true; __unreadableMatte.hasTrackMatte = true;
+      Object.defineProperty(__unreadableMatte, "trackMatteLayer", { get: function () { throw new Error("simulated older AE build"); } });
+
+      var __phoneComp = new CompItem();
+      __phoneComp.id = 40; __phoneComp.name = "Smartphone_01"; __phoneComp.numLayers = 4;
+      var __phoneLayers = { 1: __mask, 2: __screen, 3: __guide, 4: __unreadableMatte };
+      __phoneComp.layer = function (i) { return __phoneLayers[i]; };
+
+      var __items = { 1: __phoneComp, 2: __screenComp, 3: __maskFootage };
+      var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { numItems: 3, item: function (i) { return __items[i]; } } };
+    `;
+
+    function scanPhone() {
+      const result = JSON.parse(runFixedScriptWithoutNativeJson(buildScanProjectPreflightScript(), LAYER_ROLE_SETUP));
+      expect(result.ok).toBe(true);
+      return { result, phone: result.compositions.find((c: { compositionId: number }) => c.compositionId === 40) };
+    }
+
+    it("reports track-matte wiring from both sides - which layer IS a matte and which layer USES one, by AE enum key name and layer index", () => {
+      const { phone } = scanPhone();
+      expect(phone.layers[0].detail).toMatchObject({ isTrackMatte: true, hasTrackMatte: false, trackMatteType: "NO_TRACK_MATTE", trackMatteLayerIndex: null, sourceName: "Smartphone_01_Placeholder_Mask_1.mov", sourceCompositionId: null, opacityAtInPoint: 100, outPointSeconds: 4.5 });
+      expect(phone.layers[1].detail).toMatchObject({ isTrackMatte: false, hasTrackMatte: true, trackMatteType: "LUMA", trackMatteLayerIndex: 1, sourceName: "_Place Image Above_1", sourceCompositionId: 50, parentLayerIndex: 1, blendingMode: "NORMAL", opacityKeyframeCount: 2, inPointSeconds: 0.5 });
+    });
+
+    it("reports a guide text layer's guide flag, zero opacity and a bounded text preview", () => {
+      const { phone } = scanPhone();
+      const guide = phone.layers[2];
+      expect(guide.kind).toBe("TextLayer");
+      expect(guide.detail.guideLayer).toBe(true);
+      expect(guide.detail.opacityAtInPoint).toBe(0);
+      expect(guide.detail.textPreview).toHaveLength(120);
+      expect(guide.detail.textPreview.startsWith("PLACE YOUR IMAGE HERE ")).toBe(true);
+    });
+
+    it("keeps every other fact when a single fact throws on this AE build", () => {
+      const { phone } = scanPhone();
+      expect(phone.layers).toHaveLength(4);
+      expect(phone.layers[3].detail).toMatchObject({ hasTrackMatte: true, trackMatteLayerIndex: null, opacityAtInPoint: 100 });
+    });
+
+    it("emits exactly the shape the worker's strict scan parser accepts, and the parser exposes it as the layer inventory", async () => {
+      const { result } = scanPhone();
+      const { parseProjectPreflightScan } = await import("../../inspection/parse-project-preflight-scan.js");
+      const parsed = parseProjectPreflightScan(result);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.evidence.layerInventory.map((c) => c.compositionId)).toEqual([40, 50]);
+      expect(parsed.evidence.layerInventory[0]?.layers[1]?.detail?.trackMatteType).toBe("LUMA");
+    });
+  });
 });
 
 describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fix, 2026-09-08)", () => {

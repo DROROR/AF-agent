@@ -1,5 +1,6 @@
 import type { InspectTemplateRequest, InspectTemplateResponse } from "@dyo/schemas";
 import type { AllowedInspectionTool } from "./heroic-swan-mcp-client.js";
+import type { BoundedLayerInventory } from "./parse-project-preflight-scan.js";
 
 /**
  * Deterministic, read-only AE template inspection. Implementations must:
@@ -116,6 +117,15 @@ export interface ManifestInspectionResult {
   response: InspectTemplateResponse;
   diagnostics: RawToolCallCapture[];
   projectOpenEvidence: ProjectOpenEvidence;
+  /**
+   * Raw per-composition, per-layer facts from the single project-wide
+   * preflight scan (layer type, footage, track-matte wiring, guide/null
+   * flags, source identity). Evidence only - it never changes the
+   * manifest's own classification. Absent when that scan did not complete;
+   * byte-bounded (see boundLayerInventory) so it can never push the job
+   * report past the API's body limit.
+   */
+  layerInventory?: BoundedLayerInventory;
 }
 
 export type InspectTemplateResult = RawInspectionCapture | ManifestInspectionResult;
