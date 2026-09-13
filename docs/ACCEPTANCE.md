@@ -309,3 +309,26 @@ real project for this template (none exists yet).
   be reused), so it has no `created_by_user_id` and cannot be opened from the dashboard; the operator's own
   wizard run is required to create the project.
 
+## 2026-09-13 - New Project wizard locked by a cancelled inspection (fixed, `c0affa0`)
+
+Symptom (operator): FAHADNAKASH selected, Inspect Template disabled since the previous day, no job created.
+
+Root cause, reproduced from production data for the current account: the wizard restores its in-flight job from
+localStorage on every mount and cleared that draft only after a successful Create Project. The account's last
+wizard dispatch `df76c2be` was CANCELLED during QA triage, and re-inspecting was allowed only for no job or a
+FAILED job - so the restored CANCELLED job disabled the button permanently, with no message and no way to clear it.
+
+Fix: CANCELLED is retryable like FAILED ("Inspect again"), an explanation is shown (English/Hebrew), the stale draft
+is cleared once CANCELLED is known, and a remembered job returning 404 is forgotten. Reproduction test fed the exact
+production DTOs: 4/5 failing before, 6/6 passing after; existing wizard suite unchanged.
+
+The reported blank status badges were NOT reproduced: the exact production `/api/workers` response (via the real
+`toWorkerDto`, accepted by the deployed web schema) carries ONLINE for status/aeAvailability/mcpAvailability, and the
+wizard renders all three as "Online" from it. Not claimed as fixed.
+
+End-to-end proof after deploy:
+- Operator job `bafdd078-754d-4129-ac4a-0a39d5fdf800` created by the account at 10:21:07Z (button enabled, dispatch worked).
+- SUCCEEDED in 115s; validator ALL CHECKS PASS; 105/105 per-placeholder checks; 7 in-job heartbeats all green.
+- Cross-run determinism vs `7889a130`: 22/22 identical placeholderIds, 0 differences in composition, index, name,
+  type, layerPath or chain; source SHA-256 identical in both runs.
+
