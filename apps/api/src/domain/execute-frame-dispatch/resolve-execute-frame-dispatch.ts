@@ -255,6 +255,92 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   }
   const manifestScene = currentProjectManifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
 
+  // CROSS-SCENE SHARED LAYERS (code review findings, 2026-09-13). A layer
+  // inside a precomp used by several scenes is ONE layer in the working copy,
+  // and inspection lists it under every scene that reaches it (so no chosen
+  // scene is ever left without a placeholder for its own visible content).
+  // The hazard is two INCLUDED scenes writing DIFFERENT values to it: both
+  // pass every per-scene check, and whichever executes last silently
+  // overwrites the other's approved content. That is refused here, before
+  // anything runs. The same value in both, an unset value, or an excluded
+  // scene is not a conflict - the edit genuinely applies wherever the precomp
+  // appears.
+  type WriteTarget = { key: string; compositionId: string; layerIndex: number };
+  const resolveWriteTarget = (mapping: (typeof scene.mappings)[number], owner: typeof scene): WriteTarget | null => {
+    if (mapping.manifestPlaceholderId !== null) {
+      const ownerManifestScene = currentProjectManifest.scenes.find((s) => s.compositionId === owner.manifestCompositionId);
+      const target = ownerManifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId);
+      return target
+        ? { key: `${target.compositionId} ${target.layerIndex}`, compositionId: target.compositionId, layerIndex: target.layerIndex }
+        : null;
+    }
+    const lastHop = mapping.humanNestedTarget?.at(-1);
+    if (lastHop) {
+      return { key: `${lastHop.compositionId} ${lastHop.layerIndex}`, compositionId: lastHop.compositionId, layerIndex: lastHop.layerIndex };
+    }
+    if (mapping.humanLayerIndex !== null) {
+      return {
+        key: `${owner.manifestCompositionId} ${mapping.humanLayerIndex}`,
+        compositionId: owner.manifestCompositionId,
+        layerIndex: mapping.humanLayerIndex
+      };
+    }
+    return null;
+  };
+  const resolveWrittenValue = (mapping: (typeof scene.mappings)[number]): string | null => {
+    const classification = mapping.placeholderClassification.value;
+    if (classification === "text" && mapping.text !== null) {
+      return `text ${JSON.stringify(mapping.text)}`;
+    }
+    if ((ASSET_CLASSIFICATIONS as readonly string[]).includes(classification ?? "") && mapping.selectedAssetId !== null) {
+      return `asset ${mapping.selectedAssetId}`;
+    }
+    return null;
+  };
+  const writesByOtherIncludedScenes = new Map<string, { value: string; compositionName: string }[]>();
+  for (const other of currentPlan.scenePlans) {
+    if (other.id === scene.id || !other.use) {
+      continue;
+    }
+    for (const otherMapping of other.mappings) {
+      const target = resolveWriteTarget(otherMapping, other);
+      const value = resolveWrittenValue(otherMapping);
+      if (target === null || value === null) {
+        continue;
+      }
+      const writes = writesByOtherIncludedScenes.get(target.key) ?? [];
+      writes.push({ value, compositionName: other.compositionName });
+      writesByOtherIncludedScenes.set(target.key, writes);
+    }
+  }
+  // The same hazard INSIDE the scene being dispatched (code review finding,
+  // 2026-09-13): a manifest mapping to a nested placeholder and a human-added
+  // mapping whose humanNestedTarget names that same layer would otherwise
+  // produce two SET_TEXT/MAP_FOOTAGE operations on one layer, last one wins.
+  const ownWrites = new Map<string, string>();
+  for (const ownMapping of scene.mappings) {
+    const target = resolveWriteTarget(ownMapping, scene);
+    const value = resolveWrittenValue(ownMapping);
+    if (target === null || value === null) {
+      continue;
+    }
+    const earlierOwnValue = ownWrites.get(target.key);
+    if (earlierOwnValue !== undefined && earlierOwnValue !== value) {
+      return {
+        ok: false,
+        reason: `Scene "${scene.compositionName}" has two mappings that set different content on the same After Effects layer (composition "${target.compositionId}" layer ${target.layerIndex}) - one would silently overwrite the other. Remove or align the duplicate mapping before dispatching.`
+      };
+    }
+    ownWrites.set(target.key, value);
+    const conflict = writesByOtherIncludedScenes.get(target.key)?.find((write) => write.value !== value);
+    if (conflict) {
+      return {
+        ok: false,
+        reason: `Scene "${scene.compositionName}" and scene "${conflict.compositionName}" set different content on the same shared After Effects layer (composition "${target.compositionId}" layer ${target.layerIndex}). That layer lives in a precomp both scenes use, so it is one layer in the working copy - whichever scene ran last would silently overwrite the other's approved content. Make the two scenes agree, or clear one of them, before dispatching.`
+      };
+    }
+  }
+
   const assetsById = new Map(projectAssets.map((asset) => [asset.id, asset]));
   const operations: SceneEditOperationIntent[] = [];
   const approvedMappingIds: string[] = [];
@@ -340,12 +426,68 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     const freezeAtSeconds = mapping.freezeAtSeconds ?? null;
     const layerDurationSeconds = mapping.layerDurationSeconds ?? null;
 
+    // NESTED MANIFEST PLACEHOLDERS (2026-09-13). Inspection now surfaces
+    // editable layers found INSIDE precomps. Such a placeholder's layerIndex
+    // is an index within ITS OWN composition, not the scene's - so treating
+    // it as a same-composition edit (as every manifest-linked operation here
+    // used to, with `nestedTarget: null`) would silently edit whatever layer
+    // happens to sit at that index in the scene's top composition. On the
+    // template this was built for, that is a CONTROLS solid.
+    //
+    // Two independent guarantees:
+    //  1. A placeholder whose composition is not the scene's own MUST carry
+    //     a verified chain, or dispatch refuses. This is the backstop for a
+    //     manifest that lost `nestedTarget` - e.g. stripped by an older API,
+    //     since the manifest schema does not reject unknown keys.
+    //  2. The chain is re-verified against the CURRENT manifest's composition
+    //     graph with the exact same check a human nested target gets.
+    const placeholderNestedTarget = placeholder.nestedTarget ?? null;
+    const livesInSceneComposition = placeholder.compositionId === scene.manifestCompositionId;
+    if (placeholderNestedTarget === null && !livesInSceneComposition) {
+      return {
+        ok: false,
+        reason: `Mapping "${mapping.id}" targets placeholder "${placeholder.placeholderId}" in composition "${placeholder.compositionId}", which is not this scene's own composition "${scene.manifestCompositionId}", and the manifest carries no nested target path for it - refusing to dispatch rather than edit layer ${placeholder.layerIndex} of the wrong composition`
+      };
+    }
+    let manifestNestedTarget: ResolvedNestedTargetStep[] | null = null;
+    if (placeholderNestedTarget !== null) {
+      const finalStep = placeholderNestedTarget[placeholderNestedTarget.length - 1];
+      if (
+        livesInSceneComposition ||
+        !finalStep ||
+        finalStep.compositionId !== placeholder.compositionId ||
+        finalStep.layerIndex !== placeholder.layerIndex
+      ) {
+        return {
+          ok: false,
+          reason: `Mapping "${mapping.id}" targets placeholder "${placeholder.placeholderId}" whose nested target path does not end at its own composition "${placeholder.compositionId}" layer ${placeholder.layerIndex} - an internally inconsistent manifest entry, refusing to guess which layer is meant`
+        };
+      }
+      const resolved = resolveHumanNestedTarget(placeholderNestedTarget, currentProjectManifest, scene.manifestCompositionId);
+      if (!resolved.ok) {
+        return { ok: false, reason: `Mapping "${mapping.id}"'s manifest nested target is no longer valid: ${resolved.reason}` };
+      }
+      manifestNestedTarget = resolved.resolved;
+      if (layerVisible !== null || freezeAtSeconds !== null || layerDurationSeconds !== null) {
+        return {
+          ok: false,
+          reason: `Mapping "${mapping.id}" targets a layer inside a nested composition ("${placeholder.compositionId}" layer ${placeholder.layerIndex}), but SET_LAYER_VISIBILITY / SET_TIME_REMAP_FREEZE / SET_DURATION can only target a layer in the scene's own composition today - refusing rather than applying it to layer ${placeholder.layerIndex} of "${scene.manifestCompositionId}"`
+        };
+      }
+    }
+
     const classification = mapping.placeholderClassification.value;
     if (classification === "text") {
       if (mapping.text === null) {
         return { ok: false, reason: `Mapping "${mapping.id}" is classified as text but has no text set` };
       }
-      operations.push({ type: "SET_TEXT", manifestPlaceholderId: mapping.manifestPlaceholderId, layerIndex: placeholder.layerIndex, nestedTarget: null, text: mapping.text });
+      operations.push({
+        type: "SET_TEXT",
+        manifestPlaceholderId: mapping.manifestPlaceholderId,
+        layerIndex: manifestNestedTarget === null ? placeholder.layerIndex : null,
+        nestedTarget: manifestNestedTarget,
+        text: mapping.text
+      });
       approvedMappingIds.push(mapping.id);
     } else if ((ASSET_CLASSIFICATIONS as readonly string[]).includes(classification ?? "")) {
       if (mapping.selectedAssetId === null) {
@@ -358,14 +500,24 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       operations.push({
         type: "MAP_FOOTAGE",
         manifestPlaceholderId: mapping.manifestPlaceholderId,
-        layerIndex: placeholder.layerIndex,
-        nestedTarget: null,
+        layerIndex: manifestNestedTarget === null ? placeholder.layerIndex : null,
+        nestedTarget: manifestNestedTarget,
         assetId: asset.id,
         expectedSha256: asset.sha256,
         mimeType: asset.mimeType
       });
       approvedMappingIds.push(mapping.id);
     } else if (classification === "color") {
+      // Nested color placeholders are never emitted by inspection (see
+      // build-manifest.ts decideNestedLayer), but this path must not trust
+      // that: SET_BRAND_COLOR has no nested form, so recoloring "layer N"
+      // here would hit the scene's own layer N.
+      if (manifestNestedTarget !== null) {
+        return {
+          ok: false,
+          reason: `Mapping "${mapping.id}" is a color placeholder inside a nested composition ("${placeholder.compositionId}" layer ${placeholder.layerIndex}), but SET_BRAND_COLOR can only target a layer in the scene's own composition today - refusing rather than recoloring layer ${placeholder.layerIndex} of "${scene.manifestCompositionId}"`
+        };
+      }
       // SET_BRAND_COLOR - only supported target: a placeholder explicitly
       // classified "color" (operation-resolution phase, section A). The
       // canonical #RRGGBB value itself was already normalized at edit time

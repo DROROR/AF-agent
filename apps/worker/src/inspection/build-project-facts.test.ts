@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildProjectFacts } from "./build-project-facts.js";
 import type { CompositionDetail, CompositionSummary } from "./parse-mcp-shapes.js";
+import type { ScannedLayerFact } from "./parse-project-preflight-scan.js";
 
 const summaryA: CompositionSummary = {
   index: 3,
@@ -217,3 +218,97 @@ describe("buildProjectFacts", () => {
     expect(facts.pluginReferences).toEqual([]);
   });
 });
+
+describe("buildProjectFacts - inputs for nested composition traversal (2026-09-13)", () => {
+  const detailWithPrecomps: CompositionDetail = {
+    ...detailA,
+    numLayers: 5,
+    layers: [
+      ...(detailA.layers ?? []),
+      { index: 3, name: "Smartphone_01", inPointSeconds: 0, outPointSeconds: 5, nullLayer: false },
+      { index: 4, name: "Smartphone_02", inPointSeconds: 0, outPointSeconds: 5, nullLayer: false },
+      { index: 5, name: "Unscanned Layer", inPointSeconds: 0, outPointSeconds: 5, nullLayer: false }
+    ]
+  };
+
+  it("PRESERVES precomp-reference edges as precompChildren - named by the parent's own layer, in layer-index order", () => {
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA],
+      details: [detailWithPrecomps],
+      // Deliberately supplied out of order.
+      precompFacts: [[
+        { layerIndex: 4, sourceCompositionId: "comp-s02" },
+        { layerIndex: 3, sourceCompositionId: "comp-s01" }
+      ]]
+    });
+
+    expect(facts.compositions[0]!.precompChildren).toEqual([
+      { layerIndex: 3, layerName: "Smartphone_01", sourceCompositionId: "comp-s01", enabled: null },
+      { layerIndex: 4, layerName: "Smartphone_02", sourceCompositionId: "comp-s02", enabled: null }
+    ]);
+    // Still excluded from the composition's own placeholder candidates.
+    expect(facts.compositions[0]!.layers.map((l) => l.name)).not.toContain("Smartphone_01");
+  });
+
+  it("gives a composition with no precomp evidence an empty edge list rather than inventing one", () => {
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA],
+      details: [detailA]
+    });
+    expect(facts.compositions[0]!.precompChildren).toEqual([]);
+  });
+
+  it("carries AE's own layer.enabled from the project scan, and null - never a guess - when the scan has no entry", () => {
+    const scanned: ScannedLayerFact = {
+      layerIndex: 1,
+      layerName: "Text Layer",
+      enabled: false,
+      kind: "TextLayer",
+      footage: null,
+      effects: []
+    };
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA],
+      details: [detailWithPrecomps],
+      precompFacts: [[{ layerIndex: 3, sourceCompositionId: "comp-s01" }, { layerIndex: 4, sourceCompositionId: "comp-s02" }]],
+      layerFactsByCompositionAndIndex: new Map([["comp-42:1", scanned]])
+    });
+
+    const layers = facts.compositions[0]!.layers;
+    expect(layers.find((l) => l.index === 1)!.enabled).toBe(false);
+    expect(layers.find((l) => l.index === 5)!.enabled).toBeNull();
+  });
+
+  it("carries the precomp-reference layer's OWN enabled flag, so a hidden precomp is never descended into", () => {
+    const hiddenPrecomp: ScannedLayerFact = { layerIndex: 3, layerName: "Smartphone_01", enabled: false, kind: "AVLayer", footage: null, effects: [] };
+    const facts = buildProjectFacts({
+      templateId: "tmpl-1",
+      sourceProjectPath: "/copies/test.aep",
+      sourceProjectName: "test.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [summaryA],
+      details: [detailWithPrecomps],
+      precompFacts: [[{ layerIndex: 3, sourceCompositionId: "comp-s01" }, { layerIndex: 4, sourceCompositionId: "comp-s02" }]],
+      layerFactsByCompositionAndIndex: new Map([["comp-42:3", hiddenPrecomp]])
+    });
+
+    expect(facts.compositions[0]!.precompChildren.map((c) => c.enabled)).toEqual([false, null]);
+  });
+});
+

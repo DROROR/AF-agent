@@ -42,6 +42,33 @@ export const dimensionsSchema = z.object({
   height: z.number().positive()
 });
 
+/**
+ * (Defined here rather than in execution-plan.ts - which imports FROM this
+ * module - so a manifest Placeholder can carry the same step shape without
+ * a circular import. execution-plan.ts uses this exact schema.)
+ *
+ * One step of a deterministic nested AE target path (live QA brand-rule
+ * blocker fix, 2026-09-08 correction: the real logo layer for the exact
+ * project this fix was built for lives 4 compositions deep - !Render >
+ * Scene 1 > Pre-comp 3 > App Emblem > App Logo > layer 1 - never
+ * reachable by a single same-composition layerIndex). `compositionId` is
+ * a real, manifest-verified composition (apply-execution-plan-edit.ts
+ * checks every step's compositionId actually exists AND is a real child -
+ * via manifest evidence, compositions[].parentCompositionIds, never a
+ * name guess - of the PREVIOUS step's compositionId, or of the owning
+ * scene's own manifestCompositionId for the first step). `layerIndex` is
+ * the real AE layer within THAT composition: for every step except the
+ * last, the layer that IS the nested-composition reference to descend
+ * through next; for the last step, the real target content layer itself.
+ */
+export const nestedTargetStepSchema = z
+  .object({
+    compositionId: z.string().min(1),
+    layerIndex: z.number().int().nonnegative()
+  })
+  .strict();
+export type NestedTargetStep = z.infer<typeof nestedTargetStepSchema>;
+
 export const placeholderSchema = z.object({
   /** Stable, independent of any human display label - CLAUDE.md "Required Data Model". */
   placeholderId: z.string().min(1),
@@ -53,6 +80,25 @@ export const placeholderSchema = z.object({
   layerIndex: z.number().int().nonnegative(),
   /** Nesting context by composition, outermost first - e.g. ["Main Comp", "Phone Mockup"] for a layer inside a precomp inside a precomp. Empty = directly in the composition named by compositionId. */
   layerPath: z.array(z.string()),
+  /**
+   * The machine-usable counterpart to `layerPath` (2026-09-13). `layerPath`
+   * holds composition NAMES for humans; execution cannot address a layer by
+   * name. When this placeholder's layer lives inside a nested composition
+   * (so `compositionId` is that nested composition, not the scene's own),
+   * this is the exact verified chain resolve-execute-frame-dispatch.ts turns
+   * into a real nested edit - identical semantics to a mapping's
+   * humanNestedTarget (see nestedTargetStepSchema above): it never includes
+   * the scene's own composition, and its last step is always
+   * `{ compositionId, layerIndex }` of this placeholder itself.
+   *
+   * Null/absent means the layer sits directly in the scene's own
+   * composition. Optional so every manifest persisted before this field
+   * existed still parses - and dispatch independently refuses any
+   * placeholder whose compositionId is not the scene's own but which carries
+   * no chain, so a manifest that lost this field (e.g. stripped by an older
+   * API) fails closed instead of editing the wrong layer.
+   */
+  nestedTarget: z.array(nestedTargetStepSchema).min(1).nullable().optional(),
   placeholderType: placeholderTypeSchema,
   editable: z.boolean(),
   /** Raw AE layer type (e.g. "TextLayer", "AVLayer") - a machine fact, not a classification. */

@@ -34,6 +34,14 @@ export interface LayerFact {
   footage: FootageFact | null;
   /** Set only when the layer is a solid/shape with a single uniform fill and no other source. */
   solidFill: SolidFillFact | null;
+  /**
+   * AE's own `layer.enabled` (the visibility switch), from the project-wide
+   * preflight scan. A disabled layer never renders, so it can never be a
+   * real placeholder in the output - it is typically a designer's guide or
+   * reference layer. Null when the scan produced no entry for this layer:
+   * never assumed either way.
+   */
+  enabled: boolean | null;
   /** Nesting context by composition name, outermost first - empty if directly in the top-level composition. */
   layerPath: readonly string[];
   startTimeSeconds: number;
@@ -54,6 +62,40 @@ export interface CompositionFact {
   parentCompositionIds: readonly string[];
   /** In original AE layer order - never re-sorted. */
   layers: readonly LayerFact[];
+  /**
+   * This composition's own precomp-reference layers: the real, AE-confirmed
+   * edges of the composition graph, in AE layer order.
+   *
+   * These layers are deliberately NOT in `layers` above - a precomp
+   * reference wraps other content and is never itself an editable
+   * placeholder. But the edge itself is what makes that content reachable,
+   * and discarding it (as this previously did) is exactly why a template
+   * whose editable content lives inside precomps produced a manifest with
+   * almost nothing in it (real 2026-09-12 result on the Mixkit template:
+   * 21 compositions, ~96 layers, 1 placeholder). build-manifest.ts walks
+   * these to surface nested placeholders with a real layerPath.
+   */
+  precompChildren: readonly PrecompChildFact[];
+}
+
+/** One precomp-reference layer: which layer it is, and which composition it pulls in. */
+export interface PrecompChildFact {
+  /** AE's own layer.index within the PARENT composition. */
+  layerIndex: number;
+  /** The parent's own layer name for this reference - the human-meaningful hop name. */
+  layerName: string;
+  /** compositionId of the child composition this layer references. */
+  sourceCompositionId: string;
+  /**
+   * AE's own `layer.enabled` for THIS precomp-reference layer, from the
+   * project-wide scan. A disabled precomp layer never renders, so nothing
+   * inside it can be a real placeholder in the output - build-manifest.ts
+   * never descends through one (code review finding, 2026-09-13: without
+   * this, a designer's hidden guide precomp surfaced its text/image layers as
+   * approvable placeholders whose edits change nothing visible). Null when
+   * the scan has no entry: never assumed either way.
+   */
+  enabled: boolean | null;
 }
 
 export interface MissingFootageFact {

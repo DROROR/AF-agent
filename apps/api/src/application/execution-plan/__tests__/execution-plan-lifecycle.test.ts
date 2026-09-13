@@ -493,3 +493,95 @@ describe("execution plan lifecycle", () => {
     ).rejects.toThrow(AssetNotFoundError);
   });
 });
+
+/**
+ * Code review finding (2026-09-13): the edit-time refusal for nested manifest
+ * placeholders existed in apply-execution-plan-edit.ts but never ran in
+ * production, because updateExecutionPlan only loaded the manifest for a
+ * nested ADD_MAPPING. These go through the REAL updateExecutionPlan with a
+ * projectRepository wired - exactly as routes/projects.ts calls it.
+ */
+describe("updateExecutionPlan - nested manifest placeholders refused at edit time, through the full stack", () => {
+  function nestedManifest(): TemplateManifest {
+    const base = manifest();
+    return {
+      ...base,
+      compositions: [
+        ...base.compositions,
+        { compositionId: "comp-inner", aeProjectItemIndex: 2, name: "Inner", widthPx: 1242, heightPx: 2648, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+      ],
+      scenes: [
+        {
+          ...base.scenes[0]!,
+          placeholders: [
+            ...base.scenes[0]!.placeholders,
+            {
+              placeholderId: "ph-nested",
+              displayLabel: null,
+              compositionId: "comp-inner",
+              layerName: "Screen Title",
+              layerIndex: 2,
+              layerPath: ["Inner"],
+              nestedTarget: [{ compositionId: "comp-inner", layerIndex: 2 }],
+              placeholderType: "text",
+              editable: true,
+              sourceType: "TextLayer",
+              dimensions: null,
+              startTimeSeconds: 0,
+              durationSeconds: 5,
+              evidence: { source: "read_directly", reason: "TextLayer inside a precomp" }
+            }
+          ]
+        }
+      ]
+    };
+  }
+
+  async function planWithNestedPlaceholder() {
+    const env = await setup(nestedManifest());
+    const initial = await createExecutionPlan(
+      { projectRepository: env.projectRepository, executionPlanRepository: env.executionPlanRepository, now: fixedNow },
+      env.project.projectId
+    );
+    const scene = initial.plan.scenePlans[0]!;
+    const mappingFor = (placeholderId: string) => scene.mappings.find((m) => m.manifestPlaceholderId === placeholderId)!.id;
+    return { ...env, sceneId: scene.id, nestedMappingId: mappingFor("ph-nested"), topLevelMappingId: mappingFor("ph-1") };
+  }
+
+  it.each([
+    ["SET_LAYER_VISIBILITY", (sceneId: string, mappingId: string) => ({ type: "SET_LAYER_VISIBILITY" as const, scenePlanId: sceneId, mappingId, enabled: false })],
+    ["SET_TIME_REMAP_FREEZE", (sceneId: string, mappingId: string) => ({ type: "SET_TIME_REMAP_FREEZE" as const, scenePlanId: sceneId, mappingId, freezeAtSeconds: 1.5 })]
+  ])("REFUSES %s on a placeholder inside a precomp, and persists nothing", async (label, operationFor) => {
+    const { projectRepository, executionPlanRepository, assetRepository, project, sceneId, nestedMappingId } = await planWithNestedPlaceholder();
+
+    await expect(
+      updateExecutionPlan({ executionPlanRepository, assetRepository, projectRepository, now: fixedNow }, project.projectId, {
+        baseRevision: 1,
+        operations: [operationFor(sceneId, nestedMappingId)]
+      })
+    ).rejects.toThrow(new RegExp(`${label} can only target a layer in the scene's own composition`));
+
+    const current = await getExecutionPlan({ executionPlanRepository }, project.projectId);
+    expect(current.plan.revision).toBe(1);
+  });
+
+  it("still ACCEPTS the same edit on a top-level placeholder with the repository wired", async () => {
+    const { projectRepository, executionPlanRepository, assetRepository, project, sceneId, topLevelMappingId } = await planWithNestedPlaceholder();
+
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, projectRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_LAYER_VISIBILITY", scenePlanId: sceneId, mappingId: topLevelMappingId, enabled: false }]
+    });
+    expect(updated.plan.revision).toBe(2);
+  });
+
+  it("keeps the pre-existing behaviour when no repository is wired - dispatch still refuses independently", async () => {
+    const { executionPlanRepository, assetRepository, project, sceneId, nestedMappingId } = await planWithNestedPlaceholder();
+
+    const updated = await updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, {
+      baseRevision: 1,
+      operations: [{ type: "SET_LAYER_VISIBILITY", scenePlanId: sceneId, mappingId: nestedMappingId, enabled: false }]
+    });
+    expect(updated.plan.revision).toBe(2);
+  });
+});

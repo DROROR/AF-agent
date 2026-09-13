@@ -288,7 +288,23 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
   }
   const manifestScene = currentProjectManifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
 
-  const layerIndices = [...new Set((manifestScene?.placeholders ?? []).map((placeholder) => placeholder.layerIndex))]
+  // Only placeholders that live DIRECTLY in the scene's own composition
+  // (code review finding, 2026-09-13). This request reads layerIndices
+  // inside `manifestCompositionId` below; a nested placeholder's layerIndex
+  // is an index within its own precomp, so including it would read - and
+  // report as evidence - whatever layer sits at that index in the scene's
+  // top composition (on the Mixkit template, the CONTROLS solid), and would
+  // also crowd real top-level layers out of the
+  // MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST cap. Keyed on compositionId, not
+  // only on nestedTarget, so a manifest whose chain was stripped is still
+  // excluded correctly.
+  const layerIndices = [
+    ...new Set(
+      (manifestScene?.placeholders ?? [])
+        .filter((placeholder) => placeholder.compositionId === scene.manifestCompositionId && !placeholder.nestedTarget)
+        .map((placeholder) => placeholder.layerIndex)
+    )
+  ]
     .sort((a, b) => a - b)
     .slice(0, MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST);
 

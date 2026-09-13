@@ -9,6 +9,7 @@ function layer(overrides: Partial<LayerFact>): LayerFact {
     layerKind: "Unknown",
     footage: null,
     solidFill: null,
+    enabled: null,
     layerPath: [],
     startTimeSeconds: 0,
     durationSeconds: 5,
@@ -28,6 +29,7 @@ function composition(overrides: Partial<CompositionFact>): CompositionFact {
     isNestedOnlyReferenced: false,
     parentCompositionIds: [],
     layers: [],
+    precompChildren: [],
     ...overrides
   };
 }

@@ -49,15 +49,30 @@ export async function updateExecutionPlan(
     }
   }
 
-  // Only fetched when actually needed (an ADD_MAPPING with a
-  // humanNestedTarget - real-composition-chain verification) - every
-  // other edit never touches the project/manifest at all.
-  const needsManifest = request.operations.some((operation) => operation.type === "ADD_MAPPING" && operation.humanNestedTarget != null);
+  // The manifest is REQUIRED for an ADD_MAPPING with a humanNestedTarget
+  // (real-composition-chain verification). It is also consulted - whenever a
+  // project repository is wired - for the four edits that have no nested
+  // form, so an edit to a placeholder that lives inside a precomp is refused
+  // the moment the operator makes it, rather than only at dispatch after the
+  // plan has already been approved (code review finding, 2026-09-13: those
+  // edit-time checks in apply-execution-plan-edit.ts previously never ran in
+  // production, because this was the only place a manifest was loaded and it
+  // only did so for the nested ADD_MAPPING case). Dispatch still refuses
+  // independently, so a caller with no repository loses only the early
+  // refusal, never correctness.
+  const nestedSensitiveEditTypes: ReadonlySet<string> = new Set([
+    "SET_BRAND_COLOR",
+    "SET_LAYER_VISIBILITY",
+    "SET_TIME_REMAP_FREEZE",
+    "SET_LAYER_DURATION"
+  ]);
+  const requiresManifest = request.operations.some((operation) => operation.type === "ADD_MAPPING" && operation.humanNestedTarget != null);
+  const benefitsFromManifest = request.operations.some((operation) => nestedSensitiveEditTypes.has(operation.type));
+  if (requiresManifest && !deps.projectRepository) {
+    throw new Error("ADD_MAPPING with humanNestedTarget requires UpdateExecutionPlanDeps.projectRepository, which was not supplied");
+  }
   let currentManifest;
-  if (needsManifest) {
-    if (!deps.projectRepository) {
-      throw new Error("ADD_MAPPING with humanNestedTarget requires UpdateExecutionPlanDeps.projectRepository, which was not supplied");
-    }
+  if ((requiresManifest || benefitsFromManifest) && deps.projectRepository) {
     const project = await deps.projectRepository.findById(projectId);
     if (!project) {
       throw new ProjectNotFoundError(projectId);

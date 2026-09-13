@@ -767,3 +767,61 @@ describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverComposition
     expect(result.ok).toBe(false);
   });
 });
+
+/**
+ * Code review finding (2026-09-13). This request reads `layerIndices` inside
+ * the SCENE's own composition. A nested manifest placeholder's layerIndex is
+ * an index within its own precomp, so including it would read - and report
+ * as evidence - whatever layer sits at that index in the scene's top
+ * composition, and crowd real top-level layers out of the request cap.
+ */
+describe("resolveInspectSceneEvidenceDispatch - nested manifest placeholders", () => {
+  const nested = (overrides: Record<string, unknown>) => ({
+    placeholderId: "ph-nested",
+    displayLabel: null,
+    compositionId: "comp-inner",
+    layerName: "Nested Image",
+    layerIndex: 2,
+    layerPath: ["Inner"],
+    nestedTarget: [{ compositionId: "comp-inner", layerIndex: 2 }],
+    placeholderType: "image" as const,
+    editable: true,
+    sourceType: "AVLayer",
+    dimensions: null,
+    startTimeSeconds: 0,
+    durationSeconds: 5,
+    evidence: { source: "read_directly" as const, reason: "fixture" },
+    ...overrides
+  });
+
+  function withExtraPlaceholders(extra: ReturnType<typeof nested>[]): TemplateManifest {
+    const base = validManifest();
+    return validManifest({
+      compositions: [
+        ...base.compositions,
+        { compositionId: "comp-inner", aeProjectItemIndex: 8, name: "Inner", widthPx: 1242, heightPx: 2648, durationSeconds: 5, frameRate: 25, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+      ],
+      scenes: [{ ...base.scenes[0]!, placeholders: [...base.scenes[0]!.placeholders, ...extra] as never }]
+    });
+  }
+
+  const indicesFor = (manifest: TemplateManifest) => {
+    const result = resolveInspectSceneEvidenceDispatch({ scenePlanId: "scene-1", currentPlan: validPlan(), currentProjectManifest: manifest });
+    if (!result.ok) throw new Error(`expected ok, got: ${result.reason}`);
+    return result.payload.layerIndices;
+  };
+
+  it("never adds a nested placeholder's layerIndex to the scene composition's own layer request", () => {
+    // Index 2 is deliberately one the scene's own placeholders do NOT use, so
+    // leaking it would change the request visibly.
+    const baseline = indicesFor(validManifest());
+    expect(baseline).not.toContain(2);
+
+    expect(indicesFor(withExtraPlaceholders([nested({})]))).toEqual(baseline);
+  });
+
+  it("also excludes a foreign-composition placeholder whose chain was STRIPPED - keyed on compositionId, not only nestedTarget", () => {
+    const baseline = indicesFor(validManifest());
+    expect(indicesFor(withExtraPlaceholders([nested({ nestedTarget: undefined })]))).toEqual(baseline);
+  });
+});

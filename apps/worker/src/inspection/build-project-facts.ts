@@ -8,6 +8,8 @@ export interface ScannedLayerFactInput {
     | { hasVideo: boolean; hasAudio: boolean; isStill: boolean; isMissing: boolean; isSolid: boolean; widthPx: number | null; heightPx: number | null }
     | null
     | undefined;
+  /** AE's own layer.enabled from the project scan - see LayerFact.enabled. Optional: a scan from an older worker build may not carry it. */
+  enabled?: boolean;
 }
 
 export interface BuildProjectFactsInput {
@@ -149,6 +151,7 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
                 }
               : null,
           solidFill: scannedFootage?.isSolid ? { isUniformSolidFill: true } : null,
+          enabled: scanned?.enabled ?? null,
           layerPath: [],
           startTimeSeconds: layer.inPointSeconds,
           durationSeconds: Math.max(0, layer.outPointSeconds - layer.inPointSeconds)
@@ -165,7 +168,19 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
       frameRate: detail?.frameRate ?? summary.frameRate,
       isNestedOnlyReferenced: false,
       parentCompositionIds: [],
-      layers
+      layers,
+      // The graph edges, preserved rather than discarded - see
+      // CompositionFact.precompChildren for why. Layer names come from this
+      // composition's own detail, so a hop is named by what the DESIGNER
+      // called the layer, not by the child composition's name.
+      precompChildren: (input.precompFacts?.[i] ?? [])
+        .map((entry) => ({
+          layerIndex: entry.layerIndex,
+          layerName: detail?.layers?.find((l) => l.index === entry.layerIndex)?.name ?? `layer ${entry.layerIndex}`,
+          sourceCompositionId: entry.sourceCompositionId,
+          enabled: input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${entry.layerIndex}`)?.enabled ?? null
+        }))
+        .sort((a, b) => a.layerIndex - b.layerIndex)
     };
   });
 

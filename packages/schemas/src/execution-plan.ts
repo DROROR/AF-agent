@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { placeholderTypeSchema } from "./template-manifest.js";
+import { nestedTargetStepSchema, placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
 
 /**
@@ -52,28 +52,6 @@ export const provenanceSchema = z.object({
 });
 export type Provenance = z.infer<typeof provenanceSchema>;
 
-/**
- * One step of a deterministic nested AE target path (live QA brand-rule
- * blocker fix, 2026-09-08 correction: the real logo layer for the exact
- * project this fix was built for lives 4 compositions deep - !Render >
- * Scene 1 > Pre-comp 3 > App Emblem > App Logo > layer 1 - never
- * reachable by a single same-composition layerIndex). `compositionId` is
- * a real, manifest-verified composition (apply-execution-plan-edit.ts
- * checks every step's compositionId actually exists AND is a real child -
- * via manifest evidence, compositions[].parentCompositionIds, never a
- * name guess - of the PREVIOUS step's compositionId, or of the owning
- * scene's own manifestCompositionId for the first step). `layerIndex` is
- * the real AE layer within THAT composition: for every step except the
- * last, the layer that IS the nested-composition reference to descend
- * through next; for the last step, the real target content layer itself.
- */
-export const nestedTargetStepSchema = z
-  .object({
-    compositionId: z.string().min(1),
-    layerIndex: z.number().int().nonnegative()
-  })
-  .strict();
-export type NestedTargetStep = z.infer<typeof nestedTargetStepSchema>;
 
 /**
  * Zero-to-many per scene (PlaceholderMapping) - a scene with no manifest-

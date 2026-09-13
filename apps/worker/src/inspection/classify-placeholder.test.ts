@@ -9,6 +9,7 @@ function baseLayer(overrides: Partial<LayerFact> = {}): LayerFact {
     layerKind: "Unknown",
     footage: null,
     solidFill: null,
+    enabled: null,
     layerPath: [],
     startTimeSeconds: 0,
     durationSeconds: 5,

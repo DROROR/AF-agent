@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
-import { nestedTargetStepSchema } from "./execution-plan.js";
+import { nestedTargetStepSchema } from "./template-manifest.js";
 
 /**
  * Strict, allowlisted execution-plan edit operations - deliberately never

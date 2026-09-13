@@ -1093,3 +1093,308 @@ describe("resolveExecuteFrameDispatch - buildHorizontalCompositionOnly (Landscap
     expect(result.payload.approvedMappingIds).toHaveLength(0);
   });
 });
+
+/**
+ * Nested manifest placeholders (2026-09-13). Inspection now surfaces editable
+ * layers found INSIDE precomps. Their layerIndex is an index within their OWN
+ * composition, so dispatching one as a same-composition edit - which every
+ * manifest-linked operation used to do, with nestedTarget: null - would
+ * silently edit whatever layer sits at that index in the scene's top
+ * composition. These pin the fix: nested text/footage dispatch through the
+ * verified chain, and everything that cannot, fails closed.
+ */
+describe("resolveExecuteFrameDispatch - nested manifest placeholders", () => {
+  const nestedPlaceholder = (overrides: Record<string, unknown>) => ({
+    placeholderId: "ph-nested",
+    displayLabel: null,
+    compositionId: "comp-grand",
+    layerName: "Nested Title",
+    layerIndex: 2,
+    layerPath: ["Child", "Grand"],
+    nestedTarget: [
+      { compositionId: "comp-child", layerIndex: 4 },
+      { compositionId: "comp-grand", layerIndex: 2 }
+    ],
+    placeholderType: "text" as const,
+    editable: true,
+    sourceType: "TextLayer",
+    dimensions: null,
+    startTimeSeconds: 0,
+    durationSeconds: 5,
+    evidence: { source: "read_directly" as const, reason: "fixture" },
+    ...overrides
+  });
+
+  function nestedManifest(placeholders: ReturnType<typeof nestedPlaceholder>[], grandParents: string[] = ["comp-child"]): TemplateManifest {
+    const base = validManifest();
+    return validManifest({
+      compositions: [
+        ...base.compositions,
+        { compositionId: "comp-child", aeProjectItemIndex: 7, name: "Child", widthPx: 1242, heightPx: 2648, durationSeconds: 5, frameRate: 25, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] },
+        { compositionId: "comp-grand", aeProjectItemIndex: 9, name: "Grand", widthPx: 1242, heightPx: 2648, durationSeconds: 5, frameRate: 25, isNestedOnlyReferenced: true, parentCompositionIds: grandParents }
+      ],
+      scenes: [{ ...base.scenes[0]!, placeholders: [...base.scenes[0]!.placeholders, ...placeholders] as never }]
+    });
+  }
+
+  function dispatchWith(manifest: TemplateManifest, mappings: PlaceholderMapping[]) {
+    return resolveExecuteFrameDispatch(
+      baseInput({ currentProjectManifest: manifest, currentPlan: validPlan({ scenePlans: [validScene({ mappings })] }) })
+    );
+  }
+
+  it("dispatches a nested TEXT placeholder through its verified chain - layerIndex null, every hop's aeProjectItemIndex freshly resolved", () => {
+    const result = dispatchWith(nestedManifest([nestedPlaceholder({})]), [textMapping({ id: "m-nested", manifestPlaceholderId: "ph-nested", text: "Nested headline" })]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([
+      {
+        type: "SET_TEXT",
+        manifestPlaceholderId: "ph-nested",
+        layerIndex: null,
+        nestedTarget: [
+          { compositionId: "comp-child", aeProjectItemIndex: 7, layerIndex: 4 },
+          { compositionId: "comp-grand", aeProjectItemIndex: 9, layerIndex: 2 }
+        ],
+        text: "Nested headline"
+      }
+    ]);
+  });
+
+  it("dispatches a nested IMAGE placeholder as MAP_FOOTAGE through its chain", () => {
+    const image = nestedPlaceholder({
+      placeholderId: "ph-nested-image",
+      compositionId: "comp-child",
+      layerName: "screen.png",
+      layerIndex: 3,
+      layerPath: ["Child"],
+      nestedTarget: [{ compositionId: "comp-child", layerIndex: 3 }],
+      placeholderType: "image",
+      sourceType: "AVLayer"
+    });
+    const result = dispatchWith(nestedManifest([image]), [imageMapping({ id: "m-img", manifestPlaceholderId: "ph-nested-image" })]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations[0]).toMatchObject({
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: "ph-nested-image",
+      layerIndex: null,
+      nestedTarget: [{ compositionId: "comp-child", aeProjectItemIndex: 7, layerIndex: 3 }],
+      assetId: ASSET_ID
+    });
+  });
+
+  it("leaves a top-level placeholder exactly as before when nested ones exist alongside it", () => {
+    const result = dispatchWith(nestedManifest([nestedPlaceholder({})]), [textMapping()]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" }]);
+  });
+
+  // The backstop. The manifest schema does not reject unknown keys, so an
+  // older API can persist a nested placeholder with its chain STRIPPED. That
+  // must fail closed - never be treated as "layer 2 of the scene".
+  it("REFUSES a placeholder from another composition that carries no chain, instead of editing the scene's own layer at that index", () => {
+    const stripped = nestedPlaceholder({ nestedTarget: undefined });
+    const result = dispatchWith(nestedManifest([stripped]), [textMapping({ id: "m-stripped", manifestPlaceholderId: "ph-nested", text: "x" })]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/not this scene's own composition/);
+  });
+
+  it("REFUSES a chain whose last step is not the placeholder's own layer - an inconsistent manifest entry", () => {
+    const inconsistent = nestedPlaceholder({
+      nestedTarget: [
+        { compositionId: "comp-child", layerIndex: 4 },
+        { compositionId: "comp-grand", layerIndex: 99 }
+      ]
+    });
+    const result = dispatchWith(nestedManifest([inconsistent]), [textMapping({ id: "m-bad", manifestPlaceholderId: "ph-nested", text: "x" })]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/internally inconsistent/);
+  });
+
+  it("REFUSES a chain that no longer matches the CURRENT manifest's composition graph", () => {
+    const result = dispatchWith(nestedManifest([nestedPlaceholder({})], []), [textMapping({ id: "m-stale", manifestPlaceholderId: "ph-nested", text: "x" })]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/no longer valid/);
+  });
+
+  it("REFUSES SET_BRAND_COLOR on a nested color placeholder rather than recoloring the scene's own layer", () => {
+    const color = nestedPlaceholder({ placeholderType: "color", sourceType: "AVLayer" });
+    const result = dispatchWith(nestedManifest([color]), [
+      textMapping({
+        id: "m-color",
+        manifestPlaceholderId: "ph-nested",
+        text: null,
+        colorHex: "#112233",
+        placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] }
+      })
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/SET_BRAND_COLOR can only target/);
+  });
+
+  it("REFUSES a visibility/freeze/duration override on a nested placeholder - those operations have no nested form", () => {
+    const result = dispatchWith(nestedManifest([nestedPlaceholder({})]), [
+      textMapping({ id: "m-vis", manifestPlaceholderId: "ph-nested", text: "x", layerVisible: false })
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/SET_LAYER_VISIBILITY \/ SET_TIME_REMAP_FREEZE \/ SET_DURATION/);
+  });
+});
+
+/**
+ * Cross-scene shared layers (code review findings, 2026-09-13). A precomp used
+ * by two scenes is ONE layer in the working copy; inspection lists it under
+ * both scenes, so dispatch must refuse two INCLUDED scenes writing different
+ * values to it - otherwise the later scene silently overwrites the earlier
+ * one's approved content.
+ */
+describe("resolveExecuteFrameDispatch - conflicting writes to a layer shared across scenes", () => {
+  const sharedPlaceholder = (placeholderId: string) => ({
+    placeholderId,
+    displayLabel: null,
+    compositionId: "comp-shared",
+    layerName: "Logo Text",
+    layerIndex: 1,
+    layerPath: ["Shared"],
+    nestedTarget: [{ compositionId: "comp-shared", layerIndex: 1 }],
+    placeholderType: "text" as const,
+    editable: true,
+    sourceType: "TextLayer",
+    dimensions: null,
+    startTimeSeconds: 0,
+    durationSeconds: 5,
+    evidence: { source: "read_directly" as const, reason: "fixture" }
+  });
+
+  function twoSceneManifest(): TemplateManifest {
+    const base = validManifest();
+    return validManifest({
+      compositions: [
+        ...base.compositions,
+        { compositionId: "comp-2", aeProjectItemIndex: 6, name: "Scene 02", widthPx: 1080, heightPx: 1920, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+        { compositionId: "comp-shared", aeProjectItemIndex: 7, name: "Shared", widthPx: 500, heightPx: 500, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1", "comp-2"] }
+      ],
+      scenes: [
+        { ...base.scenes[0]!, placeholders: [...base.scenes[0]!.placeholders, sharedPlaceholder("ph-shared-s1")] as never },
+        { sceneId: "scene-b", displayName: null, compositionId: "comp-2", originalOrderIndex: 1, startTimeSeconds: 0, durationSeconds: 5, placeholders: [sharedPlaceholder("ph-shared-s2")] as never }
+      ]
+    });
+  }
+
+  function dispatchSceneOneWith(otherText: string | null, otherUse = true) {
+    const sceneOne = validScene({ mappings: [textMapping({ id: "m-s1", manifestPlaceholderId: "ph-shared-s1", text: "Brand A" })] });
+    const sceneTwo = validScene({
+      id: "scene-2",
+      manifestCompositionId: "comp-2",
+      compositionName: "Scene 02",
+      sourcePosition: 1,
+      finalOrder: 1,
+      use: otherUse,
+      mappings: [textMapping({ id: "m-s2", manifestPlaceholderId: "ph-shared-s2", text: otherText })]
+    });
+    return resolveExecuteFrameDispatch(
+      baseInput({ currentProjectManifest: twoSceneManifest(), currentPlan: validPlan({ scenePlans: [sceneOne, sceneTwo] }) })
+    );
+  }
+
+  it("REFUSES when another included scene writes DIFFERENT text to the same shared layer", () => {
+    const result = dispatchSceneOneWith("Brand B");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('"Scene 01"');
+    expect(result.reason).toContain('"Scene 02"');
+    expect(result.reason).toMatch(/composition "comp-shared" layer 1/);
+    expect(result.reason).toMatch(/silently overwrite/);
+  });
+
+  it("allows the SAME text in both scenes - the edit genuinely applies wherever the precomp appears", () => {
+    const result = dispatchSceneOneWith("Brand A");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations[0]).toMatchObject({ type: "SET_TEXT", layerIndex: null, text: "Brand A" });
+  });
+
+  it("allows it when the other scene leaves that layer unset", () => {
+    expect(dispatchSceneOneWith(null).ok).toBe(true);
+  });
+
+  it("allows it when the other scene is EXCLUDED from the output (use=false)", () => {
+    expect(dispatchSceneOneWith("Brand B", false).ok).toBe(true);
+  });
+});
+
+describe("resolveExecuteFrameDispatch - conflicting writes to one layer WITHIN a scene", () => {
+  const nestedTextPlaceholder = {
+    placeholderId: "ph-nested",
+    displayLabel: null,
+    compositionId: "comp-grand",
+    layerName: "Nested Title",
+    layerIndex: 2,
+    layerPath: ["Child", "Grand"],
+    nestedTarget: [
+      { compositionId: "comp-child", layerIndex: 4 },
+      { compositionId: "comp-grand", layerIndex: 2 }
+    ],
+    placeholderType: "text" as const,
+    editable: true,
+    sourceType: "TextLayer",
+    dimensions: null,
+    startTimeSeconds: 0,
+    durationSeconds: 5,
+    evidence: { source: "read_directly" as const, reason: "fixture" }
+  };
+
+  function manifest(): TemplateManifest {
+    const base = validManifest();
+    return validManifest({
+      compositions: [
+        ...base.compositions,
+        { compositionId: "comp-child", aeProjectItemIndex: 7, name: "Child", widthPx: 1242, heightPx: 2648, durationSeconds: 5, frameRate: 25, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] },
+        { compositionId: "comp-grand", aeProjectItemIndex: 9, name: "Grand", widthPx: 1242, heightPx: 2648, durationSeconds: 5, frameRate: 25, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-child"] }
+      ],
+      scenes: [{ ...base.scenes[0]!, placeholders: [...base.scenes[0]!.placeholders, nestedTextPlaceholder] as never }]
+    });
+  }
+
+  const humanSameLayer = (text: string) =>
+    textMapping({
+      id: "m-human",
+      manifestPlaceholderId: null,
+      mappingSource: "HUMAN",
+      humanNestedTarget: [
+        { compositionId: "comp-child", layerIndex: 4 },
+        { compositionId: "comp-grand", layerIndex: 2 }
+      ],
+      text
+    });
+
+  const dispatch = (mappings: PlaceholderMapping[]) =>
+    resolveExecuteFrameDispatch(baseInput({ currentProjectManifest: manifest(), currentPlan: validPlan({ scenePlans: [validScene({ mappings })] }) }));
+
+  it("REFUSES a manifest nested mapping and a human-added mapping that write DIFFERENT text to the same layer", () => {
+    const result = dispatch([textMapping({ id: "m-manifest", manifestPlaceholderId: "ph-nested", text: "From manifest" }), humanSameLayer("From human")]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/two mappings that set different content on the same After Effects layer/);
+    expect(result.reason).toMatch(/composition "comp-grand" layer 2/);
+  });
+
+  it("allows two mappings writing the SAME text to that layer - identical, not conflicting", () => {
+    const result = dispatch([textMapping({ id: "m-manifest", manifestPlaceholderId: "ph-nested", text: "Same" }), humanSameLayer("Same")]);
+    expect(result.ok).toBe(true);
+  });
+});

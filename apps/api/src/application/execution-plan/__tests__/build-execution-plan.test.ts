@@ -202,3 +202,50 @@ describe("buildScenePlans", () => {
     expect(scenePlans.every((s) => s.finalDuration === null)).toBe(true);
   });
 });
+
+describe("buildScenePlans - nested placeholder names (2026-09-13)", () => {
+  const placeholder = (overrides: Record<string, unknown>) => ({
+    placeholderId: "ph-root",
+    displayLabel: null,
+    compositionId: "comp-detailed",
+    layerName: "Layer 1",
+    layerIndex: 1,
+    layerPath: [] as string[],
+    nestedTarget: null,
+    placeholderType: "text" as const,
+    editable: true,
+    sourceType: "TextLayer",
+    dimensions: null,
+    startTimeSeconds: 0,
+    durationSeconds: 5,
+    evidence: { source: "read_directly" as const, reason: "fixture" },
+    ...overrides
+  });
+
+  // placeholderName feeds exact-name asset matching and name-based structural
+  // classification, so it must stay the raw layer name even when the layer
+  // lives inside a precomp (code review finding, 2026-09-13).
+  it("keeps the RAW layer name for a mapping to a layer inside a precomp - never folds the composition path into it", () => {
+    const base = syntheticManifest();
+    const manifest = syntheticManifest({
+      scenes: [
+        {
+          ...base.scenes[0]!,
+          placeholders: [
+            placeholder({}),
+            placeholder({
+              placeholderId: "ph-nested",
+              compositionId: "comp-nested",
+              layerName: "Screen",
+              layerPath: ["Nested Precomp"],
+              nestedTarget: [{ compositionId: "comp-nested", layerIndex: 1 }]
+            })
+          ] as never
+        }
+      ]
+    });
+
+    const plan = buildScenePlans(manifest, fixedNow).find((s) => s.manifestCompositionId === "comp-detailed")!;
+    expect(plan.mappings.map((m) => m.placeholderName)).toEqual(["Layer 1", "Screen"]);
+  });
+});

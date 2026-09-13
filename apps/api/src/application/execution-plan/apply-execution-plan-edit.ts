@@ -169,6 +169,16 @@ function applyExecutionPlanEditRaw(
       // target lives in the owning scene's own composition, a nested
       // target's LAST step is verified above to be a real descendant of
       // it, never that same composition itself).
+      //
+      // That reasoning covers HUMAN mappings only. Since 2026-09-13
+      // inspection also surfaces MANIFEST placeholders inside precomps, so a
+      // human-added mapping can name the same layer as a manifest mapping.
+      // That pairing is deliberately not refused here: the manifest mapping
+      // is usually still unset, and the text-layer discovery flow
+      // legitimately adds a human mapping for exactly such a layer. What
+      // must never happen - two mappings writing DIFFERENT content to one
+      // layer, the later silently overwriting the earlier - is refused at
+      // dispatch by resolve-execute-frame-dispatch.ts.
       const duplicateTarget = scene.mappings.some((m) => {
         if (hasDirect) {
           return m.humanLayerIndex === humanLayerIndex;
@@ -299,6 +309,10 @@ function applyExecutionPlanEditRaw(
           reason: `Mapping "${operation.mappingId}" is not classified as "color" - SET_BRAND_COLOR only applies to color-classified placeholders`
         };
       }
+      const nestedColorRefusal = refuseNestedManifestTarget(currentManifest, scene, target.manifestPlaceholderId, "SET_BRAND_COLOR");
+      if (nestedColorRefusal) {
+        return nestedColorRefusal;
+      }
       const result = updateMapping(scene, operation.mappingId, (m) => ({
         ...m,
         colorHex: normalizeColorHex(operation.colorHex),
@@ -325,6 +339,10 @@ function applyExecutionPlanEditRaw(
           reason: `Mapping "${operation.mappingId}" has no manifestPlaceholderId - it cannot be addressed to any real AE layer, so SET_LAYER_VISIBILITY has no exact canonical layer identity to target`
         };
       }
+      const nestedRefusal = refuseNestedManifestTarget(currentManifest, scene, target.manifestPlaceholderId, "SET_LAYER_VISIBILITY");
+      if (nestedRefusal) {
+        return nestedRefusal;
+      }
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, layerVisible: operation.enabled, updatedAt: timestamp }));
       if (!result.ok) return result;
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
@@ -347,6 +365,10 @@ function applyExecutionPlanEditRaw(
           reason: `Mapping "${operation.mappingId}" has no manifestPlaceholderId - it cannot be addressed to any real AE layer, so SET_TIME_REMAP_FREEZE has no exact canonical layer identity to target`
         };
       }
+      const nestedRefusal = refuseNestedManifestTarget(currentManifest, scene, target.manifestPlaceholderId, "SET_TIME_REMAP_FREEZE");
+      if (nestedRefusal) {
+        return nestedRefusal;
+      }
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, freezeAtSeconds: operation.freezeAtSeconds, updatedAt: timestamp }));
       if (!result.ok) return result;
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
@@ -368,6 +390,10 @@ function applyExecutionPlanEditRaw(
           ok: false,
           reason: `Mapping "${operation.mappingId}" has no manifestPlaceholderId - it cannot be addressed to any real AE layer, so SET_LAYER_DURATION has no exact canonical layer identity to target`
         };
+      }
+      const nestedRefusal = refuseNestedManifestTarget(currentManifest, scene, target.manifestPlaceholderId, "SET_LAYER_DURATION");
+      if (nestedRefusal) {
+        return nestedRefusal;
       }
       const result = updateMapping(scene, operation.mappingId, (m) => ({
         ...m,
@@ -472,4 +498,42 @@ export function applyExecutionPlanEdit(
     return result;
   }
   return { ok: true, scenePlans: replaceScene(result.scenePlans, sceneIndex, recomputed) };
+}
+
+/**
+ * Refuses, at EDIT time, an operation that has no nested form when its
+ * mapping's manifest placeholder lives inside a nested composition
+ * (2026-09-13). Inspection now surfaces editable layers found inside
+ * precomps; SET_BRAND_COLOR / SET_LAYER_VISIBILITY / SET_TIME_REMAP_FREEZE /
+ * SET_LAYER_DURATION can only address a layer in the scene's own
+ * composition, so accepting one here would store an edit that can only ever
+ * fail at dispatch - or, without resolve-execute-frame-dispatch.ts's own
+ * guard, hit the wrong layer. Refusing now tells the operator immediately.
+ *
+ * Only consults a supplied manifest. With none, nothing is refused here and
+ * the dispatch-time guard still refuses independently - this is the earlier,
+ * friendlier of two checks, never the only one.
+ */
+function refuseNestedManifestTarget(
+  currentManifest: TemplateManifest | undefined,
+  scene: ScenePlanEntry,
+  manifestPlaceholderId: string | null,
+  operationLabel: string
+): { ok: false; reason: string } | null {
+  if (!currentManifest || manifestPlaceholderId === null) {
+    return null;
+  }
+  const manifestScene = currentManifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
+  const placeholder = manifestScene?.placeholders.find((p) => p.placeholderId === manifestPlaceholderId);
+  if (!placeholder) {
+    return null;
+  }
+  const isNested = (placeholder.nestedTarget ?? null) !== null || placeholder.compositionId !== scene.manifestCompositionId;
+  if (!isNested) {
+    return null;
+  }
+  return {
+    ok: false,
+    reason: `${operationLabel} can only target a layer in the scene's own composition today - placeholder "${placeholder.placeholderId}" lives inside nested composition "${placeholder.compositionId}" (layer ${placeholder.layerIndex})`
+  };
 }

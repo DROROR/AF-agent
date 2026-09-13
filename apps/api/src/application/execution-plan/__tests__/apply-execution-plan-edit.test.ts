@@ -670,3 +670,106 @@ describe("applyExecutionPlanEdit - mapping-review -> execution-plan propagation 
     });
   });
 });
+
+/**
+ * Edit-time refusal for nested manifest placeholders (2026-09-13).
+ * SET_BRAND_COLOR / SET_LAYER_VISIBILITY / SET_TIME_REMAP_FREEZE /
+ * SET_LAYER_DURATION can only address a layer in the scene's own
+ * composition. Accepting one for a placeholder that lives inside a precomp
+ * would store an edit that can only ever fail at dispatch - so it is refused
+ * the moment the operator makes it.
+ */
+describe("nested manifest placeholders - edit-time refusal", () => {
+  function manifestWith(placeholder: Record<string, unknown>): TemplateManifest {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      templateId: "tmpl-1",
+      templateName: "tmpl-1",
+      sourceProject: { path: "/copies/test.aep", name: "test.aep", sha256: "a".repeat(64) },
+      afterEffects: { version: "26.3x87" },
+      generatedAt: NOW.toISOString(),
+      compositions: [
+        { compositionId: "comp-1", aeProjectItemIndex: 1, name: "Scene A", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+        { compositionId: "comp-inner", aeProjectItemIndex: 2, name: "Inner", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+      ],
+      scenes: [
+        {
+          sceneId: "scene-a",
+          displayName: null,
+          compositionId: "comp-1",
+          originalOrderIndex: 0,
+          startTimeSeconds: 0,
+          durationSeconds: 5,
+          placeholders: [
+            {
+              placeholderId: "ph-1",
+              displayLabel: null,
+              compositionId: "comp-inner",
+              layerName: "Nested Layer",
+              layerIndex: 2,
+              layerPath: ["Inner"],
+              nestedTarget: [{ compositionId: "comp-inner", layerIndex: 2 }],
+              placeholderType: "color",
+              editable: true,
+              sourceType: "AVLayer",
+              dimensions: null,
+              startTimeSeconds: 0,
+              durationSeconds: 5,
+              evidence: { source: "read_directly", reason: "fixture" },
+              ...placeholder
+            } as never
+          ]
+        }
+      ],
+      preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
+      unknownItems: []
+    };
+  }
+
+  const nestedManifest = manifestWith({});
+  const topLevelManifest = manifestWith({ compositionId: "comp-1", layerPath: [], nestedTarget: null });
+
+  it("refuses SET_LAYER_VISIBILITY on a nested placeholder, naming the composition it lives in", () => {
+    const result = applyExecutionPlanEdit([scene()], { type: "SET_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1", enabled: false }, fixedNow, nestedManifest);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/SET_LAYER_VISIBILITY can only target a layer in the scene's own composition/);
+    expect(result.reason).toContain("comp-inner");
+  });
+
+  it.each([
+    ["SET_TIME_REMAP_FREEZE", { type: "SET_TIME_REMAP_FREEZE", scenePlanId: "scene-1", mappingId: "mapping-1", freezeAtSeconds: 1.5 }],
+    ["SET_LAYER_DURATION", { type: "SET_LAYER_DURATION", scenePlanId: "scene-1", mappingId: "mapping-1", layerDurationSeconds: 2 }]
+  ])("refuses %s on a nested placeholder", (label, operation) => {
+    const result = applyExecutionPlanEdit([scene()], operation as never, fixedNow, nestedManifest);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain(`${label} can only target`);
+  });
+
+  it("refuses SET_BRAND_COLOR on a nested color placeholder", () => {
+    const colorScene = scene({ mappings: [mapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] } })] });
+    const result = applyExecutionPlanEdit([colorScene], { type: "SET_BRAND_COLOR", scenePlanId: "scene-1", mappingId: "mapping-1", colorHex: "#112233" }, fixedNow, nestedManifest);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/SET_BRAND_COLOR can only target/);
+  });
+
+  // The backstop at edit time too: a placeholder from another composition
+  // whose chain was stripped is still recognised as nested.
+  it("still refuses when the nested placeholder's chain was stripped - its composition alone proves it is not top-level", () => {
+    const stripped = manifestWith({ nestedTarget: undefined });
+    const result = applyExecutionPlanEdit([scene()], { type: "SET_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1", enabled: false }, fixedNow, stripped);
+    expect(result.ok).toBe(false);
+  });
+
+  it("allows the same edit on a TOP-LEVEL placeholder - unchanged behaviour", () => {
+    const result = applyExecutionPlanEdit([scene()], { type: "SET_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1", enabled: false }, fixedNow, topLevelManifest);
+    expect(result.ok).toBe(true);
+  });
+
+  it("changes nothing when no manifest is supplied - dispatch still refuses independently", () => {
+    const result = applyExecutionPlanEdit([scene()], { type: "SET_LAYER_VISIBILITY", scenePlanId: "scene-1", mappingId: "mapping-1", enabled: false }, fixedNow);
+    expect(result.ok).toBe(true);
+  });
+});

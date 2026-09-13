@@ -6,6 +6,13 @@ function buildMapping(placeholder: Placeholder, timestamp: string): PlaceholderM
   return {
     id: deterministicId(["mapping", placeholder.placeholderId]),
     manifestPlaceholderId: placeholder.placeholderId,
+    // Always the RAW AE layer name, including for a layer found inside a
+    // precomp (code review finding, 2026-09-13). placeholderName is not only a
+    // display label: deterministic-matcher.ts matches it exactly against asset
+    // labels/filenames, and structural-classification.ts classifies by it.
+    // Folding the composition path in broke the first silently and risked the
+    // second matching on a COMPOSITION name. The path lives on the manifest
+    // placeholder's own layerPath for any display that needs it.
     placeholderName: placeholder.layerName,
     placeholderClassification: {
       // "no invented semantic certainty": the manifest's own "unknown"

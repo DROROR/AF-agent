@@ -232,3 +232,38 @@ See `docs/INCIDENT-2026-09-12-worker-silent.md` for the full timeline and eviden
 Reversing this against the **currently deployed** API 400s every heartbeat and
 takes the worker permanently offline. After this release is deployed the order
 no longer matters — that is exactly what the forward-compatibility fix buys.
+
+## 2026-09-13 - nested-composition manifest traversal
+
+Status: **implemented and tested; not yet deployed or re-inspected at the time of writing.**
+
+Problem (job `5441c555`, plugin-free Mixkit template): 21 compositions, ~96 layers, **1** placeholder
+(`CONTROLS`), because the scene's other layers are precomp references and nothing below them was examined.
+
+What changed:
+- Recursive descent through precomp references, full `layerPath`, and a machine-usable `nestedTarget`
+  chain with the exact semantics the worker's nested JSX walker verifies per hop.
+- Cycle guard, 20-level depth guard, un-inspected-child reporting - all surfaced as `unknownItems`.
+- One placeholder per underlying layer per scene; a shared layer is listed in every scene that reaches it.
+- Structural exclusion by AE fact only (disabled layer, disabled precomp reference, shape/camera/light,
+  uniform solid); genuine uncertainty goes to `unknownItems`, never hidden.
+- Dispatch executes nested text/footage through the verified chain, fails closed for operations with no
+  nested form (color/visibility/freeze/duration), refuses a foreign-composition placeholder with no chain
+  (backstop for a stripped field), and refuses two mappings - in one scene or across included scenes - that
+  write different content to the same layer.
+- Plan edits refuse the unsupported operations at edit time (manifest now loaded in production for them).
+- Scene-evidence dispatch no longer reads nested placeholders' indices inside the scene composition.
+
+Three independent code-review rounds found 8 real defects in this change; all fixed before commit.
+
+**Deploy order is a hard gate: API first, then worker.** An older API strips `nestedTarget` (the manifest
+schema does not reject unknown keys) and its dispatch lacks the guards.
+
+### Known limitation (deferred, found in review round 3)
+
+Preview Timing Analysis (`apps/api/src/domain/preview-timing/derive-preview-timing-targets.ts`,
+`apps/web/src/lib/preview-timing.ts`) still walks only a mapping's `humanNestedTarget`. Content filled
+through a nested **manifest** placeholder contributes no timing evidence, so a *recommended* First Preview
+timestamp can ignore it. This degrades a recommendation only - preview approval remains a human gate and the
+timestamp can be chosen manually. Fix: pass the manifest and treat `placeholder.nestedTarget` like
+`humanNestedTarget` in both mirrors.
