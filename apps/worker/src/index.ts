@@ -5,7 +5,8 @@ import { CURRENT_WORKER_CAPABILITIES } from "./domain/operation-allowlist.js";
 import type { LatestHealth } from "./domain/job-dispatcher.js";
 import { executeJobWithWatchdog } from "./domain/job-watchdog.js";
 import { loadWorkerEnv } from "./env.js";
-import { ConfigError } from "./errors/worker-error.js";
+import { ConfigError, NetworkError } from "./errors/worker-error.js";
+import { persistCheckpointWithRetry } from "./runtime/persist-checkpoint-with-retry.js";
 import { buildHealthSnapshot } from "./health/health-snapshot.js";
 import { AeMcpRoundTripAdapter } from "./health/ae-mcp-round-trip-adapter.js";
 import { AeBridgeReconnector } from "./health/reconnect-ae-bridge.js";
@@ -470,16 +471,20 @@ async function main(): Promise<void> {
             // longer RUNNING - is translated into { ok: false }, never
             // thrown, so the executor's own "stop rather than guess"
             // handling (execute-scene-edit-executor.ts) always runs.
+            // A transport failure (the request, or only its response, lost on
+            // the worker's network) is retried a few times with backoff -
+            // re-sending the same checkpoint is idempotent. See
+            // persist-checkpoint-with-retry.ts for the real incident.
             persistCheckpoint: async (checkpoint) => {
-              try {
-                await apiClient.reportCheckpoint(credentials.workerId, credentials.workerToken, job.jobId, checkpoint);
+              const outcome = await persistCheckpointWithRetry({
+                report: () => apiClient.reportCheckpoint(credentials.workerId, credentials.workerToken, job.jobId, checkpoint).then(() => undefined),
+                isRetryable: (error) => error instanceof NetworkError
+              });
+              if (outcome.ok) {
                 return { ok: true };
-              } catch (cause) {
-                return {
-                  ok: false,
-                  reason: cause instanceof Error ? cause.message : "checkpoint report failed"
-                };
               }
+              workerLogger.warn({ jobId: job.jobId, attempts: outcome.attempts, reason: outcome.reason }, "checkpoint persistence failed after retries");
+              return { ok: false, reason: outcome.reason };
             },
             workRoot,
             now: () => new Date(),

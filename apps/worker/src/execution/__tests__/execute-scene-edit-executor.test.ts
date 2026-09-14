@@ -1178,6 +1178,28 @@ describe("executeSceneEdit", () => {
       expect(preview.lastCall?.aeProjectItemIndex).toBe(12);
     });
 
+    it("never adds a per-operation ae-mcp lookup for NESTED operations - they resolve their compositions by id inside AE; capture still re-resolves once", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const nested = (text: string): SceneEditOperationIntent => ({
+        type: "SET_TEXT",
+        manifestPlaceholderId: null,
+        layerIndex: null,
+        nestedTarget: [{ compositionId: "comp-5", aeProjectItemIndex: 5, layerIndex: 1 }],
+        text
+      } as unknown as SceneEditOperationIntent);
+      const bridge = new FakeAeEditBridge(alwaysSucceed, undefined, undefined, () => ({ ok: true, resolved: true, aeProjectItemIndex: 7 }));
+
+      const result = await executeSceneEdit(
+        deps(bridge, undefined, join(root, "work-root")),
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, manifestCompositionId: "comp-1", operations: [nested("a"), nested("b"), nested("c")] })
+      );
+
+      expect(result.failureReason).toBeNull();
+      expect(bridge.calls).toHaveLength(3);
+      // Once before the loop, once before capture - none per nested operation.
+      expect(bridge.resolveCompositionIndexCalls).toHaveLength(2);
+    });
+
     it("a fresh run opens the working copy from disk (discarding unsaved edits); a genuine resume keeps the open project", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");

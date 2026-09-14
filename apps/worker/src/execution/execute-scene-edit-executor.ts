@@ -292,9 +292,13 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
 
     // REAL 2026-09-14 FAILURE: the index resolved before the loop is not
     // stable for the whole job - a MAP_FOOTAGE import inserts a project item
-    // and shifts later indices. Re-resolved by durable id before every
-    // operation after the first.
-    if (operationsAppliedThisRun > 0) {
+    // and shifts later indices. Re-resolved by durable id before every later
+    // operation that actually addresses the scene composition by index. A
+    // nested operation resolves its own compositions by id inside AE and never
+    // uses this index, so it gets no extra ae-mcp round trip (each one is a new
+    // connection; a real run timed out on exactly such a redundant connection).
+    const usesSceneIndex = !("nestedTarget" in operation && operation.nestedTarget !== null);
+    if (operationsAppliedThisRun > 0 && usesSceneIndex) {
       const reResolved = await deps.aeEditBridge.resolveCompositionIndex(request.manifestCompositionId, request.compositionName);
       if (!reResolved.ok) {
         checkpoint = markFailed(checkpoint, `operation ${pendingIndex} (${operation.type}) could not re-resolve composition "${request.manifestCompositionId}" by its durable id: ${reResolved.failureReason}`, deps.now());
