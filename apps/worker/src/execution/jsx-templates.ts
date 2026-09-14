@@ -312,6 +312,11 @@ function buildMapFootageMutation(assetPath: string): string {
                 __anchorProp.setValue(__newAnchor);
                 __scaleProp.setValue(__newScale);
                 __layer.moveToBeginning();
+                // Verify the ordering actually changed - the media must now be
+                // the top layer, above the card's guide labels.
+                if (__layer.index !== 1) {
+                  __fitFailure = "screen card media was not moved to the top of its composition (layer index is " + __layer.index + ") - its guide labels would cover it";
+                }
               }
             }
             if (__fitFailure !== null) {

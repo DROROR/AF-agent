@@ -1445,7 +1445,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
   });
 
   describe("screen card replacement (Mixkit 'place image above' slots: a 1242x2688 solid under guide labels)", () => {
-    const cardSetup = (options: { animatedScale?: boolean; locked?: boolean } = {}) => `
+    const cardSetup = (options: { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean } = {}) => `
       ${NESTED_FAKE_APP_SETUP}
       function SolidSource() {}
       var __moved = false;
@@ -1457,7 +1457,11 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       __card.source = { name: "Placeholder", width: 1242, height: 2688, mainSource: new SolidSource() };
       __card.replaceSource = function (newItem) { this.source = newItem; };
       // Real AE behavior: a locked layer refuses to be re-ordered.
-      __card.moveToBeginning = function () { if (this.locked) { throw new Error("Can not call method moveToBeginning because the Layer is locked."); } __moved = true; };
+      __card.moveToBeginning = function () {
+        if (this.locked) { throw new Error("Can not call method moveToBeginning because the Layer is locked."); }
+        __moved = true;
+        ${options.moveIgnored ? "" : "this.index = 1;"}
+      };
       __card.property = function (name) {
         if (name !== "ADBE Transform Group") { return null; }
         return {
@@ -1485,7 +1489,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     // step's own result travels back as a string and is parsed out here.
     const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, locked: __card.locked });";
 
-    function runProbed(op: SceneEditOperation, options: { animatedScale?: boolean; locked?: boolean } = {}) {
+    function runProbed(op: SceneEditOperation, options: { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean } = {}) {
       const script = buildOperationScript(999, "irrelevant", op);
       // Reads the fake's state after the real script body ran, inside the same function.
       const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
@@ -1494,7 +1498,14 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       return { ...outcome, step: JSON.parse(outcome.step) };
     }
 
-    const runCard = (options: { animatedScale?: boolean; locked?: boolean } = {}) => runProbed(cardOp, options);
+    const runCard = (options: { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean } = {}) => runProbed(cardOp, options);
+
+    it("verifies the ordering: a move that leaves the media below the guide labels is reported as failed, and the lock is still restored", () => {
+      const outcome = runCard({ locked: true, moveIgnored: true });
+      expect(outcome.step.ok).toBe(false);
+      expect(outcome.step.failureReason).toMatch(/not moved to the top of its composition/);
+      expect(outcome.locked).toBe(true);
+    });
 
     it("real 2026-09-14 failure: a designer-LOCKED card is unlocked only for the fill, then locked again - never left unlocked, never refused", () => {
       const outcome = runCard({ locked: true });
