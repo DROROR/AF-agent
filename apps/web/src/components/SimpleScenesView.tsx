@@ -95,7 +95,7 @@ function StoryboardThumb({
  */
 export function SimpleScenesView(): ReactElement {
   const { t } = useLocale();
-  const { project, plan, approve, isStale, createPlan } = useProjectWorkspaceContext();
+  const { project, plan, approveScenes, isStale, createPlan } = useProjectWorkspaceContext();
   const { suggestions, accept, reject } = useMappingSuggestions(project?.project.projectId ?? "");
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
   const { data: dashboardStatus } = useDashboardStatusContext();
@@ -163,6 +163,10 @@ export function SimpleScenesView(): ReactElement {
   // isScenePreviewSettled for the real lock this prevents.
   const previewsReady = realScenes.every((scene) => isScenePreviewSettled(previewQueue.getEntry(scene.scenePlan.id)));
   const allReady = reviewsReady && previewsReady;
+  // Approved means executable: the plan AND every included scene - exactly
+  // what the Preview tab needs (see useProjectWorkspace's approveScenes).
+  const usedScenes = plan.plan.scenePlans.filter((scene) => scene.use);
+  const scenesApproved = plan.plan.status === "APPROVED" && usedScenes.length > 0 && usedScenes.every((scene) => scene.approvalState === "APPROVED");
 
   async function handleAccept(suggestion: MappingSuggestion): Promise<void> {
     setBusySuggestionId(suggestion.id);
@@ -185,9 +189,12 @@ export function SimpleScenesView(): ReactElement {
   }
 
   async function handleApprove(): Promise<void> {
+    if (isApproving) {
+      return;
+    }
     setIsApproving(true);
     setActionError(null);
-    const result = await approve();
+    const result = await approveScenes();
     setIsApproving(false);
     if (!result.ok) {
       setActionError(result.message ?? null);
@@ -203,13 +210,15 @@ export function SimpleScenesView(): ReactElement {
 
       <Card className="simple-scenes__approve-bar">
         <p>
-          {allReady
-            ? t.simpleScenes.allScenesReadyHint
-            : !reviewsReady
-              ? t.simpleScenes.scenesNotReadyHint
-              : t.simpleScenes.previewsUpdatingHint}
+          {scenesApproved
+            ? t.simpleScenes.scenesApprovedHint
+            : allReady
+              ? t.simpleScenes.allScenesReadyHint
+              : !reviewsReady
+                ? t.simpleScenes.scenesNotReadyHint
+                : t.simpleScenes.previewsUpdatingHint}
         </p>
-        <Button variant="primary" disabled={!allReady || isApproving || isStale} onClick={() => void handleApprove()}>
+        <Button variant="primary" disabled={scenesApproved || !allReady || isApproving || isStale} onClick={() => void handleApprove()}>
           {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
         </Button>
       </Card>

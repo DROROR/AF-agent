@@ -49,6 +49,8 @@ export interface ProjectWorkspaceState {
   createPlan: () => Promise<MutationOutcome>;
   applyEdit: (operations: ExecutionPlanEditOperation[]) => Promise<MutationOutcome>;
   approve: () => Promise<MutationOutcome>;
+  /** Approves every included, ready scene (APPROVE_SCENE) and then the plan - what "Approve Scenes" must do so Preview has an executable scene. A second call while one is running is ignored. */
+  approveScenes: () => Promise<MutationOutcome>;
   reject: () => Promise<MutationOutcome>;
   reopen: () => Promise<MutationOutcome>;
   setRenderOutput: (variant: RenderOutputVariant, body: SetRenderOutputConfigRequest) => Promise<MutationOutcome>;
@@ -175,6 +177,66 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     [plan, projectId]
   );
 
+  /**
+   * "Approve Scenes" (Simple mode). REAL 2026-09-14 DEFECT: this button used
+   * to approve only the PLAN. Every included scene stayed READY_FOR_APPROVAL,
+   * so the Preview tab (and execute-frame dispatch, which requires
+   * approvalState APPROVED) had nothing to execute - "No approved scene to
+   * execute" on a plan that showed Approved. It now does what it says: first
+   * approves every included, ready scene through the normal APPROVE_SCENE plan
+   * edit (a new revision - mappings untouched), then approves the plan at that
+   * revision. Also recovers a plan approved by the old flow: scenes still
+   * pending approval are approved and the plan re-approved.
+   *
+   * A second call while one is running is ignored rather than sent - the old
+   * double click surfaced a raw "Plan is APPROVED, not DRAFT" 409.
+   */
+  const isApprovingScenesRef = useRef(false);
+  const approveScenes = useCallback(async (): Promise<MutationOutcome> => {
+    if (!plan) {
+      return { ok: false, message: "No plan loaded yet" };
+    }
+    if (isApprovingScenesRef.current) {
+      return { ok: true };
+    }
+    isApprovingScenesRef.current = true;
+    try {
+      let current = plan;
+      const pendingScenes = current.plan.scenePlans.filter(
+        (scene) => scene.use && scene.approvalState === "READY_FOR_APPROVAL" && scene.unresolvedReasons.length === 0
+      );
+      if (pendingScenes.length > 0) {
+        const edited = await updateExecutionPlan(
+          projectId,
+          current.plan.revision,
+          pendingScenes.map((scene) => ({ type: "APPROVE_SCENE" as const, scenePlanId: scene.id }))
+        );
+        if (!edited.ok) {
+          if (edited.code === "CONFLICT") {
+            setIsStale(true);
+          }
+          return { ok: false, message: edited.message };
+        }
+        current = edited.data;
+        setPlan(edited.data);
+      }
+      if (current.plan.status !== "APPROVED") {
+        const approved = await approveExecutionPlan(projectId, current.plan.revision);
+        if (!approved.ok) {
+          if (approved.code === "CONFLICT") {
+            setIsStale(true);
+          }
+          return { ok: false, message: approved.message };
+        }
+        setPlan(approved.data);
+      }
+      setIsStale(false);
+      return { ok: true };
+    } finally {
+      isApprovingScenesRef.current = false;
+    }
+  }, [plan, projectId]);
+
   const setRenderOutput = useCallback(
     async (variant: RenderOutputVariant, body: SetRenderOutputConfigRequest): Promise<MutationOutcome> => {
       const result = await setRenderOutputConfig(projectId, variant, body);
@@ -197,6 +259,7 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     createPlan,
     applyEdit,
     approve: useCallback(() => runTransition(approveExecutionPlan), [runTransition]),
+    approveScenes,
     reject: useCallback(() => runTransition(rejectExecutionPlan), [runTransition]),
     reopen: useCallback(() => runTransition(reopenExecutionPlan), [runTransition]),
     setRenderOutput

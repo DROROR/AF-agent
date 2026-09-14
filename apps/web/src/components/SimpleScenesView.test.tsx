@@ -667,6 +667,115 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     );
   });
 
+  describe("real 2026-09-14 defect: Approve Scenes approved only the plan, leaving no executable scene for Preview", () => {
+    const freshPreview = (compositionId: string) => {
+      const capturedAt = new Date(Date.now() + 60_000).toISOString();
+      return {
+        status: 200,
+        body: {
+          preview: {
+            id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            projectId: PROJECT_ID,
+            manifestCompositionId: compositionId,
+            sourceProjectSha256: "a".repeat(64),
+            filename: "scene-preview.png",
+            mimeType: "image/png",
+            byteSize: 42,
+            capturedAt,
+            createdAt: capturedAt
+          }
+        }
+      };
+    };
+    const readyScenes = (approvalState = "READY_FOR_APPROVAL") => [
+      sceneFixture({ id: "scene-parent", manifestCompositionId: "comp-parent", compositionName: "App Features", mappings: [mappingFixture({ text: "Assets" })], approvalState, unresolvedReasons: [] }),
+      sceneFixture({ id: "scene-nested", manifestCompositionId: "comp-nested", compositionName: "Phone Frame", use: false, mappings: [], approvalState: "READY_FOR_APPROVAL", unresolvedReasons: [] })
+    ];
+    const planBody = (status: string, revision: number, parentState: string) => ({ plan: planFixture({ status, revision }, readyScenes(parentState)), sceneTable: [] });
+
+    function stubApprovalFlow(initialStatus: string) {
+      stubWorkspace({
+        scenes: readyScenes(),
+        extra: {
+          [`/api/projects/${PROJECT_ID}/execution-plan`]: [
+            { status: 200, body: planBody(initialStatus, 3, "READY_FOR_APPROVAL") },
+            // PATCH (APPROVE_SCENE) - a new DRAFT revision, the normal edit path.
+            { status: 200, body: planBody("DRAFT", 4, "APPROVED") }
+          ],
+          [`/api/projects/${PROJECT_ID}/execution-plan/approve`]: { status: 200, body: planBody("APPROVED", 4, "APPROVED") },
+          [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: freshPreview("comp-parent")
+        }
+      });
+    }
+
+    const fetchCalls = () => (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+    const writes = () => fetchCalls().filter(([, init]) => init?.method === "PATCH" || init?.method === "POST").map(([url, init]) => ({ url, method: init!.method, body: init!.body ? JSON.parse(String(init!.body)) : null }));
+
+    async function waitForApproveEnabled() {
+      await screen.findByRole("heading", { name: "App Features" });
+      await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 10_000 });
+    }
+
+    it(
+      "approves every included ready scene through APPROVE_SCENE first, then the plan at that new revision - and then stays disabled with a clear confirmation",
+      async () => {
+        stubApprovalFlow("DRAFT");
+        renderView();
+        await waitForApproveEnabled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
+
+        await screen.findByText("Scenes approved - continue to First Preview.", {}, { timeout: 10_000 });
+        const sent = writes();
+        expect(sent.map((w) => `${w.method} ${w.url}`)).toEqual([
+          `PATCH /api/projects/${PROJECT_ID}/execution-plan`,
+          `POST /api/projects/${PROJECT_ID}/execution-plan/approve`
+        ]);
+        // Only the included scene is approved - never an excluded one.
+        expect(sent[0]!.body).toEqual({ baseRevision: 3, operations: [{ type: "APPROVE_SCENE", scenePlanId: "scene-parent" }] });
+        expect(sent[1]!.body).toEqual({ baseRevision: 4 });
+        expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
+      },
+      20_000
+    );
+
+    it(
+      "recovers a plan the old flow approved while its scene stayed unapproved: approves the scene, then re-approves the plan",
+      async () => {
+        stubApprovalFlow("APPROVED");
+        renderView();
+        await waitForApproveEnabled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
+
+        await screen.findByText("Scenes approved - continue to First Preview.", {}, { timeout: 10_000 });
+        expect(writes().map((w) => `${w.method} ${w.url}`)).toEqual([
+          `PATCH /api/projects/${PROJECT_ID}/execution-plan`,
+          `POST /api/projects/${PROJECT_ID}/execution-plan/approve`
+        ]);
+      },
+      20_000
+    );
+
+    it(
+      "a rapid double click sends the approval once - never a second request that fails with a technical error",
+      async () => {
+        stubApprovalFlow("DRAFT");
+        renderView();
+        await waitForApproveEnabled();
+
+        const button = screen.getByRole("button", { name: "Approve Scenes" });
+        fireEvent.click(button);
+        fireEvent.click(button);
+
+        await screen.findByText("Scenes approved - continue to First Preview.", {}, { timeout: 10_000 });
+        expect(writes()).toHaveLength(2);
+        expect(screen.queryByText(/not DRAFT/)).toBeNull();
+      },
+      20_000
+    );
+  });
+
   it("a failed automatic preview (no Worker online) exposes a simple Regenerate Preview retry - never a Jobs/Queue page or internal job wording", async () => {
     stubWorkspace({
       extra: {

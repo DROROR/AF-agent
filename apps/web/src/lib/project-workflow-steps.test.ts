@@ -7,6 +7,7 @@ function input(overrides: Partial<WorkflowStepInput> = {}): WorkflowStepInput {
     workMapEntryCount: 0,
     hasPlan: false,
     planApproved: false,
+    hasExecutableScene: true,
     firstPreviewApproved: false,
     allScenesComplete: false,
     fullPreviewApproved: false,
@@ -56,6 +57,12 @@ describe("computeWorkflowSteps", () => {
     const approved = computeWorkflowSteps(input({ workMapEntryCount: 1, hasPlan: true, planApproved: true }));
     expect(stateOf(approved, "sceneMappings")).toBe("complete");
     expect(stateOf(approved, "firstPreview")).toBe("current");
+  });
+
+  it("real 2026-09-14 defect: an APPROVED plan with no executable scene (none APPROVED) never completes scene mapping or unlocks First Preview", () => {
+    const steps = computeWorkflowSteps(input({ workMapEntryCount: 1, hasPlan: true, planApproved: true, hasExecutableScene: false }));
+    expect(stateOf(steps, "sceneMappings")).toBe("current");
+    expect(stateOf(steps, "firstPreview")).toBe("locked");
   });
 
   it("firstPreview requires the plan to be approved before it is even reachable (never a page-visit-based unlock)", () => {

@@ -22,6 +22,14 @@ export interface WorkflowStepInput {
   workMapEntryCount: number;
   hasPlan: boolean;
   planApproved: boolean;
+  /**
+   * At least one scene the Preview tab can actually execute (use=true,
+   * APPROVED, no unresolvedReasons - the same rule ProjectPreviewTab.tsx and
+   * execute-frame dispatch apply). REAL 2026-09-14 DEFECT: scene mapping was
+   * shown Complete and First Preview offered on plan approval alone, while
+   * Preview said "No approved scene to execute".
+   */
+  hasExecutableScene: boolean;
   /** True once the execution session's own firstPreviewApproved flag is true (approve-first-preview.ts) - never inferred from anything else. */
   firstPreviewApproved: boolean;
   /** True once every required (use=true, APPROVED, no unresolvedReasons) scene has completed EXECUTE_FRAME in the current session - needed to reach (not to complete) the Final Preview step, matching resolveCreateFullPreviewDispatch's own real precondition. */
@@ -52,7 +60,7 @@ export function computeWorkflowSteps(input: WorkflowStepInput): ComputedWorkflow
   const uploadComplete = input.hasProject;
   const tellClaudeComplete = input.workMapEntryCount > 0;
   const reviewPlanComplete = input.hasPlan;
-  const sceneMappingsComplete = input.hasPlan && input.planApproved;
+  const sceneMappingsComplete = input.hasPlan && input.planApproved && input.hasExecutableScene;
   const firstPreviewComplete = input.firstPreviewApproved;
   const readyForFinalPreview = input.firstPreviewApproved && input.allScenesComplete;
   const finalPreviewComplete = input.fullPreviewApproved;

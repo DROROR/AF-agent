@@ -92,12 +92,23 @@ describe("ProjectWorkflowStepper", () => {
   });
 
   it("Scene Mappings only completes once the plan is APPROVED, not merely created", async () => {
+    const scene = sceneFixture({ id: "scene-1", use: true, approvalState: "APPROVED", unresolvedReasons: [] });
     stubWorkspace({
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }), sceneTable: [] } }
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, [scene]), sceneTable: [] } }
     });
     renderStepper();
     await screen.findByText("Step 5 of 7 — First Preview");
+  });
+
+  it("real 2026-09-14 defect: an APPROVED plan whose included scene is still READY_FOR_APPROVAL stays on Match Your Content - never advances to First Preview with nothing executable", async () => {
+    const scene = sceneFixture({ id: "scene-1", use: true, approvalState: "READY_FOR_APPROVAL", unresolvedReasons: [] });
+    stubWorkspace({
+      [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, [scene]), sceneTable: [] } }
+    });
+    renderStepper();
+    await screen.findByText("Step 4 of 7 — Match Your Content");
   });
 
   it("Final Preview stays current (never complete) and Render stays locked once every scene is done but the complete preview has not been approved yet - client-handoff phase, 'real final preview approval gate'", async () => {

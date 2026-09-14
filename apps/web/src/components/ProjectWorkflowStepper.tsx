@@ -61,6 +61,7 @@ export function ProjectWorkflowStepper(): ReactElement | null {
     workMapEntryCount: workMap?.entries.length ?? 0,
     hasPlan: plan !== null,
     planApproved: plan?.plan.status === "APPROVED",
+    hasExecutableScene: requiredScenePlanIds.length > 0,
     firstPreviewApproved: activeSession?.firstPreviewApproved ?? false,
     allScenesComplete,
     fullPreviewApproved: activeSession?.fullPreviewApproved ?? false,

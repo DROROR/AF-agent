@@ -880,6 +880,7 @@ export const en = {
     approveScenesAction: "Approve Scenes",
     approvingScenes: "Approving…",
     allScenesReadyHint: "Every scene is ready - approve to continue.",
+    scenesApprovedHint: "Scenes approved - continue to First Preview.",
     scenesNotReadyHint: "Finish reviewing every scene below before approving.",
     previewsUpdatingHint: "Updating previews for scenes you just changed - this only takes a moment, no action needed.",
     storyboardTitle: "Storyboard",

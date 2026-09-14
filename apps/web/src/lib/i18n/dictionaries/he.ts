@@ -857,6 +857,7 @@ export const he: Dictionary = {
     approveScenesAction: "אישור הסצנות",
     approvingScenes: "מאשר…",
     allScenesReadyHint: "כל הסצנות מוכנות - אשרו כדי להמשיך.",
+    scenesApprovedHint: "הסצנות אושרו - המשיכו לתצוגה המקדימה הראשונה.",
     scenesNotReadyHint: "סיימו לבדוק כל סצנה למטה לפני האישור.",
     previewsUpdatingHint: "מעדכנים תצוגות מקדימות לסצנות ששיניתם כרגע - זה ייקח רק רגע, אין צורך לפעול.",
     storyboardTitle: "לוח סיפור",
