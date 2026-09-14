@@ -584,7 +584,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
           "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [onlineWorker] } },
           [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
           [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } },
-          "/api/jobs": { status: 409, body: { error: { code: "PRECONDITION_NOT_MET", message: "worker is busy" } } }
+          "/api/jobs": { status: 409, body: { error: { code: "PRECONDITION_NOT_MET", message: "worker is busy", requestId: "req-test" } } }
         }
       });
       renderView();
@@ -596,6 +596,52 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     });
 
     it(
+      "maxConcurrency=1: a WORKER_BUSY refusal waits its turn and retries - no red error, and the scene still reaches a real preview",
+      async () => {
+        const capturedAt = new Date(Date.now() + 60_000).toISOString();
+        stubWorkspace({
+          scenes: readyScenes(),
+          extra: {
+            "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [onlineWorker] } },
+            [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: [
+              { status: 200, body: { preview: null } },
+              {
+                status: 200,
+                body: {
+                  preview: {
+                    id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    projectId: PROJECT_ID,
+                    manifestCompositionId: "comp-parent",
+                    sourceProjectSha256: "a".repeat(64),
+                    filename: "scene-preview.png",
+                    mimeType: "image/png",
+                    byteSize: 42,
+                    capturedAt,
+                    createdAt: capturedAt
+                  }
+                }
+              }
+            ],
+            "/api/jobs": [
+              { status: 409, body: { error: { code: "WORKER_BUSY", message: "Worker already has a live INSPECT_SCENE_EVIDENCE job in progress", requestId: "req-test" } } },
+              { status: 201, body: { jobId: JOB_ID, workerId: onlineWorker.workerId, operation: "INSPECT_SCENE_EVIDENCE", status: "QUEUED", createdAt: new Date().toISOString() } }
+            ],
+            [`/api/jobs/${JOB_ID}`]: { status: 200, body: jobDto("RUNNING") }
+          }
+        });
+        renderView();
+        await screen.findByRole("heading", { name: "App Features" });
+
+        await screen.findByText("After Effects preview", {}, { timeout: 20_000 });
+        expect(screen.queryByText(/already has a live/)).toBeNull();
+        const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+        expect(fetchMock.mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length).toBe(2);
+        expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false);
+      },
+      30_000
+    );
+
+    it(
       "still keeps Approve Scenes disabled while scene decisions are NOT complete, whatever the previews did",
       async () => {
         stubWorkspace({
@@ -604,7 +650,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
             "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [onlineWorker] } },
             [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
             [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } },
-            "/api/jobs": { status: 409, body: { error: { code: "PRECONDITION_NOT_MET", message: "worker is busy" } } }
+            "/api/jobs": { status: 409, body: { error: { code: "PRECONDITION_NOT_MET", message: "worker is busy", requestId: "req-test" } } }
           }
         });
         renderView();

@@ -508,7 +508,7 @@ async function fetchPrecompFacts(
 }
 
 /** Captures one allowlisted read-only tool call, transparently retrying a transient MCP timeout (P1 fix) - see retry-transient-mcp-call.ts. A deterministic TOOL_ERROR/NOT_CONNECTED is still reported immediately, never retried. */
-async function captureOneToolWithRetry(
+export async function captureOneToolWithRetry(
   client: HeroicSwanMcpClient,
   tool: AllowedInspectionTool,
   logger: pino.Logger | undefined,
@@ -654,7 +654,7 @@ async function pollForProjectOpen(
  *      project ever appearing - reports `matched: false` with a distinct,
  *      actionable note, never silently treated as success.
  */
-async function ensureTargetProjectOpen(
+export async function ensureTargetProjectOpen(
   client: HeroicSwanMcpClient,
   sourceProjectPath: string,
   healthCapture: RawToolCallCapture,

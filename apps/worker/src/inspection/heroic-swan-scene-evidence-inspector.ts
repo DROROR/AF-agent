@@ -15,6 +15,7 @@ import {
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
+import { captureOneToolWithRetry, ensureTargetProjectOpen, type OpenProjectOptions } from "./heroic-swan-template-inspector.js";
 
 const layerDetailsScriptResultSchema = z.union([
   z.object({ ok: z.literal(true), layerDetails: z.array(layerDetailFactSchema) }).strict(),
@@ -186,6 +187,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
   private readonly aeMcpPath: string | undefined;
   private readonly logger: McpChildTerminationLogger | undefined;
   private readonly jobExecutionRegistry: JobExecutionRegistry | undefined;
+  private readonly openProjectOptions: OpenProjectOptions | undefined;
 
   constructor(config: {
     aeMcpPath: string | undefined;
@@ -193,10 +195,13 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
     logger?: McpChildTerminationLogger;
     /** Registers the ae-mcp child process this inspect() call owns so a watchdog/shutdown can abort it - optional (omitted in most tests), but MUST be provided in production (see index.ts) for P1/P2's stuck-job recovery to actually reach this call's own MCP client. */
     jobExecutionRegistry?: JobExecutionRegistry;
+    /** Test-only override for the open-project timeout/poll budget - production uses heroic-swan-template-inspector.ts's real constants. */
+    openProjectOptions?: OpenProjectOptions;
   }) {
     this.aeMcpPath = config.aeMcpPath;
     this.logger = config.logger;
     this.jobExecutionRegistry = config.jobExecutionRegistry;
+    this.openProjectOptions = config.openProjectOptions;
   }
 
   async inspect(request: SceneEvidenceRequest): Promise<SceneEvidenceResult> {
@@ -247,6 +252,32 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
     verifiedSourceProjectSha256: string
   ): Promise<SceneEvidenceResult> {
     try {
+      // REAL 2026-09-14 FAILURE (every scene preview of a real project, Main
+      // scene included): After Effects had an empty "Untitled" project open
+      // (projectPath null, 0 items), and this job resolved compositions
+      // against whatever AE happened to have open - so every durable id came
+      // back "no composition with id ... exists in this project". Template
+      // inspection has always proven the requested file is open first; scene
+      // evidence now does exactly the same, through the same single-open,
+      // poll-not-reopen, unsaved-work-refusing step, and fails closed with
+      // that step's own reason when it cannot confirm the project.
+      const healthCapture = await captureOneToolWithRetry(client, "ae_health", undefined, undefined);
+      const openEvidence = await ensureTargetProjectOpen(
+        client,
+        request.sourceProjectPath,
+        healthCapture,
+        undefined,
+        undefined,
+        this.openProjectOptions,
+        undefined
+      );
+      if (!openEvidence.matched) {
+        return {
+          kind: "failure",
+          reason: `could not confirm the scene's project is open in After Effects: ${openEvidence.note ?? "unknown reason"}`
+        };
+      }
+
       // CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9):
       // request.aeProjectItemIndex is only ever a snapshot of the
       // manifest's own last-observed position - BUILD_HORIZONTAL_

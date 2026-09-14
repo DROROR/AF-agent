@@ -62,6 +62,8 @@ export interface UseScenePreviewQueueResult {
 const POLL_INTERVAL_MS = 4_000;
 /** ~2 minutes per scene - a real INSPECT_SCENE_EVIDENCE + preview upload is a single read-only AE round trip, never expected to take longer than this in practice. */
 const MAX_POLL_ATTEMPTS = 30;
+/** ~3 minutes of waiting for the worker's single job slot before a refused preview is reported as failed. */
+const MAX_BUSY_RETRIES = 45;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,6 +94,7 @@ export function useScenePreviewQueue(
   const queueRef = useRef<string[]>([]);
   const isProcessingRef = useRef(false);
   const runIdRef = useRef(0);
+  const drainQueueRef = useRef<((runId: number) => Promise<void>) | null>(null);
 
   useEffect(() => {
     entriesRef.current = entries;
@@ -117,7 +120,18 @@ export function useScenePreviewQueue(
         return;
       }
       updateEntry(scenePlanId, { state: "generating", errorMessage: null, hasFailed: false });
-      const dispatched = await dispatchJob({ operation: "INSPECT_SCENE_EVIDENCE", workerId: worker.workerId, projectId, scenePlanId });
+      let dispatched = await dispatchJob({ operation: "INSPECT_SCENE_EVIDENCE", workerId: worker.workerId, projectId, scenePlanId });
+      // maxConcurrency=1: the server refuses a second live preview job with
+      // WORKER_BUSY while an earlier one (e.g. from a previous page run, or
+      // another tab) is still on the worker. That is "wait your turn", never a
+      // failure - keep this scene queued and try again until the worker frees.
+      for (let busyAttempt = 0; !dispatched.ok && dispatched.code === "WORKER_BUSY" && busyAttempt < MAX_BUSY_RETRIES; busyAttempt++) {
+        updateEntry(scenePlanId, { state: "queued", errorMessage: null });
+        await sleep(POLL_INTERVAL_MS);
+        if (runId !== runIdRef.current) return;
+        updateEntry(scenePlanId, { state: "generating", errorMessage: null });
+        dispatched = await dispatchJob({ operation: "INSPECT_SCENE_EVIDENCE", workerId: worker.workerId, projectId, scenePlanId });
+      }
       if (runId !== runIdRef.current) return;
       if (!dispatched.ok) {
         updateEntry(scenePlanId, {
@@ -177,10 +191,20 @@ export function useScenePreviewQueue(
         }
       } finally {
         isProcessingRef.current = false;
+        // A newer page run queued scenes while this (now superseded) drain was
+        // still finishing its in-flight scene - it could not start its own
+        // drain then, so hand over now. Strictly one drain, one dispatch at a
+        // time.
+        if (runId !== runIdRef.current && queueRef.current.length > 0) {
+          void drainQueueRef.current?.(runIdRef.current);
+        }
       }
     },
     [dispatchAndPoll]
   );
+  useEffect(() => {
+    drainQueueRef.current = drainQueue;
+  }, [drainQueue]);
 
   // Includes each scene's own updatedAt (not just its id) so an edit to an
   // EXISTING scene's mapping - which can newly make a previously-fresh
@@ -194,7 +218,11 @@ export function useScenePreviewQueue(
   useEffect(() => {
     const runId = ++runIdRef.current;
     queueRef.current = [];
-    isProcessingRef.current = false;
+    // Deliberately NOT resetting isProcessingRef here: a drain from the
+    // previous run may still have a scene's job on the worker. Resetting it
+    // let a second drain start immediately and dispatch overlapping preview
+    // jobs against a maxConcurrency=1 worker; the old drain now hands over
+    // when it finishes (see drainQueue's finally).
 
     async function loadAll(): Promise<void> {
       const scenes = realScenes;

@@ -63,8 +63,15 @@ async function writeFakeServer(
     captureReceivedJsxCodeToFile?: string;
     /** Real 2026-09-11 incident fix - overrides the resolve-by-id script's own canned response. "drifted" simulates the real incident: the id resolves to a DIFFERENT index than aeProjectItemIndex requested (index 48, not 14), proving the inspector uses the freshly-resolved index rather than the stale one. "notFound" simulates the id no longer existing at all. Default (omitted) resolves to the same index/name ae_get_composition already reports - every pre-existing test's own behavior, unchanged. */
     resolveBehavior?: "drifted" | "notFound";
+    /** Real 2026-09-14 failure - what After Effects has open when the job starts. "target" (default): the requested project is already open, so no open call is needed - every pre-existing test's own behavior. "untitled": an empty Untitled project (projectPath null, 0 items), exactly what the real worker had open. */
+    projectAtStart?: "target" | "untitled";
+    /** How the open-project script behaves. "opens" (default) opens the requested project; "wrongProject" ends up with a different project open. */
+    openBehavior?: "opens" | "wrongProject";
+    /** When set, every ae_run_jsx call appends "OPEN" or "RESOLVE" (or "OTHER") to this file - proves ordering and exactly-once opening from the spawned process's own real input. */
+    jsxCallLogFile?: string;
   } = {}
 ): Promise<void> {
+  const targetProjectPath = sourceProjectPath;
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
   const sdkEsmRoot = join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
   await writeFile(
@@ -77,6 +84,14 @@ async function writeFakeServer(
 
   const server = new McpServer({ name: "fake-ae-mcp-scene-evidence", version: "0.0.0" });
   let calls = [];
+  const targetProjectPath = ${JSON.stringify(targetProjectPath)};
+  let openProject = ${JSON.stringify(options.projectAtStart ?? "target")} === "untitled"
+    ? { projectOpen: true, projectPath: null, projectName: "Untitled", numItems: 0 }
+    : { projectOpen: true, projectPath: targetProjectPath, projectName: "template-copy.aep", numItems: 21 };
+
+  server.registerTool("ae_health", { description: "d" }, async () => ({
+    content: [{ type: "text", text: JSON.stringify({ connected: true, ae_running: true, health: { connected: true, aeVersion: "26.3x87", ...openProject } }) }]
+  }));
 
   server.registerTool(
     "ae_get_composition",
@@ -135,7 +150,15 @@ async function writeFakeServer(
     // ae_get_composition below already reports, so every pre-existing
     // test in this file keeps exercising the SAME composition identity
     // it always did - no behavior change for any of them.
-    if (String(args && args.code).indexOf("DYO RESOLVE_COMPOSITION_INDEX") !== -1) {
+    const jsxCode = String(args && args.code);
+    const jsxKind = jsxCode.indexOf("ensure target project open") !== -1 ? "OPEN" : jsxCode.indexOf("DYO RESOLVE_COMPOSITION_INDEX") !== -1 ? "RESOLVE" : "OTHER";
+    ${options.jsxCallLogFile ? `require("node:fs").appendFileSync(${JSON.stringify(options.jsxCallLogFile)}, jsxKind + "\\n");` : ""}
+    if (jsxKind === "OPEN") {
+      const openedPath = ${JSON.stringify(options.openBehavior ?? "opens")} === "wrongProject" ? "C:\\\\somewhere\\\\else\\\\other.aep" : targetProjectPath;
+      openProject = { projectOpen: true, projectPath: openedPath, projectName: "opened.aep", numItems: 21 };
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { openedPath, openedName: "opened.aep" } }) }) }] };
+    }
+    if (jsxKind === "RESOLVE") {
       const resolveBehavior = ${JSON.stringify(options.resolveBehavior ?? null)};
       let inner;
       if (resolveBehavior === "notFound") {
@@ -260,6 +283,41 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.reason).toContain("could not re-resolve composition");
     expect(result.reason).toContain("comp-275");
     expect(result.reason).toContain("no composition with id 275 exists");
+  });
+
+  describe("real 2026-09-14 failure: After Effects had an empty Untitled project open, so every scene preview resolved against the wrong project", () => {
+    it("opens the requested project exactly once, BEFORE resolving any composition, then succeeds", async () => {
+      const jsxCallLogFile = join(dir, "jsx-calls.log");
+      await writeFakeServer(dir, { projectAtStart: "untitled", jsxCallLogFile });
+      const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+      const result = (await inspector.inspect(baseRequest())) as SceneEvidenceSuccess;
+
+      expect(result.kind).toBe("evidence");
+      expect(result.response.compositionName).toBe("Text 01");
+      expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["OPEN", "RESOLVE"]);
+    });
+
+    it("never re-opens a project that is already open at exactly the requested path", async () => {
+      const jsxCallLogFile = join(dir, "jsx-calls.log");
+      await writeFakeServer(dir, { projectAtStart: "target", jsxCallLogFile });
+      const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+      const result = await inspector.inspect(baseRequest());
+
+      expect(result.kind).toBe("evidence");
+      expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["RESOLVE"]);
+    });
+
+    it("fails closed - never resolving a composition in the wrong project - when the requested project cannot be confirmed open", async () => {
+      const jsxCallLogFile = join(dir, "jsx-calls.log");
+      await writeFakeServer(dir, { projectAtStart: "untitled", openBehavior: "wrongProject", jsxCallLogFile });
+      const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+      const result = await inspector.inspect(baseRequest());
+
+      expect(result.kind).toBe("failure");
+      if (result.kind !== "failure") return;
+      expect(result.reason).toContain("could not confirm the scene's project is open in After Effects");
+      expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["OPEN"]);
+    });
   });
 
   it("never calls ae_run_jsx when discoverLayerDetails is not requested, even though the (fake, hostile-capable) server offers it", async () => {
