@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { SceneEditOperation, SceneEditOperationType } from "@dyo/schemas";
 import { parseJsonTextContent } from "../inspection/parse-mcp-shapes.js";
 import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
-import { buildOperationScript, buildOpenProjectScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
+import { buildOperationScript, buildOpenProjectScript, buildReopenProjectFromDiskScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
 import { HeroicSwanAeMutationClient, type MutationCallResult } from "./heroic-swan-ae-mutation-client.js";
 import { describeMcpFailure } from "./classify-mcp-failure.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "./resolve-composition-index.js";
@@ -63,6 +63,16 @@ const openProjectResultValueSchema = z
 
 export type OpenProjectResult = { ok: true; openedPath: string } | { ok: false; failureReason: string };
 
+export interface OpenProjectOptions {
+  /**
+   * Start from the file on disk: if AE already has exactly this working copy
+   * open, close it WITHOUT saving before opening it again (see
+   * buildReopenProjectFromDiskScript). For a fresh run - never for a resume
+   * whose completed operations only exist in the open project.
+   */
+  discardUnsavedChanges?: boolean;
+}
+
 /**
  * CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9): the
  * SAME durable-CompItem.id resolution CREATE_PREVIEW/RENDER/
@@ -115,7 +125,7 @@ export interface AeEditBridge {
    * comparison, since both are real Windows filesystem paths. Fails
    * closed (never proceeds) if AE reports any other path, or none at all.
    */
-  openProject(expectedPath: string): Promise<OpenProjectResult>;
+  openProject(expectedPath: string, options?: OpenProjectOptions): Promise<OpenProjectResult>;
   /**
    * Real 2026-09-11 incident fix - re-resolves a possibly-stale
    * aeProjectItemIndex from the manifest's durable numeric composition
@@ -137,7 +147,7 @@ export class AeMutationTransportUnavailableError extends Error {
 
 /** Honest stub - never fabricates a mutation result. Mirrors NotAvailableTemplateInspector's own contract. */
 export class NotAvailableAeEditBridge implements AeEditBridge {
-  async openProject(_expectedPath: string): Promise<OpenProjectResult> {
+  async openProject(_expectedPath: string, _options?: OpenProjectOptions): Promise<OpenProjectResult> {
     throw new AeMutationTransportUnavailableError();
   }
   async resolveCompositionIndex(_manifestCompositionId: string, _expectedName: string): Promise<ResolveCompositionIndexResult> {
@@ -161,8 +171,8 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
         : () => new HeroicSwanAeMutationClient({ aeMcpPath: config.aeMcpPath });
   }
 
-  async openProject(expectedPath: string): Promise<OpenProjectResult> {
-    const script = buildOpenProjectScript(expectedPath);
+  async openProject(expectedPath: string, options?: OpenProjectOptions): Promise<OpenProjectResult> {
+    const script = options?.discardUnsavedChanges ? buildReopenProjectFromDiskScript(expectedPath) : buildOpenProjectScript(expectedPath);
     const outcome = await this.runScript(script);
     if (!outcome.ok) {
       return { ok: false, failureReason: outcome.failureReason };

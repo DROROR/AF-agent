@@ -184,6 +184,35 @@ describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-
 
     expect(result).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
     expect(fake.lastScript).toContain("app.open(");
+    // The ordinary open never discards anything.
+    expect(fake.lastScript).not.toContain("CloseOptions.DO_NOT_SAVE_CHANGES");
+  });
+
+  it("real 2026-09-14: discardUnsavedChanges reopens the working copy from disk (close without saving, never save) and still verifies AE's own reopened path", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, previousValue: { closedUnsavedCopy: true }, resultingValue: { openedPath: WORKING_COPY_PATH, openedName: "working-copy.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true });
+
+    expect(result).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
+    expect(fake.lastScript).toContain("CloseOptions.DO_NOT_SAVE_CHANGES");
+    expect(fake.lastScript).toContain("app.open(");
+    expect(fake.lastScript).not.toMatch(/\.save\s*\(/);
+  });
+
+  it("real 2026-09-14: a reopen that lands on a different project still fails closed", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, previousValue: { closedUnsavedCopy: false }, resultingValue: { openedPath: "C:\\somewhere\\else.aep", openedName: "else.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true });
+
+    expect(result.ok).toBe(false);
   });
 
   it("case-insensitive, separator-normalized match still succeeds - the same real Windows path reported with different casing/slashes", async () => {

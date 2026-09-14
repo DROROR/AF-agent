@@ -350,17 +350,32 @@ function wrapNestedScript(operationLabel: string, body: string, nestedTarget: re
       // generated string if embedded inside it directly, a real bug this
       // exact construction fixes.
       const compIdForMessage = step.compositionId;
+      // REAL 2026-09-14 FAILURE: a project-item INDEX is not stable within a
+      // job - importing footage (an earlier MAP_FOOTAGE in the same run)
+      // inserts a project item and shifts every later index, so step lookup
+      // by the stored index found the neighbouring composition. The AE
+      // CompItem.id IS stable (the failing lookup itself proved the real
+      // composition kept its manifest id), so each step is resolved by
+      // scanning for that id; the stored index is only reported as a hint.
+      // Exactly one match is required - zero or several fail closed.
       const resolveBlock = `
       if (__pathFailureReason === null) {
         var __stepComp = null;
-        try {
-          var __stepRawItem = app.project.item(${compIndexLiteral});
-          if (__stepRawItem instanceof CompItem) { __stepComp = __stepRawItem; }
-        } catch (__stepLookupError) { __stepComp = null; }
-        if (__stepComp === null) {
-          __pathFailureReason = "nested target step ${index}: project item index ${compIndexLiteral} did not resolve to a composition in this project";
-        } else if (__stepComp.id !== ${numericIdLiteral}) {
-          __pathFailureReason = "nested target step ${index}: project item index ${compIndexLiteral} resolved to composition id " + __stepComp.id + " (name \\"" + __stepComp.name + "\\"), expected id ${numericIdLiteral} (\\"${compIdForMessage}\\") - stale or broken nested path, refusing to guess";
+        var __stepMatches = 0;
+        var __stepItemCount = 0;
+        try { __stepItemCount = app.project.numItems; } catch (__stepCountError) { __stepItemCount = 0; }
+        for (var __stepItemIndex = 1; __stepItemIndex <= __stepItemCount; __stepItemIndex++) {
+          var __stepCandidate = null;
+          try { __stepCandidate = app.project.item(__stepItemIndex); } catch (__stepLookupError) { __stepCandidate = null; }
+          if (__stepCandidate instanceof CompItem && __stepCandidate.id === ${numericIdLiteral}) {
+            __stepMatches++;
+            __stepComp = __stepCandidate;
+          }
+        }
+        if (__stepMatches === 0) {
+          __pathFailureReason = "nested target step ${index}: no composition with id ${numericIdLiteral} (\\"${compIdForMessage}\\") exists in this project (stored project item index hint ${compIndexLiteral}) - stale or broken nested path, refusing to guess";
+        } else if (__stepMatches > 1) {
+          __pathFailureReason = "nested target step ${index}: " + __stepMatches + " compositions share id ${numericIdLiteral} (\\"${compIdForMessage}\\") - ambiguous nested path, refusing to guess";
         } else {
           __comp = __stepComp;
         }
@@ -986,6 +1001,68 @@ export function buildOpenProjectScript(sourceProjectPath: string): FixedJsxScrip
     });
   } finally {
     app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
+ * Opens a session working copy FROM DISK, discarding unsaved in-memory
+ * edits to that same file.
+ *
+ * REAL 2026-09-14 FAILURE: an EXECUTE_FRAME run applied three operations to
+ * the working copy in memory and then failed before saving. AE kept that
+ * project open with the partial edits, and buildOpenProjectScript simply
+ * reuses an already-open project - so a fresh retry would have re-applied
+ * every operation on top of that unsaved state (one of them had already
+ * re-ordered layers). The on-disk working copy is the only persisted state
+ * of a session, so a fresh run must start from it.
+ *
+ * Only the requested file is ever closed, and only without saving: a
+ * different open project is never touched (app.open's own behavior still
+ * applies to it). Never the immutable source - callers pass the session's
+ * working-copy path, which the executor independently refuses when it
+ * resolves to the source.
+ */
+export function buildReopenProjectFromDiskScript(workingProjectPath: string): FixedJsxScript {
+  const pathLiteral = JSON.stringify(workingProjectPath);
+  const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
+  try {
+    var __targetFile = new File(${pathLiteral});
+    if (!__targetFile.exists) {
+      __result = JSON.stringify({ ok: false, failureReason: "working copy does not exist on disk: " + __targetFile.fsName });
+    } else {
+      var __closedUnsaved = false;
+      var __openFile = app.project && app.project.file ? app.project.file : null;
+      if (__openFile !== null && __openFile.fsName.toLowerCase() === __targetFile.fsName.toLowerCase()) {
+        app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+        __closedUnsaved = true;
+      }
+      var __opened;
+      app.beginSuppressDialogs();
+      try {
+        __opened = app.open(__targetFile);
+      } finally {
+        app.endSuppressDialogs(false);
+      }
+      if (!__opened) {
+        __result = JSON.stringify({ ok: false, failureReason: "app.open() did not return an opened project" });
+      } else {
+        __result = JSON.stringify({
+          ok: true,
+          previousValue: { closedUnsavedCopy: __closedUnsaved },
+          resultingValue: {
+            openedPath: app.project && app.project.file ? app.project.file.fsName : null,
+            openedName: app.project ? app.project.name : null
+          }
+        });
+      }
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
   }
   return __result;`;
   return script as FixedJsxScript;

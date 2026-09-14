@@ -13,7 +13,8 @@ import {
   buildDescribeCompositionSummaryScript,
   buildInspectLayerTransformScript,
   buildScanProjectPreflightScript,
-  buildOpenProjectScript
+  buildOpenProjectScript,
+  buildReopenProjectFromDiskScript
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -1282,6 +1283,51 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
   });
 });
 
+describe("buildReopenProjectFromDiskScript (real 2026-09-14: a retry must never run on a failed run's unsaved edits)", () => {
+  const setup = (openPath: string | null, exists = true) => `
+    var __log = [];
+    function File(path) { this.fsName = path; this.exists = ${exists ? "true" : "false"}; }
+    var CloseOptions = { DO_NOT_SAVE_CHANGES: 1, SAVE_CHANGES: 2 };
+    var app = {
+      beginSuppressDialogs: function () {},
+      endSuppressDialogs: function () {},
+      project: {
+        file: ${openPath === null ? "null" : `{ fsName: ${JSON.stringify(openPath)} }`},
+        name: "open.aep",
+        close: function (option) { __log.push("close:" + option); }
+      },
+      open: function (file) { __log.push("open:" + file.fsName); app.project = { file: { fsName: file.fsName }, name: "working-copy.aep", close: function () {} }; return app.project; }
+    };
+  `;
+  const WORKING = "C:\\DYO-Agent\\execution-sessions\\s-1\\working-copy.aep";
+  const run = (script: string, setupScript: string) =>
+    JSON.parse(runFixedScriptWithoutNativeJson(script.replace(/return __result;\s*$/, `__result = JSON.stringify({ step: __result, log: __log });\n  return __result;`), setupScript));
+
+  it("closes the SAME working copy without saving, then reopens it from disk", () => {
+    const out = run(buildReopenProjectFromDiskScript(WORKING), setup(WORKING.toUpperCase()));
+    expect(out.log).toEqual(["close:1", `open:${WORKING}`]);
+    expect(JSON.parse(out.step)).toEqual({ ok: true, previousValue: { closedUnsavedCopy: true }, resultingValue: { openedPath: WORKING, openedName: "working-copy.aep" } });
+  });
+
+  it("never closes a different open project", () => {
+    const out = run(buildReopenProjectFromDiskScript(WORKING), setup("C:\\somewhere\\else.aep"));
+    expect(out.log).toEqual([`open:${WORKING}`]);
+  });
+
+  it("refuses when the working copy does not exist on disk - never opens or closes anything", () => {
+    const out = run(buildReopenProjectFromDiskScript(WORKING), setup(WORKING, false));
+    expect(out.log).toEqual([]);
+    expect(JSON.parse(out.step).ok).toBe(false);
+  });
+
+  it("never saves", () => {
+    const script = buildReopenProjectFromDiskScript(WORKING);
+    expect(script).not.toMatch(/\.save\s*\(/);
+    expect(script).not.toMatch(/\.SAVE_CHANGES\b/);
+    expect(script).toContain("CloseOptions.DO_NOT_SAVE_CHANGES");
+  });
+});
+
 describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fix, 2026-09-08)", () => {
   /**
    * Fake AE object model for a real, 2-hop nested chain shaped exactly
@@ -1338,6 +1384,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       beginUndoGroup: function () {},
       endUndoGroup: function () {},
       project: {
+        numItems: 30,
         item: function (i) { return __itemsByIndex[i]; },
         importFile: function (opts) { return { name: opts.file.fsName }; }
       }
@@ -1496,7 +1543,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       var app = {
         beginUndoGroup: function () {},
         endUndoGroup: function () {},
-        project: { item: function (i) { return __itemsByIndex[i]; } }
+        project: { numItems: 40, item: function (i) { return __itemsByIndex[i]; } }
       };
     `;
     const op: SceneEditOperation = {
@@ -1549,7 +1596,32 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     expect(result.failureReason).toContain("stale or broken nested path");
   });
 
-  it("wrong composition/layer fails closed: a step's aeProjectItemIndex does not resolve to any composition at all", () => {
+  it("real 2026-09-14 failure: resolves every step by durable id even when an earlier import shifted every stored project item index", () => {
+    // Each composition now lives one index later than the stored hint (11 -> 12, 22 -> 23), and the
+    // hinted indices hold unrelated compositions - exactly what a MAP_FOOTAGE import does mid-job.
+    const driftedSetup = `${NESTED_FAKE_APP_SETUP}
+      var __unrelatedA = new CompItem(); __unrelatedA.id = 7001; __unrelatedA.name = "Neighbour A";
+      var __unrelatedB = new CompItem(); __unrelatedB.id = 7002; __unrelatedB.name = "Neighbour B";
+      __itemsByIndex = { 11: __unrelatedA, 12: __precompComp, 22: __unrelatedB, 23: __logoComp };
+    `;
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "מבית DYO App" };
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(buildOperationScript(999, "irrelevant", op), driftedSetup));
+    expect(result).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
+  });
+
+  it("refuses an ambiguous step: two compositions carrying the same id are never guessed between", () => {
+    const ambiguousSetup = `${NESTED_FAKE_APP_SETUP}
+      var __twin = new CompItem(); __twin.id = 1113; __twin.name = "App Logo copy";
+      __itemsByIndex[25] = __twin;
+    `;
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "should never be applied" };
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(buildOperationScript(999, "irrelevant", op), ambiguousSetup));
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("2 compositions share id 1113");
+    expect(result.failureReason).toContain("ambiguous");
+  });
+
+  it("wrong composition fails closed: no composition with a step's durable id exists anywhere in the project", () => {
     const op: SceneEditOperation = {
       type: "SET_TEXT",
       manifestPlaceholderId: null,
@@ -1561,7 +1633,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(false);
-    expect(result.failureReason).toContain("did not resolve to a composition");
+    expect(result.failureReason).toContain("no composition with id 9999");
   });
 
   it("wrong composition/layer fails closed: the final step's layerIndex does not exist in the final composition", () => {
@@ -1598,7 +1670,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       var app = {
         beginUndoGroup: function () {},
         endUndoGroup: function () {},
-        project: { item: function (i) { return i === 1 ? __comp : null; } }
+        project: { numItems: 1, item: function (i) { return i === 1 ? __comp : null; } }
       };
     `;
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: 7, nestedTarget: null, text: "flat after" };
@@ -2118,7 +2190,7 @@ describe("buildOpenProjectScript (modal-safe target project open, 2026-09-03)", 
 });
 
 describe("no other allowlisted script can leave AE blocked by an unsuppressed dialog (2026-09-03 modal-safety invariant)", () => {
-  it("app.open() is called from exactly one reviewed place in this file - buildOpenProjectScript's own suppressed call - never from any other script builder", () => {
+  it("app.open() is called from exactly two reviewed places in this file - buildOpenProjectScript and buildReopenProjectFromDiskScript (real 2026-09-14) - each inside beginSuppressDialogs/endSuppressDialogs, never from any other script builder", () => {
     const sourceUrl = new URL("../jsx-templates.ts", import.meta.url);
     const source = readFileSync(fileURLToPath(sourceUrl), "utf8");
     // Matches only a REAL call with an argument (app.open(<something>)) -
@@ -2126,6 +2198,12 @@ describe("no other allowlisted script can leave AE blocked by an unsuppressed di
     // ever appears in doc-comment prose and in this script's own
     // failureReason string, never as an actual call.
     const matches = source.match(/\bapp\.open\([^)]/g) ?? [];
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(2);
+    for (const script of [buildOpenProjectScript("C:\\a\\b.aep"), buildReopenProjectFromDiskScript("C:\\a\\b.aep")]) {
+      const openAt = script.indexOf("app.open(");
+      expect(openAt).toBeGreaterThan(-1);
+      expect(script.lastIndexOf("app.beginSuppressDialogs()", openAt)).toBeGreaterThan(-1);
+      expect(script.indexOf("app.endSuppressDialogs(", openAt)).toBeGreaterThan(openAt);
+    }
   });
 });

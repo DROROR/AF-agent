@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperation, SceneEditOperationIntent } from "@dyo/schemas";
 import { executeSceneEdit, type ResolveOperation } from "../execute-scene-edit-executor.js";
-import type { AeEditBridge, OpenProjectResult, OperationExecutionResult, SaveProjectResult, ResolveCompositionIndexResult } from "../ae-edit-bridge.js";
+import type { AeEditBridge, OpenProjectOptions, OpenProjectResult, OperationExecutionResult, SaveProjectResult, ResolveCompositionIndexResult } from "../ae-edit-bridge.js";
 import type { PreviewCapture, PreviewCaptureResult } from "../preview-capture.js";
 
 /** No MAP_FOOTAGE in these fixtures - every intent is already a resolved operation, so this is a pure pass-through (the real resolver's own asset-download/verification behavior is covered separately, in resolve-scene-edit-operation.test.ts). */
@@ -58,6 +58,7 @@ class FakeAeEditBridge implements AeEditBridge {
   calls: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }[] = [];
   saveCalls = 0;
   openProjectCalls: string[] = [];
+  openProjectOptions: OpenProjectOptions[] = [];
   resolveCompositionIndexCalls: { manifestCompositionId: string; expectedName: string }[] = [];
   private workingCopyPath: string | null = null;
 
@@ -70,8 +71,9 @@ class FakeAeEditBridge implements AeEditBridge {
     private readonly resolveIndexResult: (manifestCompositionId: string, expectedName: string) => ResolveCompositionIndexResult = () => ({ ok: true, resolved: false })
   ) {}
 
-  async openProject(expectedPath: string): Promise<OpenProjectResult> {
+  async openProject(expectedPath: string, options?: OpenProjectOptions): Promise<OpenProjectResult> {
     this.openProjectCalls.push(expectedPath);
+    this.openProjectOptions.push(options ?? {});
     this.workingCopyPath = expectedPath;
     return this.openResult(expectedPath);
   }
@@ -1151,6 +1153,69 @@ describe("executeSceneEdit", () => {
    * the stale one - and fails closed (never silently mutates the wrong
    * composition) if resolution itself fails.
    */
+  describe("real 2026-09-14 First Preview failure: index drift after an import, and a retry on top of unsaved partial edits", () => {
+    const deps = (bridge: FakeAeEditBridge, preview = new FakePreviewCapture(REAL_PREVIEW), workRoot: string) => ({
+      workRoot,
+      aeEditBridge: bridge,
+      previewCapture: preview,
+      uploadPreview: async () => ({ ok: true as const }),
+      persistCheckpoint: async () => ({ ok: true as const }),
+      resolveOperation: defaultResolveOperation,
+      now: () => new Date()
+    });
+
+    it("re-resolves the scene composition by durable id before every later operation and before capture - an import that shifts indices mid-job is followed", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const indices = [10, 11, 12];
+      let resolveCount = 0;
+      const bridge = new FakeAeEditBridge(alwaysSucceed, undefined, undefined, () => ({ ok: true, resolved: true, aeProjectItemIndex: indices[Math.min(resolveCount++, indices.length - 1)]! }));
+      const preview = new FakePreviewCapture(REAL_PREVIEW);
+
+      const result = await executeSceneEdit(deps(bridge, preview, join(root, "work-root")), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, manifestCompositionId: "comp-1" }));
+
+      expect(result.failureReason).toBeNull();
+      expect(bridge.calls.map((c) => c.aeProjectItemIndex)).toEqual([10, 11]);
+      expect(preview.lastCall?.aeProjectItemIndex).toBe(12);
+    });
+
+    it("a fresh run opens the working copy from disk (discarding unsaved edits); a genuine resume keeps the open project", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+
+      const fresh = new FakeAeEditBridge(alwaysSucceed);
+      await executeSceneEdit(deps(fresh, undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-fresh" }));
+      expect(fresh.openProjectOptions).toEqual([{ discardUnsavedChanges: true }]);
+
+      const resumed = new FakeAeEditBridge(alwaysSucceed);
+      const partial: SceneEditCheckpoint = { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: null };
+      await executeSceneEdit(deps(resumed, undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-resume", checkpoint: partial }));
+      expect(resumed.openProjectOptions).toEqual([{ discardUnsavedChanges: false }]);
+      expect(resumed.calls.map((c) => c.operation.type)).toEqual(["SET_LAYER_VISIBILITY"]);
+    });
+
+    it("a failure after earlier operations, then a fresh retry of the same session: reopens from disk and applies every operation exactly once - never on top of the failed run's unsaved edits", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-retry" });
+
+      const failing = new FakeAeEditBridge((operation, callIndex) =>
+        callIndex === 1 ? { ok: false, operationType: operation.type, failureReason: "nested target step 0: stale or broken nested path, refusing to guess" } : alwaysSucceed(operation)
+      );
+      const failed = await executeSceneEdit(deps(failing, undefined, workRoot), request);
+      expect(failed.failureReason).toContain("operation 1");
+      expect(failed.operationsCompleted).toEqual([0]);
+      expect(failing.saveCalls).toBe(0);
+
+      // Dispatch retries with checkpoint null (a new job for the same session) - exactly what production sends.
+      const retry = new FakeAeEditBridge(alwaysSucceed);
+      const retried = await executeSceneEdit(deps(retry, undefined, workRoot), request);
+      expect(retried.failureReason).toBeNull();
+      expect(retry.openProjectOptions).toEqual([{ discardUnsavedChanges: true }]);
+      expect(retry.calls.map((c) => c.operation.type)).toEqual(["SET_TEXT", "SET_LAYER_VISIBILITY"]);
+      expect(retried.operationsCompleted).toEqual([0, 1]);
+    });
+  });
+
   describe("resolveCompositionIndex (real 2026-09-11 EXECUTE_FRAME durable-identity fix)", () => {
     it("uses the freshly-resolved aeProjectItemIndex for every applyOperation call when the bridge reports a drifted index, never the stale request.aeProjectItemIndex", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
@@ -1171,7 +1236,8 @@ describe("executeSceneEdit", () => {
       );
 
       expect(result.failureReason).toBeNull();
-      expect(bridge.resolveCompositionIndexCalls).toEqual([{ manifestCompositionId: "comp-1", expectedName: "Scene 1" }]);
+      // Before the loop, before the second operation, and before preview capture.
+      expect(bridge.resolveCompositionIndexCalls).toEqual(Array(3).fill({ manifestCompositionId: "comp-1", expectedName: "Scene 1" }));
       expect(bridge.calls.every((c) => c.aeProjectItemIndex === 48)).toBe(true);
       expect(bridge.calls.some((c) => c.aeProjectItemIndex === 1)).toBe(false);
     });

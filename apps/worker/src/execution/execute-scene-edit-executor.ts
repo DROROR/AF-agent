@@ -212,7 +212,14 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // or save is ever attempted (see AeEditBridge.openProject's own doc
   // comment for the full rationale - this is the actual fix for the real
   // incident).
-  const opened = await deps.aeEditBridge.openProject(workingCopy.workingProjectPath);
+  // REAL 2026-09-14 FAILURE: a failed run leaves its partial, UNSAVED edits
+  // in the open project, and a fresh retry used to re-apply everything on top
+  // of them. A fresh run (nothing completed) therefore starts from the
+  // working copy on disk - the session's only persisted state. A genuine
+  // resume keeps the open project, because its completed operations only
+  // exist there.
+  const startsFresh = checkpoint.completedOperationIndices.length === 0;
+  const opened = await deps.aeEditBridge.openProject(workingCopy.workingProjectPath, { discardUnsavedChanges: startsFresh });
   if (!opened.ok) {
     checkpoint = markFailed(checkpoint, `could not confirm the session working copy is open in After Effects: ${opened.failureReason}`, deps.now());
     return finish({
@@ -248,7 +255,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewTimestampSeconds: null
     });
   }
-  const effectiveAeProjectItemIndex = resolvedIndex.resolved ? resolvedIndex.aeProjectItemIndex : request.aeProjectItemIndex;
+  let effectiveAeProjectItemIndex = resolvedIndex.resolved ? resolvedIndex.aeProjectItemIndex : request.aeProjectItemIndex;
 
   let pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
   while (pendingIndex !== null) {
@@ -282,6 +289,27 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       });
     }
     const operation = resolved.operation;
+
+    // REAL 2026-09-14 FAILURE: the index resolved before the loop is not
+    // stable for the whole job - a MAP_FOOTAGE import inserts a project item
+    // and shifts later indices. Re-resolved by durable id before every
+    // operation after the first.
+    if (operationsAppliedThisRun > 0) {
+      const reResolved = await deps.aeEditBridge.resolveCompositionIndex(request.manifestCompositionId, request.compositionName);
+      if (!reResolved.ok) {
+        checkpoint = markFailed(checkpoint, `operation ${pendingIndex} (${operation.type}) could not re-resolve composition "${request.manifestCompositionId}" by its durable id: ${reResolved.failureReason}`, deps.now());
+        return finish({
+          sourceProjectSha256: workingCopy.sourceProjectSha256,
+          workingProjectPath: workingCopy.workingProjectPath,
+          workingProjectSha256: workingCopy.workingProjectSha256,
+          previewFramePath: null,
+          previewTimestampSeconds: null
+        });
+      }
+      if (reResolved.resolved) {
+        effectiveAeProjectItemIndex = reResolved.aeProjectItemIndex;
+      }
+    }
 
     const outcome = await deps.aeEditBridge.applyOperation({
       aeProjectItemIndex: effectiveAeProjectItemIndex,
@@ -491,6 +519,25 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewTimestampSeconds: null,
       workingCopyFailureCode: "WORKING_COPY_UNEXPECTEDLY_MUTATED"
     });
+  }
+
+  // The last operation may itself have imported footage and shifted indices
+  // again (see the per-operation re-resolution above).
+  if (operationsAppliedThisRun > 0) {
+    const captureResolved = await deps.aeEditBridge.resolveCompositionIndex(request.manifestCompositionId, request.compositionName);
+    if (!captureResolved.ok) {
+      checkpoint = markFailed(checkpoint, `could not re-resolve composition "${request.manifestCompositionId}" by its durable id before preview capture: ${captureResolved.failureReason}`, deps.now());
+      return finish({
+        sourceProjectSha256: workingCopy.sourceProjectSha256,
+        workingProjectPath: workingCopy.workingProjectPath,
+        workingProjectSha256: savedHash.value.sha256,
+        previewFramePath: null,
+        previewTimestampSeconds: null
+      });
+    }
+    if (captureResolved.resolved) {
+      effectiveAeProjectItemIndex = captureResolved.aeProjectItemIndex;
+    }
   }
 
   const previewResult = await deps.previewCapture.capture({
