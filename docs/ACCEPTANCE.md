@@ -379,3 +379,11 @@ Session `1257ac95`, job `e0039632`: operations 0-2 ran (two SET_TEXT, then the s
 - **Risk found.** That file changed on disk between 11:09 (sha256 equal to the source) and 11:56 (`1eaf519e...`) with no recorded save. Re-applying every operation to an unconfirmed copy that may already contain some of them could double-apply a non-idempotent edit (the screen-card fill re-orders layers).
 - **Fix (worker).** A fresh run of a session's first scene rebuilds the working copy from the verified source (source sha256 checked before and after the copy), then reopens it from disk. A genuine resume keeps its copy, and a later scene's hash-confirmed working copy is never rebuilt - a mismatch is still refused as WORKING_COPY_SHA_MISMATCH.
 - **Source.** The immutable source's sha256 was verified by the worker at the start of every run (last at 11:58:10 UTC: `4172ee08...deafd`) and is re-verified before and after any rebuild.
+
+## 2026-09-14 - First Preview reached operation 7: a template-locked layer (session 1257ac95)
+
+- **Clean start proven.** Jobs `8873bf84` and `e655c6bd` both started from a working copy byte-identical to the source (sha256 `4172ee08...deafd`) - the fresh-run rebuild works - and the source was verified unchanged at each start.
+- **Progress.** Both completed operations 0-6 on the same session: every nested SET_TEXT (including the Hebrew line and the edit that previously failed on index drift) and the shared-screen MAP_FOOTAGE import.
+- **Failure.** Operation 7 (MAP_FOOTAGE, the App Screen 01 card) failed: "Can not call method moveToBeginning ... because the Layer is locked". The template ships that card layer locked.
+- **Fix (worker).** SET_TEXT and MAP_FOOTAGE unlock the target layer only for the approved edit and lock it again afterwards, preserving the template's lock state; if the lock cannot be restored the operation is reported failed, never left silently unlocked.
+- **UX observation.** `e655c6bd` was created from the dashboard 39 s after `8873bf84` failed, on the same session (a second Continue click or a page resubmission) - no second session was created.

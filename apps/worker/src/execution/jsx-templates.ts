@@ -213,8 +213,41 @@ function withTargets(script: string, aeProjectItemIndex: number, compositionName
     .replaceAll("__TARGET_LAYER_INDEX__", String(layerIndex));
 }
 
+/**
+ * Runs a mutation body with the target layer temporarily unlocked.
+ *
+ * REAL 2026-09-14 FAILURE (job 8873bf84, operation 7): a template shipped its
+ * screen-card layer LOCKED, and After Effects refused the edit ("Can not call
+ * method moveToBeginning ... because the Layer is locked"). A designer's lock
+ * protects a layer from accidental manual changes, not from an approved,
+ * explicit edit - so the layer is unlocked only for this operation and locked
+ * again afterwards, preserving the template's own lock state. If the lock
+ * cannot be restored, the operation is reported as failed rather than
+ * silently leaving the layer unlocked.
+ */
+function withTargetLayerUnlocked(body: string): string {
+  return `
+        var __wasLayerLocked = false;
+        try { __wasLayerLocked = __layer.locked === true; } catch (__lockReadError) { __wasLayerLocked = false; }
+        if (__wasLayerLocked) { __layer.locked = false; }
+        try {${body}
+        } finally {
+          if (__wasLayerLocked) {
+            try {
+              __layer.locked = true;
+            } catch (__relockError) {
+              __result = JSON.stringify({ ok: false, failureReason: "the edit ran, but the layer's original lock could not be restored: " + (__relockError && __relockError.toString ? __relockError.toString() : String(__relockError)) });
+            }
+          }
+        }`;
+}
+
 /** Shared mutation body for SET_TEXT - identical for the flat and nested target cases, since both resolve down to the same `__layer` variable before this runs. */
 function buildSetTextBody(text: string): string {
+  return withTargetLayerUnlocked(buildSetTextMutation(text));
+}
+
+function buildSetTextMutation(text: string): string {
   const textLiteral = JSON.stringify(text);
   return `
         if (!(__layer instanceof TextLayer)) {
@@ -230,6 +263,10 @@ function buildSetTextBody(text: string): string {
 
 /** Shared mutation body for MAP_FOOTAGE - identical for the flat and nested target cases (module doc comment on buildSetTextBody above). */
 function buildMapFootageBody(assetPath: string): string {
+  return withTargetLayerUnlocked(buildMapFootageMutation(assetPath));
+}
+
+function buildMapFootageMutation(assetPath: string): string {
   const assetPathLiteral = JSON.stringify(assetPath);
   return `
         if (!(__layer instanceof AVLayer)) {

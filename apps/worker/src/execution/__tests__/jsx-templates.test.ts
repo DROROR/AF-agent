@@ -1412,6 +1412,19 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     expect(result).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
   });
 
+  it("real 2026-09-14: a LOCKED text layer gets its new text and is locked again afterwards", () => {
+    const lockedTextSetup = `${NESTED_FAKE_APP_SETUP}
+      __logoTextLayer.locked = true;
+      __logoTextLayer.sourceText.setValue = function (v) { if (__logoTextLayer.locked) { throw new Error("the Layer is locked"); } this.value = v; };
+    `;
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "מבית DYO App" };
+    const script = buildOperationScript(999, "irrelevant", op).replace(/return __result;\s*$/, "__result = JSON.stringify({ step: __result, locked: __logoTextLayer.locked, text: __logoTextLayer.sourceText.value.text });\n  return __result;");
+    const outcome = JSON.parse(runFixedScriptWithoutNativeJson(script, lockedTextSetup));
+    expect(JSON.parse(outcome.step)).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
+    expect(outcome.text).toBe("מבית DYO App");
+    expect(outcome.locked).toBe(true);
+  });
+
   it("nested logo asset replacement: descends through the real precomp reference and replaces the final AVLayer's footage source", () => {
     const op: SceneEditOperation = {
       type: "MAP_FOOTAGE",
@@ -1432,7 +1445,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
   });
 
   describe("screen card replacement (Mixkit 'place image above' slots: a 1242x2688 solid under guide labels)", () => {
-    const cardSetup = (options: { animatedScale?: boolean } = {}) => `
+    const cardSetup = (options: { animatedScale?: boolean; locked?: boolean } = {}) => `
       ${NESTED_FAKE_APP_SETUP}
       function SolidSource() {}
       var __moved = false;
@@ -1440,9 +1453,11 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       var __scaleValue = [100, 100, 100];
       var __card = new AVLayer();
       __card.index = 3;
+      __card.locked = ${options.locked ? "true" : "false"};
       __card.source = { name: "Placeholder", width: 1242, height: 2688, mainSource: new SolidSource() };
       __card.replaceSource = function (newItem) { this.source = newItem; };
-      __card.moveToBeginning = function () { __moved = true; };
+      // Real AE behavior: a locked layer refuses to be re-ordered.
+      __card.moveToBeginning = function () { if (this.locked) { throw new Error("Can not call method moveToBeginning because the Layer is locked."); } __moved = true; };
       __card.property = function (name) {
         if (name !== "ADBE Transform Group") { return null; }
         return {
@@ -1468,9 +1483,9 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     };
     // ExtendScript has no JSON.parse (only the stringify polyfill), so the
     // step's own result travels back as a string and is parsed out here.
-    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue });";
+    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, locked: __card.locked });";
 
-    function runProbed(op: SceneEditOperation, options: { animatedScale?: boolean } = {}) {
+    function runProbed(op: SceneEditOperation, options: { animatedScale?: boolean; locked?: boolean } = {}) {
       const script = buildOperationScript(999, "irrelevant", op);
       // Reads the fake's state after the real script body ran, inside the same function.
       const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
@@ -1479,7 +1494,21 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       return { ...outcome, step: JSON.parse(outcome.step) };
     }
 
-    const runCard = (options: { animatedScale?: boolean } = {}) => runProbed(cardOp, options);
+    const runCard = (options: { animatedScale?: boolean; locked?: boolean } = {}) => runProbed(cardOp, options);
+
+    it("real 2026-09-14 failure: a designer-LOCKED card is unlocked only for the fill, then locked again - never left unlocked, never refused", () => {
+      const outcome = runCard({ locked: true });
+      expect(outcome.step).toEqual({ ok: true, previousValue: "Placeholder", resultingValue: "/real/app-screenshot.png" });
+      expect(outcome.moved).toBe(true);
+      expect(outcome.scale[0]).toBeCloseTo(115, 6);
+      expect(outcome.locked).toBe(true);
+    });
+
+    it("an unlocked card stays unlocked after the fill", () => {
+      const outcome = runCard();
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.locked).toBe(false);
+    });
 
     it("scales the media to cover the card's own area, keeps the card's relative anchor, and raises it above the guide labels", () => {
       const outcome = runCard();
