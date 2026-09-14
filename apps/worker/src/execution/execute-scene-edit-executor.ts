@@ -164,7 +164,10 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     executionSessionId: request.executionSessionId,
     sourceProjectPath: request.sourceProjectPath,
     expectedSourceSha256: request.sourceProjectSha256,
-    expectedWorkingProjectSha256: request.expectedWorkingProjectSha256
+    expectedWorkingProjectSha256: request.expectedWorkingProjectSha256,
+    // A fresh run (nothing completed) re-applies every operation, so it must
+    // not start from an unconfirmed first-scene copy - see working-copy.ts.
+    rebuildUnconfirmedCopy: checkpoint.completedOperationIndices.length === 0
   });
   if (!workingCopy.ok) {
     checkpoint = markFailed(checkpoint, `working copy could not be prepared (${workingCopy.reason}): ${workingCopy.message}`, deps.now());

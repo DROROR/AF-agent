@@ -1215,6 +1215,35 @@ describe("executeSceneEdit", () => {
       expect(resumed.calls.map((c) => c.operation.type)).toEqual(["SET_LAYER_VISIBILITY"]);
     });
 
+    it("real 2026-09-14: a fresh first-scene run rebuilds a changed, never-confirmed working copy from the verified source; a resume keeps it; the source is never touched", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const sessionId = "session-tampered";
+      const workingCopyPath = join(workRoot, "execution-sessions", sessionId, "working-copy.aep");
+      const failAtSecond = (operation: SceneEditOperation, callIndex: number): OperationExecutionResult =>
+        callIndex === 1 ? { ok: false, operationType: operation.type, failureReason: "stop before save" } : alwaysSucceed(operation);
+
+      // A first attempt creates the working copy; then it changes on disk with no confirmed scene (the unexplained real change).
+      await executeSceneEdit(deps(new FakeAeEditBridge(failAtSecond), undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: sessionId }));
+      writeFileSync(workingCopyPath, "fake-aep-bytes\n// edits saved by something unknown");
+      const tamperedSha = sha256(readFileSync(workingCopyPath, "utf8"));
+      expect(tamperedSha).not.toBe(sourceSha);
+
+      // Resume (a real completed checkpoint): the copy holds that progress, so it is kept.
+      const partial: SceneEditCheckpoint = { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: null };
+      const resumed = await executeSceneEdit(
+        deps(new FakeAeEditBridge(() => ({ ok: false, operationType: "SET_LAYER_VISIBILITY", failureReason: "stop" })), undefined, workRoot),
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: sessionId, checkpoint: partial })
+      );
+      expect(resumed.workingProjectSha256).toBe(tamperedSha);
+
+      // Fresh run (what dispatch sends): rebuilt from the source before any operation.
+      const fresh = await executeSceneEdit(deps(new FakeAeEditBridge(failAtSecond), undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: sessionId }));
+      expect(fresh.workingProjectSha256).toBe(sourceSha);
+      expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
+      expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha);
+    });
+
     it("a failure after earlier operations, then a fresh retry of the same session: reopens from disk and applies every operation exactly once - never on top of the failed run's unsaved edits", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");

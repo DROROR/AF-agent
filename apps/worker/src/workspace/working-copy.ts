@@ -35,6 +35,14 @@ export interface PrepareSessionWorkingCopyParams {
   expectedSourceSha256: string;
   /** Null only for a session's very first scene job (no working copy has ever been produced yet). Non-null for every later job - the session's own latestWorkingProjectSha256 as last durably recorded by the API. */
   expectedWorkingProjectSha256: string | null;
+  /**
+   * Only meaningful for a first-scene job (expectedWorkingProjectSha256 null):
+   * rebuild the working copy from the verified source even if one already
+   * exists, because it was never confirmed by a successful scene and a fresh
+   * run re-applies every operation. Never affects a later scene's
+   * hash-verified working copy.
+   */
+  rebuildUnconfirmedCopy?: boolean;
 }
 
 export interface WorkingCopyReady {
@@ -148,7 +156,14 @@ export async function prepareSessionWorkingCopy(params: PrepareSessionWorkingCop
     };
   }
 
-  if (existsSync(destPath)) {
+  // REAL 2026-09-14 FAILURE MODE (session 1257ac95): no scene of this session
+  // has ever succeeded, yet the existing working copy on disk had changed
+  // (sha256 no longer the source's) with no recorded save. A FRESH run
+  // re-applies every operation, so reusing that file could apply operations
+  // on top of edits already in it. Nothing in it was ever confirmed by a
+  // successful scene, so a fresh first-scene run rebuilds it from the
+  // verified source instead. A genuine resume still reuses it below.
+  if (existsSync(destPath) && !params.rebuildUnconfirmedCopy) {
     // First-scene resume path: an existing working copy from an earlier
     // attempt at THIS SAME first job is reused as-is, never re-copied over
     // - a re-copy here could silently discard in-progress edits a prior

@@ -24,6 +24,72 @@ function makeSourceProject(content = "fake-aep-bytes"): { root: string; sourcePa
   return { root, sourcePath, sha256: sha256(content) };
 }
 
+describe("prepareSessionWorkingCopy - rebuildUnconfirmedCopy (real 2026-09-14: a never-confirmed working copy changed on disk)", () => {
+  function tamperedFirstSceneCopy() {
+    const { root, sourcePath, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const copyPath = sessionWorkingCopyPath(workRoot, "session-1");
+    mkdirSync(copyPath.replace(/working-copy\.aep$/, ""), { recursive: true });
+    writeFileSync(copyPath, "fake-aep-bytes\n// saved edits from an unconfirmed attempt");
+    return { workRoot, sourcePath, sourceSha, copyPath };
+  }
+
+  it("rebuilds an existing, never-confirmed first-scene copy from the verified source - byte-identical, not a resume - and never touches the source", async () => {
+    const { workRoot, sourcePath, sourceSha, copyPath } = tamperedFirstSceneCopy();
+
+    const result = await prepareSessionWorkingCopy({
+      workRoot,
+      executionSessionId: "session-1",
+      sourceProjectPath: sourcePath,
+      expectedSourceSha256: sourceSha,
+      expectedWorkingProjectSha256: null,
+      rebuildUnconfirmedCopy: true
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.resumed).toBe(false);
+    expect(result.workingProjectSha256).toBe(sourceSha);
+    expect(readFileSync(copyPath, "utf8")).toBe("fake-aep-bytes");
+    expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
+  });
+
+  it("without the flag, still reuses an existing first-scene copy as before (a genuine resume keeps its progress)", async () => {
+    const { workRoot, sourcePath, sourceSha, copyPath } = tamperedFirstSceneCopy();
+
+    const result = await prepareSessionWorkingCopy({
+      workRoot,
+      executionSessionId: "session-1",
+      sourceProjectPath: sourcePath,
+      expectedSourceSha256: sourceSha,
+      expectedWorkingProjectSha256: null
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.resumed).toBe(true);
+    expect(readFileSync(copyPath, "utf8")).toContain("saved edits from an unconfirmed attempt");
+  });
+
+  it("never rebuilds a later scene's hash-confirmed working copy - a mismatch is still refused, never silently recopied from source", async () => {
+    const { workRoot, sourcePath, sourceSha, copyPath } = tamperedFirstSceneCopy();
+
+    const result = await prepareSessionWorkingCopy({
+      workRoot,
+      executionSessionId: "session-1",
+      sourceProjectPath: sourcePath,
+      expectedSourceSha256: sourceSha,
+      expectedWorkingProjectSha256: "a".repeat(64),
+      rebuildUnconfirmedCopy: true
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("WORKING_COPY_SHA_MISMATCH");
+    expect(readFileSync(copyPath, "utf8")).toContain("saved edits from an unconfirmed attempt");
+  });
+});
+
 describe("prepareSessionWorkingCopy - a session's FIRST scene job (expectedWorkingProjectSha256: null)", () => {
   it("copies the source into a session-scoped working copy, leaving the original untouched", async () => {
     const { root, sourcePath, sha256: expectedSha } = makeSourceProject();
