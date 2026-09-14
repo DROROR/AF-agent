@@ -19,7 +19,7 @@ function realScene(overrides: Partial<ScenePlanEntry> = {}): RealScene {
   return { manifestCompositionId: scenePlan.manifestCompositionId, sceneName: scenePlan.compositionName, scenePlan, nested: [] };
 }
 
-const READY_PREVIEW: ScenePreviewEntry = { preview: null, state: "ready", isStale: false, errorMessage: null };
+const READY_PREVIEW: ScenePreviewEntry = { preview: null, state: "ready", isStale: false, errorMessage: null, hasFailed: false };
 
 function renderCard(scene: RealScene, previewEntry: ScenePreviewEntry = READY_PREVIEW, pendingSuggestions: MappingSuggestion[] = []) {
   renderWithLocale(

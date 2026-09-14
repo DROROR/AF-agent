@@ -8,7 +8,7 @@ import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { groupIntoRealScenes, type RealScene } from "../lib/real-scene-grouping";
-import { useScenePreviewQueue, type UseScenePreviewQueueResult } from "../lib/use-scene-preview-queue";
+import { isScenePreviewSettled, useScenePreviewQueue, type UseScenePreviewQueueResult } from "../lib/use-scene-preview-queue";
 import { sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
@@ -159,10 +159,9 @@ export function SimpleScenesView(): ReactElement {
   // condition self-resolves as soon as that regeneration completes -
   // approval is simply held until the client is genuinely looking at the
   // real, current result, not a guess about whether it still matches.
-  const previewsReady = realScenes.every((scene) => {
-    const entry = previewQueue.getEntry(scene.scenePlan.id);
-    return entry.state === "ready" && !entry.isStale;
-  });
+  // A preview whose generation definitively failed is settled too - see
+  // isScenePreviewSettled for the real lock this prevents.
+  const previewsReady = realScenes.every((scene) => isScenePreviewSettled(previewQueue.getEntry(scene.scenePlan.id)));
   const allReady = reviewsReady && previewsReady;
 
   async function handleAccept(suggestion: MappingSuggestion): Promise<void> {

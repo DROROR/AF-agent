@@ -500,6 +500,127 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     30_000
   );
 
+  describe("real 2026-09-14 lock: a terminally failed preview never keeps Approve Scenes disabled once every scene decision is complete", () => {
+    const JOB_ID = "33333333-3333-3333-3333-333333333333";
+    const onlineWorker = {
+      workerId: "11111111-1111-1111-1111-111111111111",
+      name: "Client PC",
+      status: "ONLINE",
+      aeStatus: "ONLINE",
+      mcpStatus: "ONLINE",
+      aeAvailability: "ONLINE",
+      mcpAvailability: "ONLINE",
+      capabilities: ["INSPECT_SCENE_EVIDENCE"],
+      currentJobId: null,
+      maxConcurrency: 1,
+      lastHeartbeatAt: new Date().toISOString()
+    };
+    const readyScenes = () => [
+      sceneFixture({
+        id: "scene-parent",
+        manifestCompositionId: "comp-parent",
+        compositionName: "App Features",
+        mappings: [mappingFixture({ text: "Assets" })],
+        approvalState: "READY_FOR_APPROVAL",
+        unresolvedReasons: []
+      }),
+      sceneFixture({
+        id: "scene-nested",
+        manifestCompositionId: "comp-nested",
+        compositionName: "Phone Frame",
+        mappings: [],
+        approvalState: "READY_FOR_APPROVAL",
+        unresolvedReasons: []
+      })
+    ];
+    const jobDto = (status: string) => ({
+      // Exact production JobDto shape (jobDtoSchema) - the client parses it strictly.
+      job: {
+        jobId: JOB_ID,
+        workerId: onlineWorker.workerId,
+        projectId: PROJECT_ID,
+        operation: "INSPECT_SCENE_EVIDENCE",
+        status,
+        payload: {},
+        result: null,
+        error: status === "FAILED" ? { code: "NOT_AVAILABLE", message: "could not re-resolve composition" } : null,
+        checkpoint: null,
+        createdAt: new Date().toISOString(),
+        claimedAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    });
+
+    it(
+      "unlocks as soon as the preview JOB fails - without waiting out the whole polling window on a job that already ended",
+      async () => {
+        stubWorkspace({
+          scenes: readyScenes(),
+          extra: {
+            "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [onlineWorker] } },
+            [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
+            [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } },
+            "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId: onlineWorker.workerId, operation: "INSPECT_SCENE_EVIDENCE", status: "QUEUED", createdAt: new Date().toISOString() } },
+            [`/api/jobs/${JOB_ID}`]: { status: 200, body: jobDto("FAILED") }
+          }
+        });
+        renderView();
+        await screen.findByRole("heading", { name: "App Features" });
+
+        await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), {
+          timeout: 20_000
+        });
+        expect(screen.queryByText("Updating previews for scenes you just changed - this only takes a moment, no action needed.")).toBeNull();
+      },
+      30_000
+    );
+
+    it("unlocks when the preview dispatch itself is refused", async () => {
+      stubWorkspace({
+        scenes: readyScenes(),
+        extra: {
+          "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [onlineWorker] } },
+          [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
+          [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } },
+          "/api/jobs": { status: 409, body: { error: { code: "PRECONDITION_NOT_MET", message: "worker is busy" } } }
+        }
+      });
+      renderView();
+      await screen.findByRole("heading", { name: "App Features" });
+
+      await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), {
+        timeout: 10_000
+      });
+    });
+
+    it(
+      "still keeps Approve Scenes disabled while scene decisions are NOT complete, whatever the previews did",
+      async () => {
+        stubWorkspace({
+          scenes: readyScenes().map((scene) => ({ ...scene, approvalState: "UNREVIEWED", unresolvedReasons: ["1 placeholder(s) in this scene still need a mapping decision"] })),
+          extra: {
+            "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [onlineWorker] } },
+            [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
+            [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } },
+            "/api/jobs": { status: 409, body: { error: { code: "PRECONDITION_NOT_MET", message: "worker is busy" } } }
+          }
+        });
+        renderView();
+        await screen.findByRole("heading", { name: "App Features" });
+
+        const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+        // The refused dispatch has happened, so every preview has settled as failed...
+        await waitFor(() => expect(fetchMock.mock.calls.some((call: unknown[]) => call[0] === "/api/jobs")).toBe(true), { timeout: 10_000 });
+        // ...and approval is STILL held, because a scene decision is missing.
+        await waitFor(() => expect(screen.queryByRole("button", { name: "Approve Scenes" })).not.toBeNull());
+        expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
+      },
+      20_000
+    );
+  });
+
   it("a failed automatic preview (no Worker online) exposes a simple Regenerate Preview retry - never a Jobs/Queue page or internal job wording", async () => {
     stubWorkspace({
       extra: {
