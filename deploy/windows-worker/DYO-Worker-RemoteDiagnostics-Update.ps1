@@ -210,14 +210,17 @@ function Stop-OneProcessTree {
   return $true
 }
 
+# REAL 2026-09-15 BUG: these used to end with `return ,$found`, and every
+# caller wraps them again in @(...). That nests the result, so .Count was
+# always 1 - even with ZERO matching processes (reproduced exactly: blank
+# properties, then "Cannot convert null to type System.DateTimeOffset").
+# Plain pipeline output lets each caller's @(...) produce the real count.
 function Get-DyoSupervisorProcesses {
-  $found = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") })
-  return ,$found
+  Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("dist\supervisor\index.js") }
 }
 
 function Get-DyoWorkerChildProcesses {
-  $found = @(Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("--env-file=.env dist\index.js") })
-  return ,$found
+  Get-DyoWorkerProcesses | Where-Object { $_.CommandLine -match [regex]::Escape("--env-file=.env dist\index.js") }
 }
 
 # ORDER MATTERS: supervisors are stopped FIRST. A supervisor whose child is
@@ -259,8 +262,8 @@ function Wait-ForHealthyWorkerTree {
   while ((Get-Date) -lt $deadline) {
     $supervisors = @(Get-DyoSupervisorProcesses)
     $children = @(Get-DyoWorkerChildProcesses)
-    if ($supervisors.Count -gt 1) { return $false }
-    if ($supervisors.Count -eq 1 -and $children.Count -ge 1) { return $true }
+    if ($supervisors.Count -gt 1 -or $children.Count -gt 1) { return $false }
+    if ($supervisors.Count -eq 1 -and $children.Count -eq 1) { return $true }
     Start-Sleep -Seconds 2
   }
   return $false

@@ -892,7 +892,7 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
     expect(payload.checkpoint).toBeNull();
   });
 
-  it("true resume: carries a prior FAILED attempt's own durable checkpoint into the fresh dispatch for the same scene, unchanged, so the worker skips already-completed operations", async () => {
+  it("resume (real 2026-09-15): carries a prior FAILED attempt's checkpoint only when every operation was applied and its saved working copy verified - a crash checkpoint without a saved hash starts fresh", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);
     const projectRepository = new InMemoryProjectRepository();
@@ -933,11 +933,26 @@ describe("dispatchJob - EXECUTE_FRAME (safe dispatch)", () => {
       FIXED_NOW
     );
 
-    const resumedDispatch = await dispatchJob(commonDeps, dispatchArgs);
+    // No saved hash: the completed edit may only have existed unsaved in
+    // After Effects, so it is never skipped - a fresh start. Later dispatches
+    // get later creation times so "most recent prior job" is unambiguous.
+    const freshDispatch = await dispatchJob({ ...commonDeps, now: () => new Date(FIXED_NOW.getTime() + 1_000) }, dispatchArgs);
+    expect(((await jobRepository.findById(freshDispatch.jobId))?.payload as Record<string, unknown>).checkpoint).toBeNull();
+
+    // Every operation applied, saved and verified; only the capture failed.
+    const savedCheckpoint = { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: FIXED_NOW.toISOString(), failureReason: "preview capture failed: ae_capture_frame failed: MCP error -32001: Request timed out", savedWorkingProjectSha256: "f".repeat(64) };
+    await jobRepository.updateStatus(
+      freshDispatch.jobId,
+      workerId,
+      { expectedCurrentStatus: "QUEUED", status: "FAILED", checkpoint: savedCheckpoint, error: { code: "NOT_AVAILABLE", message: "preview capture failed" } },
+      FIXED_NOW
+    );
+
+    const resumedDispatch = await dispatchJob({ ...commonDeps, now: () => new Date(FIXED_NOW.getTime() + 2_000) }, dispatchArgs);
 
     const resumedJob = await jobRepository.findById(resumedDispatch.jobId);
     const resumedPayload = resumedJob?.payload as Record<string, unknown>;
-    expect(resumedPayload.checkpoint).toEqual(crashCheckpoint);
+    expect(resumedPayload.checkpoint).toEqual(savedCheckpoint);
     // Never re-copies from the original source and never changes the
     // working-copy path derivation - same executionSessionId, same scene.
     expect(resumedPayload.executionSessionId).toBe(session.id);

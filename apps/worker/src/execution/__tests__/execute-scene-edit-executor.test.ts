@@ -503,9 +503,10 @@ describe("executeSceneEdit", () => {
 
       expect(result.failureReason).toBeNull();
       // One persist call per operation, each carrying the checkpoint AS OF
-      // that operation completing - never batched/deferred to the end.
-      expect(persistedCheckpoints).toEqual([[0], [0, 1]]);
-      expect(persistCheckpoint).toHaveBeenCalledTimes(2);
+      // that operation completing - never batched/deferred to the end - plus
+      // one after the verified save that records the saved hash.
+      expect(persistedCheckpoints).toEqual([[0], [0, 1], [0, 1]]);
+      expect(persistCheckpoint).toHaveBeenCalledTimes(3);
     });
 
     it("pauses (does not apply further operations) when checkpoint persistence fails after an operation completes", async () => {
@@ -606,7 +607,8 @@ describe("executeSceneEdit", () => {
       );
 
       expect(result.failureReason).toBeNull();
-      expect(persistCheckpoint).toHaveBeenCalledTimes(2);
+      // One per operation, plus the post-save checkpoint recording the saved hash.
+      expect(persistCheckpoint).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1264,6 +1266,107 @@ describe("executeSceneEdit", () => {
       expect(retry.openProjectOptions).toEqual([{ discardUnsavedChanges: true }]);
       expect(retry.calls.map((c) => c.operation.type)).toEqual(["SET_TEXT", "SET_LAYER_VISIBILITY"]);
       expect(retried.operationsCompleted).toEqual([0, 1]);
+    });
+  });
+
+  describe("real 2026-09-15 First Preview failure: every operation saved, then only the preview capture timed out", () => {
+    const deps = (bridge: FakeAeEditBridge, preview: FakePreviewCapture, workRoot: string, persisted: SceneEditCheckpoint[] = []) => ({
+      workRoot,
+      aeEditBridge: bridge,
+      previewCapture: preview,
+      uploadPreview: async () => ({ ok: true as const }),
+      persistCheckpoint: async (checkpoint: SceneEditCheckpoint) => {
+        persisted.push(checkpoint);
+        return { ok: true as const };
+      },
+      resolveOperation: defaultResolveOperation,
+      now: () => new Date()
+    });
+    const CAPTURE_TIMEOUT: PreviewCaptureResult = { ok: false, reason: "ae_capture_frame failed: MCP error -32001: Request timed out" };
+
+    async function failAtCapture(sessionId: string) {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: sessionId });
+      const persisted: SceneEditCheckpoint[] = [];
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const failed = await executeSceneEdit(deps(bridge, new FakePreviewCapture(CAPTURE_TIMEOUT), workRoot, persisted), request);
+      const workingCopyPath = join(workRoot, "execution-sessions", sessionId, "working-copy.aep");
+      return { sourcePath, sourceSha, workRoot, request, persisted, bridge, failed, workingCopyPath };
+    }
+
+    it("records the verified saved hash durably before capture, so a capture failure keeps it", async () => {
+      const { failed, persisted, workingCopyPath, bridge } = await failAtCapture("session-capture-timeout");
+      const savedSha = sha256(readFileSync(workingCopyPath, "utf8"));
+
+      expect(failed.failureReason).toContain("preview capture failed");
+      expect(bridge.saveCalls).toBe(1);
+      expect(failed.workingProjectSha256).toBe(savedSha);
+      expect(persisted.at(-1)).toMatchObject({ completedOperationIndices: [0, 1], savedWorkingProjectSha256: savedSha });
+      expect(failed.checkpoint.savedWorkingProjectSha256).toBe(savedSha);
+    });
+
+    it("capture-only resume: applies no operation, never saves or rebuilds, reopens the pinned saved copy from disk, and captures", async () => {
+      const { failed, request, workRoot, workingCopyPath, sourcePath, sourceSha } = await failAtCapture("session-capture-only");
+      const savedSha = sha256(readFileSync(workingCopyPath, "utf8"));
+
+      const retryBridge = new FakeAeEditBridge(alwaysSucceed);
+      const preview = new FakePreviewCapture(REAL_PREVIEW);
+      const retried = await executeSceneEdit(deps(retryBridge, preview, workRoot), { ...request, checkpoint: failed.checkpoint });
+
+      expect(retried.failureReason).toBeNull();
+      expect(retryBridge.calls).toHaveLength(0);
+      expect(retryBridge.saveCalls).toBe(0);
+      expect(retryBridge.openProjectOptions).toEqual([{ discardUnsavedChanges: true }]);
+      expect(preview.calls).toBe(1);
+      expect(retried.workingProjectSha256).toBe(savedSha);
+      expect(sha256(readFileSync(workingCopyPath, "utf8"))).toBe(savedSha);
+      expect(retried.previewFramePath).toBe(REAL_PREVIEW.path);
+      expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha);
+    });
+
+    it("capture-only resume refuses a working copy that no longer matches the saved hash - no rebuild, no edits, no capture", async () => {
+      const { failed, request, workRoot, workingCopyPath, sourcePath, sourceSha } = await failAtCapture("session-capture-diverged");
+      writeFileSync(workingCopyPath, "fake-aep-bytes\n// changed after the verified save");
+
+      const retryBridge = new FakeAeEditBridge(alwaysSucceed);
+      const preview = new FakePreviewCapture(REAL_PREVIEW);
+      const retried = await executeSceneEdit(deps(retryBridge, preview, workRoot), { ...request, checkpoint: failed.checkpoint });
+
+      expect(retried.workingCopyFailureCode).toBe("WORKING_COPY_SHA_MISMATCH");
+      expect(retryBridge.openProjectCalls).toHaveLength(0);
+      expect(retryBridge.calls).toHaveLength(0);
+      expect(retryBridge.saveCalls).toBe(0);
+      expect(preview.calls).toBe(0);
+      expect(readFileSync(workingCopyPath, "utf8")).toBe("fake-aep-bytes\n// changed after the verified save");
+      expect(sha256(readFileSync(sourcePath, "utf8"))).toBe(sourceSha);
+    });
+
+    it("capture-only resume refuses a missing working copy rather than recreating it from the source", async () => {
+      const { failed, request, workRoot, workingCopyPath } = await failAtCapture("session-capture-missing");
+      rmSync(workingCopyPath);
+
+      const retryBridge = new FakeAeEditBridge(alwaysSucceed);
+      const preview = new FakePreviewCapture(REAL_PREVIEW);
+      const retried = await executeSceneEdit(deps(retryBridge, preview, workRoot), { ...request, checkpoint: failed.checkpoint });
+
+      expect(retried.workingCopyFailureCode).toBe("WORKING_COPY_MISSING");
+      expect(retryBridge.calls).toHaveLength(0);
+      expect(preview.calls).toBe(0);
+    });
+
+    it("a full checkpoint WITHOUT a saved hash is not capture-only: the ordinary path saves again", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const full: SceneEditCheckpoint = { completedOperationIndices: [0, 1], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: null };
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      await executeSceneEdit(
+        deps(bridge, new FakePreviewCapture(REAL_PREVIEW), workRoot),
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-legacy-full", checkpoint: full })
+      );
+      expect(bridge.calls).toHaveLength(0);
+      expect(bridge.saveCalls).toBe(1);
+      expect(bridge.openProjectOptions).toEqual([{ discardUnsavedChanges: false }]);
     });
   });
 

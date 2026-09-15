@@ -301,7 +301,16 @@ export const sceneEditCheckpointSchema = z.object({
   completedOperationIndices: z.array(z.number().int().nonnegative()),
   checkpointBeforeAt: z.string().datetime().nullable(),
   checkpointAfterAt: z.string().datetime().nullable(),
-  failureReason: z.string().nullable()
+  failureReason: z.string().nullable(),
+  /**
+   * REAL 2026-09-15 FAILURE (job 60fcab36): sha256 of the working copy as
+   * saved to disk after EVERY requested operation was applied, recorded only
+   * once that saved file was hashed and the immutable source re-verified.
+   * Its presence is what makes a later attempt a capture-only resume (pin
+   * the copy to this hash, apply nothing, never rebuild) - see
+   * execute-scene-edit-executor.ts. Absent on older checkpoints.
+   */
+  savedWorkingProjectSha256: z.string().min(1).nullable().optional()
 });
 export type SceneEditCheckpoint = z.infer<typeof sceneEditCheckpointSchema>;
 

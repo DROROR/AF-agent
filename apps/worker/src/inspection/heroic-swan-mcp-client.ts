@@ -281,7 +281,7 @@ export class HeroicSwanMcpClient implements McpChildOwner {
    * ToolCallFailure, matching the "never fabricate, always report failure
    * honestly" contract already used by TemplateInspector/AfterEffectsRenderer.
    */
-  async callTool(name: AllowedInspectionTool, args: Record<string, unknown> = {}): Promise<ToolCallResult> {
+  async callTool(name: AllowedInspectionTool, args: Record<string, unknown> = {}, timeoutMsOverride?: number): Promise<ToolCallResult> {
     if (!this.client) {
       return {
         ok: false,
@@ -289,7 +289,7 @@ export class HeroicSwanMcpClient implements McpChildOwner {
       };
     }
     try {
-      const result = await this.client.callTool({ name, arguments: args }, undefined, { timeout: this.timeoutMs });
+      const result = await this.client.callTool({ name, arguments: args }, undefined, { timeout: timeoutMsOverride ?? this.timeoutMs });
       if (result.isError) {
         return { ok: false, error: { code: "TOOL_ERROR", message: extractErrorText(result.content) } };
       }

@@ -141,14 +141,15 @@ function Test-IsDyoWorkerProcess {
   return ($cmd -match $SupervisorPattern -or $cmd -match $WorkerChildPattern)
 }
 
+# REAL 2026-09-15 BUG (recovery v1/v2): `return ,$found` plus the callers'
+# own @(...) nested the result, so .Count was always 1 even with ZERO DYO
+# processes. Plain pipeline output gives callers the real count.
 function Get-DyoSupervisorProcesses {
-  $found = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine -match $SupervisorPattern })
-  return ,$found
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine -match $SupervisorPattern }
 }
 
 function Get-DyoWorkerChildProcesses {
-  $found = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine -match $WorkerChildPattern })
-  return ,$found
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine -match $WorkerChildPattern }
 }
 
 function Get-LiveProcessById {

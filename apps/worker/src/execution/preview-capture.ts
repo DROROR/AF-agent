@@ -43,8 +43,35 @@ export class NotAvailablePreviewCapture implements PreviewCapture {
   }
 }
 
+/**
+ * REAL 2026-09-15 FAILURE (job 60fcab36): the first capture after nine real
+ * edits (two large imports) ran past the MCP client's flat 15 s default -
+ * "MCP error -32001: Request timed out" - while After Effects kept rendering
+ * the still (its bridge heartbeat stopped until it finished). A still render
+ * of an edited scene legitimately takes longer than an inspection read, so
+ * capture gets its own bounds: still finite, never retried automatically
+ * (a second request would only queue another render behind the first). A
+ * timed-out capture is retried as a capture-only resume instead.
+ */
+export const DEFAULT_CAPTURE_CONNECT_TIMEOUT_MS = 60_000;
+export const DEFAULT_CAPTURE_CALL_TIMEOUT_MS = 180_000;
+
+export interface HeroicSwanPreviewCaptureTimeouts {
+  connectTimeoutMs?: number;
+  callTimeoutMs?: number;
+}
+
 export class HeroicSwanPreviewCapture implements PreviewCapture {
-  constructor(private readonly aeMcpPath: string) {}
+  readonly connectTimeoutMs: number;
+  readonly callTimeoutMs: number;
+
+  constructor(
+    private readonly aeMcpPath: string,
+    timeouts: HeroicSwanPreviewCaptureTimeouts = {}
+  ) {
+    this.connectTimeoutMs = timeouts.connectTimeoutMs ?? DEFAULT_CAPTURE_CONNECT_TIMEOUT_MS;
+    this.callTimeoutMs = timeouts.callTimeoutMs ?? DEFAULT_CAPTURE_CALL_TIMEOUT_MS;
+  }
 
   async capture({
     aeProjectItemIndex,
@@ -53,7 +80,7 @@ export class HeroicSwanPreviewCapture implements PreviewCapture {
     aeProjectItemIndex: number;
     timestampSeconds: number;
   }): Promise<PreviewCaptureResult> {
-    const client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath });
+    const client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath, timeoutMs: this.connectTimeoutMs });
     try {
       await client.connect();
     } catch (error) {
@@ -62,7 +89,7 @@ export class HeroicSwanPreviewCapture implements PreviewCapture {
     }
 
     try {
-      const result = await client.callTool("ae_capture_frame", { comp_index: aeProjectItemIndex, time: timestampSeconds });
+      const result = await client.callTool("ae_capture_frame", { comp_index: aeProjectItemIndex, time: timestampSeconds }, this.callTimeoutMs);
       if (!result.ok) {
         return { ok: false, reason: `ae_capture_frame failed: ${result.error.message}` };
       }

@@ -112,7 +112,11 @@ function toWorkingCopyFailureCode(reason: WorkingCopyFailureReason): WorkingCopy
 
 export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: ExecuteSceneEditRequest): Promise<SceneEditResult> {
   const startedAt = deps.now().toISOString();
-  let checkpoint: SceneEditCheckpoint = request.checkpoint ?? EMPTY_SCENE_EDIT_CHECKPOINT;
+  // A failure reason describes one attempt: a resumed checkpoint carries the
+  // prior attempt's completed work, never its failure - otherwise a
+  // capture-only resume (which completes no operation that would clear it)
+  // reports a genuine success as the old failure.
+  let checkpoint: SceneEditCheckpoint = { ...(request.checkpoint ?? EMPTY_SCENE_EDIT_CHECKPOINT), failureReason: null };
   // Set only if a BUILD_REELS_COMPOSITION operation completes successfully
   // in this attempt - see jsx-templates.ts's own resultingValue shape for
   // that operation.
@@ -159,12 +163,26 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     };
   }
 
+  // REAL 2026-09-15 FAILURE (job 60fcab36): all 9 operations were applied,
+  // saved and verified, then only the preview capture timed out. Retrying
+  // that must never rebuild the working copy or re-apply a single edit. A
+  // checkpoint that already covers every operation AND records the hash of
+  // the verified saved working copy resumes as capture-only: the copy is
+  // pinned to exactly that hash (missing or different is refused, never
+  // rebuilt), reopened from disk, not saved again, and re-verified
+  // byte-identical before capture. A full checkpoint WITHOUT a saved hash
+  // (the edits may only ever have existed unsaved in After Effects) keeps
+  // the ordinary path.
+  const savedCheckpointSha256 = checkpoint.savedWorkingProjectSha256 ?? null;
+  const captureOnlyResume =
+    request.previewOnly !== true && savedCheckpointSha256 !== null && nextPendingOperationIndex(checkpoint, request.operations.length) === null;
+
   const workingCopy = await prepareSessionWorkingCopy({
     workRoot: deps.workRoot,
     executionSessionId: request.executionSessionId,
     sourceProjectPath: request.sourceProjectPath,
     expectedSourceSha256: request.sourceProjectSha256,
-    expectedWorkingProjectSha256: request.expectedWorkingProjectSha256,
+    expectedWorkingProjectSha256: captureOnlyResume ? savedCheckpointSha256 : request.expectedWorkingProjectSha256,
     // A fresh run (nothing completed) re-applies every operation, so it must
     // not start from an unconfirmed first-scene copy - see working-copy.ts.
     rebuildUnconfirmedCopy: checkpoint.completedOperationIndices.length === 0
@@ -222,7 +240,9 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // resume keeps the open project, because its completed operations only
   // exist there.
   const startsFresh = checkpoint.completedOperationIndices.length === 0;
-  const opened = await deps.aeEditBridge.openProject(workingCopy.workingProjectPath, { discardUnsavedChanges: startsFresh });
+  // A capture-only resume also reopens from disk: the pinned, hash-verified
+  // saved file is the authority, never whatever is still open in AE.
+  const opened = await deps.aeEditBridge.openProject(workingCopy.workingProjectPath, { discardUnsavedChanges: startsFresh || captureOnlyResume });
   if (!opened.ok) {
     checkpoint = markFailed(checkpoint, `could not confirm the session working copy is open in After Effects: ${opened.failureReason}`, deps.now());
     return finish({
@@ -411,7 +431,9 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // genuinely separate, read-only `ae_capture_frame` tool and never
   // needed a save to begin with - skipping it for previewOnly loses
   // nothing.
-  if (request.previewOnly !== true) {
+  // The same holds for a capture-only resume: nothing was applied, so a save
+  // would only re-serialize the pinned copy and change its hash.
+  if (request.previewOnly !== true && !captureOnlyResume) {
     const saveResult = await deps.aeEditBridge.saveProject();
     if (!saveResult.ok) {
       checkpoint = markFailed(checkpoint, `working copy save failed: ${saveResult.failureReason}`, deps.now());
@@ -510,10 +532,10 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // identical to what it was before this run. Any change means something
   // mutated it outside this job's own knowledge - never treated as a safe
   // recapture.
-  if (request.previewOnly === true && savedHash.value.sha256 !== workingCopy.workingProjectSha256) {
+  if ((request.previewOnly === true || captureOnlyResume) && savedHash.value.sha256 !== workingCopy.workingProjectSha256) {
     checkpoint = markFailed(
       checkpoint,
-      "SAFETY CHECK FAILED (WORKING_COPY_UNEXPECTEDLY_MUTATED): this was a previewOnly run (zero operations requested), but the " +
+      `SAFETY CHECK FAILED (WORKING_COPY_UNEXPECTEDLY_MUTATED): this was a ${captureOnlyResume ? "capture-only resume (every operation already applied and saved)" : "previewOnly run (zero operations requested)"}, but the ` +
         `saved working copy's sha256 (${savedHash.value.sha256}) differs from what it was before this run ` +
         `(${workingCopy.workingProjectSha256}) - refusing to report success.`,
       deps.now()
@@ -526,6 +548,17 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewTimestampSeconds: null,
       workingCopyFailureCode: "WORKING_COPY_UNEXPECTEDLY_MUTATED"
     });
+  }
+
+  // Every operation is applied, saved, hashed, and the source re-verified:
+  // durably record that saved hash BEFORE capture, so a capture or upload
+  // failure can be retried as capture-only (see captureOnlyResume above)
+  // instead of rebuilding and re-editing. A failed report only loses that
+  // resumability - the next attempt is then an ordinary fresh run - so it
+  // never blocks the capture itself.
+  if (request.previewOnly !== true && !captureOnlyResume) {
+    checkpoint = { ...checkpoint, savedWorkingProjectSha256: savedHash.value.sha256 };
+    await deps.persistCheckpoint(checkpoint);
   }
 
   // The last operation may itself have imported footage and shifted indices

@@ -27,6 +27,34 @@ function extractValidCheckpoint(job: Job | null): SceneEditCheckpoint | null {
   return parsed.data;
 }
 
+/**
+ * Key-order-independent JSON form. REAL 2026-09-15 FINDING: job payloads are
+ * stored as PostgreSQL jsonb, which re-orders object keys, so comparing a
+ * stored operations array with a freshly resolved one via JSON.stringify
+ * never matched - every EXECUTE_FRAME retry silently started fresh.
+ */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${canonicalJson(entryValue)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * EXECUTE_FRAME resumes ONLY a prior attempt that applied, saved and verified
+ * every operation (its checkpoint covers all of them and records
+ * savedWorkingProjectSha256) - the worker then runs capture-only against that
+ * pinned copy. A partial checkpoint is deliberately not resumed: its completed
+ * edits may only ever have existed unsaved inside After Effects (lost on any
+ * AE/worker restart), so skipping them would produce a wrong frame. Such a
+ * retry starts fresh, and the worker rebuilds the copy from the verified source.
+ */
 export async function resolveExecuteFrameResumeCheckpoint(
   jobRepository: JobRepository,
   resolvedPayload: Omit<ExecuteSceneEditRequest, "checkpoint">
@@ -46,8 +74,17 @@ export async function resolveExecuteFrameResumeCheckpoint(
     priorPayload.planId === resolvedPayload.planId &&
     priorPayload.planRevision === resolvedPayload.planRevision &&
     priorPayload.expectedWorkingProjectSha256 === resolvedPayload.expectedWorkingProjectSha256 &&
-    JSON.stringify(priorPayload.operations) === JSON.stringify(resolvedPayload.operations);
-  return sameIntent ? checkpoint : null;
+    canonicalJson(priorPayload.operations) === canonicalJson(resolvedPayload.operations);
+  if (!sameIntent) {
+    return null;
+  }
+  const completed = new Set(checkpoint.completedOperationIndices);
+  const operationCount = resolvedPayload.operations.length;
+  const everyOperationCompleted = operationCount > 0 && Array.from({ length: operationCount }, (_, index) => index).every((index) => completed.has(index));
+  if (!everyOperationCompleted || !checkpoint.savedWorkingProjectSha256) {
+    return null;
+  }
+  return checkpoint;
 }
 
 export async function resolveRenderResumeCheckpoint(
