@@ -423,8 +423,23 @@ Write-CheckResult $true "Updated DYO Worker program files"
 
 Write-Host "Checking runtime dependencies (only needs internet access if something is missing)..."
 Push-Location $InstallDir
-& npm install --omit=dev --no-audit --no-fund *>$null
-$npmExitCode = $LASTEXITCODE
+# REAL 2026-09-15 FAILURE: `& npm install ... *>$null` under
+# $ErrorActionPreference = "Stop" aborted this installer after the worker had
+# been stopped and the files copied - Windows PowerShell 5.1 turns a native
+# program's stderr ("npm notice ...") into a terminating NativeCommandError
+# even when it is redirected. npm now runs through cmd.exe with its output
+# redirected INSIDE cmd, so PowerShell never sees a stderr stream; only npm's
+# own exit code decides the outcome (the same approach as taskkill above).
+$npmLogPath = Join-Path $InstallDir "logs\update-npm-install.log"
+if (-not (Test-Path (Split-Path $npmLogPath))) { New-Item -ItemType Directory -Path (Split-Path $npmLogPath) | Out-Null }
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+  & cmd.exe /d /c "npm install --omit=dev --no-audit --no-fund > `"$npmLogPath`" 2>&1"
+  $npmExitCode = $LASTEXITCODE
+} finally {
+  $ErrorActionPreference = $previousErrorActionPreference
+}
 Pop-Location
 if ($npmExitCode -ne 0) {
   Write-Host "[NEEDS ATTENTION] Installing dependencies failed."
