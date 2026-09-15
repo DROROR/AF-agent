@@ -390,3 +390,11 @@ Session `1257ac95`, job `e0039632`: operations 0-2 ran (two SET_TEXT, then the s
 - **UX defect - raw technical error.** The Preview page showed the After Effects scripting error verbatim: `Can not call method "moveToBeginning" on Layer "e911189-0e21-49d2-97d8-411fd5e0750b.png" because the Layer is locked.` - an internal asset id as a layer name, AE method names, and no recovery instruction for the client.
 - **UX defect - misleading heading.** The same failure was shown under "Could not dispatch this job", although the job had been dispatched and completed operations 0-6.
 - **Layer order check.** `moveToBeginning` is required for a screen-card fill (the fitted media must sit above the card's guide labels). The fill now verifies the media is the composition's top layer afterwards and fails the operation otherwise.
+
+## 2026-09-14 - First Preview job a4a0ac5e: After Effects busy longer than the mutation timeout (session 1257ac95)
+
+- **Run.** Build `98a3594`. Started from a source-identical working copy; operations 0-2 completed (two SET_TEXT, the shared-screen MAP_FOOTAGE fill). Operation 3 (SET_TEXT) failed ~26-30 s later: "TRANSPORT_ERROR: AE_UNRESPONSIVE (BRIDGE_TIMEOUT)". Nothing was saved; still one session.
+- **Evidence.** Seconds later AE answered normally (CHECK_HEALTH: working-copy.aep open, 47 items, bridge live) - a busy period, not a hang or dialog. Job `e80c36c4` earlier hit the same timeout right after a MAP_FOOTAGE import.
+- **Cause.** Every mutation connection and call was bounded by a flat 30 s; ae-mcp's `ae_run_jsx` has no per-call timeout of its own.
+- **Fix (worker).** Mutation connect bound 60 s, call bound 120 s. A timed-out mutation is still never retried (outcome unknown); the job fails honestly and the next fresh run rebuilds the working copy from the source.
+- **UX defect.** The failure text tells the client to "restart AE if it is genuinely hung" for what was a transient busy period.

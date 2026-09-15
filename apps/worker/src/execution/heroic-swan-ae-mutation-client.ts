@@ -37,7 +37,22 @@ import { describeMcpFailure } from "./classify-mcp-failure.js";
  * `(function(){...})()` expression).
  */
 const SERVE_SUBCOMMAND = "serve";
-const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Bounds for one mutation connection and one mutation call.
+ *
+ * REAL 2026-09-14 FAILURES (session 1257ac95): right after a MAP_FOOTAGE
+ * import of a large screenshot, After Effects stayed busy longer than the old
+ * flat 30 s bound - job e80c36c4 could not even connect, and job a4a0ac5e's
+ * next SET_TEXT timed out - yet AE answered normally seconds later both times.
+ * A mutation that times out is never retried (its outcome is unknown); the
+ * job fails honestly and the next fresh run rebuilds the working copy from the
+ * source. So the bound only needs to outlast AE's real post-import busy
+ * period, while still surfacing a genuinely hung AE within a couple of
+ * minutes.
+ */
+export const DEFAULT_MUTATION_CONNECT_TIMEOUT_MS = 60_000;
+export const DEFAULT_MUTATION_CALL_TIMEOUT_MS = 120_000;
 const MUTATION_TOOL_NAME = "ae_run_jsx";
 /** Fixed, non-sensitive audit string - upstream's own `description` field exists "for audit"; this never varies per call, so it can never leak per-request data into ae-mcp's own logs. */
 const FIXED_OPERATION_DESCRIPTION = "DYO EXECUTE_FRAME fixed operation";
@@ -69,17 +84,20 @@ function extractErrorText(content: unknown): string {
 
 export interface HeroicSwanAeMutationClientConfig {
   aeMcpPath: string;
+  /** Overrides BOTH the connect and the call bound (tests use a short one). */
   timeoutMs?: number;
 }
 
 export class HeroicSwanAeMutationClient {
   private readonly aeMcpPath: string;
-  private readonly timeoutMs: number;
+  readonly connectTimeoutMs: number;
+  readonly callTimeoutMs: number;
   private client: Client | null = null;
 
   constructor(config: HeroicSwanAeMutationClientConfig) {
     this.aeMcpPath = config.aeMcpPath;
-    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.connectTimeoutMs = config.timeoutMs ?? DEFAULT_MUTATION_CONNECT_TIMEOUT_MS;
+    this.callTimeoutMs = config.timeoutMs ?? DEFAULT_MUTATION_CALL_TIMEOUT_MS;
   }
 
   async connect(): Promise<void> {
@@ -91,7 +109,7 @@ export class HeroicSwanAeMutationClient {
     });
     transport.stderr?.on("data", () => {});
     const client = new Client({ name: "dyo-video-agent-worker", version: "0.1.0" }, { capabilities: {} });
-    await client.connect(transport, { timeout: this.timeoutMs });
+    await client.connect(transport, { timeout: this.connectTimeoutMs });
     this.client = client;
   }
 
@@ -120,7 +138,7 @@ export class HeroicSwanAeMutationClient {
           }
         },
         undefined,
-        { timeout: this.timeoutMs }
+        { timeout: this.callTimeoutMs }
       );
       if (result.isError) {
         return { ok: false, error: { code: "TOOL_ERROR", message: extractErrorText(result.content) } };
