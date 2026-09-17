@@ -2814,6 +2814,31 @@ describe("buildDescribeProjectFontsScript (real 2026-09-17: the template's fonts
     expect(gotham).toMatchObject({ status: "missing", installed: [] });
   });
 
+  it("real 2026-09-17 (job 2ee2114f): After Effects wrapper objects (Boolean/String) still give 'substituted', never 'installed'", () => {
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    // Reproduces the real result: HelveticaNeue-Bold rendered through Times New Roman,
+    // with isSubstitute / postScriptName delivered as wrapper objects.
+    vm.runInContext(
+      setup() +
+        `
+      function wrappedFont(ps, family, style, isSubstitute, location) {
+        return { postScriptName: new String(ps), familyName: new String(family), styleName: new String(style), isSubstitute: new Boolean(isSubstitute), isFromAdobeFonts: new Boolean(false), location: new String(location) };
+      }
+      var times = wrappedFont("HelveticaNeue-Bold", "HelveticaNeue", "Bold", true, "C:/Windows/Fonts/times.ttf");
+      comp1Layers[1] = textLayer(2, "Text 1", new String("HelveticaNeue-Bold"), times);
+      app.fonts.missingOrSubstitutedFonts = [times];
+      app.fonts.getFontsByPostScriptName = function (name) { return String(name) === "HelveticaNeue-Bold" ? [times] : String(name) === "Arial-BoldMT" ? [arial] : []; };
+    `,
+      context
+    );
+    const result = JSON.parse(vm.runInContext(`(new Function("args", ${JSON.stringify(buildDescribeProjectFontsScript())}))()`, context) as string);
+    const bold = result.facts.fonts.find((f: { postScriptName: string }) => f.postScriptName === "HelveticaNeue-Bold");
+    expect(bold).toMatchObject({ status: "substituted", installed: [{ postScriptName: "HelveticaNeue-Bold", isSubstitute: true, location: "C:/Windows/Fonts/times.ttf" }] });
+    expect(bold.usedBy[0].renderedWith).toEqual({ postScriptName: "HelveticaNeue-Bold", familyName: "HelveticaNeue", styleName: "Bold", isSubstitute: true, isFromAdobeFonts: false, location: "C:/Windows/Fonts/times.ttf" });
+    expect(result.facts.fonts.find((f: { postScriptName: string }) => f.postScriptName === "Arial-BoldMT").status).toBe("installed");
+  });
+
   it("without the app.fonts API every status is 'unknown' - never guessed", () => {
     const { result } = run({ fontsApi: false });
     expect(result.ok).toBe(true);

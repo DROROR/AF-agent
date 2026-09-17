@@ -2670,15 +2670,21 @@ export function buildDescribeProjectFontsScript(): FixedJsxScript {
   const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO DESCRIBE_PROJECT_FONTS")});
   var __result = null;
   function __safe(__fn) { try { var __v = __fn(); return __v === undefined ? null : __v; } catch (__safeError) { return null; } }
+  // REAL 2026-09-17 FINDING (job 2ee2114f): After Effects returned font facts
+  // that serialised as true / "HelveticaNeue" but failed === comparisons
+  // (wrapper objects), so a substituted font was labelled "installed". Every
+  // value is normalised to a primitive here, once, before any comparison.
+  function __str(__v) { return __v === null || __v === undefined ? null : String(__v); }
+  function __bool(__v) { return __v === null || __v === undefined ? null : String(__v) === "true"; }
   function __fontInfo(__font) {
     if (!__font) { return null; }
     return {
-      postScriptName: __safe(function () { return __font.postScriptName; }),
-      familyName: __safe(function () { return __font.familyName; }),
-      styleName: __safe(function () { return __font.styleName; }),
-      isSubstitute: __safe(function () { return __font.isSubstitute; }),
-      isFromAdobeFonts: __safe(function () { return __font.isFromAdobeFonts; }),
-      location: __safe(function () { return __font.location; })
+      postScriptName: __str(__safe(function () { return __font.postScriptName; })),
+      familyName: __str(__safe(function () { return __font.familyName; })),
+      styleName: __str(__safe(function () { return __font.styleName; })),
+      isSubstitute: __bool(__safe(function () { return __font.isSubstitute; })),
+      isFromAdobeFonts: __bool(__safe(function () { return __font.isFromAdobeFonts; })),
+      location: __str(__safe(function () { return __font.location; }))
     };
   }
   try {
@@ -2697,7 +2703,7 @@ export function buildDescribeProjectFontsScript(): FixedJsxScript {
         __textLayerCount++;
         var __sourceText = __safe(function () { return __layer.property("ADBE Text Properties").property("ADBE Text Document"); });
         var __doc = __safe(function () { return __sourceText.value; });
-        var __name = __safe(function () { return __doc.font; });
+        var __name = __str(__safe(function () { return __doc.font; }));
         if (!__name) { continue; }
         if (!__byName.hasOwnProperty(__name)) {
           __byName[__name] = { postScriptName: __name, usedBy: [], usageCount: 0 };
@@ -2709,7 +2715,7 @@ export function buildDescribeProjectFontsScript(): FixedJsxScript {
             composition: __safe(function () { return __item.name; }),
             layerIndex: __safe(function () { return __layer.index; }),
             layerName: __safe(function () { return __layer.name; }),
-            sourceTextKeyframed: __safe(function () { return __sourceText.numKeys > 0; }),
+            sourceTextKeyframed: __bool(__safe(function () { return __sourceText.numKeys > 0; })),
             renderedWith: __fontInfo(__safe(function () { return __doc.fontObject; }))
           });
         }
