@@ -247,6 +247,9 @@ function buildSetTextBody(text: string): string {
   return withTargetLayerUnlocked(buildSetTextMutation(text));
 }
 
+/** A replaced text line is never shrunk below this fraction of its template scale - below it the operation fails instead of producing unreadably small text. */
+export const TEXT_AUTO_FIT_MIN_FACTOR = 0.6;
+
 function buildSetTextMutation(text: string): string {
   const textLiteral = JSON.stringify(text);
   return `
@@ -258,7 +261,140 @@ function buildSetTextMutation(text: string): string {
           __td.text = ${textLiteral};
           __layer.sourceText.setValue(__td);
           __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${textLiteral} });
+          ${buildTextAutoFit()}
         }`;
+}
+
+/**
+ * REAL 2026-09-17 FINDING (session 069b5891, proven by read-only inspection):
+ * the approved Hebrew line replaced a 6-character right-aligned template text;
+ * being longer, it grew left over a shape filled with EXACTLY the text's own
+ * colour (the template's orange circle), so its first letters vanished.
+ *
+ * After the text is set, if the text layer is a plain unparented 2D layer with
+ * static transform and no rotation: every enabled, unparented, unrotated 2D
+ * layer BELOW it whose fill colour (enabled Fill effect, else its solid colour)
+ * matches the text's colour (enabled Fill effect, else the text fill) within
+ * 0.02 per channel is a blocker, bounded by its ADD masks (else its rendered
+ * rect), all measured midway through the text's visible time. The text is then
+ * shrunk uniformly about its own anchor by the largest factor that separates
+ * it from every blocker by a margin (1.25 % of the composition width, at least
+ * 8 px) - never enlarged, never moved. A factor below
+ * TEXT_AUTO_FIT_MIN_FACTOR fails the operation. Any measurement that cannot
+ * be read skips the fit and leaves the replaced text as set.
+ */
+function buildTextAutoFit(): string {
+  return `
+          var __fitFailureReason = null;
+          try {
+            var __fitComp = __layer.containingComp;
+            var __fitTransform = __layer.property("ADBE Transform Group");
+            var __fitScaleProp = __fitTransform.property("ADBE Scale");
+            var __fitAnchorProp = __fitTransform.property("ADBE Anchor Point");
+            var __fitPositionProp = __fitTransform.property("ADBE Position");
+            var __fitRotationProp = __fitTransform.property("ADBE Rotate Z");
+            var __fitFillColour = function (__lyr) {
+              var __parade = null;
+              try { __parade = __lyr.property("ADBE Effect Parade"); } catch (__paradeError) { __parade = null; }
+              if (__parade) {
+                for (var __e = 1; __e <= __parade.numProperties; __e++) {
+                  var __fx = __parade.property(__e);
+                  if (__fx && __fx.matchName === "ADBE Fill" && __fx.enabled) { return __fx.property("ADBE Fill-0002").value; }
+                }
+              }
+              return null;
+            };
+            var __fitSameColour = function (__c1, __c2) {
+              if (!__c1 || !__c2) { return false; }
+              for (var __ch = 0; __ch < 3; __ch++) { if (Math.abs(__c1[__ch] - __c2[__ch]) > 0.02) { return false; } }
+              return true;
+            };
+            var __fitLayerBounds = function (__lyr, __time) {
+              var __lt = __lyr.property("ADBE Transform Group");
+              if (__lt.property("ADBE Rotate Z").valueAtTime(__time, false) !== 0) { return null; }
+              var __la = __lt.property("ADBE Anchor Point").valueAtTime(__time, false);
+              var __lp = __lt.property("ADBE Position").valueAtTime(__time, false);
+              var __ls = __lt.property("ADBE Scale").valueAtTime(__time, false);
+              var __box = null;
+              var __masks = null;
+              try { __masks = __lyr.property("ADBE Mask Parade"); } catch (__maskError) { __masks = null; }
+              if (__masks) {
+                for (var __m = 1; __m <= __masks.numProperties; __m++) {
+                  var __mask = __masks.property(__m);
+                  if (!__mask || __mask.maskMode !== MaskMode.ADD || __mask.inverted) { continue; }
+                  var __verts = __mask.property("ADBE Mask Shape").valueAtTime(__time, false).vertices;
+                  for (var __v = 0; __v < __verts.length; __v++) {
+                    if (__box === null) { __box = { left: __verts[__v][0], right: __verts[__v][0], top: __verts[__v][1], bottom: __verts[__v][1] }; }
+                    __box.left = Math.min(__box.left, __verts[__v][0]); __box.right = Math.max(__box.right, __verts[__v][0]);
+                    __box.top = Math.min(__box.top, __verts[__v][1]); __box.bottom = Math.max(__box.bottom, __verts[__v][1]);
+                  }
+                }
+              }
+              if (__box === null) {
+                var __rect = __lyr.sourceRectAtTime(__time, false);
+                __box = { left: __rect.left, right: __rect.left + __rect.width, top: __rect.top, bottom: __rect.top + __rect.height };
+              }
+              return {
+                left: __lp[0] + (__box.left - __la[0]) * __ls[0] / 100,
+                right: __lp[0] + (__box.right - __la[0]) * __ls[0] / 100,
+                top: __lp[1] + (__box.top - __la[1]) * __ls[1] / 100,
+                bottom: __lp[1] + (__box.bottom - __la[1]) * __ls[1] / 100
+              };
+            };
+            var __textColour = __fitFillColour(__layer);
+            if (__textColour === null) {
+              try { if (__td.applyFill) { __textColour = __td.fillColor; } } catch (__fillColorError) { __textColour = null; }
+            }
+            var __fitSupported =
+              __textColour !== null && !__layer.threeDLayer && !__layer.parent &&
+              __fitScaleProp.numKeys === 0 && __fitAnchorProp.numKeys === 0 && __fitPositionProp.numKeys === 0 && __fitRotationProp.numKeys === 0 &&
+              __fitRotationProp.value === 0 && __fitScaleProp.value[0] > 0 && __fitScaleProp.value[1] > 0;
+            if (__fitSupported) {
+              var __fitTime = (Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __fitComp.duration)) / 2;
+              var __textRect = __layer.sourceRectAtTime(__fitTime, false);
+              var __fs = __fitScaleProp.value, __fa = __fitAnchorProp.value, __fp = __fitPositionProp.value;
+              // Offsets of the text's rendered edges from its anchor at the current scale.
+              var __dLeft = (__textRect.left - __fa[0]) * __fs[0] / 100;
+              var __dRight = (__textRect.left + __textRect.width - __fa[0]) * __fs[0] / 100;
+              var __dTop = (__textRect.top - __fa[1]) * __fs[1] / 100;
+              var __dBottom = (__textRect.top + __textRect.height - __fa[1]) * __fs[1] / 100;
+              var __margin = Math.max(8, __fitComp.width * 0.0125);
+              var __factor = 1;
+              for (var __li = __layer.index + 1; __li <= __fitComp.numLayers; __li++) {
+                var __other = __fitComp.layer(__li);
+                if (!__other || !__other.enabled || __other.threeDLayer || __other.parent || __other instanceof TextLayer) { continue; }
+                var __otherColour = __fitFillColour(__other);
+                if (__otherColour === null) {
+                  try { if (__other.source && __other.source.mainSource instanceof SolidSource) { __otherColour = __other.source.mainSource.color; } } catch (__solidColourError) { __otherColour = null; }
+                }
+                if (!__fitSameColour(__otherColour, __textColour)) { continue; }
+                var __b = __fitLayerBounds(__other, __fitTime);
+                if (__b === null) { continue; }
+                var __overlaps = __fp[0] + __dLeft < __b.right + __margin && __fp[0] + __dRight > __b.left - __margin &&
+                  __fp[1] + __dTop < __b.bottom + __margin && __fp[1] + __dBottom > __b.top - __margin;
+                if (!__overlaps) { continue; }
+                // Largest shrink factor that separates the text from this blocker on any one side.
+                var __best = 0;
+                if (__dLeft < 0 && __fp[0] > __b.right + __margin) { __best = Math.max(__best, (__b.right + __margin - __fp[0]) / __dLeft); }
+                if (__dRight > 0 && __fp[0] < __b.left - __margin) { __best = Math.max(__best, (__b.left - __margin - __fp[0]) / __dRight); }
+                if (__dTop < 0 && __fp[1] > __b.bottom + __margin) { __best = Math.max(__best, (__b.bottom + __margin - __fp[1]) / __dTop); }
+                if (__dBottom > 0 && __fp[1] < __b.top - __margin) { __best = Math.max(__best, (__b.top - __margin - __fp[1]) / __dBottom); }
+                __factor = Math.min(__factor, Math.min(__best, 1));
+              }
+              if (__factor < ${TEXT_AUTO_FIT_MIN_FACTOR}) {
+                __fitFailureReason = "replaced text overlaps a shape of its own colour and would have to shrink to " + Math.round(__factor * 100) + "% of its template size to stay visible (minimum ${Math.round(TEXT_AUTO_FIT_MIN_FACTOR * 100)}%) - refusing to produce unreadable or hidden text";
+              } else if (__factor < 1) {
+                var __newTextScale = [__fs[0] * __factor, __fs[1] * __factor];
+                if (__fs.length > 2) { __newTextScale.push(__fs[2]); }
+                __fitScaleProp.setValue(__newTextScale);
+              }
+            }
+          } catch (__fitError) {
+            __fitFailureReason = null;
+          }
+          if (__fitFailureReason !== null) {
+            __result = JSON.stringify({ ok: false, failureReason: __fitFailureReason });
+          }`;
 }
 
 /** How replaced media fills a screen card: "cover" crops to fill the whole card (screenshots); "contain" shows the whole media, centred, uncropped and unstretched (logos). */

@@ -2628,3 +2628,116 @@ describe("buildDescribeLayerAtTimeScript (real 2026-09-17: a proven-correct Hebr
     expect(result.facts.text).toBeNull();
   });
 });
+
+
+describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line grew over a shape of its own orange colour)", () => {
+  type FitOptions = { blockerColour?: number[]; blockerAbove?: boolean; blockerPositionX?: number; blockerY?: number; textRotation?: number; locked?: boolean };
+  const ORANGE = [1, 0.66139823198318, 0.26009500026703, 1];
+  const setup = (options: FitOptions = {}) => `
+    function CompItem() {}
+    function AVLayer() {}
+    function TextLayer() {}
+    TextLayer.prototype = new AVLayer();
+    function SolidSource() {}
+    var MaskMode = { NONE: 6812, ADD: 6813, SUBTRACT: 6814 };
+    function prop(value) { return { numKeys: 0, value: value, valueAtTime: function () { return this.value; }, setValue: function (v) { this.value = v; } }; }
+    function fillParade(colour) {
+      var fill = { matchName: "ADBE Fill", enabled: true, property: function (n) { return n === "ADBE Fill-0002" ? { value: colour } : null; } };
+      return { numProperties: 1, property: function () { return fill; } };
+    }
+
+    var __textProps = { "ADBE Scale": prop([80, 80, 100]), "ADBE Anchor Point": prop([-50.5461578369141, -64.5190048217773, 0]), "ADBE Position": prop([1542.90086616518, 467.384796142578, 0]), "ADBE Rotate Z": prop(${options.textRotation ?? 0}) };
+    var __text = new TextLayer();
+    __text.name = "Text 1"; __text.enabled = true; __text.threeDLayer = false; __text.parent = null; __text.inPoint = 0.4; __text.outPoint = 60.4;
+    __text.locked = ${options.locked ? "true" : "false"};
+    __text.sourceText = { value: { text: "Mixkit", applyFill: true, fillColor: [0, 0, 0] }, setValue: function (v) { this.value = v; } };
+    __text.sourceRectAtTime = function () { return { left: -1095.74072265625, top: -123.2587890625, width: 1041.52001953125, height: 162.1826171875 }; };
+    __text.property = function (n) {
+      if (n === "ADBE Transform Group") { return { property: function (inner) { return __textProps[inner] || null; } }; }
+      if (n === "ADBE Effect Parade") { return fillParade(${JSON.stringify(ORANGE)}); }
+      return null;
+    };
+
+    var __blockerProps = { "ADBE Scale": prop([68, 68, 100]), "ADBE Anchor Point": prop([643.547794117647, 542.205882352941, 0]), "ADBE Position": prop([${options.blockerPositionX ?? 465}, ${options.blockerY ?? 517}, 0]), "ADBE Rotate Z": prop(0) };
+    var __mask = { maskMode: MaskMode.ADD, inverted: false, property: function () { return { valueAtTime: function () { return { vertices: [[110, 10], [1175.625, 10], [1175.625, 1075.625], [110, 1075.625]] }; } }; } };
+    var __blocker = new AVLayer();
+    __blocker.name = "BG Color 2"; __blocker.enabled = true; __blocker.threeDLayer = false; __blocker.parent = null;
+    __blocker.source = { mainSource: new SolidSource() };
+    __blocker.sourceRectAtTime = function () { return { left: 0, top: 0, width: 1920, height: 1080 }; };
+    __blocker.property = function (n) {
+      if (n === "ADBE Transform Group") { return { property: function (inner) { return __blockerProps[inner] || null; } }; }
+      if (n === "ADBE Effect Parade") { return fillParade(${JSON.stringify(options.blockerColour ?? ORANGE)}); }
+      if (n === "ADBE Mask Parade") { return { numProperties: 1, property: function () { return __mask; } }; }
+      return null;
+    };
+
+    var __comp = new CompItem();
+    __comp.name = "Smartphone_05"; __comp.width = 1920; __comp.height = 1080; __comp.duration = 7.04; __comp.numLayers = 3;
+    var __order = ${options.blockerAbove ? "[null, __blocker, __text, null]" : "[null, null, __text, __blocker]"};
+    for (var __i = 1; __i <= 3; __i++) { if (__order[__i]) { __order[__i].index = __i; __order[__i].containingComp = __comp; } }
+    __comp.layer = function (i) { return __order[i] || null; };
+    var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 7 ? __comp : null; } } };
+  `;
+  const textIndex = (options: FitOptions) => (options.blockerAbove ? 2 : 2);
+  const HEBREW = "מבית DYO App";
+
+  function runFit(options: FitOptions = {}) {
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-hebrew", layerIndex: textIndex(options), nestedTarget: null, text: HEBREW };
+    const script = buildOperationScript(7, "Smartphone_05", op);
+    const probed = script.replace(/return __result;\s*$/, `; __result = JSON.stringify({ step: __result, scale: __textProps["ADBE Scale"].value, text: __text.sourceText.value.text, locked: __text.locked });\n  return __result;`);
+    expect(probed).not.toBe(script);
+    const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup(options)));
+    return { ...outcome, step: JSON.parse(outcome.step) };
+  }
+
+  // Same geometry the real inspection measured: circle right edge 465 + (1175.625 - 643.5478) * 0.68, margin 1.25 % of 1920.
+  const blockerRight = 465 + (1175.625 - 643.547794117647) * 0.68;
+  const dLeft = (-1095.74072265625 - -50.5461578369141) * 0.8;
+  const expectedFactor = (blockerRight + 24 - 1542.90086616518) / dLeft;
+
+  it("shrinks the replaced line uniformly about its anchor just enough to clear a same-coloured shape behind it (~66 %)", () => {
+    const outcome = runFit();
+    expect(outcome.step).toEqual({ ok: true, previousValue: "Mixkit", resultingValue: HEBREW });
+    expect(outcome.text).toBe(HEBREW);
+    expect(expectedFactor).toBeGreaterThan(0.8);
+    expect(expectedFactor).toBeLessThan(0.85);
+    expect(outcome.scale[0]).toBeCloseTo(80 * expectedFactor, 6);
+    expect(outcome.scale[1]).toBeCloseTo(outcome.scale[0], 9);
+    expect(outcome.scale[2]).toBe(100);
+    // Its new left edge now sits exactly one margin to the right of the shape.
+    expect(1542.90086616518 + dLeft * expectedFactor).toBeCloseTo(blockerRight + 24, 6);
+  });
+
+  it("leaves the text size alone when the shape behind it is a different colour", () => {
+    const outcome = runFit({ blockerColour: [0.2196, 0.2314, 0.4627, 1] });
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.scale).toEqual([80, 80, 100]);
+  });
+
+  it("leaves the text size alone when a same-coloured shape does not overlap it", () => {
+    const outcome = runFit({ blockerY: 2000 });
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.scale).toEqual([80, 80, 100]);
+  });
+
+  it("ignores a same-coloured shape stacked ABOVE the text - only what is behind the text can hide it", () => {
+    const outcome = runFit({ blockerAbove: true });
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.scale).toEqual([80, 80, 100]);
+  });
+
+  it("never guesses on a rotated text layer - the text is set and its size left alone", () => {
+    const outcome = runFit({ textRotation: 12 });
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.text).toBe(HEBREW);
+    expect(outcome.scale).toEqual([80, 80, 100]);
+  });
+
+  it("fails - never producing unreadable text - when clearing the shape would need less than 60 %, and still restores the lock", () => {
+    const outcome = runFit({ blockerPositionX: 1100, locked: true });
+    expect(outcome.step.ok).toBe(false);
+    expect(outcome.step.failureReason).toMatch(/would have to shrink to \d+% of its template size to stay visible \(minimum 60%\)/);
+    expect(outcome.scale).toEqual([80, 80, 100]);
+    expect(outcome.locked).toBe(true);
+  });
+});
