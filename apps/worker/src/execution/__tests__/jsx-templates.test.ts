@@ -1446,7 +1446,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
   });
 
   describe("screen card replacement (Mixkit 'place image above' slots: a 1242x2688 solid under guide labels)", () => {
-    type CardOptions = { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean; fillStuck?: boolean };
+    type CardOptions = { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean; fillStuck?: boolean; anchor?: number[]; position?: number[]; scale?: number[]; rotation?: number };
     const cardSetup = (options: CardOptions = {}) => `
       ${NESTED_FAKE_APP_SETUP}
       function SolidSource() {}
@@ -1471,8 +1471,10 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       var __otherBlur = __makeEffect("ADBE Gaussian Blur 2", "Gaussian Blur", false);
       __logoImageLayer.property = function (name) { return name === "ADBE Effect Parade" ? __makeParade([__otherFill, __otherBlur]) : null; };
       var __moved = false;
-      var __anchorValue = [621, 1344, 0];
-      var __scaleValue = [100, 100, 100];
+      var __anchorValue = ${JSON.stringify(options.anchor ?? [621, 1344, 0])};
+      var __scaleValue = ${JSON.stringify(options.scale ?? [100, 100, 100])};
+      var __positionValue = ${JSON.stringify(options.position ?? [621, 1344, 0])};
+      var __rotationValue = ${options.rotation ?? 0};
       var __card = new AVLayer();
       __card.index = 3;
       __card.locked = ${options.locked ? "true" : "false"};
@@ -1491,6 +1493,8 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
           property: function (inner) {
             if (inner === "ADBE Scale") { return { numKeys: ${options.animatedScale ? 2 : 0}, value: __scaleValue, setValue: function (v) { __scaleValue = v; } }; }
             if (inner === "ADBE Anchor Point") { return { numKeys: 0, value: __anchorValue, setValue: function (v) { __anchorValue = v; } }; }
+            if (inner === "ADBE Position") { return { numKeys: 0, value: __positionValue, setValue: function (v) { __positionValue = v; } }; }
+            if (inner === "ADBE Rotate Z") { return { numKeys: 0, value: __rotationValue, setValue: function () { throw new Error("rotation must not change"); } }; }
             return null;
           }
         };
@@ -1510,7 +1514,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     };
     // ExtendScript has no JSON.parse (only the stringify polyfill), so the
     // step's own result travels back as a string and is parsed out here.
-    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, locked: __card.locked, cardFill: __cardFill.enabled, cardBlur: __cardBlur.enabled, otherFill: __otherFill.enabled, otherBlur: __otherBlur.enabled });";
+    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, position: __positionValue, locked: __card.locked, cardFill: __cardFill.enabled, cardBlur: __cardBlur.enabled, otherFill: __otherFill.enabled, otherBlur: __otherBlur.enabled });";
 
     function runProbed(op: SceneEditOperation, options: CardOptions = {}) {
       const script = buildOperationScript(999, "irrelevant", op);
@@ -1544,7 +1548,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       expect(outcome.locked).toBe(false);
     });
 
-    it("scales the media to cover the card's own area, keeps the card's relative anchor, and raises it above the guide labels", () => {
+    it("scales the media uniformly to cover the card's own area, centres it on the card, and raises it above the guide labels", () => {
       const outcome = runCard();
       expect(outcome.step).toEqual({ ok: true, previousValue: "Placeholder", resultingValue: "/real/app-screenshot.png" });
       // cover = max(1242/1080, 2688/2340) = 1.15
@@ -1552,13 +1556,56 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       expect(outcome.scale[1]).toBeCloseTo(115, 6);
       expect(outcome.scale[2]).toBe(100);
       expect(outcome.anchor).toEqual([540, 1170, 0]);
+      expect(outcome.position).toEqual([621, 1344, 0]);
       expect(outcome.moved).toBe(true);
+    });
+
+    it("real 2026-09-17: a card with UNEVEN scale still gets one uniform scale - the media is never stretched - covering the card's rendered size", () => {
+      const outcome = runCard({ scale: [101.5, 100, 100] });
+      expect(outcome.step.ok).toBe(true);
+      // Rendered card 1260.63 x 2688 -> cover = max(1260.63/1080, 2688/2340).
+      const cover = Math.max((1242 * 1.015) / 1080, 2688 / 2340) * 100;
+      expect(outcome.scale[0]).toBeCloseTo(cover, 6);
+      expect(outcome.scale[1]).toBeCloseTo(outcome.scale[0], 9);
+      expect(1080 * outcome.scale[0] / 100).toBeGreaterThanOrEqual(1242 * 1.015 - 1e-6);
+      expect(2340 * outcome.scale[1] / 100).toBeGreaterThanOrEqual(2688 - 1e-6);
+    });
+
+    it("real 2026-09-17: a card with an OFF-CENTRE anchor gets the media centred on the card itself, not shifted by the anchor", () => {
+      const outcome = runCard({ anchor: [0, 0, 0], position: [100, 200, 0] });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.anchor).toEqual([540, 1170, 0]);
+      // Card centre = position + (card centre - anchor) * scale = (100 + 621, 200 + 1344).
+      expect(outcome.position).toEqual([721, 1544, 0]);
+    });
+
+    it("real 2026-09-17: a replaceSource that already rescales the anchor (as After Effects does) never leads to a doubly-scaled, off-centre anchor", () => {
+      const script = buildOperationScript(999, "irrelevant", cardOp);
+      const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
+      // Simulate After Effects: swapping the source rescales the anchor to the new source's size.
+      const aeLikeSetup = `${cardSetup()}
+        __card.replaceSource = function (newItem) {
+          __anchorValue = [__anchorValue[0] * newItem.width / this.source.width, __anchorValue[1] * newItem.height / this.source.height, __anchorValue[2]];
+          this.source = newItem;
+        };`;
+      const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, aeLikeSetup));
+      expect(JSON.parse(outcome.step).ok).toBe(true);
+      expect(outcome.anchor).toEqual([540, 1170, 0]);
+      expect(outcome.position).toEqual([621, 1344, 0]);
+    });
+
+    it("centres through a rotated card's own rotation", () => {
+      const outcome = runCard({ anchor: [0, 0, 0], position: [100, 200, 0], rotation: 90 });
+      expect(outcome.step.ok).toBe(true);
+      // Offset (621, 1344) rotated 90 degrees -> (-1344, 621).
+      expect(outcome.position[0]).toBeCloseTo(100 - 1344, 6);
+      expect(outcome.position[1]).toBeCloseTo(200 + 621, 6);
     });
 
     it("refuses to guess a fit for a card with animated scale, and says so", () => {
       const outcome = runCard({ animatedScale: true });
       expect(outcome.step.ok).toBe(false);
-      expect(outcome.step.failureReason).toMatch(/animated scale or anchor/);
+      expect(outcome.step.failureReason).toMatch(/animated scale, anchor point, position or rotation/);
       expect(outcome.moved).toBe(false);
     });
 
@@ -1588,7 +1635,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
 
     it("a card whose fit already failed is reported for that reason, with its effects untouched", () => {
       const outcome = runCard({ animatedScale: true });
-      expect(outcome.step.failureReason).toMatch(/animated scale or anchor/);
+      expect(outcome.step.failureReason).toMatch(/animated scale, anchor point, position or rotation/);
       expect(outcome.cardFill).toBe(true);
     });
   });

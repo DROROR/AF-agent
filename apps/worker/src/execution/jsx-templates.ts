@@ -363,26 +363,65 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string 
             var __fitFailure = null;
             ${containOnCard ? `if (__solidCard !== null) {${buildMapFootageContainOnCard()}
             } else ` : ""}{
-            __layer.replaceSource(__newFootageItem, false);
+            // Card geometry is read BEFORE the source swap: replaceSource itself
+            // rescales the layer's anchor point to the new source's size.
+            var __cardBefore = null;
             if (__solidCard !== null) {
-              // Scale the media to COVER the card (keeping the card's own
-              // relative anchor), then raise it above the card's guide labels.
               var __transformGroup = __layer.property("ADBE Transform Group");
               var __scaleProp = __transformGroup.property("ADBE Scale");
               var __anchorProp = __transformGroup.property("ADBE Anchor Point");
-              if (__scaleProp.numKeys > 0 || __anchorProp.numKeys > 0) {
-                __fitFailure = "screen card layer has animated scale or anchor point - refusing to guess how to fit the media";
+              var __positionProp = __transformGroup.property("ADBE Position");
+              var __rotationProp = __transformGroup.property("ADBE Rotate Z");
+              __cardBefore = {
+                animated: __scaleProp.numKeys > 0 || __anchorProp.numKeys > 0 || __positionProp.numKeys > 0 || __rotationProp.numKeys > 0,
+                anchor: __anchorProp.value,
+                scale: __scaleProp.value,
+                position: __positionProp.value,
+                rotation: __rotationProp.value
+              };
+            }
+            __layer.replaceSource(__newFootageItem, false);
+            if (__solidCard !== null) {
+              // REAL 2026-09-17 FINDING (session 069b5891, proven against the
+              // untouched template's own placeholder solids): replaceSource
+              // already rescales the layer's anchor point to the new source's
+              // size, and the old fit rescaled it a SECOND time (621 x
+              // (879/1242)^2 = 311.05), shifting the screenshot 193 px right and
+              // ~450 px down on its card; and scaling each axis by the card's own
+              // uneven scale (100 x 98.51 %) stretched it 1.5 %. Cover now uses
+              // the card geometry read before the swap (above), sets the anchor
+              // absolutely to the media's own centre, uses ONE
+              // uniform scale for the card's rendered size, and centres the media
+              // on the card (centre computed through the card's anchor, scale and
+              // rotation). Then raise it above the card's guide labels.
+              if (__cardBefore.animated) {
+                __fitFailure = "screen card layer has animated scale, anchor point, position or rotation - refusing to guess how to fit the media";
               } else if (!(__newFootageItem.width > 0 && __newFootageItem.height > 0 && __solidCard.width > 0 && __solidCard.height > 0)) {
                 __fitFailure = "screen card or imported media has no usable pixel size";
+              } else if (!(__cardBefore.scale[0] > 0 && __cardBefore.scale[1] > 0)) {
+                __fitFailure = "screen card layer has a zero or mirrored scale - refusing to guess how to fit the media";
               } else {
-                var __cover = Math.max(__solidCard.width / __newFootageItem.width, __solidCard.height / __newFootageItem.height);
-                var __oldAnchor = __anchorProp.value;
-                var __oldScale = __scaleProp.value;
-                var __newAnchor = [__oldAnchor[0] * __newFootageItem.width / __solidCard.width, __oldAnchor[1] * __newFootageItem.height / __solidCard.height];
-                var __newScale = [__oldScale[0] * __cover, __oldScale[1] * __cover];
+                var __oldAnchor = __cardBefore.anchor;
+                var __oldScale = __cardBefore.scale;
+                var __oldPosition = __cardBefore.position;
+                var __oldRotationRadians = __cardBefore.rotation * Math.PI / 180;
+                var __coverFactor = Math.max(
+                  (__solidCard.width * __oldScale[0] / 100) / __newFootageItem.width,
+                  (__solidCard.height * __oldScale[1] / 100) / __newFootageItem.height
+                );
+                var __centerOffsetX = (__solidCard.width / 2 - __oldAnchor[0]) * __oldScale[0] / 100;
+                var __centerOffsetY = (__solidCard.height / 2 - __oldAnchor[1]) * __oldScale[1] / 100;
+                var __newPosition = [
+                  __oldPosition[0] + __centerOffsetX * Math.cos(__oldRotationRadians) - __centerOffsetY * Math.sin(__oldRotationRadians),
+                  __oldPosition[1] + __centerOffsetX * Math.sin(__oldRotationRadians) + __centerOffsetY * Math.cos(__oldRotationRadians)
+                ];
+                var __newAnchor = [__newFootageItem.width / 2, __newFootageItem.height / 2];
+                var __newScale = [__coverFactor * 100, __coverFactor * 100];
                 if (__oldAnchor.length > 2) { __newAnchor.push(__oldAnchor[2]); }
+                if (__oldPosition.length > 2) { __newPosition.push(__oldPosition[2]); }
                 if (__oldScale.length > 2) { __newScale.push(__oldScale[2]); }
                 __anchorProp.setValue(__newAnchor);
+                __positionProp.setValue(__newPosition);
                 __scaleProp.setValue(__newScale);
                 __layer.moveToBeginning();
                 // Verify the ordering actually changed - the media must now be
