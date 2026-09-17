@@ -318,6 +318,31 @@ function buildMapFootageMutation(assetPath: string): string {
                   __fitFailure = "screen card media was not moved to the top of its composition (layer index is " + __layer.index + ") - its guide labels would cover it";
                 }
               }
+              // REAL 2026-09-16 FINDING (session 1257ac95): replaceSource keeps the
+              // layer's effects, and a template card solid gets its flat colour
+              // from an "ADBE Fill" effect. Left on, that Fill paints every
+              // opaque pixel of the new media one colour - the screenshot and
+              // logo rendered as plain dark-grey cards. Switch those Fill effects
+              // off (never delete them) and verify, failing rather than
+              // reporting a fill nobody can see. Other effects are left alone.
+              if (__fitFailure === null) {
+                var __effectParade = null;
+                try { __effectParade = __layer.property("ADBE Effect Parade"); } catch (__paradeError) { __effectParade = null; }
+                if (__effectParade) {
+                  for (var __effectIndex = 1; __effectIndex <= __effectParade.numProperties; __effectIndex++) {
+                    var __effect = __effectParade.property(__effectIndex);
+                    if (__effect && __effect.matchName === "ADBE Fill" && __effect.enabled) {
+                      try { __effect.enabled = false; } catch (__disableError) { /* verified below */ }
+                    }
+                  }
+                  for (var __checkIndex = 1; __checkIndex <= __effectParade.numProperties; __checkIndex++) {
+                    var __checkEffect = __effectParade.property(__checkIndex);
+                    if (__checkEffect && __checkEffect.matchName === "ADBE Fill" && __checkEffect.enabled) {
+                      __fitFailure = "screen card's Fill effect \\"" + __checkEffect.name + "\\" could not be switched off - it would paint the media one flat colour";
+                    }
+                  }
+                }
+              }
             }
             if (__fitFailure !== null) {
               __result = JSON.stringify({ ok: false, failureReason: __fitFailure });

@@ -1445,9 +1445,30 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
   });
 
   describe("screen card replacement (Mixkit 'place image above' slots: a 1242x2688 solid under guide labels)", () => {
-    const cardSetup = (options: { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean } = {}) => `
+    type CardOptions = { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean; fillStuck?: boolean };
+    const cardSetup = (options: CardOptions = {}) => `
       ${NESTED_FAKE_APP_SETUP}
       function SolidSource() {}
+      // A template card solid colours itself with an "ADBE Fill" effect; an
+      // unrelated effect sits next to it. The ordinary footage layer (index 2)
+      // carries the same pair, so non-card replacement can prove it is untouched.
+      function __makeEffect(matchName, name, stuck) {
+        var __value = true;
+        var __e = { matchName: matchName, name: name };
+        Object.defineProperty(__e, "enabled", {
+          get: function () { return __value; },
+          set: function (v) { if (stuck) { throw new Error("Can not set enabled on this effect."); } __value = v; }
+        });
+        return __e;
+      }
+      function __makeParade(effects) {
+        return { numProperties: effects.length, property: function (i) { return effects[i - 1]; } };
+      }
+      var __cardFill = __makeEffect("ADBE Fill", "Fill", ${options.fillStuck ? "true" : "false"});
+      var __cardBlur = __makeEffect("ADBE Gaussian Blur 2", "Gaussian Blur", false);
+      var __otherFill = __makeEffect("ADBE Fill", "Fill", false);
+      var __otherBlur = __makeEffect("ADBE Gaussian Blur 2", "Gaussian Blur", false);
+      __logoImageLayer.property = function (name) { return name === "ADBE Effect Parade" ? __makeParade([__otherFill, __otherBlur]) : null; };
       var __moved = false;
       var __anchorValue = [621, 1344, 0];
       var __scaleValue = [100, 100, 100];
@@ -1463,6 +1484,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
         ${options.moveIgnored ? "" : "this.index = 1;"}
       };
       __card.property = function (name) {
+        if (name === "ADBE Effect Parade") { return __makeParade([__cardFill, __cardBlur]); }
         if (name !== "ADBE Transform Group") { return null; }
         return {
           property: function (inner) {
@@ -1487,9 +1509,9 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     };
     // ExtendScript has no JSON.parse (only the stringify polyfill), so the
     // step's own result travels back as a string and is parsed out here.
-    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, locked: __card.locked });";
+    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, locked: __card.locked, cardFill: __cardFill.enabled, cardBlur: __cardBlur.enabled, otherFill: __otherFill.enabled, otherBlur: __otherBlur.enabled });";
 
-    function runProbed(op: SceneEditOperation, options: { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean } = {}) {
+    function runProbed(op: SceneEditOperation, options: CardOptions = {}) {
       const script = buildOperationScript(999, "irrelevant", op);
       // Reads the fake's state after the real script body ran, inside the same function.
       const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
@@ -1498,7 +1520,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       return { ...outcome, step: JSON.parse(outcome.step) };
     }
 
-    const runCard = (options: { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean } = {}) => runProbed(cardOp, options);
+    const runCard = (options: CardOptions = {}) => runProbed(cardOp, options);
 
     it("verifies the ordering: a move that leaves the media below the guide labels is reported as failed, and the lock is still restored", () => {
       const outcome = runCard({ locked: true, moveIgnored: true });
@@ -1539,11 +1561,34 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       expect(outcome.moved).toBe(false);
     });
 
-    it("leaves ordinary footage replacement untouched - no fit, no reordering", () => {
+    it("leaves ordinary footage replacement untouched - no fit, no reordering, effects unchanged", () => {
       const outcome = runProbed({ ...cardOp, nestedTarget: [cardOp.nestedTarget![0]!, { ...cardOp.nestedTarget![1]!, layerIndex: 2 }] });
       expect(outcome.step.ok).toBe(true);
       expect(outcome.moved).toBe(false);
       expect(outcome.scale).toEqual([100, 100, 100]);
+      expect(outcome.otherFill).toBe(true);
+      expect(outcome.otherBlur).toBe(true);
+    });
+
+    it("real 2026-09-16: switches off the card solid's own Fill effect so the media is not painted one flat colour, and leaves other effects on", () => {
+      const outcome = runCard();
+      expect(outcome.step).toEqual({ ok: true, previousValue: "Placeholder", resultingValue: "/real/app-screenshot.png" });
+      expect(outcome.cardFill).toBe(false);
+      expect(outcome.cardBlur).toBe(true);
+    });
+
+    it("a Fill effect that cannot be switched off fails the operation with its name - never a silent flat card - and the lock is still restored", () => {
+      const outcome = runCard({ locked: true, fillStuck: true });
+      expect(outcome.step.ok).toBe(false);
+      expect(outcome.step.failureReason).toMatch(/Fill effect "Fill" could not be switched off/);
+      expect(outcome.cardFill).toBe(true);
+      expect(outcome.locked).toBe(true);
+    });
+
+    it("a card whose fit already failed is reported for that reason, with its effects untouched", () => {
+      const outcome = runCard({ animatedScale: true });
+      expect(outcome.step.failureReason).toMatch(/animated scale or anchor/);
+      expect(outcome.cardFill).toBe(true);
     });
   });
 
