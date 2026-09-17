@@ -133,6 +133,21 @@ describe("describeLayerAtTime (real 2026-09-17: proving why a correct Hebrew lin
   });
 });
 
+describe("describeFonts (real 2026-09-17: are the template's fonts installed or substituted?)", () => {
+  it("accepts describeFonts: true and rejects a non-boolean", () => {
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ layerIndices: [], describeFonts: true }))).not.toThrow();
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ describeFonts: "yes" }))).toThrow();
+  });
+
+  it("an ordinary response has no font keys, and a response with font facts parses", () => {
+    const ordinary = sceneEvidenceResponseSchema.parse(validResponse());
+    expect(ordinary).not.toHaveProperty("fontFacts");
+    expect(ordinary).not.toHaveProperty("fontFactsFailureReason");
+    const withFonts = sceneEvidenceResponseSchema.parse({ ...validResponse(), fontFacts: { fontsApiAvailable: true, fonts: [] }, fontFactsFailureReason: null });
+    expect(withFonts.fontFacts).toEqual({ fontsApiAvailable: true, fonts: [] });
+  });
+});
+
 describe("sceneEvidenceResponseSchema", () => {
   it("accepts a valid response with no preview", () => {
     expect(() => sceneEvidenceResponseSchema.parse(validResponse())).not.toThrow();

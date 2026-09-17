@@ -58,7 +58,7 @@ async function writeFakeServer(
     captureShape?: "image" | "fallback" | "none";
     previewFilePath?: string;
     /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "compositionSummary" returns a real {ok:true, compDurationSeconds, ...} envelope matching buildDescribeCompositionSummaryScript's own response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
-    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "layerAtTime" | "error";
+    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "layerAtTime" | "projectFonts" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
     /** Real 2026-09-11 incident fix - overrides the resolve-by-id script's own canned response. "drifted" simulates the real incident: the id resolves to a DIFFERENT index than aeProjectItemIndex requested (index 48, not 14), proving the inspector uses the freshly-resolved index rather than the stale one. "notFound" simulates the id no longer existing at all. Default (omitted) resolves to the same index/name ae_get_composition already reports - every pre-existing test's own behavior, unchanged. */
@@ -210,6 +210,11 @@ async function writeFakeServer(
                 ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({
                     ok: true,
                     facts: { timeSeconds: 4.96, layer: { layerIndex: 2, layerName: "Text 1", hasTrackMatte: false, masks: [{ index: 1, mode: "ADD", boundsAtTime: { left: 400, top: -60, right: 900, bottom: 40 } }] }, text: { justification: "RIGHT_JUSTIFY", animators: [] }, matteLayer: null }
+                  }) }) }] };`
+              : options.runJsxResult === "projectFonts"
+                ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({
+                    ok: true,
+                    facts: { fontsApiAvailable: true, textLayerCount: 2, fonts: [{ postScriptName: "HelveticaNeue-Bold", status: "substituted", usageCount: 2, usedBy: [], installed: [] }], missingOrSubstitutedFonts: [] }
                   }) }) }] };`
               : options.runJsxResult === "error"
                 ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
@@ -556,6 +561,36 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.kind).toBe("evidence");
     expect(result.response.layerAtTimeFacts).toBeNull();
     expect(result.response.layerAtTimeFactsFailureReason).toMatch(/ae_run_jsx failed/);
+  });
+
+  it("real 2026-09-17: describeFonts sends the read-only project font script and parses its facts into the response", async () => {
+    const capturePath = join(dir, "received-jsx-code-project-fonts.txt");
+    await writeFakeServer(dir, { runJsxResult: "projectFonts", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeFonts: true }))) as SceneEvidenceSuccess;
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/DYO DESCRIBE_PROJECT_FONTS/);
+    expect(receivedCode).not.toMatch(/setValue/);
+    expect(result.kind).toBe("evidence");
+    expect(result.response.fontFactsFailureReason).toBeNull();
+    expect(result.response.fontFacts).toMatchObject({ fontsApiAvailable: true, fonts: [{ postScriptName: "HelveticaNeue-Bold", status: "substituted" }] });
+  });
+
+  it("real 2026-09-17: a request without describeFonts has no font keys", async () => {
+    await writeFakeServer(dir, { runJsxResult: "success" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest())) as SceneEvidenceSuccess;
+    expect(result.response).not.toHaveProperty("fontFacts");
+    expect(result.response).not.toHaveProperty("fontFactsFailureReason");
+  });
+
+  it("real 2026-09-17: reports fontFactsFailureReason (never fabricated facts) when the font script call fails", async () => {
+    await writeFakeServer(dir, { runJsxResult: "error" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeFonts: true }))) as SceneEvidenceSuccess;
+    expect(result.response.fontFacts).toBeNull();
+    expect(result.response.fontFactsFailureReason).toMatch(/ae_run_jsx failed/);
   });
 
   it("reports layerTransformFactsFailureReason (never fabricates layerTransformFacts) when describeLayerTransforms is requested but the underlying ae_run_jsx call fails", async () => {

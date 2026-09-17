@@ -11,7 +11,8 @@ import {
   buildFindHostLayersScript,
   buildInspectCompositionLayerDetailsScript,
   buildInspectLayerTransformScript,
-  buildDescribeLayerAtTimeScript
+  buildDescribeLayerAtTimeScript,
+  buildDescribeProjectFontsScript
 } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
@@ -201,6 +202,31 @@ async function fetchLayerAtTime(
   const parsed = describeLayerAtTimeScriptResultSchema.safeParse(unwrapped.value);
   if (!parsed.success) {
     return { ok: false, reason: `describe-layer-at-time script response did not match the expected shape: ${parsed.error.message}` };
+  }
+  if (!parsed.data.ok) {
+    return { ok: false, reason: parsed.data.failureReason };
+  }
+  return { ok: true, facts: parsed.data.facts };
+}
+
+const describeProjectFontsScriptResultSchema = z.union([
+  z.object({ ok: z.literal(true), facts: z.record(z.unknown()) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/** REAL 2026-09-17 brand/typography gate - best-effort, never throws, same shape as fetchLayerAtTime. */
+async function fetchProjectFonts(client: HeroicSwanMcpClient): Promise<{ ok: true; facts: Record<string, unknown> } | { ok: false; reason: string }> {
+  const result = await client.runFixedInspectionScript(buildDescribeProjectFontsScript());
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  const parsed = describeProjectFontsScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success) {
+    return { ok: false, reason: `describe-project-fonts script response did not match the expected shape: ${parsed.error.message}` };
   }
   if (!parsed.data.ok) {
     return { ok: false, reason: parsed.data.failureReason };
@@ -516,6 +542,15 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           : { layerAtTimeFacts: null, layerAtTimeFactsFailureReason: layerAtTimeResult.reason };
       }
 
+      // Added to the response ONLY when requested - see scene-evidence.ts.
+      let fonts: { fontFacts: Record<string, unknown> | null; fontFactsFailureReason: string | null } | null = null;
+      if (request.describeFonts === true) {
+        const fontsResult = await fetchProjectFonts(client);
+        fonts = fontsResult.ok
+          ? { fontFacts: fontsResult.facts, fontFactsFailureReason: null }
+          : { fontFacts: null, fontFactsFailureReason: fontsResult.reason };
+      }
+
       return {
         kind: "evidence",
         response: {
@@ -535,6 +570,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           layerTransformFacts,
           layerTransformFactsFailureReason,
           ...(layerAtTime ?? {}),
+          ...(fonts ?? {}),
           capturedAt: new Date().toISOString()
         }
       };

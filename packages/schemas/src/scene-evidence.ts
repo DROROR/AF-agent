@@ -165,7 +165,14 @@ export const sceneEvidenceRequestSchema = z
         timeSeconds: z.number().nonnegative()
       })
       .strict()
-      .optional()
+      .optional(),
+    /**
+     * REAL 2026-09-17 brand/typography gate (session e0483ad6): whether the
+     * template's fonts are installed or substituted by After Effects was never
+     * checked. Project-wide, read-only font report
+     * (buildDescribeProjectFontsScript).
+     */
+    describeFonts: z.boolean().optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
@@ -550,6 +557,9 @@ export const sceneEvidenceResponseSchema = z
      */
     layerAtTimeFacts: z.record(z.unknown()).nullable().optional(),
     layerAtTimeFactsFailureReason: z.string().nullable().optional(),
+    /** Present ONLY when `describeFonts` was requested - same version-skew reasoning as layerAtTimeFacts above. Shape owned by buildDescribeProjectFontsScript. */
+    fontFacts: z.record(z.unknown()).nullable().optional(),
+    fontFactsFailureReason: z.string().nullable().optional(),
     capturedAt: z.string().datetime()
   })
   .strict();

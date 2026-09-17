@@ -15,7 +15,8 @@ import {
   buildScanProjectPreflightScript,
   buildOpenProjectScript,
   buildReopenProjectFromDiskScript,
-  buildDescribeLayerAtTimeScript
+  buildDescribeLayerAtTimeScript,
+  buildDescribeProjectFontsScript
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -2739,5 +2740,84 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
     expect(outcome.step.failureReason).toMatch(/would have to shrink to \d+% of its template size to stay visible \(minimum 60%\)/);
     expect(outcome.scale).toEqual([80, 80, 100]);
     expect(outcome.locked).toBe(true);
+  });
+});
+
+
+describe("buildDescribeProjectFontsScript (real 2026-09-17: the template's fonts may be substituted on the worker PC)", () => {
+  const setup = (options: { fontsApi?: boolean } = {}) => `
+    function CompItem() {}
+    function AVLayer() {}
+    function TextLayer() {}
+    TextLayer.prototype = new AVLayer();
+    var __writes = [];
+    function font(ps, family, style, isSubstitute, location) { return { postScriptName: ps, familyName: family, styleName: style, isSubstitute: isSubstitute, isFromAdobeFonts: false, location: location }; }
+    function textLayer(index, name, fontName, fontObject) {
+      var l = new TextLayer();
+      l.index = index; l.name = name;
+      var doc = { text: "t", font: fontName, fontObject: fontObject };
+      var sourceText = { numKeys: 0, value: doc, setValue: function () { __writes.push("setValue"); throw new Error("READ-ONLY VIOLATION"); } };
+      l.property = function (n) { return n === "ADBE Text Properties" ? { property: function (inner) { return inner === "ADBE Text Document" ? sourceText : null; } } : null; };
+      return l;
+    }
+    var arial = font("Arial-BoldMT", "Arial", "Bold", false, "C:/Windows/Fonts/arialbd.ttf");
+    var substitute = font("MyriadPro-Regular", "Myriad Pro", "Regular", true, "");
+    var comp1 = new CompItem(); comp1.name = "Smartphone_05";
+    var comp1Layers = [textLayer(1, "Text 2", "HelveticaNeue", substitute), textLayer(2, "Text 1", "HelveticaNeue-Bold", substitute)];
+    comp1.numLayers = 3;
+    comp1.layer = function (i) { return i === 3 ? new AVLayer() : comp1Layers[i - 1]; };
+    var comp2 = new CompItem(); comp2.name = "Smartphone_01";
+    comp2.numLayers = 1;
+    comp2.layer = function () { return textLayer(1, "Label", "Arial-BoldMT", arial); };
+    var footage = { name: "11222.png" };
+    var app = {
+      beginUndoGroup: function () {}, endUndoGroup: function () {},
+      project: { numItems: 3, item: function (i) { return [comp1, footage, comp2][i - 1]; }, save: function () { __writes.push("save"); } }
+      ${options.fontsApi === false ? "" : `, fonts: {
+        missingOrSubstitutedFonts: [font("HelveticaNeue-Bold", "Helvetica Neue", "Bold", true, "")],
+        getFontsByPostScriptName: function (name) { return name === "Arial-BoldMT" ? [arial] : []; }
+      }`}
+    };
+  `;
+
+  function run(options: { fontsApi?: boolean } = {}) {
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(setup(options), context);
+    const resultText = vm.runInContext(`(new Function("args", ${JSON.stringify(buildDescribeProjectFontsScript())}))()`, context) as string;
+    return { result: JSON.parse(resultText), writes: vm.runInContext("__writes", context) as string[] };
+  }
+
+  it("reports each font's status - installed, substituted, missing - with where it is used and what renders it, and never writes or saves", () => {
+    const { result, writes } = run();
+    expect(writes).toEqual([]);
+    expect(result.ok).toBe(true);
+    const facts = result.facts;
+    expect(facts.fontsApiAvailable).toBe(true);
+    expect(facts.textLayerCount).toBe(3);
+    const byName = Object.fromEntries(facts.fonts.map((f: { postScriptName: string }) => [f.postScriptName, f]));
+    // Rendered through a substitute AND listed by After Effects as missing/substituted.
+    expect(byName["HelveticaNeue-Bold"]).toMatchObject({ status: "substituted", usageCount: 1, installed: [] });
+    expect(byName["HelveticaNeue-Bold"].usedBy[0]).toMatchObject({ composition: "Smartphone_05", layerIndex: 2, layerName: "Text 1", sourceTextKeyframed: false, renderedWith: { postScriptName: "MyriadPro-Regular", isSubstitute: true } });
+    // Renders through a substitute even though After Effects did not list it.
+    expect(byName["HelveticaNeue"]).toMatchObject({ status: "substituted" });
+    expect(byName["Arial-BoldMT"]).toMatchObject({ status: "installed", installed: [{ postScriptName: "Arial-BoldMT", isSubstitute: false, location: "C:/Windows/Fonts/arialbd.ttf" }] });
+    expect(facts.missingOrSubstitutedFonts).toEqual([{ postScriptName: "HelveticaNeue-Bold", familyName: "Helvetica Neue", styleName: "Bold", isSubstitute: true, isFromAdobeFonts: false, location: "" }]);
+  });
+
+  it("a font with no installed match and no substitute evidence is reported missing", () => {
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(setup() + "\ncomp1Layers[0] = textLayer(1, 'Text 2', 'Gotham-Book', null);", context);
+    const result = JSON.parse(vm.runInContext(`(new Function("args", ${JSON.stringify(buildDescribeProjectFontsScript())}))()`, context) as string);
+    const gotham = result.facts.fonts.find((f: { postScriptName: string }) => f.postScriptName === "Gotham-Book");
+    expect(gotham).toMatchObject({ status: "missing", installed: [] });
+  });
+
+  it("without the app.fonts API every status is 'unknown' - never guessed", () => {
+    const { result } = run({ fontsApi: false });
+    expect(result.ok).toBe(true);
+    expect(result.facts.fontsApiAvailable).toBe(false);
+    expect(result.facts.fonts.map((f: { status: string }) => f.status)).toEqual(["unknown", "unknown", "unknown"]);
   });
 });

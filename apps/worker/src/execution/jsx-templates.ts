@@ -2648,3 +2648,109 @@ export function buildDescribeLayerAtTimeScript(
   return __result;`;
   return script as FixedJsxScript;
 }
+
+/**
+ * REAL 2026-09-17 FINDING (session e0483ad6, brand/typography gate): the
+ * template references Arial-BoldMT, HelveticaNeue and HelveticaNeue-Bold, and
+ * the Hebrew line's layer reports HelveticaNeue-Bold, yet every rendered frame
+ * - including the untouched template's own line - shows a serif face. Nothing
+ * checked whether those fonts are installed or substituted by After Effects.
+ *
+ * READ-ONLY, project-wide: for every text layer of every composition, reads its
+ * TextDocument's font and fontObject; for every distinct PostScript name, reads
+ * what After Effects finds installed (app.fonts.getFontsByPostScriptName) and
+ * whether it is in app.fonts.missingOrSubstitutedFonts. Never setValue, never
+ * a save. Status per font: "substituted" if any use renders through a
+ * substitute or After Effects lists it as missing/substituted; "installed" if
+ * a real (non-substitute) font of that name exists; otherwise "missing";
+ * "unknown" when the app.fonts API is unavailable. Helpers are declared at the
+ * script's top level (ES3: no function declarations inside blocks).
+ */
+export function buildDescribeProjectFontsScript(): FixedJsxScript {
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO DESCRIBE_PROJECT_FONTS")});
+  var __result = null;
+  function __safe(__fn) { try { var __v = __fn(); return __v === undefined ? null : __v; } catch (__safeError) { return null; } }
+  function __fontInfo(__font) {
+    if (!__font) { return null; }
+    return {
+      postScriptName: __safe(function () { return __font.postScriptName; }),
+      familyName: __safe(function () { return __font.familyName; }),
+      styleName: __safe(function () { return __font.styleName; }),
+      isSubstitute: __safe(function () { return __font.isSubstitute; }),
+      isFromAdobeFonts: __safe(function () { return __font.isFromAdobeFonts; }),
+      location: __safe(function () { return __font.location; })
+    };
+  }
+  try {
+    var __apiAvailable = __safe(function () { return app.fonts !== undefined && app.fonts !== null && typeof app.fonts.getFontsByPostScriptName === "function"; }) === true;
+    var __byName = {};
+    var __order = [];
+    var __textLayerCount = 0;
+    var __itemCount = __safe(function () { return app.project.numItems; }) || 0;
+    for (var __i = 1; __i <= __itemCount; __i++) {
+      var __item = __safe(function () { return app.project.item(__i); });
+      if (!(__item instanceof CompItem)) { continue; }
+      var __layerCount = __safe(function () { return __item.numLayers; }) || 0;
+      for (var __l = 1; __l <= __layerCount; __l++) {
+        var __layer = __safe(function () { return __item.layer(__l); });
+        if (!(__layer instanceof TextLayer)) { continue; }
+        __textLayerCount++;
+        var __sourceText = __safe(function () { return __layer.property("ADBE Text Properties").property("ADBE Text Document"); });
+        var __doc = __safe(function () { return __sourceText.value; });
+        var __name = __safe(function () { return __doc.font; });
+        if (!__name) { continue; }
+        if (!__byName.hasOwnProperty(__name)) {
+          __byName[__name] = { postScriptName: __name, usedBy: [], usageCount: 0 };
+          __order.push(__name);
+        }
+        __byName[__name].usageCount++;
+        if (__byName[__name].usedBy.length < 20) {
+          __byName[__name].usedBy.push({
+            composition: __safe(function () { return __item.name; }),
+            layerIndex: __safe(function () { return __layer.index; }),
+            layerName: __safe(function () { return __layer.name; }),
+            sourceTextKeyframed: __safe(function () { return __sourceText.numKeys > 0; }),
+            renderedWith: __fontInfo(__safe(function () { return __doc.fontObject; }))
+          });
+        }
+      }
+    }
+    var __missingOrSubstituted = [];
+    if (__apiAvailable) {
+      var __listed = __safe(function () { return app.fonts.missingOrSubstitutedFonts; });
+      var __listedCount = __listed ? (__safe(function () { return __listed.length; }) || 0) : 0;
+      for (var __m = 0; __m < __listedCount; __m++) { __missingOrSubstituted.push(__fontInfo(__listed[__m])); }
+    }
+    var __fonts = [];
+    for (var __f = 0; __f < __order.length; __f++) {
+      var __entry = __byName[__order[__f]];
+      var __installed = [];
+      if (__apiAvailable) {
+        var __matches = __safe(function () { return app.fonts.getFontsByPostScriptName(__entry.postScriptName); });
+        var __matchCount = __matches ? (__safe(function () { return __matches.length; }) || 0) : 0;
+        for (var __k = 0; __k < __matchCount; __k++) { __installed.push(__fontInfo(__matches[__k])); }
+      }
+      var __rendersThroughSubstitute = false;
+      for (var __u = 0; __u < __entry.usedBy.length; __u++) {
+        if (__entry.usedBy[__u].renderedWith && __entry.usedBy[__u].renderedWith.isSubstitute === true) { __rendersThroughSubstitute = true; }
+      }
+      var __listedAsMissing = false;
+      for (var __s = 0; __s < __missingOrSubstituted.length; __s++) {
+        if (__missingOrSubstituted[__s] && __missingOrSubstituted[__s].postScriptName === __entry.postScriptName) { __listedAsMissing = true; }
+      }
+      var __realInstalled = false;
+      for (var __r = 0; __r < __installed.length; __r++) {
+        if (__installed[__r] && __installed[__r].isSubstitute !== true) { __realInstalled = true; }
+      }
+      var __status = !__apiAvailable ? "unknown" : (__rendersThroughSubstitute || __listedAsMissing) ? "substituted" : __realInstalled ? "installed" : "missing";
+      __fonts.push({ postScriptName: __entry.postScriptName, status: __status, usageCount: __entry.usageCount, usedBy: __entry.usedBy, installed: __installed });
+    }
+    __result = JSON.stringify({ ok: true, facts: { fontsApiAvailable: __apiAvailable, textLayerCount: __textLayerCount, fonts: __fonts, missingOrSubstitutedFonts: __missingOrSubstituted } });
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
