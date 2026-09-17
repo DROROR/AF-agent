@@ -149,7 +149,21 @@ export const sceneEvidenceRequestSchema = z
      * findHostLayersForChildCompositionId by construction (the resolver
      * never sets more than one).
      */
-    describeLayerTransforms: z.boolean().optional()
+    describeLayerTransforms: z.boolean().optional(),
+    /**
+     * REAL 2026-09-17 investigation (session 069b5891): a replaced text line
+     * rendered partly clipped although its text is proven correct. Describes
+     * ONE layer of this composition at ONE time - masks, track matte, text
+     * box/justification, rendered rect, transform, text animators and effects
+     * (buildInspectTextLayerClippingScript) - read-only.
+     */
+    describeTextLayerClipping: z
+      .object({
+        layerIndex: z.number().int().positive(),
+        timeSeconds: z.number().nonnegative()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
@@ -525,6 +539,15 @@ export const sceneEvidenceResponseSchema = z
       .nullable()
       .optional()
       .transform((value) => value ?? null),
+    /**
+     * Present ONLY when `describeTextLayerClipping` was requested (no
+     * null-defaulting transform on purpose): every other evidence response
+     * keeps exactly its existing shape, so an API that predates this field
+     * still accepts it. The facts are a diagnostic description whose shape is
+     * owned by buildInspectTextLayerClippingScript.
+     */
+    textLayerClippingFacts: z.record(z.unknown()).nullable().optional(),
+    textLayerClippingFactsFailureReason: z.string().nullable().optional(),
     capturedAt: z.string().datetime()
   })
   .strict();

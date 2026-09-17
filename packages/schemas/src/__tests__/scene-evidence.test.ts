@@ -112,6 +112,27 @@ describe("layerEvidenceSchema", () => {
   });
 });
 
+describe("describeTextLayerClipping (real 2026-09-17: proving why a correct Hebrew line renders clipped)", () => {
+  it("accepts one layer at one time, and rejects a zero layer index, a missing time or an extra key", () => {
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ layerIndices: [], describeTextLayerClipping: { layerIndex: 2, timeSeconds: 4.96 } }))).not.toThrow();
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ describeTextLayerClipping: { layerIndex: 0, timeSeconds: 1 } }))).toThrow();
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ describeTextLayerClipping: { layerIndex: 2 } }))).toThrow();
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ describeTextLayerClipping: { layerIndex: 2, timeSeconds: 1, extra: true } }))).toThrow();
+  });
+
+  it("an ordinary response is unchanged - the new keys are neither required nor added - and a response with clipping facts parses", () => {
+    const ordinary = sceneEvidenceResponseSchema.parse(validResponse());
+    expect(ordinary).not.toHaveProperty("textLayerClippingFacts");
+    expect(ordinary).not.toHaveProperty("textLayerClippingFactsFailureReason");
+    const withFacts = sceneEvidenceResponseSchema.parse({
+      ...validResponse(),
+      textLayerClippingFacts: { timeSeconds: 4.96, layer: { masks: [] } },
+      textLayerClippingFactsFailureReason: null
+    });
+    expect(withFacts.textLayerClippingFacts).toEqual({ timeSeconds: 4.96, layer: { masks: [] } });
+  });
+});
+
 describe("sceneEvidenceResponseSchema", () => {
   it("accepts a valid response with no preview", () => {
     expect(() => sceneEvidenceResponseSchema.parse(validResponse())).not.toThrow();

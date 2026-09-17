@@ -14,7 +14,8 @@ import {
   buildInspectLayerTransformScript,
   buildScanProjectPreflightScript,
   buildOpenProjectScript,
-  buildReopenProjectFromDiskScript
+  buildReopenProjectFromDiskScript,
+  buildInspectTextLayerClippingScript
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -2436,5 +2437,118 @@ describe("no other allowlisted script can leave AE blocked by an unsuppressed di
       expect(script.lastIndexOf("app.beginSuppressDialogs()", openAt)).toBeGreaterThan(-1);
       expect(script.indexOf("app.endSuppressDialogs(", openAt)).toBeGreaterThan(openAt);
     }
+  });
+});
+
+
+describe("buildInspectTextLayerClippingScript (real 2026-09-17: a proven-correct Hebrew line rendered partly clipped)", () => {
+  // Every setter throws: the script must only ever read.
+  const CLIPPING_APP_SETUP = (options: { withTrackMatteLayerApi?: boolean; layerCount?: number } = {}) => `
+    function CompItem() {}
+    var MaskMode = { NONE: 6812, ADD: 6813, SUBTRACT: 6814, INTERSECT: 6815, LIGHTEN: 6816, DARKEN: 6817, DIFFERENCE: 6818 };
+    var TrackMatteType = { NO_TRACK_MATTE: 5012, ALPHA: 5013, ALPHA_INVERTED: 5014, LUMA: 5015, LUMA_INVERTED: 5016 };
+    var ParagraphJustification = { LEFT_JUSTIFY: 7413, RIGHT_JUSTIFY: 7414, CENTER_JUSTIFY: 7415, FULL_JUSTIFY_LASTLINE_LEFT: 7416, FULL_JUSTIFY_LASTLINE_RIGHT: 7417, FULL_JUSTIFY_LASTLINE_CENTER: 7418, FULL_JUSTIFY_LASTLINE_FULL: 7419 };
+    var __writes = [];
+    function prop(valueAt, numKeys) {
+      return { numKeys: numKeys || 0, valueAtTime: function (t) { return typeof valueAt === "function" ? valueAt(t) : valueAt; }, setValue: function () { __writes.push("setValue"); throw new Error("READ-ONLY VIOLATION"); } };
+    }
+    function group(items) { return { numProperties: items.length, property: function (i) { return items[i - 1]; } }; }
+    function named(name, matchName, children) {
+      var g = { name: name, matchName: matchName, enabled: true };
+      g.property = function (n) { return children[n] || null; };
+      return g;
+    }
+
+    var __mask = {
+      name: "Reveal", maskMode: MaskMode.ADD, inverted: false,
+      property: function (n) {
+        if (n === "ADBE Mask Shape") { return prop(function (t) { return { vertices: [[400, -60], [900, -60], [900, 40], [400, 40]], closed: true }; }, 2); }
+        if (n === "ADBE Mask Feather") { return prop([0, 0]); }
+        if (n === "ADBE Mask Opacity") { return prop(100); }
+        if (n === "ADBE Mask Offset") { return prop(0); }
+        return null;
+      }
+    };
+    var __selector = named("Range Selector 1", "ADBE Text Selector", {
+      "ADBE Text Percent Start": prop(0), "ADBE Text Percent End": prop(100), "ADBE Text Percent Offset": prop(0)
+    });
+    var __animator = named("Animator 1", "ADBE Text Animator", {
+      "ADBE Text Selectors": group([__selector]),
+      "ADBE Text Animator Properties": group([{ name: "Position", matchName: "ADBE Text Position 3D", valueAtTime: function () { return [0, 0, 0]; } }])
+    });
+    var __doc = { text: "מבית DYO App", font: "TimesNewRomanPSMT", fontSize: 96, justification: ParagraphJustification.RIGHT_JUSTIFY, boxText: false };
+    var __textProps = { "ADBE Text Document": prop(__doc), "ADBE Text Animators": group([__animator]) };
+
+    var __matte = { index: 1, name: "Matte Solid", enabled: false, inPoint: 0, outPoint: 7.04, startTime: 0, threeDLayer: false, parent: null, isTrackMatte: true, hasTrackMatte: false, trackMatteType: TrackMatteType.NO_TRACK_MATTE };
+    __matte.transform = { anchorPoint: prop([0, 0]), position: prop([960, 540]), scale: prop([100, 100]), rotation: prop(0), opacity: prop(100) };
+    __matte.sourceRectAtTime = function () { return { left: 0, top: 0, width: 1920, height: 1080 }; };
+    __matte.property = function (n) { return n === "ADBE Mask Parade" ? group([]) : n === "ADBE Effect Parade" ? group([]) : null; };
+
+    var __text = { index: 2, name: "Text 1", enabled: true, inPoint: 0.4, outPoint: 60.4, startTime: 0, threeDLayer: false, parent: null, isTrackMatte: false, hasTrackMatte: true, trackMatteType: TrackMatteType.ALPHA };
+    ${options.withTrackMatteLayerApi === false ? "Object.defineProperty(__text, 'trackMatteLayer', { get: function () { throw new Error('not supported'); } });" : "__text.trackMatteLayer = __matte;"}
+    __text.transform = { anchorPoint: prop([0, 0]), position: prop([1480, 520]), scale: prop([100, 100]), rotation: prop(0), opacity: prop(100) };
+    __text.sourceRectAtTime = function (t) { return { left: -610, top: -70, width: 610, height: 90 }; };
+    __text.property = function (n) {
+      if (n === "ADBE Mask Parade") { return group([__mask]); }
+      if (n === "ADBE Effect Parade") { return group([{ name: "Linear Wipe", matchName: "ADBE Linear Wipe", enabled: true }]); }
+      if (n === "ADBE Text Properties") { return { property: function (inner) { return __textProps[inner] || null; } }; }
+      return null;
+    };
+
+    var __comp = new CompItem();
+    __comp.name = "Smartphone_05"; __comp.width = 1920; __comp.height = 1080; __comp.duration = 7.04;
+    __comp.numLayers = ${options.layerCount ?? 2};
+    __comp.layer = function (i) { return i === 1 ? __matte : i === 2 ? __text : null; };
+    var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 45 ? __comp : null; } } };
+  `;
+
+  function run(script: string, setup: string) {
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(setup, context);
+    const resultText = vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context) as string;
+    const writes = vm.runInContext("__writes", context) as string[];
+    return { result: JSON.parse(resultText), writes };
+  }
+
+  it("describes masks, track matte, text box/justification, rendered rect, text animators and effects of one layer at one time - and never writes", () => {
+    const { result, writes } = run(buildInspectTextLayerClippingScript(45, "Smartphone_05", 2, 21 - 16.04), CLIPPING_APP_SETUP());
+    expect(writes).toEqual([]);
+    expect(result.ok).toBe(true);
+    const facts = result.facts;
+    expect(facts.timeSeconds).toBeCloseTo(4.96, 9);
+    expect(facts.composition).toEqual({ name: "Smartphone_05", width: 1920, height: 1080, durationSeconds: 7.04 });
+    expect(facts.layer).toMatchObject({
+      layerIndex: 2, layerName: "Text 1", enabled: true, hasTrackMatte: true, trackMatteType: "ALPHA",
+      trackMatteLayer: { layerIndex: 1, layerName: "Matte Solid" },
+      rectAtTime: { left: -610, top: -70, width: 610, height: 90 },
+      transformAtTime: { position: [1480, 520], scale: [100, 100], rotation: 0, opacity: 100 },
+      effects: [{ name: "Linear Wipe", matchName: "ADBE Linear Wipe", enabled: true }]
+    });
+    expect(facts.layer.masks).toEqual([
+      { index: 1, name: "Reveal", mode: "ADD", inverted: false, shapeAnimated: true, boundsAtTime: { left: 400, top: -60, right: 900, bottom: 40, vertexCount: 4, closed: true }, featherAtTime: [0, 0], opacityAtTime: 100, expansionAtTime: 0 }
+    ]);
+    expect(facts.text).toMatchObject({ textLength: 12, font: "TimesNewRomanPSMT", fontSize: 96, justification: "RIGHT_JUSTIFY", boxText: false, boxTextSize: null });
+    expect(facts.text.animators).toEqual([
+      { name: "Animator 1", enabled: true, selectors: [{ name: "Range Selector 1", matchName: "ADBE Text Selector", startAtTime: 0, endAtTime: 100, offsetAtTime: 0 }], properties: [{ name: "Position", matchName: "ADBE Text Position 3D", valueAtTime: [0, 0, 0] }] }
+    ]);
+    expect(facts.matteLayer).toMatchObject({ layerIndex: 1, layerName: "Matte Solid", isTrackMatte: true, enabled: false });
+  });
+
+  it("an After Effects without trackMatteLayer reports it as null and still describes the classic matte (the layer above)", () => {
+    const { result, writes } = run(buildInspectTextLayerClippingScript(45, "Smartphone_05", 2, 4.96), CLIPPING_APP_SETUP({ withTrackMatteLayerApi: false }));
+    expect(writes).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.facts.layer.trackMatteLayer).toBeNull();
+    expect(result.facts.matteLayer).toMatchObject({ layerIndex: 1, layerName: "Matte Solid" });
+  });
+
+  it("refuses the wrong composition and an out-of-range layer instead of describing something else", () => {
+    const wrongComp = run(buildInspectTextLayerClippingScript(45, "Smartphone_04", 2, 1), CLIPPING_APP_SETUP());
+    expect(wrongComp.result.ok).toBe(false);
+    expect(wrongComp.result.failureReason).toMatch(/expected "Smartphone_04"/);
+    const outOfRange = run(buildInspectTextLayerClippingScript(45, "Smartphone_05", 9, 1), CLIPPING_APP_SETUP());
+    expect(outOfRange.result.ok).toBe(false);
+    expect(outOfRange.result.failureReason).toMatch(/layer index 9 is outside composition "Smartphone_05" \(2 layers\)/);
   });
 });

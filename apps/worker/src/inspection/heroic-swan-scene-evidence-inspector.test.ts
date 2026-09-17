@@ -58,7 +58,7 @@ async function writeFakeServer(
     captureShape?: "image" | "fallback" | "none";
     previewFilePath?: string;
     /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "compositionSummary" returns a real {ok:true, compDurationSeconds, ...} envelope matching buildDescribeCompositionSummaryScript's own response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
-    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "error";
+    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "textLayerClipping" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
     /** Real 2026-09-11 incident fix - overrides the resolve-by-id script's own canned response. "drifted" simulates the real incident: the id resolves to a DIFFERENT index than aeProjectItemIndex requested (index 48, not 14), proving the inspector uses the freshly-resolved index rather than the stale one. "notFound" simulates the id no longer existing at all. Default (omitted) resolves to the same index/name ae_get_composition already reports - every pre-existing test's own behavior, unchanged. */
@@ -206,6 +206,11 @@ async function writeFakeServer(
                     }
                   ]
                 }) }) }] };`
+              : options.runJsxResult === "textLayerClipping"
+                ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({
+                    ok: true,
+                    facts: { timeSeconds: 4.96, layer: { layerIndex: 2, layerName: "Text 1", hasTrackMatte: false, masks: [{ index: 1, mode: "ADD", boundsAtTime: { left: 400, top: -60, right: 900, bottom: 40 } }] }, text: { justification: "RIGHT_JUSTIFY", animators: [] }, matteLayer: null }
+                  }) }) }] };`
               : options.runJsxResult === "error"
                 ? `return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };`
                 : `return { content: [{ type: "text", text: "MUTATION - should never be reachable" }] };`
@@ -515,6 +520,42 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
         effects: []
       }
     ]);
+  });
+
+  it("real 2026-09-17: describeTextLayerClipping sends the read-only text-clipping script for exactly that layer and time, and parses its facts into the response", async () => {
+    const capturePath = join(dir, "received-jsx-code-text-clipping.txt");
+    await writeFakeServer(dir, { runJsxResult: "textLayerClipping", captureReceivedJsxCodeToFile: capturePath });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeTextLayerClipping: { layerIndex: 2, timeSeconds: 4.96 } }))) as SceneEvidenceSuccess;
+
+    const receivedCode = await readFile(capturePath, "utf8");
+    expect(receivedCode).toMatch(/DYO INSPECT_TEXT_LAYER_CLIPPING/);
+    expect(receivedCode).toMatch(/var __t = 4\.96;/);
+    expect(receivedCode).toMatch(/__comp\.layer\(2\)/);
+    expect(receivedCode).not.toMatch(/setValue/);
+    expect(result.kind).toBe("evidence");
+    expect(result.response.textLayerClippingFactsFailureReason).toBeNull();
+    expect(result.response.textLayerClippingFacts).toMatchObject({ timeSeconds: 4.96, layer: { layerIndex: 2, layerName: "Text 1" }, text: { justification: "RIGHT_JUSTIFY" } });
+  });
+
+  it("real 2026-09-17: a request without describeTextLayerClipping has neither new response key - its shape is exactly as before", async () => {
+    await writeFakeServer(dir, { runJsxResult: "success" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest())) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response).not.toHaveProperty("textLayerClippingFacts");
+    expect(result.response).not.toHaveProperty("textLayerClippingFactsFailureReason");
+  });
+
+  it("real 2026-09-17: reports textLayerClippingFactsFailureReason (never fabricated facts) when the text-clipping script call fails", async () => {
+    await writeFakeServer(dir, { runJsxResult: "error" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeTextLayerClipping: { layerIndex: 2, timeSeconds: 4.96 } }))) as SceneEvidenceSuccess;
+
+    expect(result.kind).toBe("evidence");
+    expect(result.response.textLayerClippingFacts).toBeNull();
+    expect(result.response.textLayerClippingFactsFailureReason).toMatch(/ae_run_jsx failed/);
   });
 
   it("reports layerTransformFactsFailureReason (never fabricates layerTransformFacts) when describeLayerTransforms is requested but the underlying ae_run_jsx call fails", async () => {

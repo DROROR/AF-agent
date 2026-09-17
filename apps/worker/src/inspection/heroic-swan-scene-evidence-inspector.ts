@@ -10,7 +10,8 @@ import {
   buildDescribeCompositionSummaryScript,
   buildFindHostLayersScript,
   buildInspectCompositionLayerDetailsScript,
-  buildInspectLayerTransformScript
+  buildInspectLayerTransformScript,
+  buildInspectTextLayerClippingScript
 } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
@@ -168,6 +169,43 @@ async function fetchLayerTransforms(
     return { ok: false, reason: parsed.data.failureReason };
   }
   return { ok: true, layers: parsed.data.layers };
+}
+
+const inspectTextLayerClippingScriptResultSchema = z.union([
+  z.object({ ok: z.literal(true), facts: z.record(z.unknown()) }).strict(),
+  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
+]);
+
+/**
+ * REAL 2026-09-17 investigation (session 069b5891) - best-effort, never
+ * throws, same shape as fetchLayerTransforms. Describes one layer at one time
+ * (see buildInspectTextLayerClippingScript); a failure is reported via
+ * textLayerClippingFactsFailureReason and never fails the rest of the result.
+ */
+async function fetchTextLayerClipping(
+  client: HeroicSwanMcpClient,
+  aeProjectItemIndex: number,
+  compositionName: string,
+  layerIndex: number,
+  timeSeconds: number
+): Promise<{ ok: true; facts: Record<string, unknown> } | { ok: false; reason: string }> {
+  const script = buildInspectTextLayerClippingScript(aeProjectItemIndex, compositionName, layerIndex, timeSeconds);
+  const result = await client.runFixedInspectionScript(script);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  if (!unwrapped.ok) {
+    return { ok: false, reason: unwrapped.reason };
+  }
+  const parsed = inspectTextLayerClippingScriptResultSchema.safeParse(unwrapped.value);
+  if (!parsed.success) {
+    return { ok: false, reason: `inspect-text-layer-clipping script response did not match the expected shape: ${parsed.error.message}` };
+  }
+  if (!parsed.data.ok) {
+    return { ok: false, reason: parsed.data.failureReason };
+  }
+  return { ok: true, facts: parsed.data.facts };
 }
 
 /**
@@ -463,6 +501,21 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
         }
       }
 
+      // Added to the response ONLY when requested - see scene-evidence.ts.
+      let textLayerClipping: { textLayerClippingFacts: Record<string, unknown> | null; textLayerClippingFactsFailureReason: string | null } | null = null;
+      if (request.describeTextLayerClipping !== undefined) {
+        const clippingResult = await fetchTextLayerClipping(
+          client,
+          effectiveAeProjectItemIndex,
+          parsedComp.value.name,
+          request.describeTextLayerClipping.layerIndex,
+          request.describeTextLayerClipping.timeSeconds
+        );
+        textLayerClipping = clippingResult.ok
+          ? { textLayerClippingFacts: clippingResult.facts, textLayerClippingFactsFailureReason: null }
+          : { textLayerClippingFacts: null, textLayerClippingFactsFailureReason: clippingResult.reason };
+      }
+
       return {
         kind: "evidence",
         response: {
@@ -481,6 +534,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           compositionSummaryFailureReason,
           layerTransformFacts,
           layerTransformFactsFailureReason,
+          ...(textLayerClipping ?? {}),
           capturedAt: new Date().toISOString()
         }
       };

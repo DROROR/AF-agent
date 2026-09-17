@@ -2252,3 +2252,198 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
     }
   }
 }
+
+/**
+ * REAL 2026-09-17 INVESTIGATION (session 069b5891): the approved Hebrew line
+ * "מבית DYO App" is proven present in Smartphone_05 "Text 1",
+ * yet only " DYO App" and part of the Hebrew word render at 19 s and 21 s,
+ * while the gap where the rest belongs is plain background (not the phone,
+ * which sits below the text layers). The existing inspection scripts do not
+ * report masks, track mattes, text boxes or text animators, so the clipping
+ * cause could not be proven.
+ *
+ * READ-ONLY: reads ONE layer (and its track matte layer, if any) at ONE time -
+ * every value via value/valueAtTime/sourceRectAtTime, never setValue, never a
+ * save. Every read is individually guarded, so an unsupported property (e.g.
+ * trackMatteLayer on an older After Effects) reports null instead of failing
+ * the whole description. Enum values are reported by their ExtendScript
+ * constant name (e.g. MaskMode.ADD -> "ADD") when recognised.
+ */
+export function buildInspectTextLayerClippingScript(
+  aeProjectItemIndex: number,
+  compositionName: string,
+  layerIndex: number,
+  timeSeconds: number
+): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const layerIndexLiteral = String(layerIndex);
+  const timeLiteral = String(timeSeconds);
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_TEXT_LAYER_CLIPPING")});
+  var __result = null;
+  var __t = ${timeLiteral};
+  function __safe(__fn) { try { var __v = __fn(); return __v === undefined ? null : __v; } catch (__safeError) { return null; } }
+  function __table(__fn) { var __tbl = __safe(__fn); return __tbl === null ? {} : __tbl; }
+  var __maskModes = __table(function () { return { NONE: MaskMode.NONE, ADD: MaskMode.ADD, SUBTRACT: MaskMode.SUBTRACT, INTERSECT: MaskMode.INTERSECT, LIGHTEN: MaskMode.LIGHTEN, DARKEN: MaskMode.DARKEN, DIFFERENCE: MaskMode.DIFFERENCE }; });
+  var __matteTypes = __table(function () { return { NO_TRACK_MATTE: TrackMatteType.NO_TRACK_MATTE, ALPHA: TrackMatteType.ALPHA, ALPHA_INVERTED: TrackMatteType.ALPHA_INVERTED, LUMA: TrackMatteType.LUMA, LUMA_INVERTED: TrackMatteType.LUMA_INVERTED }; });
+  var __justifications = __table(function () { return { LEFT_JUSTIFY: ParagraphJustification.LEFT_JUSTIFY, RIGHT_JUSTIFY: ParagraphJustification.RIGHT_JUSTIFY, CENTER_JUSTIFY: ParagraphJustification.CENTER_JUSTIFY, FULL_JUSTIFY_LASTLINE_LEFT: ParagraphJustification.FULL_JUSTIFY_LASTLINE_LEFT, FULL_JUSTIFY_LASTLINE_RIGHT: ParagraphJustification.FULL_JUSTIFY_LASTLINE_RIGHT, FULL_JUSTIFY_LASTLINE_CENTER: ParagraphJustification.FULL_JUSTIFY_LASTLINE_CENTER, FULL_JUSTIFY_LASTLINE_FULL: ParagraphJustification.FULL_JUSTIFY_LASTLINE_FULL }; });
+  function __enumName(__value, __tbl) {
+    if (__value === null || __value === undefined) { return null; }
+    for (var __key in __tbl) { if (__tbl[__key] === __value) { return __key; } }
+    return String(__value);
+  }
+  function __valueAt(__prop) { return __safe(function () { return __prop.valueAtTime(__t, false); }); }
+  function __isAnimated(__prop) { return __safe(function () { return __prop.numKeys > 0; }); }
+  function __shapeBounds(__shape) {
+    if (!__shape || !__shape.vertices || __shape.vertices.length === 0) { return null; }
+    var __left = __shape.vertices[0][0], __right = __left, __top = __shape.vertices[0][1], __bottom = __top;
+    for (var __v = 1; __v < __shape.vertices.length; __v++) {
+      var __pt = __shape.vertices[__v];
+      if (__pt[0] < __left) { __left = __pt[0]; }
+      if (__pt[0] > __right) { __right = __pt[0]; }
+      if (__pt[1] < __top) { __top = __pt[1]; }
+      if (__pt[1] > __bottom) { __bottom = __pt[1]; }
+    }
+    return { left: __left, top: __top, right: __right, bottom: __bottom, vertexCount: __shape.vertices.length, closed: __shape.closed === true };
+  }
+  function __describeMasks(__lyr) {
+    var __masks = [];
+    var __group = __safe(function () { return __lyr.property("ADBE Mask Parade"); });
+    if (!__group) { return __masks; }
+    var __count = __safe(function () { return __group.numProperties; }) || 0;
+    for (var __m = 1; __m <= __count; __m++) {
+      var __mask = __safe(function () { return __group.property(__m); });
+      if (!__mask) { continue; }
+      var __shapeProp = __safe(function () { return __mask.property("ADBE Mask Shape"); });
+      __masks.push({
+        index: __m,
+        name: __safe(function () { return __mask.name; }),
+        mode: __enumName(__safe(function () { return __mask.maskMode; }), __maskModes),
+        inverted: __safe(function () { return __mask.inverted; }),
+        shapeAnimated: __isAnimated(__shapeProp),
+        boundsAtTime: __safe(function () { return __shapeBounds(__shapeProp.valueAtTime(__t, false)); }),
+        featherAtTime: __valueAt(__safe(function () { return __mask.property("ADBE Mask Feather"); })),
+        opacityAtTime: __valueAt(__safe(function () { return __mask.property("ADBE Mask Opacity"); })),
+        expansionAtTime: __valueAt(__safe(function () { return __mask.property("ADBE Mask Offset"); }))
+      });
+    }
+    return __masks;
+  }
+  function __describeEffects(__lyr) {
+    var __effects = [];
+    var __group = __safe(function () { return __lyr.property("ADBE Effect Parade"); });
+    if (!__group) { return __effects; }
+    var __count = __safe(function () { return __group.numProperties; }) || 0;
+    for (var __e = 1; __e <= __count; __e++) {
+      var __eff = __safe(function () { return __group.property(__e); });
+      if (__eff) { __effects.push({ name: __safe(function () { return __eff.name; }), matchName: __safe(function () { return __eff.matchName; }), enabled: __safe(function () { return __eff.enabled; }) }); }
+    }
+    return __effects;
+  }
+  function __describeLayer(__lyr) {
+    var __transform = __safe(function () { return __lyr.transform; });
+    return {
+      layerIndex: __safe(function () { return __lyr.index; }),
+      layerName: __safe(function () { return __lyr.name; }),
+      enabled: __safe(function () { return __lyr.enabled; }),
+      inPointSeconds: __safe(function () { return __lyr.inPoint; }),
+      outPointSeconds: __safe(function () { return __lyr.outPoint; }),
+      startTimeSeconds: __safe(function () { return __lyr.startTime; }),
+      threeDLayer: __safe(function () { return __lyr.threeDLayer; }),
+      parent: __safe(function () { return __lyr.parent ? { layerIndex: __lyr.parent.index, layerName: __lyr.parent.name } : null; }),
+      isTrackMatte: __safe(function () { return __lyr.isTrackMatte; }),
+      hasTrackMatte: __safe(function () { return __lyr.hasTrackMatte; }),
+      trackMatteType: __enumName(__safe(function () { return __lyr.trackMatteType; }), __matteTypes),
+      trackMatteLayer: __safe(function () { return __lyr.trackMatteLayer ? { layerIndex: __lyr.trackMatteLayer.index, layerName: __lyr.trackMatteLayer.name } : null; }),
+      rectAtTime: __safe(function () { var __r = __lyr.sourceRectAtTime(__t, false); return { left: __r.left, top: __r.top, width: __r.width, height: __r.height }; }),
+      transformAtTime: {
+        anchorPoint: __valueAt(__safe(function () { return __transform.anchorPoint; })),
+        position: __valueAt(__safe(function () { return __transform.position; })),
+        scale: __valueAt(__safe(function () { return __transform.scale; })),
+        rotation: __valueAt(__safe(function () { return __transform.rotation; })),
+        opacity: __valueAt(__safe(function () { return __transform.opacity; }))
+      },
+      masks: __describeMasks(__lyr),
+      effects: __describeEffects(__lyr)
+    };
+  }
+  function __describeText(__lyr) {
+    var __textGroup = __safe(function () { return __lyr.property("ADBE Text Properties"); });
+    if (!__textGroup) { return null; }
+    var __doc = __valueAt(__safe(function () { return __textGroup.property("ADBE Text Document"); }));
+    var __animators = [];
+    var __animGroup = __safe(function () { return __textGroup.property("ADBE Text Animators"); });
+    var __animCount = __animGroup ? (__safe(function () { return __animGroup.numProperties; }) || 0) : 0;
+    for (var __a = 1; __a <= __animCount; __a++) {
+      var __anim = __safe(function () { return __animGroup.property(__a); });
+      if (!__anim) { continue; }
+      var __selectors = [];
+      var __selGroup = __safe(function () { return __anim.property("ADBE Text Selectors"); });
+      var __selCount = __selGroup ? (__safe(function () { return __selGroup.numProperties; }) || 0) : 0;
+      for (var __s = 1; __s <= __selCount; __s++) {
+        var __sel = __safe(function () { return __selGroup.property(__s); });
+        if (!__sel) { continue; }
+        __selectors.push({
+          name: __safe(function () { return __sel.name; }),
+          matchName: __safe(function () { return __sel.matchName; }),
+          startAtTime: __valueAt(__safe(function () { return __sel.property("ADBE Text Percent Start"); })),
+          endAtTime: __valueAt(__safe(function () { return __sel.property("ADBE Text Percent End"); })),
+          offsetAtTime: __valueAt(__safe(function () { return __sel.property("ADBE Text Percent Offset"); }))
+        });
+      }
+      var __animatedProps = [];
+      var __propsGroup = __safe(function () { return __anim.property("ADBE Text Animator Properties"); });
+      var __propCount = __propsGroup ? (__safe(function () { return __propsGroup.numProperties; }) || 0) : 0;
+      for (var __p = 1; __p <= __propCount; __p++) {
+        var __ap = __safe(function () { return __propsGroup.property(__p); });
+        if (__ap) { __animatedProps.push({ name: __safe(function () { return __ap.name; }), matchName: __safe(function () { return __ap.matchName; }), valueAtTime: __valueAt(__ap) }); }
+      }
+      __animators.push({ name: __safe(function () { return __anim.name; }), enabled: __safe(function () { return __anim.enabled; }), selectors: __selectors, properties: __animatedProps });
+    }
+    return {
+      textLength: __doc ? __safe(function () { return __doc.text.length; }) : null,
+      font: __doc ? __safe(function () { return __doc.font; }) : null,
+      fontSize: __doc ? __safe(function () { return __doc.fontSize; }) : null,
+      justification: __doc ? __enumName(__safe(function () { return __doc.justification; }), __justifications) : null,
+      boxText: __doc ? __safe(function () { return __doc.boxText; }) : null,
+      boxTextSize: __doc ? __safe(function () { return __doc.boxText ? __doc.boxTextSize : null; }) : null,
+      boxTextPos: __doc ? __safe(function () { return __doc.boxText ? __doc.boxTextPos : null; }) : null,
+      animators: __animators
+    };
+  }
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) { __comp = __rawItem; }
+    } catch (__compLookupError) { __comp = null; }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to report facts about the wrong composition" });
+    } else if (!(${layerIndexLiteral} >= 1 && ${layerIndexLiteral} <= __comp.numLayers)) {
+      __result = JSON.stringify({ ok: false, failureReason: "layer index " + ${layerIndexLiteral} + " is outside composition \\"" + __comp.name + "\\" (" + __comp.numLayers + " layers)" });
+    } else {
+      var __layer = __comp.layer(${layerIndexLiteral});
+      var __matte = null;
+      if (__safe(function () { return __layer.hasTrackMatte; }) === true) {
+        __matte = __safe(function () { return __layer.trackMatteLayer; });
+        if (!__matte && __layer.index > 1) { __matte = __safe(function () { return __comp.layer(__layer.index - 1); }); }
+      }
+      var __facts = {
+        timeSeconds: __t,
+        composition: { name: __comp.name, width: __safe(function () { return __comp.width; }), height: __safe(function () { return __comp.height; }), durationSeconds: __safe(function () { return __comp.duration; }) },
+        layer: __describeLayer(__layer),
+        text: __describeText(__layer),
+        matteLayer: __matte ? __describeLayer(__matte) : null
+      };
+      __result = JSON.stringify({ ok: true, facts: __facts });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
