@@ -1592,6 +1592,152 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     });
   });
 
+  describe("logo contain fit on a screen card (real 2026-09-16: a near-square logo was cover-cropped to a slice of a tall card)", () => {
+    type ContainOptions = { anchor?: number[]; position?: number[]; scale?: number[]; rotation?: number; animatedPosition?: boolean; locked?: boolean };
+    const containSetup = (options: ContainOptions = {}) => `
+      ${NESTED_FAKE_APP_SETUP}
+      function SolidSource() {}
+      var __order = [];
+      var __added = null;
+      var __cardSourceReplaced = false;
+      function __reindex() { for (var i = 0; i < __order.length; i++) { __order[i].index = i + 1; } }
+      function __moveToFront(l) { __order.splice(__order.indexOf(l), 1); __order.unshift(l); __reindex(); }
+      function __makeProp(v, keys) { return { numKeys: keys, value: v, setValue: function (x) { this.value = x; } }; }
+      function __makeTransform(v) {
+        var props = {
+          "ADBE Anchor Point": __makeProp(v.anchor, 0),
+          "ADBE Position": __makeProp(v.position, v.animatedPosition ? 2 : 0),
+          "ADBE Scale": __makeProp(v.scale, 0),
+          "ADBE Rotate Z": __makeProp(v.rotation, 0)
+        };
+        return { props: props, property: function (n) { return props[n] || null; } };
+      }
+      var __labelApp = new TextLayer(); __labelApp.name = "APP SCREEN";
+      var __labelNumber = new TextLayer(); __labelNumber.name = "2";
+      var __card = new AVLayer();
+      __card.name = "Placeholder";
+      __card.locked = ${options.locked ? "true" : "false"};
+      __card.parent = null;
+      __card.startTime = 0; __card.inPoint = 0; __card.outPoint = 64;
+      __card.source = { name: "Placeholder", width: 1242, height: 2648, mainSource: new SolidSource() };
+      var __cardTransform = __makeTransform({
+        anchor: ${JSON.stringify(options.anchor ?? [621, 1324, 0])},
+        position: ${JSON.stringify(options.position ?? [621, 1324, 0])},
+        scale: ${JSON.stringify(options.scale ?? [100, 100, 100])},
+        rotation: ${options.rotation ?? 0},
+        animatedPosition: ${options.animatedPosition ? "true" : "false"}
+      });
+      __card.property = function (n) { return n === "ADBE Transform Group" ? __cardTransform : null; };
+      __card.replaceSource = function () { __cardSourceReplaced = true; };
+      __card.moveToBeginning = function () {
+        if (this.locked) { throw new Error("Can not call method moveToBeginning because the Layer is locked."); }
+        __moveToFront(this);
+      };
+      __card.containingComp = {
+        layers: {
+          add: function (item) {
+            var l = new AVLayer();
+            l.name = item.name; l.source = item; l.parent = null;
+            l.startTime = 0; l.inPoint = 0; l.outPoint = 999;
+            l.transform = __makeTransform({ anchor: [0, 0, 0], position: [0, 0, 0], scale: [100, 100, 100], rotation: 0 });
+            l.property = function (n) { return n === "ADBE Transform Group" ? this.transform : null; };
+            l.moveToBeginning = function () { __moveToFront(this); };
+            __order.unshift(l); __reindex(); __added = l;
+            return l;
+          }
+        }
+      };
+      __order = [__labelApp, __labelNumber, __card];
+      __reindex();
+      __logoLayersByIndex[3] = __card;
+      app.project.importFile = function (opts) { return { name: opts.file.fsName, width: 469, height: 533 }; };
+    `;
+    const logoOp: SceneEditOperation = {
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: null,
+      layerIndex: null,
+      nestedTarget: [
+        { compositionId: "comp-1635", aeProjectItemIndex: 11, layerIndex: 4 },
+        { compositionId: "comp-1113", aeProjectItemIndex: 22, layerIndex: 3 }
+      ],
+      assetPath: "/real/app-logo.png",
+      fit: "contain"
+    };
+    const probe =
+      "; var __names = []; for (var __i = 0; __i < __order.length; __i++) { __names.push(__order[__i].name); }" +
+      " __result = JSON.stringify({ step: __result, order: __names, cardSourceName: __card.source.name, cardSourceReplaced: __cardSourceReplaced, locked: __card.locked," +
+      " media: __added ? { anchor: __added.transform.props['ADBE Anchor Point'].value, position: __added.transform.props['ADBE Position'].value, scale: __added.transform.props['ADBE Scale'].value, rotation: __added.transform.props['ADBE Rotate Z'].value, startTime: __added.startTime, inPoint: __added.inPoint, outPoint: __added.outPoint } : null," +
+      " logoSourceName: __logoImageLayer.source.name });";
+
+    function runContain(op: SceneEditOperation, options: ContainOptions = {}) {
+      const script = buildOperationScript(999, "irrelevant", op);
+      const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
+      expect(probed).not.toBe(script);
+      const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, containSetup(options)));
+      return { ...outcome, step: JSON.parse(outcome.step) };
+    }
+
+    it("adds the whole logo above the card, centred and uniformly scaled so it fits - never cropped, never stretched - and keeps the card as its background above the guide labels", () => {
+      const outcome = runContain(logoOp);
+      expect(outcome.step).toEqual({ ok: true, previousValue: "Placeholder", resultingValue: "/real/app-logo.png" });
+      expect(outcome.order).toEqual(["/real/app-logo.png", "Placeholder", "APP SCREEN", "2"]);
+      expect(outcome.cardSourceReplaced).toBe(false);
+      expect(outcome.cardSourceName).toBe("Placeholder");
+      // contain = min(1242/469, 2648/533) = 1242/469: full width, height 1411 of 2648.
+      const factor = (1242 / 469) * 100;
+      expect(outcome.media.scale[0]).toBeCloseTo(factor, 6);
+      expect(outcome.media.scale[1]).toBeCloseTo(factor, 6);
+      expect(outcome.media.scale[2]).toBe(100);
+      expect((469 * outcome.media.scale[0]) / 100).toBeLessThanOrEqual(1242 + 1e-6);
+      expect((533 * outcome.media.scale[1]) / 100).toBeLessThanOrEqual(2648 + 1e-6);
+      expect(outcome.media.anchor).toEqual([234.5, 266.5, 0]);
+      expect(outcome.media.position).toEqual([621, 1324, 0]);
+      expect(outcome.media.rotation).toBe(0);
+      expect([outcome.media.startTime, outcome.media.inPoint, outcome.media.outPoint]).toEqual([0, 0, 64]);
+    });
+
+    it("centres on a rotated, non-uniformly scaled card through its own anchor, scale and rotation, and still scales the logo uniformly", () => {
+      const outcome = runContain(logoOp, { anchor: [0, 0, 0], position: [100, 200, 0], scale: [50, 100, 100], rotation: 90 });
+      expect(outcome.step.ok).toBe(true);
+      // Card centre offset (621*0.5, 1324*1) rotated 90 degrees: (-1324, 310.5).
+      expect(outcome.media.position[0]).toBeCloseTo(100 - 1324, 6);
+      expect(outcome.media.position[1]).toBeCloseTo(200 + 310.5, 6);
+      // Rendered card 621 x 2648 -> contain = 621/469.
+      expect(outcome.media.scale[0]).toBeCloseTo((621 / 469) * 100, 6);
+      expect(outcome.media.scale[1]).toBeCloseTo(outcome.media.scale[0], 9);
+      expect(outcome.media.rotation).toBe(90);
+    });
+
+    it("refuses a card with animated position - no layer added, the card left as it was", () => {
+      const outcome = runContain(logoOp, { animatedPosition: true });
+      expect(outcome.step.ok).toBe(false);
+      expect(outcome.step.failureReason).toMatch(/animated scale, anchor point, position or rotation/);
+      expect(outcome.media).toBeNull();
+      expect(outcome.order).toEqual(["APP SCREEN", "2", "Placeholder"]);
+    });
+
+    it("a designer-locked card is unlocked only for the fit and locked again", () => {
+      const outcome = runContain(logoOp, { locked: true });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.order[0]).toBe("/real/app-logo.png");
+      expect(outcome.locked).toBe(true);
+    });
+
+    it("a contain fit on a layer that is not a solid card is a plain source swap - nothing added", () => {
+      const outcome = runContain({ ...logoOp, nestedTarget: [logoOp.nestedTarget![0]!, { ...logoOp.nestedTarget![1]!, layerIndex: 2 }] });
+      expect(outcome.step).toEqual({ ok: true, previousValue: "workshop_logo__.png", resultingValue: "/real/app-logo.png" });
+      expect(outcome.media).toBeNull();
+      expect(outcome.logoSourceName).toBe("/real/app-logo.png");
+    });
+
+    it("without a fit, a screen card keeps the cover path (source swap) - the contain branch is not even in the script", () => {
+      const { fit: _fit, ...coverOp } = logoOp;
+      const script = buildOperationScript(999, "irrelevant", coverOp as SceneEditOperation);
+      expect(script).not.toContain("layers.add(__newFootageItem)");
+      expect(script).toContain("__layer.replaceSource(__newFootageItem, false)");
+    });
+  });
+
   it("multi-hop traversal: a 3-hop chain resolves through two intermediate precomp hops before reaching the final layer", () => {
     const threeHopSetup = `
       function CompItem() {}

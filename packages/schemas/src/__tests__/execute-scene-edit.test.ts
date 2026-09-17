@@ -168,6 +168,21 @@ describe("sceneEditOperationIntentSchema - the dispatch-facing (server -> worker
     ).not.toThrow();
   });
 
+  it("accepts a logo MAP_FOOTAGE intent with fit contain, and rejects any fit other than cover/contain", () => {
+    const intent = {
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: "ph-1",
+      layerIndex: 1,
+      nestedTarget: null,
+      assetId: "22222222-2222-2222-2222-222222222222",
+      expectedSha256: "c".repeat(64),
+      mimeType: "image/png"
+    };
+    expect(() => sceneEditOperationIntentSchema.parse({ ...intent, fit: "contain" })).not.toThrow();
+    expect(() => sceneEditOperationIntentSchema.parse({ ...intent, fit: "cover" })).not.toThrow();
+    expect(() => sceneEditOperationIntentSchema.parse({ ...intent, fit: "stretch" })).toThrow();
+  });
+
   it("rejects a MAP_FOOTAGE intent that still tries to supply a raw assetPath", () => {
     expect(() =>
       sceneEditOperationIntentSchema.parse({

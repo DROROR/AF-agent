@@ -83,6 +83,34 @@ describe("resolveSceneEditOperation", () => {
     }
   });
 
+  it("carries a logo's contain fit through to the resolved operation, and adds no fit when the intent has none", async () => {
+    const content = "real logo bytes";
+    const base: SceneEditOperationIntent = {
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: "ph-9",
+      layerIndex: 3,
+      nestedTarget: null,
+      assetId: "33333333-3333-3333-3333-333333333333",
+      expectedSha256: sha256(content),
+      mimeType: "image/png"
+    };
+
+    const contained = await resolveSceneEditOperation(
+      { workRoot: makeWorkRoot(), jobId: "job-logo", assetDownloadClient: new FakeAssetDownloadClient(Buffer.from(content)) },
+      { ...base, fit: "contain" }
+    );
+    const plain = await resolveSceneEditOperation(
+      { workRoot: makeWorkRoot(), jobId: "job-image", assetDownloadClient: new FakeAssetDownloadClient(Buffer.from(content)) },
+      base
+    );
+
+    expect(contained.ok && contained.operation.type === "MAP_FOOTAGE" && contained.operation.fit).toBe("contain");
+    expect(plain.ok).toBe(true);
+    if (plain.ok) {
+      expect(plain.operation).not.toHaveProperty("fit");
+    }
+  });
+
   it("propagates a clean failure (never throws) when the asset cannot be resolved - e.g. sha256 mismatch", async () => {
     const workRoot = makeWorkRoot();
     const client = new FakeAssetDownloadClient(Buffer.from("wrong bytes"));

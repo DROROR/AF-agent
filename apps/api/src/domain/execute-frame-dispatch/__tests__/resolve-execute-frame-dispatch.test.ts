@@ -279,6 +279,17 @@ describe("resolveExecuteFrameDispatch", () => {
     ]);
   });
 
+  it("real 2026-09-16: a mapping approved as a logo asks the worker to fit the whole logo inside its card (contain); other assets keep the default cover fit", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping({ selectedAssetType: "logo" })] })] }) })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([
+      { type: "MAP_FOOTAGE", manifestPlaceholderId: "ph-2", layerIndex: 3, nestedTarget: null, assetId: ASSET_ID, expectedSha256: "b".repeat(64), mimeType: "image/jpeg", fit: "contain" }
+    ]);
+  });
+
   it("fails when no plan exists", () => {
     const result = resolveExecuteFrameDispatch(baseInput({ currentPlan: null }));
     expect(result.ok).toBe(false);

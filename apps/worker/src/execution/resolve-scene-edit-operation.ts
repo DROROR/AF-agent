@@ -46,7 +46,8 @@ export async function resolveSceneEditOperation(
       manifestPlaceholderId: intent.manifestPlaceholderId,
       layerIndex: intent.layerIndex,
       nestedTarget: intent.nestedTarget,
-      assetPath: resolved.assetPath
+      assetPath: resolved.assetPath,
+      ...(intent.fit !== undefined ? { fit: intent.fit } : {})
     }
   };
 }

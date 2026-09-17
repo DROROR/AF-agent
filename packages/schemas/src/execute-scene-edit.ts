@@ -94,7 +94,14 @@ const mapFootageOperationSchema = z
     layerIndex: z.number().int().positive().nullable(),
     nestedTarget: z.array(resolvedNestedTargetStepSchema).min(1).nullable(),
     /** Real file path on the worker's OWN filesystem, already downloaded and sha256-verified by the worker itself - see resolve-scene-edit-operation.ts. Never a URL, never a value that ever crossed the wire from the API - this operation shape is worker-internal only (constructed by the worker after asset resolution), never the dispatch-facing wire contract (see mapFootageOperationIntentSchema below for that). */
-    assetPath: z.string().min(1)
+    assetPath: z.string().min(1),
+    /**
+     * How the media fills a screen card (a solid placeholder): absent or
+     * "cover" crops it to fill the whole card; "contain" shows the whole
+     * media centred on the card, never cropped or stretched (logos - see
+     * jsx-templates.ts). Ignored for a layer that is not a solid card.
+     */
+    fit: z.enum(["cover", "contain"]).optional()
   })
   .strict();
 
@@ -269,7 +276,14 @@ const mapFootageOperationIntentSchema = z
     /** The asset's real, server-computed sha256 (AssetRecord.sha256) - the worker refuses to use downloaded bytes that don't match this. */
     expectedSha256: z.string().min(1),
     /** Used only to pick a sensible local file extension for the cached copy - never trusted as a security boundary by itself. */
-    mimeType: z.string().min(1)
+    mimeType: z.string().min(1),
+    /**
+     * How the media fills a screen card (a solid placeholder): absent or
+     * "cover" crops it to fill the whole card; "contain" shows the whole
+     * media centred on the card, never cropped or stretched (logos - see
+     * jsx-templates.ts). Ignored for a layer that is not a solid card.
+     */
+    fit: z.enum(["cover", "contain"]).optional()
   })
   .strict();
 

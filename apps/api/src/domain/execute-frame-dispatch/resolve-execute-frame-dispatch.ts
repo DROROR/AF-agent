@@ -176,6 +176,16 @@ export type ResolveExecuteFrameDispatchResult =
  * cannot be translated into any fixed operation (no layerIndex to
  * address), and is not itself evidence of anything unresolved.
  */
+/**
+ * REAL 2026-09-16 FINDING (session 1257ac95): a logo cover-fitted onto a tall
+ * screen card was cropped to a slice. A mapping approved as a logo asks the
+ * worker to show the whole logo, centred and unstretched; every other asset
+ * keeps the default cover fit, so its payload is unchanged.
+ */
+function logoFit(mapping: { selectedAssetType?: string | null }): { fit: "contain" } | Record<string, never> {
+  return mapping.selectedAssetType === "logo" ? { fit: "contain" } : {};
+}
+
 export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchInput): ResolveExecuteFrameDispatchResult {
   const { projectId, scenePlanId, session, currentPlan, currentProjectManifest, projectAssets, worker, now, staleAfterMs } = input;
 
@@ -395,7 +405,8 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
           nestedTarget,
           assetId: asset.id,
           expectedSha256: asset.sha256,
-          mimeType: asset.mimeType
+          mimeType: asset.mimeType,
+          ...logoFit(mapping)
         });
         approvedMappingIds.push(mapping.id);
       } else {
@@ -504,7 +515,8 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         nestedTarget: manifestNestedTarget,
         assetId: asset.id,
         expectedSha256: asset.sha256,
-        mimeType: asset.mimeType
+        mimeType: asset.mimeType,
+        ...logoFit(mapping)
       });
       approvedMappingIds.push(mapping.id);
     } else if (classification === "color") {

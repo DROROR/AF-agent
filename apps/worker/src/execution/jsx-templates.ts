@@ -261,13 +261,84 @@ function buildSetTextMutation(text: string): string {
         }`;
 }
 
+/** How replaced media fills a screen card: "cover" crops to fill the whole card (screenshots); "contain" shows the whole media, centred, uncropped and unstretched (logos). */
+export type MapFootageFit = "cover" | "contain";
+
 /** Shared mutation body for MAP_FOOTAGE - identical for the flat and nested target cases (module doc comment on buildSetTextBody above). */
-function buildMapFootageBody(assetPath: string): string {
-  return withTargetLayerUnlocked(buildMapFootageMutation(assetPath));
+function buildMapFootageBody(assetPath: string, fit: MapFootageFit): string {
+  return withTargetLayerUnlocked(buildMapFootageMutation(assetPath, fit));
 }
 
-function buildMapFootageMutation(assetPath: string): string {
+/**
+ * REAL 2026-09-16 FINDING (session 1257ac95): a near-square logo cover-fitted
+ * onto a tall screen card was scaled ~500% and cropped to a slice. A
+ * "contain" fit therefore never swaps the card solid's source: the solid stays
+ * as the card background (with its own colour) and is raised above the card's
+ * guide labels, and the media is added as a NEW layer directly above it -
+ * centred on the card, scaled uniformly so the whole media fits, with the
+ * card's rotation, parent and timing. The card centre is computed through the
+ * card's own anchor, scale and rotation, so a non-uniformly scaled or rotated
+ * card still centres correctly. Animated card geometry is refused, never
+ * guessed. A layer that is not a solid card keeps the plain source swap.
+ */
+function buildMapFootageContainOnCard(): string {
+  return `
+              var __cardTransform = __layer.property("ADBE Transform Group");
+              var __cardScaleProp = __cardTransform.property("ADBE Scale");
+              var __cardAnchorProp = __cardTransform.property("ADBE Anchor Point");
+              var __cardPositionProp = __cardTransform.property("ADBE Position");
+              var __cardRotationProp = __cardTransform.property("ADBE Rotate Z");
+              if (__cardScaleProp.numKeys > 0 || __cardAnchorProp.numKeys > 0 || __cardPositionProp.numKeys > 0 || __cardRotationProp.numKeys > 0) {
+                __fitFailure = "screen card layer has animated scale, anchor point, position or rotation - refusing to guess where to place the media";
+              } else if (!(__newFootageItem.width > 0 && __newFootageItem.height > 0 && __solidCard.width > 0 && __solidCard.height > 0)) {
+                __fitFailure = "screen card or imported media has no usable pixel size";
+              } else {
+                var __cardScale = __cardScaleProp.value;
+                var __cardAnchor = __cardAnchorProp.value;
+                var __cardPosition = __cardPositionProp.value;
+                var __cardRotation = __cardRotationProp.value;
+                if (!(__cardScale[0] > 0 && __cardScale[1] > 0)) {
+                  __fitFailure = "screen card layer has a zero or mirrored scale - refusing to guess how to fit the media";
+                } else {
+                  var __containFactor = Math.min(
+                    (__solidCard.width * __cardScale[0] / 100) / __newFootageItem.width,
+                    (__solidCard.height * __cardScale[1] / 100) / __newFootageItem.height
+                  );
+                  var __rotationRadians = __cardRotation * Math.PI / 180;
+                  var __offsetX = (__solidCard.width / 2 - __cardAnchor[0]) * __cardScale[0] / 100;
+                  var __offsetY = (__solidCard.height / 2 - __cardAnchor[1]) * __cardScale[1] / 100;
+                  var __cardCenterX = __cardPosition[0] + __offsetX * Math.cos(__rotationRadians) - __offsetY * Math.sin(__rotationRadians);
+                  var __cardCenterY = __cardPosition[1] + __offsetX * Math.sin(__rotationRadians) + __offsetY * Math.cos(__rotationRadians);
+                  var __media = __layer.containingComp.layers.add(__newFootageItem);
+                  // Parent first: the geometry below is expressed in the card's own parent space.
+                  if (__layer.parent) { __media.parent = __layer.parent; }
+                  var __mediaTransform = __media.property("ADBE Transform Group");
+                  var __mediaAnchor = [__newFootageItem.width / 2, __newFootageItem.height / 2];
+                  var __mediaPosition = [__cardCenterX, __cardCenterY];
+                  var __mediaScale = [__containFactor * 100, __containFactor * 100];
+                  if (__cardAnchor.length > 2) { __mediaAnchor.push(__cardAnchor[2]); }
+                  if (__cardPosition.length > 2) { __mediaPosition.push(__cardPosition[2]); }
+                  if (__cardScale.length > 2) { __mediaScale.push(__cardScale[2]); }
+                  __mediaTransform.property("ADBE Anchor Point").setValue(__mediaAnchor);
+                  __mediaTransform.property("ADBE Position").setValue(__mediaPosition);
+                  __mediaTransform.property("ADBE Scale").setValue(__mediaScale);
+                  __mediaTransform.property("ADBE Rotate Z").setValue(__cardRotation);
+                  __media.startTime = __layer.startTime;
+                  __media.inPoint = __layer.inPoint;
+                  __media.outPoint = __layer.outPoint;
+                  // The card background covers its guide labels; the media sits directly above it.
+                  __layer.moveToBeginning();
+                  __media.moveToBeginning();
+                  if (__media.index !== 1 || __layer.index !== 2) {
+                    __fitFailure = "contained media was not placed directly above its screen card (media index " + __media.index + ", card index " + __layer.index + ") - its guide labels could show";
+                  }
+                }
+              }`;
+}
+
+function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string {
   const assetPathLiteral = JSON.stringify(assetPath);
+  const containOnCard = fit === "contain";
   return `
         if (!(__layer instanceof AVLayer)) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer is not an AV layer" });
@@ -289,8 +360,10 @@ function buildMapFootageMutation(assetPath: string): string {
             }
             var __importOptions = new ImportOptions(__assetFile);
             var __newFootageItem = app.project.importFile(__importOptions);
-            __layer.replaceSource(__newFootageItem, false);
             var __fitFailure = null;
+            ${containOnCard ? `if (__solidCard !== null) {${buildMapFootageContainOnCard()}
+            } else ` : ""}{
+            __layer.replaceSource(__newFootageItem, false);
             if (__solidCard !== null) {
               // Scale the media to COVER the card (keeping the card's own
               // relative anchor), then raise it above the card's guide labels.
@@ -344,6 +417,7 @@ function buildMapFootageMutation(assetPath: string): string {
                 }
               }
             }
+            }
             if (__fitFailure !== null) {
               __result = JSON.stringify({ ok: false, failureReason: __fitFailure });
             } else {
@@ -357,8 +431,8 @@ function buildSetTextScript(aeProjectItemIndex: number, compositionName: string,
   return withTargets(wrapScript("SET_TEXT", buildSetTextBody(text)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
 }
 
-function buildMapFootageScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, assetPath: string): FixedJsxScript {
-  return withTargets(wrapScript("MAP_FOOTAGE", buildMapFootageBody(assetPath)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
+function buildMapFootageScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, assetPath: string, fit: MapFootageFit): FixedJsxScript {
+  return withTargets(wrapScript("MAP_FOOTAGE", buildMapFootageBody(assetPath, fit)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
 }
 
 /**
@@ -510,8 +584,8 @@ function buildSetTextNestedScript(nestedTarget: readonly ResolvedNestedTargetSte
   return wrapNestedScript("SET_TEXT", buildSetTextBody(text), nestedTarget);
 }
 
-function buildMapFootageNestedScript(nestedTarget: readonly ResolvedNestedTargetStep[], assetPath: string): FixedJsxScript {
-  return wrapNestedScript("MAP_FOOTAGE", buildMapFootageBody(assetPath), nestedTarget);
+function buildMapFootageNestedScript(nestedTarget: readonly ResolvedNestedTargetStep[], assetPath: string, fit: MapFootageFit): FixedJsxScript {
+  return wrapNestedScript("MAP_FOOTAGE", buildMapFootageBody(assetPath, fit), nestedTarget);
 }
 
 function buildSetLayerVisibilityScript(
@@ -2154,12 +2228,12 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildSetTextScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.text);
     case "MAP_FOOTAGE":
       if (operation.nestedTarget !== null) {
-        return buildMapFootageNestedScript(operation.nestedTarget, operation.assetPath);
+        return buildMapFootageNestedScript(operation.nestedTarget, operation.assetPath, operation.fit ?? "cover");
       }
       if (operation.layerIndex === null) {
         throw new Error("MAP_FOOTAGE operation has neither layerIndex nor nestedTarget set");
       }
-      return buildMapFootageScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.assetPath);
+      return buildMapFootageScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.assetPath, operation.fit ?? "cover");
     case "SET_LAYER_VISIBILITY":
       return buildSetLayerVisibilityScript(aeProjectItemIndex, compositionName, operation);
     case "SET_TIME_REMAP_FREEZE":
