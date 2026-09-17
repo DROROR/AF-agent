@@ -151,13 +151,15 @@ export const sceneEvidenceRequestSchema = z
      */
     describeLayerTransforms: z.boolean().optional(),
     /**
-     * REAL 2026-09-17 investigation (session 069b5891): a replaced text line
-     * rendered partly clipped although its text is proven correct. Describes
-     * ONE layer of this composition at ONE time - masks, track matte, text
-     * box/justification, rendered rect, transform, text animators and effects
-     * (buildInspectTextLayerClippingScript) - read-only.
+     * REAL 2026-09-17 investigations (session 069b5891): a replaced text line
+     * rendered partly clipped although its text is proven correct, and a
+     * replaced screenshot looked horizontally compressed. Describes ONE layer
+     * of this composition at ONE time - source pixel size and aspect, masks,
+     * track matte, text box/justification, rendered rect, transform, text
+     * animators and effects with their settings (buildDescribeLayerAtTimeScript)
+     * - read-only.
      */
-    describeTextLayerClipping: z
+    describeLayerAtTime: z
       .object({
         layerIndex: z.number().int().positive(),
         timeSeconds: z.number().nonnegative()
@@ -540,14 +542,14 @@ export const sceneEvidenceResponseSchema = z
       .optional()
       .transform((value) => value ?? null),
     /**
-     * Present ONLY when `describeTextLayerClipping` was requested (no
+     * Present ONLY when `describeLayerAtTime` was requested (no
      * null-defaulting transform on purpose): every other evidence response
      * keeps exactly its existing shape, so an API that predates this field
      * still accepts it. The facts are a diagnostic description whose shape is
-     * owned by buildInspectTextLayerClippingScript.
+     * owned by buildDescribeLayerAtTimeScript.
      */
-    textLayerClippingFacts: z.record(z.unknown()).nullable().optional(),
-    textLayerClippingFactsFailureReason: z.string().nullable().optional(),
+    layerAtTimeFacts: z.record(z.unknown()).nullable().optional(),
+    layerAtTimeFactsFailureReason: z.string().nullable().optional(),
     capturedAt: z.string().datetime()
   })
   .strict();

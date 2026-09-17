@@ -2254,13 +2254,13 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
 }
 
 /**
- * REAL 2026-09-17 INVESTIGATION (session 069b5891): the approved Hebrew line
- * "מבית DYO App" is proven present in Smartphone_05 "Text 1",
- * yet only " DYO App" and part of the Hebrew word render at 19 s and 21 s,
- * while the gap where the rest belongs is plain background (not the phone,
- * which sits below the text layers). The existing inspection scripts do not
- * report masks, track mattes, text boxes or text animators, so the clipping
- * cause could not be proven.
+ * REAL 2026-09-17 INVESTIGATIONS (session 069b5891): the approved Hebrew line
+ * "\u05DE\u05D1\u05D9\u05EA DYO App" is proven present in Smartphone_05 "Text 1",
+ * yet only " DYO App" and part of the Hebrew word render at 19 s and 21 s; and
+ * the replaced screenshot looks horizontally compressed with too much empty
+ * space below. The existing inspection scripts do not report masks, track
+ * mattes, text boxes, text animators, source pixel size/aspect or effect
+ * settings (e.g. a corner pin), so neither cause could be proven.
  *
  * READ-ONLY: reads ONE layer (and its track matte layer, if any) at ONE time -
  * every value via value/valueAtTime/sourceRectAtTime, never setValue, never a
@@ -2269,7 +2269,7 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
  * the whole description. Enum values are reported by their ExtendScript
  * constant name (e.g. MaskMode.ADD -> "ADD") when recognised.
  */
-export function buildInspectTextLayerClippingScript(
+export function buildDescribeLayerAtTimeScript(
   aeProjectItemIndex: number,
   compositionName: string,
   layerIndex: number,
@@ -2279,7 +2279,7 @@ export function buildInspectTextLayerClippingScript(
   const compNameLiteral = JSON.stringify(compositionName);
   const layerIndexLiteral = String(layerIndex);
   const timeLiteral = String(timeSeconds);
-  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_TEXT_LAYER_CLIPPING")});
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO DESCRIBE_LAYER_AT_TIME")});
   var __result = null;
   var __t = ${timeLiteral};
   function __safe(__fn) { try { var __v = __fn(); return __v === undefined ? null : __v; } catch (__safeError) { return null; } }
@@ -2336,7 +2336,21 @@ export function buildInspectTextLayerClippingScript(
     var __count = __safe(function () { return __group.numProperties; }) || 0;
     for (var __e = 1; __e <= __count; __e++) {
       var __eff = __safe(function () { return __group.property(__e); });
-      if (__eff) { __effects.push({ name: __safe(function () { return __eff.name; }), matchName: __safe(function () { return __eff.matchName; }), enabled: __safe(function () { return __eff.enabled; }) }); }
+      if (!__eff) { continue; }
+      // Each effect's own settings at this time (e.g. a Corner Pin's four
+      // corners or a Transform effect's scale) - only plain values, capped.
+      var __settings = [];
+      var __settingCount = __safe(function () { return __eff.numProperties; }) || 0;
+      for (var __q = 1; __q <= __settingCount && __settings.length < 24; __q++) {
+        var __setting = __safe(function () { return __eff.property(__q); });
+        if (!__setting) { continue; }
+        var __settingValue = __valueAt(__setting);
+        var __settingType = typeof __settingValue;
+        if (__settingType === "number" || __settingType === "boolean" || __settingType === "string" || (__settingValue && __settingValue.length !== undefined && typeof __settingValue[0] === "number")) {
+          __settings.push({ name: __safe(function () { return __setting.name; }), matchName: __safe(function () { return __setting.matchName; }), valueAtTime: __settingValue });
+        }
+      }
+      __effects.push({ name: __safe(function () { return __eff.name; }), matchName: __safe(function () { return __eff.matchName; }), enabled: __safe(function () { return __eff.enabled; }), settings: __settings });
     }
     return __effects;
   }
@@ -2346,6 +2360,18 @@ export function buildInspectTextLayerClippingScript(
       layerIndex: __safe(function () { return __lyr.index; }),
       layerName: __safe(function () { return __lyr.name; }),
       enabled: __safe(function () { return __lyr.enabled; }),
+      source: __safe(function () {
+        var __src = __lyr.source;
+        if (!__src) { return null; }
+        return {
+          name: __safe(function () { return __src.name; }),
+          kind: __src instanceof CompItem ? "composition" : (__safe(function () { return __src.mainSource instanceof SolidSource; }) === true ? "solid" : "footage"),
+          width: __safe(function () { return __src.width; }),
+          height: __safe(function () { return __src.height; }),
+          pixelAspect: __safe(function () { return __src.pixelAspect; }),
+          durationSeconds: __safe(function () { return __src.duration; })
+        };
+      }),
       inPointSeconds: __safe(function () { return __lyr.inPoint; }),
       outPointSeconds: __safe(function () { return __lyr.outPoint; }),
       startTimeSeconds: __safe(function () { return __lyr.startTime; }),
@@ -2432,7 +2458,7 @@ export function buildInspectTextLayerClippingScript(
       }
       var __facts = {
         timeSeconds: __t,
-        composition: { name: __comp.name, width: __safe(function () { return __comp.width; }), height: __safe(function () { return __comp.height; }), durationSeconds: __safe(function () { return __comp.duration; }) },
+        composition: { name: __comp.name, width: __safe(function () { return __comp.width; }), height: __safe(function () { return __comp.height; }), pixelAspect: __safe(function () { return __comp.pixelAspect; }), durationSeconds: __safe(function () { return __comp.duration; }) },
         layer: __describeLayer(__layer),
         text: __describeText(__layer),
         matteLayer: __matte ? __describeLayer(__matte) : null

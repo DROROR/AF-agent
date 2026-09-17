@@ -11,7 +11,7 @@ import {
   buildFindHostLayersScript,
   buildInspectCompositionLayerDetailsScript,
   buildInspectLayerTransformScript,
-  buildInspectTextLayerClippingScript
+  buildDescribeLayerAtTimeScript
 } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
@@ -171,7 +171,7 @@ async function fetchLayerTransforms(
   return { ok: true, layers: parsed.data.layers };
 }
 
-const inspectTextLayerClippingScriptResultSchema = z.union([
+const describeLayerAtTimeScriptResultSchema = z.union([
   z.object({ ok: z.literal(true), facts: z.record(z.unknown()) }).strict(),
   z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
 ]);
@@ -179,17 +179,17 @@ const inspectTextLayerClippingScriptResultSchema = z.union([
 /**
  * REAL 2026-09-17 investigation (session 069b5891) - best-effort, never
  * throws, same shape as fetchLayerTransforms. Describes one layer at one time
- * (see buildInspectTextLayerClippingScript); a failure is reported via
- * textLayerClippingFactsFailureReason and never fails the rest of the result.
+ * (see buildDescribeLayerAtTimeScript); a failure is reported via
+ * layerAtTimeFactsFailureReason and never fails the rest of the result.
  */
-async function fetchTextLayerClipping(
+async function fetchLayerAtTime(
   client: HeroicSwanMcpClient,
   aeProjectItemIndex: number,
   compositionName: string,
   layerIndex: number,
   timeSeconds: number
 ): Promise<{ ok: true; facts: Record<string, unknown> } | { ok: false; reason: string }> {
-  const script = buildInspectTextLayerClippingScript(aeProjectItemIndex, compositionName, layerIndex, timeSeconds);
+  const script = buildDescribeLayerAtTimeScript(aeProjectItemIndex, compositionName, layerIndex, timeSeconds);
   const result = await client.runFixedInspectionScript(script);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
@@ -198,9 +198,9 @@ async function fetchTextLayerClipping(
   if (!unwrapped.ok) {
     return { ok: false, reason: unwrapped.reason };
   }
-  const parsed = inspectTextLayerClippingScriptResultSchema.safeParse(unwrapped.value);
+  const parsed = describeLayerAtTimeScriptResultSchema.safeParse(unwrapped.value);
   if (!parsed.success) {
-    return { ok: false, reason: `inspect-text-layer-clipping script response did not match the expected shape: ${parsed.error.message}` };
+    return { ok: false, reason: `describe-layer-at-time script response did not match the expected shape: ${parsed.error.message}` };
   }
   if (!parsed.data.ok) {
     return { ok: false, reason: parsed.data.failureReason };
@@ -502,18 +502,18 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       }
 
       // Added to the response ONLY when requested - see scene-evidence.ts.
-      let textLayerClipping: { textLayerClippingFacts: Record<string, unknown> | null; textLayerClippingFactsFailureReason: string | null } | null = null;
-      if (request.describeTextLayerClipping !== undefined) {
-        const clippingResult = await fetchTextLayerClipping(
+      let layerAtTime: { layerAtTimeFacts: Record<string, unknown> | null; layerAtTimeFactsFailureReason: string | null } | null = null;
+      if (request.describeLayerAtTime !== undefined) {
+        const layerAtTimeResult = await fetchLayerAtTime(
           client,
           effectiveAeProjectItemIndex,
           parsedComp.value.name,
-          request.describeTextLayerClipping.layerIndex,
-          request.describeTextLayerClipping.timeSeconds
+          request.describeLayerAtTime.layerIndex,
+          request.describeLayerAtTime.timeSeconds
         );
-        textLayerClipping = clippingResult.ok
-          ? { textLayerClippingFacts: clippingResult.facts, textLayerClippingFactsFailureReason: null }
-          : { textLayerClippingFacts: null, textLayerClippingFactsFailureReason: clippingResult.reason };
+        layerAtTime = layerAtTimeResult.ok
+          ? { layerAtTimeFacts: layerAtTimeResult.facts, layerAtTimeFactsFailureReason: null }
+          : { layerAtTimeFacts: null, layerAtTimeFactsFailureReason: layerAtTimeResult.reason };
       }
 
       return {
@@ -534,7 +534,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           compositionSummaryFailureReason,
           layerTransformFacts,
           layerTransformFactsFailureReason,
-          ...(textLayerClipping ?? {}),
+          ...(layerAtTime ?? {}),
           capturedAt: new Date().toISOString()
         }
       };

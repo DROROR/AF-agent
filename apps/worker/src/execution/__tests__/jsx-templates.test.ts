@@ -15,7 +15,7 @@ import {
   buildScanProjectPreflightScript,
   buildOpenProjectScript,
   buildReopenProjectFromDiskScript,
-  buildInspectTextLayerClippingScript
+  buildDescribeLayerAtTimeScript
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -2441,10 +2441,11 @@ describe("no other allowlisted script can leave AE blocked by an unsuppressed di
 });
 
 
-describe("buildInspectTextLayerClippingScript (real 2026-09-17: a proven-correct Hebrew line rendered partly clipped)", () => {
+describe("buildDescribeLayerAtTimeScript (real 2026-09-17: a proven-correct Hebrew line rendered partly clipped; a replaced screenshot looked compressed)", () => {
   // Every setter throws: the script must only ever read.
   const CLIPPING_APP_SETUP = (options: { withTrackMatteLayerApi?: boolean; layerCount?: number } = {}) => `
     function CompItem() {}
+    function SolidSource() {}
     var MaskMode = { NONE: 6812, ADD: 6813, SUBTRACT: 6814, INTERSECT: 6815, LIGHTEN: 6816, DARKEN: 6817, DIFFERENCE: 6818 };
     var TrackMatteType = { NO_TRACK_MATTE: 5012, ALPHA: 5013, ALPHA_INVERTED: 5014, LUMA: 5015, LUMA_INVERTED: 5016 };
     var ParagraphJustification = { LEFT_JUSTIFY: 7413, RIGHT_JUSTIFY: 7414, CENTER_JUSTIFY: 7415, FULL_JUSTIFY_LASTLINE_LEFT: 7416, FULL_JUSTIFY_LASTLINE_RIGHT: 7417, FULL_JUSTIFY_LASTLINE_CENTER: 7418, FULL_JUSTIFY_LASTLINE_FULL: 7419 };
@@ -2496,9 +2497,21 @@ describe("buildInspectTextLayerClippingScript (real 2026-09-17: a proven-correct
     };
 
     var __comp = new CompItem();
-    __comp.name = "Smartphone_05"; __comp.width = 1920; __comp.height = 1080; __comp.duration = 7.04;
-    __comp.numLayers = ${options.layerCount ?? 2};
-    __comp.layer = function (i) { return i === 1 ? __matte : i === 2 ? __text : null; };
+    __comp.name = "Smartphone_05"; __comp.width = 1920; __comp.height = 1080; __comp.duration = 7.04; __comp.pixelAspect = 1;
+    __comp.numLayers = ${options.layerCount ?? 3};
+
+    // A replaced screenshot: footage with its own pixel size and a non-square
+    // pixel aspect, carrying a Corner Pin with plain and non-plain settings.
+    var __shot = { index: 3, name: "11222.png", enabled: true, inPoint: 0, outPoint: 64, startTime: 0, threeDLayer: false, parent: null, isTrackMatte: false, hasTrackMatte: false, trackMatteType: TrackMatteType.NO_TRACK_MATTE, trackMatteLayer: null };
+    __shot.source = { name: "11222.png", width: 879, height: 1789, pixelAspect: 0.9, duration: 0, mainSource: {} };
+    __shot.transform = { anchorPoint: prop([311, 595, 0]), position: prop([621, 1324, 0]), scale: prop([150.25, 148.02, 100]), rotation: prop(0), opacity: prop(100) };
+    __shot.sourceRectAtTime = function () { return { left: 0, top: 0, width: 879, height: 1789 }; };
+    var __upperLeft = prop([10, 20]); __upperLeft.name = "Upper Left"; __upperLeft.matchName = "ADBE Corner Pin-0001";
+    var __cornerSettings = [__upperLeft, prop(true), { name: "Group", matchName: "ADBE Group", valueAtTime: function () { return { nested: true }; } }];
+    var __cornerPin = { name: "Corner Pin", matchName: "ADBE Corner Pin", enabled: true, numProperties: 3, property: function (i) { return __cornerSettings[i - 1]; } };
+    __shot.property = function (n) { return n === "ADBE Mask Parade" ? group([]) : n === "ADBE Effect Parade" ? group([__cornerPin]) : null; };
+
+    __comp.layer = function (i) { return i === 1 ? __matte : i === 2 ? __text : i === 3 ? __shot : null; };
     var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 45 ? __comp : null; } } };
   `;
 
@@ -2512,12 +2525,12 @@ describe("buildInspectTextLayerClippingScript (real 2026-09-17: a proven-correct
   }
 
   it("describes masks, track matte, text box/justification, rendered rect, text animators and effects of one layer at one time - and never writes", () => {
-    const { result, writes } = run(buildInspectTextLayerClippingScript(45, "Smartphone_05", 2, 21 - 16.04), CLIPPING_APP_SETUP());
+    const { result, writes } = run(buildDescribeLayerAtTimeScript(45, "Smartphone_05", 2, 21 - 16.04), CLIPPING_APP_SETUP());
     expect(writes).toEqual([]);
     expect(result.ok).toBe(true);
     const facts = result.facts;
     expect(facts.timeSeconds).toBeCloseTo(4.96, 9);
-    expect(facts.composition).toEqual({ name: "Smartphone_05", width: 1920, height: 1080, durationSeconds: 7.04 });
+    expect(facts.composition).toEqual({ name: "Smartphone_05", width: 1920, height: 1080, pixelAspect: 1, durationSeconds: 7.04 });
     expect(facts.layer).toMatchObject({
       layerIndex: 2, layerName: "Text 1", enabled: true, hasTrackMatte: true, trackMatteType: "ALPHA",
       trackMatteLayer: { layerIndex: 1, layerName: "Matte Solid" },
@@ -2536,7 +2549,7 @@ describe("buildInspectTextLayerClippingScript (real 2026-09-17: a proven-correct
   });
 
   it("an After Effects without trackMatteLayer reports it as null and still describes the classic matte (the layer above)", () => {
-    const { result, writes } = run(buildInspectTextLayerClippingScript(45, "Smartphone_05", 2, 4.96), CLIPPING_APP_SETUP({ withTrackMatteLayerApi: false }));
+    const { result, writes } = run(buildDescribeLayerAtTimeScript(45, "Smartphone_05", 2, 4.96), CLIPPING_APP_SETUP({ withTrackMatteLayerApi: false }));
     expect(writes).toEqual([]);
     expect(result.ok).toBe(true);
     expect(result.facts.layer.trackMatteLayer).toBeNull();
@@ -2544,11 +2557,27 @@ describe("buildInspectTextLayerClippingScript (real 2026-09-17: a proven-correct
   });
 
   it("refuses the wrong composition and an out-of-range layer instead of describing something else", () => {
-    const wrongComp = run(buildInspectTextLayerClippingScript(45, "Smartphone_04", 2, 1), CLIPPING_APP_SETUP());
+    const wrongComp = run(buildDescribeLayerAtTimeScript(45, "Smartphone_04", 2, 1), CLIPPING_APP_SETUP());
     expect(wrongComp.result.ok).toBe(false);
     expect(wrongComp.result.failureReason).toMatch(/expected "Smartphone_04"/);
-    const outOfRange = run(buildInspectTextLayerClippingScript(45, "Smartphone_05", 9, 1), CLIPPING_APP_SETUP());
+    const outOfRange = run(buildDescribeLayerAtTimeScript(45, "Smartphone_05", 9, 1), CLIPPING_APP_SETUP());
     expect(outOfRange.result.ok).toBe(false);
-    expect(outOfRange.result.failureReason).toMatch(/layer index 9 is outside composition "Smartphone_05" \(2 layers\)/);
+    expect(outOfRange.result.failureReason).toMatch(/layer index 9 is outside composition "Smartphone_05" \(3 layers\)/);
+  });
+
+  it("describes a replaced screenshot's source pixel size and pixel aspect, the composition's pixel aspect, uneven scale, and effect settings - never writing", () => {
+    const { result, writes } = run(buildDescribeLayerAtTimeScript(45, "Smartphone_05", 3, 2), CLIPPING_APP_SETUP());
+    expect(writes).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.facts.composition.pixelAspect).toBe(1);
+    expect(result.facts.layer.source).toEqual({ name: "11222.png", kind: "footage", width: 879, height: 1789, pixelAspect: 0.9, durationSeconds: 0 });
+    expect(result.facts.layer.transformAtTime.scale).toEqual([150.25, 148.02, 100]);
+    expect(result.facts.layer.rectAtTime).toEqual({ left: 0, top: 0, width: 879, height: 1789 });
+    expect(result.facts.layer.effects).toHaveLength(1);
+    expect(result.facts.layer.effects[0]).toMatchObject({ name: "Corner Pin", matchName: "ADBE Corner Pin", enabled: true });
+    // Plain settings only: the point and the boolean, never the nested group object.
+    expect(result.facts.layer.effects[0].settings.map((setting: { valueAtTime: unknown }) => setting.valueAtTime)).toEqual([[10, 20], true]);
+    expect(result.facts.layer.effects[0].settings[0]).toMatchObject({ name: "Upper Left", matchName: "ADBE Corner Pin-0001" });
+    expect(result.facts.text).toBeNull();
   });
 });
