@@ -54,3 +54,9 @@ deploy/*.zip
 # checkout, a fresh clone, a developer's machine, or an isolated release
 # worktree - see scripts/guard-production-web-build.mjs.
 /.production-checkout
+
+# Operator handoff PDF that lives in the working tree but is not repository content
+# (accidentally committed 2026-09-18, removed from tracking in the same session).
+# Deliberately an exact path, never a broad *.pdf / docs/*.pdf rule - a future
+# document that genuinely belongs in the repo must still be committable.
+/docs/DYO_AE_Agent_Complete_Progress_Handoff_2026-09-16.pdf
