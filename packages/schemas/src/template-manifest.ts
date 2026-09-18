@@ -103,6 +103,22 @@ export const placeholderSchema = z.object({
   editable: z.boolean(),
   /** Raw AE layer type (e.g. "TextLayer", "AVLayer") - a machine fact, not a classification. */
   sourceType: z.string().nullable(),
+  /**
+   * The untouched template layer's own text, exactly as the source project
+   * stores it - code point for code point, never trimmed, folded or
+   * normalised. This is what leftover-template-copy detection compares an
+   * approved mapping against (see template-copy.ts).
+   *
+   * THREE DISTINCT STATES, deliberately: a string is the captured text;
+   * `null` means "captured, and this placeholder is not a text layer";
+   * ABSENT means this manifest predates template-text capture, which blocks
+   * approval and execution until the project is re-inspected rather than
+   * silently passing. Optional so every manifest written before this field
+   * existed still parses unchanged.
+   */
+  originalText: z.string().nullable().optional(),
+  /** True when the layer's text was longer than the capture limit, so `originalText` is NOT the whole text and must not be compared as if it were. Treated exactly like an absent `originalText`. */
+  originalTextTruncated: z.boolean().optional(),
   dimensions: dimensionsSchema.nullable(),
   startTimeSeconds: z.number().nullable(),
   durationSeconds: z.number().nullable(),

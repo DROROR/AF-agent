@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { templateTextDecisionSchema } from "./template-copy.js";
 import { placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
 import { nestedTargetStepSchema } from "./template-manifest.js";
@@ -137,6 +138,29 @@ const clearTextSchema = z
   })
   .strict();
 
+/**
+ * The reviewer's explicit decision about text that still matches the
+ * template's own wording (leftover-template-copy gate). Deliberately a
+ * separate operation from SET_TEXT: replacing the words and consciously
+ * keeping them are different acts, and only an explicit one of these can
+ * clear the gate - editing text alone never records a decision.
+ */
+const setTemplateTextDecisionSchema = z
+  .object({
+    type: z.literal("SET_TEMPLATE_TEXT_DECISION"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    decision: templateTextDecisionSchema
+  })
+  .strict();
+const clearTemplateTextDecisionSchema = z
+  .object({
+    type: z.literal("CLEAR_TEMPLATE_TEXT_DECISION"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
 const setAssetTimestampSchema = z
   .object({
     type: z.literal("SET_ASSET_TIMESTAMP"),
@@ -269,6 +293,8 @@ export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   clearAssetSchema,
   setTextSchema,
   clearTextSchema,
+  setTemplateTextDecisionSchema,
+  clearTemplateTextDecisionSchema,
   setAssetTimestampSchema,
   clearAssetTimestampSchema,
   setFinalDurationSchema,

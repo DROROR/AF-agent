@@ -72,7 +72,10 @@ const layerDetailSchema = z
     outPointSeconds: z.number().nullable(),
     opacityAtInPoint: z.number().nullable(),
     opacityKeyframeCount: z.number().nullable(),
-    textPreview: z.string().nullable()
+    textPreview: z.string().nullable(),
+    /** The layer's full text (bounded) and whether that bound was hit. Optional: a response from an older worker build simply does not carry them, which the manifest then records as "template text not captured". */
+    sourceText: z.string().nullable().optional(),
+    sourceTextTruncated: z.boolean().nullable().optional()
   })
   .strict();
 

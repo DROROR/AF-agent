@@ -112,3 +112,25 @@ template knowledge:
 SET_TEXT operation, each tagged with its `operationIndex`. It **defaults to
 `[]`**, so stored results and older workers' results remain readable without
 migration; the API and database need no change to accept it.
+
+## template-copy (leftover template wording)
+
+`packages/schemas/src/template-copy.ts`:
+
+- `assessTemplateCopy({ mappingText, templateText, decision }) -> TemplateCopyAssessment`
+  with `status`, `variantKind`, `decisionState` (`NONE`/`CURRENT`/`STALE`),
+  `effectiveDecision`, `blocks` and a human-readable `reason`.
+- `templateTextDecisionRecordSchema` - `{ decision, decidedBy, decidedAt, textAtDecision }`.
+
+Schema changes, all backward-readable with no migration:
+
+- `placeholderSchema.originalText` (optional, nullable) and
+  `originalTextTruncated` (optional) on the manifest - an absent key keeps its
+  own meaning, "never captured".
+- `placeholderMappingSchema.keepTemplateText` - optional and nullable; absent
+  and null both mean "no decision recorded", and there is deliberately no
+  default, because any default would be a decision nobody made.
+- Two new plan edit operations: `SET_TEMPLATE_TEXT_DECISION` (with `decision`)
+  and `CLEAR_TEMPLATE_TEXT_DECISION`. `updateExecutionPlan` takes the editing
+  user so the decision is attributable; it refuses rather than record an
+  unattributable one.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RenderOutputConfig, ScenePlanEntry } from "@dyo/schemas";
+import { manifestFixture, mappingFixture, scenePlanFixture } from "../../execution-plan/test-support/template-copy-fixtures.js";
 import {
   resolveCreateFullPreviewDispatch,
   type FullPreviewDispatchPlanSnapshot,
@@ -98,12 +99,79 @@ function baseInput(overrides: Partial<Parameters<typeof resolveCreateFullPreview
     currentPlan: validPlan(),
     currentProjectSourceProjectSha256: SHA,
     currentProjectSourceProjectPath: SOURCE_PATH,
+    currentProjectManifest: manifestFixture([]),
     worker: validWorker(),
     now: NOW,
     staleAfterMs: STALE_AFTER_MS,
     ...overrides
   };
 }
+
+describe("resolveCreateFullPreviewDispatch - second leftover-template-copy gate", () => {
+  it("refuses a complete preview while an included scene still carries the template's own wording", () => {
+    const manifest = manifestFixture([{ placeholderId: "ph-1", layerName: "Headline", originalText: "Assets" }]);
+    const scene = scenePlanFixture({
+      id: "scene-1",
+      manifestCompositionId: "comp-1",
+      mappings: [mappingFixture({ id: "ph-1", placeholderName: "Headline", text: "Assets" })]
+    });
+
+    const result = resolveCreateFullPreviewDispatch(
+      baseInput({ currentProjectManifest: manifest, currentPlan: validPlan({ scenePlans: [scene] }) })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/unreviewed template copy/i);
+  });
+
+  it("refuses when the project's manifest never captured the template's own text - a plan approved before this gate existed cannot slip through", () => {
+    const manifest = manifestFixture([{ placeholderId: "ph-1", layerName: "Headline" }]);
+    const scene = scenePlanFixture({
+      id: "scene-1",
+      manifestCompositionId: "comp-1",
+      mappings: [mappingFixture({ id: "ph-1", text: "Whatever was approved earlier" })]
+    });
+
+    const result = resolveCreateFullPreviewDispatch(
+      baseInput({ currentProjectManifest: manifest, currentPlan: validPlan({ scenePlans: [scene] }) })
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/re-run template inspection/);
+  });
+
+  it("allows a complete preview once the reviewer explicitly kept the template wording", () => {
+    const manifest = manifestFixture([{ placeholderId: "ph-1", layerName: "Headline", originalText: "Assets" }]);
+    const scene = scenePlanFixture({
+      id: "scene-1",
+      manifestCompositionId: "comp-1",
+      mappings: [
+        mappingFixture({
+          id: "ph-1",
+          text: "Assets",
+          keepTemplateText: { decision: "KEEP_TEMPLATE_TEXT", decidedBy: "user-1", decidedAt: NOW.toISOString(), textAtDecision: "Assets" }
+        })
+      ]
+    });
+
+    const result = resolveCreateFullPreviewDispatch(
+      baseInput({ currentProjectManifest: manifest, currentPlan: validPlan({ scenePlans: [scene] }) })
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("allows a complete preview when the text was genuinely replaced", () => {
+    const manifest = manifestFixture([{ placeholderId: "ph-1", layerName: "Headline", originalText: "Assets" }]);
+    const scene = scenePlanFixture({
+      id: "scene-1",
+      manifestCompositionId: "comp-1",
+      mappings: [mappingFixture({ id: "ph-1", text: "Your own words" })]
+    });
+
+    expect(resolveCreateFullPreviewDispatch(baseInput({ currentProjectManifest: manifest, currentPlan: validPlan({ scenePlans: [scene] }) })).ok).toBe(true);
+  });
+});
 
 describe("resolveCreateFullPreviewDispatch", () => {
   it("succeeds and reuses the project's own configured LANDSCAPE composition/templates - never a second, invented 'preview composition'", () => {

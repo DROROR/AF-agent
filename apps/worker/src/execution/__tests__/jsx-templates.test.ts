@@ -1176,7 +1176,9 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     // No TrackMatteType/BlendingMode globals and no layer properties in this
     // fixture - every fact is unreadable, so every fact is null.
     expect(Object.values(plain.detail).every((value) => value === null)).toBe(true);
-    expect(Object.keys(plain.detail)).toHaveLength(19);
+    // 19 original layer-role facts, plus the captured template text and its
+    // truncation marker (leftover-template-copy gate).
+    expect(Object.keys(plain.detail)).toHaveLength(21);
     const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
     expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
   });
@@ -1265,6 +1267,20 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
       expect(guide.detail.opacityAtInPoint).toBe(0);
       expect(guide.detail.textPreview).toHaveLength(120);
       expect(guide.detail.textPreview.startsWith("PLACE YOUR IMAGE HERE ")).toBe(true);
+    });
+
+    it("captures a text layer's FULL text alongside the bounded preview, for leftover-template-copy detection", () => {
+      const { phone } = scanPhone();
+      const guide = phone.layers[2];
+      // The preview stays bounded for display; the captured template text is
+      // the whole string, because the gate compares it exactly.
+      expect(guide.detail.textPreview).toHaveLength(120);
+      expect(guide.detail.sourceText.length).toBeGreaterThan(120);
+      expect(guide.detail.sourceText.startsWith("PLACE YOUR IMAGE HERE ")).toBe(true);
+      expect(guide.detail.sourceTextTruncated).toBe(false);
+      // A non-text layer reports null for both, never a fabricated empty string.
+      expect(phone.layers[0].detail.sourceText).toBeNull();
+      expect(phone.layers[0].detail.sourceTextTruncated).toBeNull();
     });
 
     it("keeps every other fact when a single fact throws on this AE build", () => {

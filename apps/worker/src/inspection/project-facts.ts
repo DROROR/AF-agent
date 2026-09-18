@@ -46,6 +46,15 @@ export interface LayerFact {
   trackMatte?: TrackMatteFact | null;
   /** AE's own `layer.guideLayer`: a guide layer never renders in output. Null/absent when unread. */
   guideLayer?: boolean | null;
+  /**
+   * The untouched template layer's own text, in full, for a text layer -
+   * `null` for any other layer kind, `undefined` when the scan did not report
+   * it at all (an older worker build). Feeds the manifest's own `originalText`
+   * (leftover-template-copy gate); never trimmed or normalised.
+   */
+  sourceText?: string | null | undefined;
+  /** True when `sourceText` hit the capture bound and is therefore NOT the whole text. */
+  sourceTextTruncated?: boolean | null | undefined;
   /** Nesting context by composition name, outermost first - empty if directly in the top-level composition. */
   layerPath: readonly string[];
   startTimeSeconds: number;

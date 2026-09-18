@@ -1,6 +1,7 @@
-import type { CreateFullPreviewRequest, ExecutionSessionStatus, PlanStatus, RenderOutputs, ScenePlanEntry, WorkerCapability } from "@dyo/schemas";
+import type { CreateFullPreviewRequest, ExecutionSessionStatus, PlanStatus, RenderOutputs, ScenePlanEntry, TemplateManifest, WorkerCapability } from "@dyo/schemas";
 import { TERMINAL_EXECUTION_SESSION_STATUSES } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
+import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 
 /**
@@ -39,6 +40,8 @@ export interface ResolveCreateFullPreviewDispatchInput {
   currentPlan: FullPreviewDispatchPlanSnapshot | null;
   currentProjectSourceProjectSha256: string | null;
   currentProjectSourceProjectPath: string | null;
+  /** The project's CURRENT manifest, freshly read - the source of the untouched template text the second template-copy gate below compares against. Null only when the project does not exist. */
+  currentProjectManifest: TemplateManifest | null;
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
@@ -82,7 +85,7 @@ export type ResolveCreateFullPreviewDispatchResult = { ok: true; payload: Create
  * marked READY_FOR_LIVE_ACCEPTANCE, not fabricated here.
  */
 export function resolveCreateFullPreviewDispatch(input: ResolveCreateFullPreviewDispatchInput): ResolveCreateFullPreviewDispatchResult {
-  const { projectId, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, worker, now, staleAfterMs } = input;
+  const { projectId, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, currentProjectManifest, worker, now, staleAfterMs } = input;
 
   if (!session) {
     return { ok: false, reason: "No execution session was found for the requested executionSessionId" };
@@ -112,6 +115,19 @@ export function resolveCreateFullPreviewDispatch(input: ResolveCreateFullPreview
     currentProjectSourceProjectSha256 !== currentPlan.sourceProjectSha256
   ) {
     return { ok: false, reason: "The project's current manifest sha256 no longer matches this plan - the source project may have changed" };
+  }
+
+  // SECOND, INDEPENDENT TEMPLATE-COPY GATE. Approval is the first; this one
+  // re-checks against the CURRENT manifest and the CURRENT plan immediately
+  // before a complete preview is produced, so a plan approved before this gate
+  // existed - or one whose manifest has since been re-inspected - can never
+  // reach a finished video still carrying the template's own wording.
+  const templateCopyBlockers = currentProjectManifest ? findTemplateCopyBlockers(currentPlan.scenePlans, currentProjectManifest) : [];
+  if (templateCopyBlockers.length > 0) {
+    return {
+      ok: false,
+      reason: `Plan still contains unreviewed template copy: ${describeTemplateCopyBlockers(templateCopyBlockers).join(" | ")}`
+    };
   }
 
   const config = currentPlan.renderOutputs.LANDSCAPE;

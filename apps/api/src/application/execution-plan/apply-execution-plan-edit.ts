@@ -95,7 +95,9 @@ function applyExecutionPlanEditRaw(
   scenePlans: readonly ScenePlanEntry[],
   operation: ExecutionPlanEditOperation,
   now: () => Date,
-  currentManifest?: TemplateManifest
+  currentManifest?: TemplateManifest,
+  /** The authenticated user making this edit. Required only by operations that record an attributable human decision (SET_TEMPLATE_TEXT_DECISION); every other operation ignores it, so existing callers keep working unchanged. */
+  editedBy?: string
 ): ApplyEditResult {
   const plans = [...scenePlans];
   const sceneIndex = plans.findIndex((s) => s.id === operation.scenePlanId);
@@ -210,6 +212,9 @@ function applyExecutionPlanEditRaw(
       const newMapping: PlaceholderMapping = {
         id: randomUUID(),
         manifestPlaceholderId: null,
+        // No decision is ever written by default - see placeholderMappingSchema's
+        // own doc comment on why null can never mean "keep".
+        keepTemplateText: null,
         placeholderName: operation.placeholderName,
         placeholderClassification: { value: operation.placeholderClassification, source: "HUMAN", evidence: [] },
         selectedAssetId: isAssetClassification ? selectedAssetId : null,
@@ -263,6 +268,36 @@ function applyExecutionPlanEditRaw(
 
     case "CLEAR_TEXT": {
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, text: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    // The leftover-template-copy gate's ONLY escape hatch, and deliberately an
+    // explicit operation of its own: editing text never records a decision,
+    // and no default is ever written, so silence can never read as approval
+    // (see template-copy.ts). The record carries the deciding user, the time,
+    // and the exact text decided about, which is what makes a later text edit
+    // stale that decision rather than silently inherit it.
+    case "SET_TEMPLATE_TEXT_DECISION": {
+      if (editedBy === undefined || editedBy.trim() === "") {
+        return { ok: false, reason: "SET_TEMPLATE_TEXT_DECISION requires the deciding user's identity - refusing to record an unattributable decision" };
+      }
+      const result = updateMapping(scene, operation.mappingId, (m) => ({
+        ...m,
+        keepTemplateText: {
+          decision: operation.decision,
+          decidedBy: editedBy,
+          decidedAt: timestamp,
+          textAtDecision: m.text ?? ""
+        },
+        updatedAt: timestamp
+      }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_TEMPLATE_TEXT_DECISION": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, keepTemplateText: null, updatedAt: timestamp }));
       if (!result.ok) return result;
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
     }
@@ -482,9 +517,10 @@ export function applyExecutionPlanEdit(
   scenePlans: readonly ScenePlanEntry[],
   operation: ExecutionPlanEditOperation,
   now: () => Date,
-  currentManifest?: TemplateManifest
+  currentManifest?: TemplateManifest,
+  editedBy?: string
 ): ApplyEditResult {
-  const result = applyExecutionPlanEditRaw(scenePlans, operation, now, currentManifest);
+  const result = applyExecutionPlanEditRaw(scenePlans, operation, now, currentManifest, editedBy);
   if (!result.ok) {
     return result;
   }

@@ -11,6 +11,7 @@ import type { ProjectRepository } from "../../domain/project/types.js";
 import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
 import { validateBrandRules, type BrandRulesConfig } from "../../domain/brand-rules/validate-brand-rules.js";
 import { loadBrandRulesConfig } from "../../domain/brand-rules/brand-rules-config.js";
+import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../../domain/execution-plan/evaluate-template-copy.js";
 
 export interface ApproveExecutionPlanDeps {
   executionPlanRepository: ExecutionPlanRepository;
@@ -69,6 +70,21 @@ export async function approveExecutionPlan(
   if (!readiness.ready) {
     throw new PreconditionNotMetError(
       `Plan is not ready for approval: ${readiness.unresolvedSceneCount} scene(s) marked for use still have an unresolved reason`
+    );
+  }
+
+  // LEFTOVER TEMPLATE COPY (2026-09-18 real incident): a text mapping that
+  // still says exactly what the purchased template said - or differs only in
+  // case/whitespace - blocks approval until a human explicitly decides to
+  // replace it or to keep the template wording. Silence is never approval.
+  // A manifest that never captured the template's own text cannot be checked
+  // at all and blocks the same way, naming re-inspection as the fix, rather
+  // than passing with a warning nobody reads. Enforced here in the backend,
+  // so a direct API call cannot bypass the dashboard's own warnings.
+  const templateCopyBlockers = findTemplateCopyBlockers(current.scenePlans, project.manifest);
+  if (templateCopyBlockers.length > 0) {
+    throw new PreconditionNotMetError(
+      `Plan still contains unreviewed template copy: ${describeTemplateCopyBlockers(templateCopyBlockers).join(" | ")}`
     );
   }
 

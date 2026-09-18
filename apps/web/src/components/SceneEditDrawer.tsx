@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import type { ExecutionPlanEditOperation, MediaKind, PlaceholderType } from "@dyo/schemas";
+import { assessTemplateCopy, type ExecutionPlanEditOperation, type MediaKind, type PlaceholderType, type TemplateCopyAssessment, type TemplateTextDecision } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { Dialog } from "./ui/Dialog";
@@ -37,6 +37,8 @@ interface MappingFormState {
   text: string;
   assetTimestamp: string;
   selectedAssetId: string;
+  /** The reviewer's explicit choice in THIS form session, or null while undecided - never defaulted, since a default would be a decision nobody made. */
+  templateTextDecision: TemplateTextDecision | null;
 }
 
 /**
@@ -80,7 +82,8 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
         label: mapping.placeholderName ?? mapping.id,
         text: mapping.text ?? "",
         assetTimestamp: mapping.assetTimestamp !== null ? String(mapping.assetTimestamp) : "",
-        selectedAssetId: mapping.selectedAssetId ?? ""
+        selectedAssetId: mapping.selectedAssetId ?? "",
+        templateTextDecision: mapping.keepTemplateText?.decision ?? null
       }))
     );
     setError(null);
@@ -88,6 +91,49 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
 
   if (!scenePlanId || !scene) {
     return null;
+  }
+
+  /**
+   * The template's own wording for a mapping, from the project's CURRENT
+   * manifest. `undefined` means this manifest never captured it (an older
+   * inspection), which the shared gate reports as blocking - the dashboard
+   * never invents a value to make the warning go away.
+   */
+  function templateTextFor(mappingId: string): string | null | undefined {
+    const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
+    if (!mapping || mapping.manifestPlaceholderId === null) {
+      return null;
+    }
+    for (const manifestScene of project?.manifest.scenes ?? []) {
+      for (const placeholder of manifestScene.placeholders) {
+        if (placeholder.placeholderId === mapping.manifestPlaceholderId) {
+          return placeholder.originalTextTruncated === true ? undefined : placeholder.originalText;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /** Assessed with the SAME pure function the backend gate uses, against the text currently typed in the form - so the warning tracks what the reviewer is actually about to save. */
+  function assessMapping(form: MappingFormState): TemplateCopyAssessment {
+    const original = scene!.mappings.find((candidate) => candidate.id === form.mappingId);
+    const trimmed = form.text.trim();
+    const typedText = trimmed === "" ? null : trimmed;
+    return assessTemplateCopy({
+      mappingText: typedText,
+      templateText: templateTextFor(form.mappingId),
+      decision:
+        form.templateTextDecision === null
+          ? null
+          : {
+              decision: form.templateTextDecision,
+              decidedBy: original?.keepTemplateText?.decidedBy ?? "pending",
+              decidedAt: original?.keepTemplateText?.decidedAt ?? new Date(0).toISOString(),
+              // A choice made in this form session is about the text in this
+              // form session - saving records exactly that.
+              textAtDecision: typedText ?? ""
+            }
+    });
   }
 
   function buildOperations(): ExecutionPlanEditOperation[] {
@@ -137,6 +183,24 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
         } else if (Number.isFinite(nextTimestamp) && nextTimestamp >= 0) {
           ops.push({ type: "SET_ASSET_TIMESTAMP", scenePlanId: currentScene.id, mappingId: form.mappingId, assetTimestamp: nextTimestamp });
         }
+      }
+
+      // Emitted AFTER any SET_TEXT/CLEAR_TEXT above, so the decision the API
+      // records carries the text the reviewer actually decided about - a
+      // decision saved against the previous text would immediately be stale.
+      const previousDecision = originalMapping.keepTemplateText?.decision ?? null;
+      const textChanged = nextText !== originalMapping.text;
+      if (form.templateTextDecision === null) {
+        if (previousDecision !== null) {
+          ops.push({ type: "CLEAR_TEMPLATE_TEXT_DECISION", scenePlanId: currentScene.id, mappingId: form.mappingId });
+        }
+      } else if (form.templateTextDecision !== previousDecision || textChanged) {
+        ops.push({
+          type: "SET_TEMPLATE_TEXT_DECISION",
+          scenePlanId: currentScene.id,
+          mappingId: form.mappingId,
+          decision: form.templateTextDecision
+        });
       }
 
       const nextAssetId = form.selectedAssetId === "" ? null : form.selectedAssetId;
@@ -233,6 +297,77 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                 }}
               />
             </Field>
+            {(() => {
+              const assessment = assessMapping(mapping);
+              if (assessment.status === "NOT_APPLICABLE" || assessment.status === "REPLACED") {
+                return null;
+              }
+              const templateText = templateTextFor(mapping.mappingId);
+              const warning =
+                assessment.status === "TEMPLATE_TEXT_UNKNOWN"
+                  ? t.projectWorkspace.editDrawer.templateCopyUnknownWarning
+                  : assessment.status === "IDENTICAL"
+                    ? t.projectWorkspace.editDrawer.templateCopyIdenticalWarning
+                    : t.projectWorkspace.editDrawer.templateCopyVariantWarning;
+              return (
+                <div className="template-copy-warning" role="status" data-blocks={assessment.blocks ? "true" : "false"}>
+                  <p>{warning}</p>
+                  {assessment.decisionState === "STALE" ? <p>{t.projectWorkspace.editDrawer.templateCopyStaleWarning}</p> : null}
+                  {typeof templateText === "string" ? (
+                    <p>
+                      <span>{t.projectWorkspace.editDrawer.templateCopyTemplateTextLabel}: </span>
+                      <code>{templateText}</code>
+                    </p>
+                  ) : null}
+                  {assessment.status === "TEMPLATE_TEXT_UNKNOWN" ? null : (
+                    <>
+                      <p>{t.projectWorkspace.editDrawer.templateCopyDecisionHint}</p>
+                      <div className="template-copy-actions">
+                        <Button
+                          variant={mapping.templateTextDecision === "REPLACE" ? "primary" : "ghost"}
+                          onClick={() => {
+                            const next = [...mappings];
+                            next[index] = { ...mapping, templateTextDecision: "REPLACE" };
+                            setMappings(next);
+                          }}
+                        >
+                          {t.projectWorkspace.editDrawer.templateCopyReplace}
+                        </Button>
+                        <Button
+                          variant={mapping.templateTextDecision === "KEEP_TEMPLATE_TEXT" ? "primary" : "ghost"}
+                          onClick={() => {
+                            const next = [...mappings];
+                            next[index] = { ...mapping, templateTextDecision: "KEEP_TEMPLATE_TEXT" };
+                            setMappings(next);
+                          }}
+                        >
+                          {t.projectWorkspace.editDrawer.templateCopyKeep}
+                        </Button>
+                        {mapping.templateTextDecision === null ? null : (
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              const next = [...mappings];
+                              next[index] = { ...mapping, templateTextDecision: null };
+                              setMappings(next);
+                            }}
+                          >
+                            {t.projectWorkspace.editDrawer.templateCopyClearDecision}
+                          </Button>
+                        )}
+                      </div>
+                      {mapping.templateTextDecision === null ? null : (
+                        <p>
+                          {mapping.templateTextDecision === "REPLACE"
+                            ? t.projectWorkspace.editDrawer.templateCopyDecidedReplace
+                            : t.projectWorkspace.editDrawer.templateCopyDecidedKeep}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
             <Field label={t.projectWorkspace.editDrawer.assetTimestampLabel} htmlFor={`mapping-timestamp-${mapping.mappingId}`}>
               <Input
                 id={`mapping-timestamp-${mapping.mappingId}`}

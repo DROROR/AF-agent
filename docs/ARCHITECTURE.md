@@ -162,3 +162,69 @@ evidence travels beside it as its own optional key, so nothing that already
 reads `resultingValue` can be affected. The field defaults to
 `[]`, so results written before this existed still parse; absence means "this
 worker reported no direction evidence", never "the text was left-to-right".
+
+## Leftover template copy - generic rules
+
+A purchased template ships with its own wording. An approved plan that still
+carries that wording renders a finished video that says what the template
+said - the real 2026-09-18 incident, in which five of six visible text layers
+shipped the template's copy with nothing unmapped and nothing failing.
+
+### Capturing the template's own text
+
+Template inspection records each text layer's own text, in full and exactly as
+authored (no trimming, folding or normalisation), onto its manifest
+placeholder as `originalText`. Three states are kept distinct, because they
+mean different things:
+
+| State | Meaning |
+| --- | --- |
+| a string | captured |
+| `null` | captured, and this placeholder is not a text layer |
+| key absent | never captured - an older inspection, or a text longer than the 10,000-character capture bound (then `originalTextTruncated: true`) |
+
+### The gate
+
+`assessTemplateCopy` (in `@dyo/schemas`, pure) compares a mapping's text with
+its placeholder's `originalText`:
+
+| Result | Blocks? |
+| --- | --- |
+| `IDENTICAL` - equal code point for code point | yes, until an explicit **Keep template text** decision |
+| `TRIVIAL_VARIANT` - differs only in letter case, only in whitespace, or only in both | yes, until either explicit decision |
+| `TEMPLATE_TEXT_UNKNOWN` - never captured or truncated | yes; the fix is re-running template inspection, and no decision can override it |
+| `REPLACED` - genuinely different | no |
+| `NOT_APPLICABLE` - no text on this mapping, or not a text placeholder | no |
+
+Case folding and whitespace stripping are only ever used to RECOGNISE a
+near-miss; equality itself is always exact code points, so text that merely
+looks similar (a composed versus decomposed accent, say) is genuinely
+different.
+
+### Silence is never approval
+
+Clearing the gate takes an explicit decision recorded on the mapping
+(`keepTemplateText`), carrying the decision, who made it, when, and
+`textAtDecision` - the exact text it was made about. If the text later
+changes, the decision is **stale** and the mapping needs deciding again. A
+`REPLACE` decision never unblocks text that is still identical: saying
+"replaced" is not replacing.
+
+Each mapping is judged on its own text, its own placeholder and its own
+decision, so a template that repeats wording across scenes needs a decision
+per occurrence - deciding one never clears another. Scenes not marked for use
+are not judged at all.
+
+### Where it is enforced
+
+1. **Plan approval** (`approveExecutionPlan`) - refuses with the scene and
+   layer named. Backend enforcement, so a direct API call cannot bypass it.
+2. **Execution dispatch** (`resolveExecuteFrameDispatch`) - a plan approved
+   before this gate existed still cannot execute template wording.
+3. **Complete Preview** (`resolveCreateFullPreviewDispatch`) - a second,
+   independent check against the current manifest and plan, immediately
+   before a finished video is produced.
+
+The dashboard's scene editor shows the template's own text beside the warning
+and offers the two explicit choices, using the same pure function, so it can
+never claim a plan is ready when the backend would refuse it.

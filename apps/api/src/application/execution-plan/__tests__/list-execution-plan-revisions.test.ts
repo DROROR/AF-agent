@@ -47,6 +47,10 @@ function manifest(): TemplateManifest {
             layerIndex: 1,
             layerPath: [],
             placeholderType: "text",
+            // The template's own wording for this layer, so these tests are not
+            // blocked by the leftover-template-copy gate's "this manifest never
+            // captured template text" rule (which has its own dedicated tests).
+            originalText: "The template's own wording",
             editable: true,
             sourceType: "TextLayer",
             dimensions: null,

@@ -40,6 +40,11 @@ function validManifest(overrides: Partial<TemplateManifest> = {}): TemplateManif
             layerIndex: 2,
             layerPath: [],
             placeholderType: "text",
+            // The template's own wording for this layer. Present so these
+            // dispatch tests are not blocked by the leftover-template-copy
+            // gate's "manifest never captured template text" rule, which has
+            // its own dedicated tests below.
+            originalText: "The template's own wording",
             editable: true,
             sourceType: "TextLayer",
             dimensions: null,
@@ -216,6 +221,61 @@ function baseInput(overrides: Partial<Parameters<typeof resolveExecuteFrameDispa
     ...overrides
   };
 }
+
+describe("resolveExecuteFrameDispatch - leftover template copy blocks EXECUTION, not only approval", () => {
+  it("refuses to dispatch a scene whose text is still the template's own wording", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: "The template's own wording" })] })] })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/unreviewed template copy/i);
+  });
+
+  it("refuses a case-only variant of the template's wording", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: "THE TEMPLATE'S OWN WORDING" })] })] })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/letter case/);
+  });
+
+  it("dispatches once the reviewer explicitly kept the template wording", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [
+                textMapping({
+                  text: "The template's own wording",
+                  keepTemplateText: { decision: "KEEP_TEMPLATE_TEXT", decidedBy: "user-1", decidedAt: NOW.toISOString(), textAtDecision: "The template's own wording" }
+                })
+              ]
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a scene whose manifest placeholder never captured the template's own text", () => {
+    const legacyManifest = validManifest();
+    const legacyScene = legacyManifest.scenes[0]!;
+    const strippedPlaceholders = legacyScene.placeholders.map(({ originalText: _dropped, ...rest }) => rest);
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: { ...legacyManifest, scenes: [{ ...legacyScene, placeholders: strippedPlaceholders }] }
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/re-run template inspection/);
+  });
+});
 
 describe("resolveExecuteFrameDispatch", () => {
   it("succeeds and derives the real composition identity + SET_TEXT operation from the approved mapping", () => {
@@ -1127,6 +1187,7 @@ describe("resolveExecuteFrameDispatch - nested manifest placeholders", () => {
       { compositionId: "comp-grand", layerIndex: 2 }
     ],
     placeholderType: "text" as const,
+    originalText: "The template's own wording",
     editable: true,
     sourceType: "TextLayer",
     dimensions: null,
@@ -1283,6 +1344,7 @@ describe("resolveExecuteFrameDispatch - conflicting writes to a layer shared acr
     layerPath: ["Shared"],
     nestedTarget: [{ compositionId: "comp-shared", layerIndex: 1 }],
     placeholderType: "text" as const,
+    originalText: "The template's own wording",
     editable: true,
     sourceType: "TextLayer",
     dimensions: null,
@@ -1361,6 +1423,7 @@ describe("resolveExecuteFrameDispatch - conflicting writes to one layer WITHIN a
       { compositionId: "comp-grand", layerIndex: 2 }
     ],
     placeholderType: "text" as const,
+    originalText: "The template's own wording",
     editable: true,
     sourceType: "TextLayer",
     dimensions: null,

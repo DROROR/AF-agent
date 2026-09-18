@@ -33,7 +33,9 @@ export interface UpdateExecutionPlanDeps {
 export async function updateExecutionPlan(
   deps: UpdateExecutionPlanDeps,
   projectId: string,
-  request: UpdateExecutionPlanRequest
+  request: UpdateExecutionPlanRequest,
+  /** The authenticated user making the edit - recorded on operations that store an attributable human decision (SET_TEMPLATE_TEXT_DECISION). Optional so existing callers keep working; those operations refuse rather than record an unattributable decision. */
+  editedBy?: string
 ): Promise<ExecutionPlanResponse> {
   const current = await deps.executionPlanRepository.findCurrentByProjectId(projectId);
   if (!current) {
@@ -82,7 +84,7 @@ export async function updateExecutionPlan(
 
   let scenePlans = current.scenePlans;
   for (const operation of request.operations) {
-    const result = applyExecutionPlanEdit(scenePlans, operation, deps.now, currentManifest);
+    const result = applyExecutionPlanEdit(scenePlans, operation, deps.now, currentManifest, editedBy);
     if (!result.ok) {
       throw new ExecutionPlanEditError(result.reason);
     }

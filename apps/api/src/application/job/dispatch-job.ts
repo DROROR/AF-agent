@@ -217,6 +217,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       currentPlan: plan,
       currentProjectSourceProjectSha256: project.sourceProjectSha256,
       currentProjectSourceProjectPath: project.manifest.sourceProject.path,
+      currentProjectManifest: project.manifest,
       worker,
       now,
       staleAfterMs: deps.staleAfterMs

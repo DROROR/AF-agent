@@ -161,13 +161,14 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
   });
 
   app.patch("/api/projects/:projectId/execution-plan", async (request, reply) => {
-    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const user = await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId } = projectIdParamsSchema.parse(request.params);
     const body = updateExecutionPlanRequestSchema.parse(request.body);
     const result = await updateExecutionPlan(
       { executionPlanRepository: deps.executionPlanRepository, assetRepository: deps.assetRepository, projectRepository: deps.projectRepository, now },
       projectId,
-      body
+      body,
+      user.id
     );
     reply.send(result);
   });

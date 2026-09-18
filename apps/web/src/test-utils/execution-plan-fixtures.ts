@@ -3,7 +3,33 @@ import { vi } from "vitest";
 export const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
 export const SOURCE_SHA = "a".repeat(64);
 
-export function manifestFixture() {
+/** One manifest placeholder, including the template's own text for it (the leftover-template-copy gate's input). Pass `originalText: undefined` to model a LEGACY manifest that never captured it. */
+export function placeholderFixture(overrides: Record<string, unknown> = {}) {
+  const { originalText: overriddenOriginalText, ...rest } = overrides;
+  // Deliberately NOT a default parameter: `{ originalText: undefined }` is how
+  // a test models a LEGACY manifest that never captured the template's own
+  // text, and a default would silently turn that into "captured".
+  const originalText = "originalText" in overrides ? overriddenOriginalText : "The template's own wording";
+  return {
+    placeholderId: "ph-1",
+    displayLabel: null,
+    compositionId: "c1",
+    layerName: "APP PROMO",
+    layerIndex: 1,
+    layerPath: [],
+    placeholderType: "text",
+    editable: true,
+    sourceType: "TextLayer",
+    ...(originalText === undefined ? {} : { originalText }),
+    dimensions: null,
+    startTimeSeconds: 0,
+    durationSeconds: 4,
+    evidence: { source: "read_directly", reason: "AE layer type is TextLayer" },
+    ...rest
+  };
+}
+
+export function manifestFixture(placeholders: Record<string, unknown>[] = [placeholderFixture()]) {
   return {
     schemaVersion: "1.0",
     templateId: "tmpl-1",
@@ -19,7 +45,7 @@ export function manifestFixture() {
       { compositionId: "c1", aeProjectItemIndex: 1, name: "Scene 01", widthPx: 1920, heightPx: 1080, durationSeconds: 4, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }
     ],
     scenes: [
-      { sceneId: "s1", displayName: null, compositionId: "c1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 4, placeholders: [] }
+      { sceneId: "s1", displayName: null, compositionId: "c1", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 4, placeholders }
     ],
     preflight: { requiredFonts: [], footageReferenced: [], missingFootage: [], pluginReferences: [] },
     unknownItems: []
@@ -208,12 +234,30 @@ interface HandlerSpec {
  * shadow a more specific one like "/api/projects/:id/execution-plan",
  * since every request URL contains the shorter string too.
  */
-export function stubFetchByUrl(handlers: Record<string, HandlerSpec | HandlerSpec[]>): void {
+/** One recorded outgoing request, for tests that need to assert WHAT was sent (e.g. which edit operations a form produced), not only that a call happened. */
+export interface RecordedFetchCall {
+  url: string;
+  method: string;
+  body: unknown;
+}
+
+export function stubFetchByUrl(handlers: Record<string, HandlerSpec | HandlerSpec[]>, calls?: RecordedFetchCall[]): void {
   const callCounts = new Map<string, number>();
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: { method?: string; body?: string }) => {
       const url = typeof input === "string" ? input : input.toString();
+      if (calls) {
+        let parsedBody: unknown = null;
+        if (typeof init?.body === "string") {
+          try {
+            parsedBody = JSON.parse(init.body);
+          } catch {
+            parsedBody = init.body;
+          }
+        }
+        calls.push({ url, method: init?.method ?? "GET", body: parsedBody });
+      }
       const [pattern, spec] =
         Object.entries(handlers)
           .sort((a, b) => b[0].length - a[0].length)

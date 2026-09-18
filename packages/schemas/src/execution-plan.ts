@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { templateTextDecisionRecordSchema } from "./template-copy.js";
 import { nestedTargetStepSchema, placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
 
@@ -84,6 +85,25 @@ export const placeholderMappingSchema = z.object({
     .string()
     .regex(/^#[0-9A-F]{6}$/, "colorHex must be canonical #RRGGBB (uppercase)")
     .nullable(),
+  /**
+   * The reviewer's explicit, auditable decision about text that still matches
+   * the template's own wording (2026-09-18 leftover-template-copy gate).
+   *
+   * Null means NO decision has been recorded - never "keep" and never
+   * "replace". Silence is not approval: while a mapping's text is identical
+   * to the template's (or differs only in case/whitespace), a null decision
+   * blocks plan approval, execution dispatch and the complete-preview gate.
+   * The record carries who decided, when, and the exact text it was decided
+   * about, so a later text edit makes it stale rather than silently carrying
+   * over - see template-copy.ts's own doc comment.
+   *
+   * ABSENT and null mean the same thing - no decision - so every plan stored
+   * before this field existed parses and behaves identically, with no
+   * migration. Consumers read it as `mapping.keepTemplateText ?? null`; there
+   * is deliberately no default value, because any default would be a decision
+   * nobody made.
+   */
+  keepTemplateText: templateTextDecisionRecordSchema.nullable().optional(),
   /** Explicit SET_LAYER_VISIBILITY intent - null means "no override, leave the layer exactly as authored", never defaulted to true/false. */
   layerVisible: z.boolean().nullable(),
   /** Explicit SET_TIME_REMAP_FREEZE intent (seconds) - null means no freeze-frame override requested for this layer. Never guessed from assetTimestamp or any other field. */

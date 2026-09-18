@@ -186,3 +186,45 @@ describe("computeInspectionSummary", () => {
     expect(summary.unknownItemCount).toBe(2);
   });
 });
+
+describe("buildTemplateManifest - template text capture (leftover-template-copy gate)", () => {
+  it("carries a text layer's own captured text onto its placeholder, exactly", () => {
+    const text = "מבית DYO App\rsecond line";
+    const manifest = buildTemplateManifest(
+      baseFacts({ compositions: [composition({ layers: [layer({ name: "Headline", index: 1, layerKind: "TextLayer", sourceText: text })] })] }),
+      fixedNow
+    );
+    expect(manifest.scenes[0]?.placeholders[0]?.originalText).toBe(text);
+  });
+
+  it("records null for a layer that genuinely has no text", () => {
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        compositions: [composition({ layers: [layer({ name: "Card", index: 1, layerKind: "AVLayer", footage: { hasVideo: false, hasAudio: false, isStill: true, isMissing: false, widthPx: 10, heightPx: 10 }, sourceText: null })] })]
+      }),
+      fixedNow
+    );
+    expect(manifest.scenes[0]?.placeholders[0]?.originalText).toBeNull();
+  });
+
+  it("leaves the field ABSENT when the scan never reported template text - never defaulted to null, so 'never captured' stays distinguishable from 'no text'", () => {
+    const manifest = buildTemplateManifest(
+      baseFacts({ compositions: [composition({ layers: [layer({ name: "Headline", index: 1, layerKind: "TextLayer" })] })] }),
+      fixedNow
+    );
+    const placeholder = manifest.scenes[0]?.placeholders[0];
+    expect(placeholder && "originalText" in placeholder).toBe(false);
+  });
+
+  it("omits a TRUNCATED capture and marks it, so a partial string is never compared as the whole text", () => {
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        compositions: [composition({ layers: [layer({ name: "Headline", index: 1, layerKind: "TextLayer", sourceText: "a very long line that was cut", sourceTextTruncated: true })] })]
+      }),
+      fixedNow
+    );
+    const placeholder = manifest.scenes[0]?.placeholders[0];
+    expect(placeholder && "originalText" in placeholder).toBe(false);
+    expect(placeholder?.originalTextTruncated).toBe(true);
+  });
+});

@@ -474,6 +474,15 @@ function buildPlaceholder(args: {
     placeholderType: classification.placeholderType,
     editable: classification.editable,
     sourceType: layer.layerKind,
+    // The untouched template's own text for this layer, carried onto the
+    // manifest so leftover-template-copy detection has something real to
+    // compare an approved mapping against (template-copy.ts). Three distinct
+    // states are preserved exactly: a string (captured), null (captured, not
+    // a text layer), and ABSENT (never captured - e.g. an older worker build,
+    // or a text longer than the capture bound), which blocks approval and
+    // execution until the project is re-inspected.
+    ...(layer.sourceText === undefined || layer.sourceTextTruncated === true ? {} : { originalText: layer.sourceText }),
+    ...(layer.sourceTextTruncated === true ? { originalTextTruncated: true } : {}),
     dimensions:
       layer.footage && layer.footage.widthPx !== null && layer.footage.heightPx !== null
         ? { width: layer.footage.widthPx, height: layer.footage.heightPx }

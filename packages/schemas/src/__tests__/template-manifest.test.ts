@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, templateManifestSchema, type TemplateManifest } from "../template-manifest.js";
+import { SCHEMA_VERSION, placeholderSchema, templateManifestSchema, type TemplateManifest } from "../template-manifest.js";
 import { hasAepExtension, inspectTemplateRequestSchema, inspectTemplateResponseSchema, inspectTemplateResultSchema } from "../inspect-template.js";
 
 function validManifest(): TemplateManifest {
@@ -217,5 +217,47 @@ describe("inspectTemplateResponseSchema", () => {
     it("rejects the bare {manifest, summary} shape with no `kind` discriminator - the exact old wizard bug (parsing job.result directly against inspectTemplateResponseSchema instead of unwrapping .response first)", () => {
       expect(() => inspectTemplateResultSchema.parse(validResponse())).toThrow();
     });
+  });
+});
+
+describe("placeholder.originalText (leftover-template-copy capture)", () => {
+  function placeholder(extra: Record<string, unknown>) {
+    return {
+      placeholderId: "ph-1",
+      displayLabel: null,
+      compositionId: "comp-1",
+      layerName: "Any Layer",
+      layerIndex: 1,
+      layerPath: [],
+      placeholderType: "text",
+      editable: true,
+      sourceType: "TextLayer",
+      dimensions: null,
+      startTimeSeconds: 0,
+      durationSeconds: 5,
+      evidence: { source: "read_directly", reason: "AE layer type is TextLayer" },
+      ...extra
+    };
+  }
+
+  it("keeps captured text exactly, including multiline and non-Latin code points", () => {
+    const text = "מבית DYO App\rשורה שנייה";
+    const parsed = placeholderSchema.parse(placeholder({ originalText: text }));
+    expect(parsed.originalText).toBe(text);
+    expect([...(parsed.originalText ?? "")].map((c) => c.codePointAt(0))).toEqual([...text].map((c) => c.codePointAt(0)));
+  });
+
+  it("distinguishes captured-but-empty, captured-as-not-a-text-layer, and never-captured", () => {
+    expect(placeholderSchema.parse(placeholder({ originalText: "" })).originalText).toBe("");
+    expect(placeholderSchema.parse(placeholder({ originalText: null })).originalText).toBeNull();
+    // A LEGACY manifest parses unchanged, and the key stays absent rather than
+    // being defaulted to null - "never captured" must stay distinguishable.
+    const legacy = placeholderSchema.parse(placeholder({}));
+    expect("originalText" in legacy).toBe(false);
+  });
+
+  it("carries the truncation marker when the capture bound was hit", () => {
+    const parsed = placeholderSchema.parse(placeholder({ originalText: "a long line", originalTextTruncated: true }));
+    expect(parsed.originalTextTruncated).toBe(true);
   });
 });

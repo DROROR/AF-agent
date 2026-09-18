@@ -12,7 +12,15 @@ export interface ScannedLayerFactInput {
   enabled?: boolean;
   /** Layer-role facts from the same scan (only the ones classification uses). Absent on an older worker build's scan. */
   detail?:
-    | { isTrackMatte: boolean | null; hasTrackMatte: boolean | null; trackMatteLayerIndex: number | null; guideLayer: boolean | null }
+    | {
+        isTrackMatte: boolean | null;
+        hasTrackMatte: boolean | null;
+        trackMatteLayerIndex: number | null;
+        guideLayer: boolean | null;
+        /** The layer's full template text and whether the capture bound was hit - absent on a scan from an older worker build (see LayerFact.sourceText). */
+        sourceText?: string | null | undefined;
+        sourceTextTruncated?: boolean | null | undefined;
+      }
     | undefined;
 }
 
@@ -164,6 +172,12 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
               }
             : null,
           guideLayer: scanned?.detail?.guideLayer ?? null,
+          // Deliberately preserves the undefined/null distinction: undefined
+          // means "this scan never reported template text", null means "read,
+          // and this layer has none". The manifest turns that into a
+          // blocking "re-inspect" state rather than a silent pass.
+          sourceText: scanned?.detail ? (scanned.detail.sourceText ?? undefined) : undefined,
+          sourceTextTruncated: scanned?.detail ? (scanned.detail.sourceTextTruncated ?? undefined) : undefined,
           layerPath: [],
           startTimeSeconds: layer.inPointSeconds,
           durationSeconds: Math.max(0, layer.outPointSeconds - layer.inPointSeconds)

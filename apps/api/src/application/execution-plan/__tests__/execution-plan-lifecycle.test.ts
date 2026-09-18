@@ -61,6 +61,10 @@ function manifest(sha256 = "a".repeat(64)): TemplateManifest {
             layerIndex: 1,
             layerPath: [],
             placeholderType: "text",
+            // The template's own wording for this layer, so these tests are not
+            // blocked by the leftover-template-copy gate's "this manifest never
+            // captured template text" rule (which has its own dedicated tests).
+            originalText: "The template's own wording",
             editable: true,
             sourceType: "TextLayer",
             dimensions: null,
@@ -524,6 +528,10 @@ describe("updateExecutionPlan - nested manifest placeholders refused at edit tim
               layerPath: ["Inner"],
               nestedTarget: [{ compositionId: "comp-inner", layerIndex: 2 }],
               placeholderType: "text",
+              // The template's own wording for this layer, so these tests are not
+              // blocked by the leftover-template-copy gate's "this manifest never
+              // captured template text" rule (which has its own dedicated tests).
+              originalText: "The template's own wording",
               editable: true,
               sourceType: "TextLayer",
               dimensions: null,

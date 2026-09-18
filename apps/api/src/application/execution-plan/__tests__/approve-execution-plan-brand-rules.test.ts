@@ -50,6 +50,11 @@ function manifest(): TemplateManifest {
             placeholderType: "text",
             editable: true,
             sourceType: "TextLayer",
+            // The template's own wording for this layer. Present so these
+            // tests exercise the BRAND RULES gate specifically: without it the
+            // manifest would be "legacy", which the leftover-template-copy
+            // gate (correctly) blocks first.
+            originalText: "The template's own headline",
             dimensions: null,
             startTimeSeconds: 0,
             durationSeconds: 5,

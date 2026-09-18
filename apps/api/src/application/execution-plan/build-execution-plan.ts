@@ -6,6 +6,8 @@ function buildMapping(placeholder: Placeholder, timestamp: string): PlaceholderM
   return {
     id: deterministicId(["mapping", placeholder.placeholderId]),
     manifestPlaceholderId: placeholder.placeholderId,
+    // Never a default decision - see placeholderMappingSchema's own doc comment.
+    keepTemplateText: null,
     // Always the RAW AE layer name, including for a layer found inside a
     // precomp (code review finding, 2026-09-13). placeholderName is not only a
     // display label: deterministic-matcher.ts matches it exactly against asset

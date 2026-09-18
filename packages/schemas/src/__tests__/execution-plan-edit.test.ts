@@ -129,3 +129,37 @@ describe("updateExecutionPlanRequestSchema", () => {
     expect(() => updateExecutionPlanRequestSchema.parse({ operations: [{ type: "INCLUDE_SCENE", scenePlanId: "s1" }] })).toThrow();
   });
 });
+
+describe("SET_TEMPLATE_TEXT_DECISION / CLEAR_TEMPLATE_TEXT_DECISION", () => {
+  it("accepts each of the two explicit decisions", () => {
+    for (const decision of ["REPLACE", "KEEP_TEMPLATE_TEXT"]) {
+      expect(() =>
+        executionPlanEditOperationSchema.parse({ type: "SET_TEMPLATE_TEXT_DECISION", scenePlanId: "scene-1", mappingId: "mapping-1", decision })
+      ).not.toThrow();
+    }
+  });
+
+  it("rejects any other decision value, and a missing one - there is no implicit default", () => {
+    expect(() =>
+      executionPlanEditOperationSchema.parse({ type: "SET_TEMPLATE_TEXT_DECISION", scenePlanId: "scene-1", mappingId: "mapping-1", decision: "MAYBE" })
+    ).toThrow();
+    expect(() => executionPlanEditOperationSchema.parse({ type: "SET_TEMPLATE_TEXT_DECISION", scenePlanId: "scene-1", mappingId: "mapping-1" })).toThrow();
+  });
+
+  it("rejects unknown extra fields, like every other edit operation", () => {
+    expect(() =>
+      executionPlanEditOperationSchema.parse({
+        type: "SET_TEMPLATE_TEXT_DECISION",
+        scenePlanId: "scene-1",
+        mappingId: "mapping-1",
+        decision: "REPLACE",
+        decidedBy: "someone the caller made up"
+      })
+    ).toThrow();
+  });
+
+  it("clearing needs only the scene and mapping", () => {
+    expect(() => executionPlanEditOperationSchema.parse({ type: "CLEAR_TEMPLATE_TEXT_DECISION", scenePlanId: "scene-1", mappingId: "mapping-1" })).not.toThrow();
+    expect(() => executionPlanEditOperationSchema.parse({ type: "CLEAR_TEMPLATE_TEXT_DECISION", scenePlanId: "scene-1" })).toThrow();
+  });
+});

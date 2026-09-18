@@ -1,3 +1,4 @@
+import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
 import type {
   ExecuteSceneEditRequest,
   ExecutionSessionStatus,
@@ -257,6 +258,14 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   }
   if (scene.unresolvedReasons.length > 0) {
     return { ok: false, reason: `Scene "${scenePlanId}" has unresolved reasons: ${scene.unresolvedReasons.join("; ")}` };
+  }
+
+  // Leftover template copy blocks EXECUTION too, not only approval: a plan
+  // approved before this gate existed, or one whose manifest never captured
+  // the template's own text, must not quietly execute template wording.
+  const templateCopyBlockers = findTemplateCopyBlockers([scene], currentProjectManifest);
+  if (templateCopyBlockers.length > 0) {
+    return { ok: false, reason: `Scene "${scenePlanId}" still contains unreviewed template copy: ${describeTemplateCopyBlockers(templateCopyBlockers).join(" | ")}` };
   }
 
   const composition = currentProjectManifest.compositions.find((c) => c.compositionId === scene.manifestCompositionId);

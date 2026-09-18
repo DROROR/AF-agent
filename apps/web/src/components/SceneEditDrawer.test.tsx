@@ -8,6 +8,8 @@ import {
   PROJECT_ID,
   assetFixture,
   manifestFixture,
+  placeholderFixture,
+  type RecordedFetchCall,
   planFixture,
   projectDtoFixture,
   sceneFixture,
@@ -72,6 +74,113 @@ describe("SceneEditDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("warns when the typed text is still the template's own wording, and requires an explicit choice", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "The template's own wording" })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    await screen.findByText("This text is still exactly the template's own wording.");
+    // The template's own text is shown, so the reviewer can see WHAT matched.
+    expect(screen.getByText("The template's own wording", { selector: "code" })).toBeTruthy();
+    // Undecided is the blocking state, and neither choice is preselected.
+    expect(screen.getByRole("status").getAttribute("data-blocks")).toBe("true");
+    expect(screen.getByRole("button", { name: "I replaced it" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Keep template text" })).toBeTruthy();
+    expect(screen.queryByText("Recorded: keeping the template's wording")).toBeNull();
+  });
+
+  it("warns about a formatting-only variant too", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "THE TEMPLATE'S OWN WORDING" })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("This text differs from the template's own wording only in formatting.");
+  });
+
+  it("saves an explicit Keep template text decision alongside the text", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "The template's own wording" })] })];
+    const calls: RecordedFetchCall[] = [];
+    stubFetchByUrl(
+      {
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+      },
+      calls
+    );
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    fireEvent.click(screen.getByRole("button", { name: "Keep template text" }));
+    await screen.findByText("Recorded: keeping the template's wording");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH");
+      expect(patch).toBeDefined();
+      const operations = (patch?.body as { operations: { type: string; decision?: string }[] }).operations;
+      expect(operations).toContainEqual(expect.objectContaining({ type: "SET_TEMPLATE_TEXT_DECISION", decision: "KEEP_TEMPLATE_TEXT" }));
+    });
+  });
+
+  it("tells the reviewer to re-inspect when the manifest never captured the template's own text, and offers no decision to make", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "Anything at all" })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: { project: projectDtoFixture(), manifest: manifestFixture([placeholderFixture({ originalText: undefined })]) }
+      }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText(/Re-run template inspection/);
+    expect(screen.queryByRole("button", { name: "Keep template text" })).toBeNull();
+  });
+
+  it("shows no template-copy warning at all once the text is genuinely different", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "Completely different words" })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("shows a save-failed error (never silently discards the edit) when the API rejects the change", async () => {

@@ -2339,6 +2339,16 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
 /** Bounds each text layer's reported preview, so the persisted layer inventory stays small on text-heavy templates. */
 const LAYER_TEXT_PREVIEW_MAX_LENGTH = 120;
 
+/**
+ * Upper bound on the FULL template text captured per text layer
+ * (leftover-template-copy gate, 2026-09-18). A whole-project scan carries one
+ * of these per text layer, so an unbounded read is a real memory/payload
+ * hazard on a template with pathological text. Beyond this the capture is
+ * marked truncated and the gate treats it as unverifiable (blocking) rather
+ * than comparing a partial string as if it were the whole text.
+ */
+const LAYER_SOURCE_TEXT_MAX_LENGTH = 10_000;
+
 /** AE scripting's documented TrackMatteType keys. */
 const TRACK_MATTE_TYPE_KEYS = ["NO_TRACK_MATTE", "ALPHA", "ALPHA_INVERTED", "LUMA", "LUMA_INVERTED"] as const;
 
@@ -2490,6 +2500,20 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
               if (!(__layer instanceof TextLayer)) { return null; }
               var __previewText = __layer.sourceText.value.text;
               return typeof __previewText === "string" ? __previewText.substring(0, ${LAYER_TEXT_PREVIEW_MAX_LENGTH}) : null;
+            }),
+            // The template layer's own text IN FULL (up to the bound), exactly
+            // as authored - never trimmed, folded or normalised, because the
+            // leftover-template-copy gate compares it code point for code
+            // point against an approved mapping.
+            sourceText: __readStringFact(function () {
+              if (!(__layer instanceof TextLayer)) { return null; }
+              var __fullText = __layer.sourceText.value.text;
+              return typeof __fullText === "string" ? __fullText.substring(0, ${LAYER_SOURCE_TEXT_MAX_LENGTH}) : null;
+            }),
+            sourceTextTruncated: __readBooleanFact(function () {
+              if (!(__layer instanceof TextLayer)) { return null; }
+              var __fullText = __layer.sourceText.value.text;
+              return typeof __fullText === "string" ? __fullText.length > ${LAYER_SOURCE_TEXT_MAX_LENGTH} : null;
             })
           };
           __layers.push({

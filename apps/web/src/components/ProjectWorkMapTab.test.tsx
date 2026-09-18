@@ -201,7 +201,10 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
  */
 describe("ProjectWorkMapTab - Simple Mode scene filtering (live QA fix)", () => {
   function manifestWithNestedComps() {
-    const base = manifestFixture();
+    // Deliberately NO placeholders: this case is specifically about a template
+    // whose scene exposes no editable placeholder at all, which is what the
+    // honest "did not detect standard editable placeholders" notice reports.
+    const base = manifestFixture([]);
     const nested = [0, 1, 2].map((i) => ({
       compositionId: `nested-${i}`,
       aeProjectItemIndex: i + 2,
