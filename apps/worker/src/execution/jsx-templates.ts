@@ -1,3 +1,4 @@
+import { analyseTextDirection, textCodeUnits } from "@dyo/schemas";
 import type { ResolvedNestedTargetStep, SceneEditOperation } from "@dyo/schemas";
 
 /**
@@ -250,18 +251,141 @@ function buildSetTextBody(text: string): string {
 /** A replaced text line is never shrunk below this fraction of its template scale - below it the operation fails instead of producing unreadably small text. */
 export const TEXT_AUTO_FIT_MIN_FACTOR = 0.6;
 
+/**
+ * BIDIRECTIONAL TEXT (2026-09-18, generic - no template, language or layer
+ * name is ever consulted).
+ *
+ * `analyseTextDirection` derives from Unicode alone whether the REPLACEMENT
+ * text is right-to-left. When it is, this mutation sets the paragraph
+ * direction and a Middle-Eastern-capable composer engine on the same
+ * TextDocument as the text itself, BEFORE the auto-fit measures anything -
+ * both properties change the rendered rect, so fitting first would fit the
+ * wrong shape.
+ *
+ * FAILS CLOSED, NEVER "WARNS AND SUCCEEDS". If the text needs RTL and this
+ * After Effects build exposes no ParagraphDirection/ComposerEngine, or an
+ * assignment throws, or the read-back does not show the requested values,
+ * the operation FAILS. Left-to-right or purely neutral text (digits,
+ * punctuation) never overrides the template's own typography, so nothing is
+ * assigned and nothing can fail.
+ *
+ * The characters themselves are never reordered, mirrored or reversed: the
+ * exact code units are written, then read back and compared position by
+ * position, and any difference fails the operation (see text-direction.ts).
+ */
 function buildSetTextMutation(text: string): string {
   const textLiteral = JSON.stringify(text);
+  const analysis = analyseTextDirection(text);
+  const expectedCodeUnits = JSON.stringify(textCodeUnits(text));
+  const requiresRtl = analysis.requiredDirection === "RTL";
   return `
         if (!(__layer instanceof TextLayer)) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer is not a text layer" });
         } else {
           var __td = __layer.sourceText.value;
           var __previousText = __td.text;
+          var __requiresRtl = ${requiresRtl ? "true" : "false"};
+          var __expectedCodeUnits = ${expectedCodeUnits};
+          var __dirNote = null;
+          var __dirFailureReason = null;
+          var __readDirection = function (__doc) {
+            try {
+              return __doc.direction === undefined || __doc.direction === null ? null : String(__doc.direction);
+            } catch (__directionReadError) {
+              return null;
+            }
+          };
+          var __readComposer = function (__doc) {
+            try {
+              return __doc.composerEngine === undefined || __doc.composerEngine === null ? null : String(__doc.composerEngine);
+            } catch (__composerReadError) {
+              return null;
+            }
+          };
+          var __previousDirection = __readDirection(__td);
+          var __previousComposer = __readComposer(__td);
+          var __appliedDirection = null;
+          var __appliedComposer = null;
+          var __wantedDirection = null;
+          var __wantedComposer = null;
           __td.text = ${textLiteral};
-          __layer.sourceText.setValue(__td);
-          __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${textLiteral} });
-          ${buildTextAutoFit()}
+          if (__requiresRtl) {
+            if (typeof ParagraphDirection === "undefined" || ParagraphDirection.DIRECTION_RIGHT_TO_LEFT === undefined) {
+              __dirFailureReason = "this text is right-to-left, but this After Effects build exposes no paragraph-direction API (ParagraphDirection) - refusing to write right-to-left text that would render in the template's own left-to-right direction";
+            } else if (typeof ComposerEngine === "undefined" || ComposerEngine.UNIVERSAL_TYPE_ENGINE === undefined) {
+              __dirFailureReason = "this text is right-to-left, but this After Effects build exposes no Middle-Eastern-capable composer engine (ComposerEngine.UNIVERSAL_TYPE_ENGINE) - refusing to write right-to-left text the composer cannot shape correctly";
+            } else {
+              __wantedDirection = String(ParagraphDirection.DIRECTION_RIGHT_TO_LEFT);
+              __wantedComposer = String(ComposerEngine.UNIVERSAL_TYPE_ENGINE);
+              try {
+                __td.direction = ParagraphDirection.DIRECTION_RIGHT_TO_LEFT;
+              } catch (__directionWriteError) {
+                __dirFailureReason = "this text is right-to-left, but its paragraph direction could not be set: " + (__directionWriteError && __directionWriteError.toString ? __directionWriteError.toString() : String(__directionWriteError));
+              }
+              if (__dirFailureReason === null) {
+                try {
+                  __td.composerEngine = ComposerEngine.UNIVERSAL_TYPE_ENGINE;
+                } catch (__composerWriteError) {
+                  __dirFailureReason = "this text is right-to-left, but its composer engine could not be set to the Middle-Eastern-capable engine: " + (__composerWriteError && __composerWriteError.toString ? __composerWriteError.toString() : String(__composerWriteError));
+                }
+              }
+            }
+          }
+          if (__dirFailureReason !== null) {
+            __result = JSON.stringify({ ok: false, failureReason: __dirFailureReason });
+          } else {
+            __layer.sourceText.setValue(__td);
+            var __storedDoc = __layer.sourceText.value;
+            var __storedText = __storedDoc.text;
+            __appliedDirection = __readDirection(__storedDoc);
+            __appliedComposer = __readComposer(__storedDoc);
+            var __textVerified = true;
+            var __mismatchAt = -1;
+            if (__storedText === null || __storedText === undefined || String(__storedText).length !== __expectedCodeUnits.length) {
+              __textVerified = false;
+            } else {
+              var __storedString = String(__storedText);
+              for (var __u = 0; __u < __expectedCodeUnits.length; __u++) {
+                if (__storedString.charCodeAt(__u) !== __expectedCodeUnits[__u]) {
+                  __textVerified = false;
+                  __mismatchAt = __u;
+                  break;
+                }
+              }
+            }
+            var __directionVerified = __requiresRtl ? __appliedDirection !== null && __appliedDirection === __wantedDirection : true;
+            var __composerVerified = __requiresRtl ? __appliedComposer !== null && __appliedComposer === __wantedComposer : true;
+            if (!__requiresRtl) {
+              __dirNote = "text contains no right-to-left character - the template's own paragraph direction and composer were left unchanged";
+            }
+            if (!__textVerified) {
+              __dirFailureReason = "the stored text does not match the requested code units" + (__mismatchAt >= 0 ? " (first difference at code unit " + __mismatchAt + ")" : " (length differs)") + " - refusing to report a text edit that After Effects did not store exactly";
+            } else if (!__directionVerified) {
+              __dirFailureReason = "this text is right-to-left, but After Effects did not report the requested right-to-left paragraph direction after writing it (read back: " + (__appliedDirection === null ? "unreadable" : __appliedDirection) + ")";
+            } else if (!__composerVerified) {
+              __dirFailureReason = "this text is right-to-left, but After Effects did not report the requested Middle-Eastern-capable composer engine after writing it (read back: " + (__appliedComposer === null ? "unreadable" : __appliedComposer) + ")";
+            }
+            var __directionEvidence = {
+              requiredDirection: ${JSON.stringify(analysis.requiredDirection)},
+              rtlScripts: ${JSON.stringify(analysis.rtlScripts)},
+              isMixed: ${analysis.isMixed ? "true" : "false"},
+              previousDirection: __previousDirection,
+              previousComposerEngine: __previousComposer,
+              appliedDirection: __requiresRtl ? __appliedDirection : null,
+              appliedComposerEngine: __requiresRtl ? __appliedComposer : null,
+              directionVerified: __directionVerified,
+              composerVerified: __composerVerified,
+              textCodeUnitsVerified: __textVerified,
+              codeUnitCount: __expectedCodeUnits.length,
+              note: __dirNote
+            };
+            if (__dirFailureReason !== null) {
+              __result = JSON.stringify({ ok: false, failureReason: __dirFailureReason, resultingValue: { textDirection: __directionEvidence } });
+            } else {
+              __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: { text: ${textLiteral}, textDirection: __directionEvidence } });
+              ${buildTextAutoFit()}
+            }
+          }
         }`;
 }
 

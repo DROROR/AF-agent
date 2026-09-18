@@ -24,3 +24,4 @@ export * from "./inspect-render-capabilities.js";
 export * from "./execution-session.js";
 export * from "./create-full-preview.js";
 export * from "./ai-provider.js";
+export * from "./text-direction.js";

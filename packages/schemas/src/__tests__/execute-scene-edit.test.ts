@@ -409,6 +409,35 @@ describe("sceneEditResultSchema", () => {
     ).not.toThrow();
   });
 
+  it("defaults textDirectionEvidence to [] so a result written before bidirectional-text support still parses", () => {
+    const parsed = sceneEditResultSchema.parse(validResult());
+    expect(parsed.textDirectionEvidence).toEqual([]);
+  });
+
+  it("keeps each SET_TEXT operation's direction evidence, tagged with the operation it came from", () => {
+    const parsed = sceneEditResultSchema.parse({
+      ...validResult(),
+      textDirectionEvidence: [
+        {
+          operationIndex: 2,
+          requiredDirection: "RTL",
+          rtlScripts: ["Arabic"],
+          isMixed: false,
+          previousDirection: "DIRECTION_LEFT_TO_RIGHT",
+          previousComposerEngine: "LATIN_COMPOSER_ENGINE",
+          appliedDirection: "DIRECTION_RIGHT_TO_LEFT",
+          appliedComposerEngine: "UNIVERSAL_TYPE_ENGINE",
+          directionVerified: true,
+          composerVerified: true,
+          textCodeUnitsVerified: true,
+          codeUnitCount: 13,
+          note: null
+        }
+      ]
+    });
+    expect(parsed.textDirectionEvidence[0]).toMatchObject({ operationIndex: 2, requiredDirection: "RTL", directionVerified: true });
+  });
+
   it("accepts jobId/workerId only once stamped (optional)", () => {
     expect(() => sceneEditResultSchema.parse(validResult())).not.toThrow();
     expect(() => sceneEditResultSchema.parse({ ...validResult(), jobId: "job-1", workerId: "worker-1" })).not.toThrow();

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { textDirectionEvidenceSchema } from "@dyo/schemas";
 import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult, WorkingCopyFailureCode } from "@dyo/schemas";
 import { prepareSessionWorkingCopy, type WorkingCopyFailureReason } from "../workspace/working-copy.js";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
@@ -28,6 +29,16 @@ const horizontalCompositionBuiltResultSchema = z.object({
   horizontalDurationSeconds: z.number().nonnegative(),
   horizontalFrameRate: z.number().positive()
 });
+
+/**
+ * What jsx-templates.ts's SET_TEXT script's own resultingValue carries
+ * alongside the stored text (2026-09-18 bidirectional-text stage): the
+ * direction/composer/verification evidence defined in text-direction.ts.
+ * Parsed defensively like every other resultingValue on this path - a script
+ * result that does not match is simply not reported as evidence, and never
+ * turns a completed operation into a failure.
+ */
+const setTextDirectionResultSchema = z.object({ textDirection: textDirectionEvidenceSchema });
 
 /**
  * The default frame this project's own "first-frame execution" workflow
@@ -124,6 +135,11 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // Same as reelsCompositionBuilt above, for a successfully completed
   // BUILD_HORIZONTAL_COMPOSITION operation (live QA, 2026-09-10).
   let horizontalCompositionBuilt: SceneEditResult["horizontalCompositionBuilt"] = null;
+  // One entry per SET_TEXT operation actually applied in this run, in
+  // operation order - reported whether the job as a whole succeeds or fails
+  // later, so an operator can always see what direction handling really
+  // happened (see text-direction.ts).
+  const textDirectionEvidence: SceneEditResult["textDirectionEvidence"] = [];
   // Counts operations actually applied to the AE bridge DURING THIS
   // INVOCATION only - deliberately NOT checkpoint.completedOperationIndices
   // (which reflects the FULL cumulative history, including operations a
@@ -157,6 +173,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewTimestampSeconds: params.previewTimestampSeconds,
       reelsCompositionBuilt,
       horizontalCompositionBuilt,
+      textDirectionEvidence,
       failureReason: checkpoint.failureReason,
       startedAt,
       completedAt: deps.now().toISOString()
@@ -359,6 +376,13 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     // itself only ever reports ok:true after its mutation actually ran).
     checkpoint = markOperationCompleted(checkpoint, pendingIndex, deps.now());
     operationsAppliedThisRun++;
+
+    if (operation.type === "SET_TEXT") {
+      const parsedResultingValue = setTextDirectionResultSchema.safeParse(outcome.resultingValue);
+      if (parsedResultingValue.success) {
+        textDirectionEvidence.push({ ...parsedResultingValue.data.textDirection, operationIndex: pendingIndex });
+      }
+    }
 
     if (operation.type === "BUILD_REELS_COMPOSITION") {
       // outcome.resultingValue is `unknown` at this generic layer (every

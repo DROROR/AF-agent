@@ -98,3 +98,55 @@ GET  /api/settings/ai-provider | POST /api/settings/ai-provider | /test
 Job claiming is atomic (`SELECT ... FOR UPDATE SKIP LOCKED`, see
 `drizzle-job-repository.ts`) - safe under real concurrent claims, no
 external queue (Redis/BullMQ) needed at this scale.
+
+## Bidirectional (RTL) text - generic rules
+
+Writing direction is a property of the **text**, never of the template, the
+layer name or the project. `packages/schemas/src/text-direction.ts` derives it
+from Unicode alone and nothing else in the system is allowed to decide it.
+
+- **Detection.** `analyseTextDirection(text)` matches every character against
+  the RTL scripts listed in `RTL_SCRIPT_NAMES` through `Script_Extensions`
+  (Hebrew, Arabic, Syriac, Thaana, N'Ko, Adlam and the rest), and counts any
+  other letter as strongly left-to-right. One RTL character makes the whole
+  paragraph RTL, so `"מבית DYO App"` is a right-to-left line containing a
+  Latin run - not a left-to-right one. Text with no strongly-directional
+  character at all (digits, punctuation, symbols, whitespace) is NEUTRAL.
+- **What is applied.** For RTL text, and only for RTL text, `SET_TEXT` sets
+  the layer's paragraph direction to right-to-left and its composer engine to
+  the Middle-Eastern-capable (universal) engine, on the same TextDocument as
+  the text, **before** the auto-fit measures anything - both change the
+  rendered rect, so fitting first would fit the wrong shape. LTR and NEUTRAL
+  text never override the template's own typography.
+- **What is never done.** Characters are never reordered, mirrored or
+  reversed. Visual ordering is After Effects' own bidi algorithm's job once
+  direction and composer are right; reversing code points produces text that
+  looks correct in one rendering and is wrong everywhere else.
+- **Verification.** After writing, the stored text is read back and compared
+  with the requested UTF-16 code units position by position, and for RTL text
+  the direction and composer are read back and compared with what was
+  requested.
+
+### Failure behaviour
+
+Every one of these fails the operation closed - the job reports a typed
+failure and no later operation runs. A warning followed by an apparently
+successful edit is never acceptable here, because the rendered result would
+silently be wrong.
+
+| Condition | Result |
+| --- | --- |
+| RTL text, build exposes no `ParagraphDirection` | fails: "no paragraph-direction API" |
+| RTL text, build exposes no Middle-Eastern-capable `ComposerEngine` | fails: "no Middle-Eastern-capable composer engine" |
+| Direction or composer assignment throws | fails, quoting AE's own error |
+| Direction or composer not reported back after the write | fails, quoting what was read back |
+| Stored text differs from the requested code units | fails, naming the first differing code unit (or that the length differs) |
+
+### Evidence
+
+Each `SET_TEXT` operation reports a `textDirectionEvidence` entry on the job
+result (`sceneEditResultSchema`): the required direction, which RTL scripts
+occurred, whether the line is mixed, the layer's previous direction/composer,
+what was applied, and the three verification outcomes. The field defaults to
+`[]`, so results written before this existed still parse; absence means "this
+worker reported no direction evidence", never "the text was left-to-right".

@@ -168,6 +168,55 @@ describe("executeSceneEdit", () => {
     expect(readFileSync(sourcePath, "utf8")).toBe("fake-aep-bytes");
   });
 
+  it("reports each SET_TEXT operation's own direction evidence, in operation order, from the script's real resultingValue", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const rtlEvidence = {
+      requiredDirection: "RTL" as const,
+      rtlScripts: ["Hebrew"],
+      isMixed: true,
+      previousDirection: "DIRECTION_LEFT_TO_RIGHT",
+      previousComposerEngine: "LATIN_COMPOSER_ENGINE",
+      appliedDirection: "DIRECTION_RIGHT_TO_LEFT",
+      appliedComposerEngine: "UNIVERSAL_TYPE_ENGINE",
+      directionVerified: true,
+      composerVerified: true,
+      textCodeUnitsVerified: true,
+      codeUnitCount: 12,
+      note: null
+    };
+    const bridge = new FakeAeEditBridge((operation) => ({
+      ok: true,
+      operationType: operation.type,
+      previousValue: null,
+      resultingValue: operation.type === "SET_TEXT" ? { text: "any replacement", textDirection: rtlEvidence } : null
+    }));
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date("2026-01-01T00:00:00.000Z") },
+      makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha })
+    );
+
+    expect(result.failureReason).toBeNull();
+    // Only the SET_TEXT operation (index 0) contributes evidence - the
+    // SET_LAYER_VISIBILITY operation at index 1 has no text at all.
+    expect(result.textDirectionEvidence).toEqual([{ ...rtlEvidence, operationIndex: 0 }]);
+  });
+
+  it("reports no direction evidence when a SET_TEXT script result does not carry any - never invents a direction", async () => {
+    const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+    const workRoot = join(root, "work-root");
+    const bridge = new FakeAeEditBridge(alwaysSucceed);
+
+    const result = await executeSceneEdit(
+      { workRoot, aeEditBridge: bridge, previewCapture: new FakePreviewCapture(REAL_PREVIEW), uploadPreview: async () => ({ ok: true as const }), persistCheckpoint: async () => ({ ok: true as const }), resolveOperation: defaultResolveOperation, now: () => new Date("2026-01-01T00:00:00.000Z") },
+      makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha })
+    );
+
+    expect(result.failureReason).toBeNull();
+    expect(result.textDirectionEvidence).toEqual([]);
+  });
+
   it("captures reelsCompositionBuilt from a successful BUILD_REELS_COMPOSITION operation's own resultingValue - never fabricated", async () => {
     const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
     const workRoot = join(root, "work-root");

@@ -89,3 +89,24 @@ colorSafety:
 ```
 
 The actual official DYO blue must come from an approved source/configuration; do not invent it.
+
+## text-direction (bidirectional text)
+
+`packages/schemas/src/text-direction.ts` is pure, shared and has no AE or
+template knowledge:
+
+- `analyseTextDirection(text) -> TextDirectionAnalysis` - `requiredDirection`
+  (`RTL` / `LTR` / `NEUTRAL`), `hasRtl`, `hasStrongLtr`, `isMixed`,
+  `rtlScripts`, character counts, and `codeUnitCount`/`codePointCount`.
+- `textCodeUnits(text) -> number[]` - the exact UTF-16 sequence a mutation
+  must find in the project afterwards (order-sensitive, so reversed text can
+  never verify as equal).
+- `textDirectionEvidenceSchema` - what one SET_TEXT operation reports back:
+  required direction, RTL scripts, mixed flag, previous and applied
+  direction/composer, `directionVerified`, `composerVerified`,
+  `textCodeUnitsVerified`, `codeUnitCount` and an optional `note`.
+
+`sceneEditResultSchema.textDirectionEvidence` carries one such record per
+SET_TEXT operation, each tagged with its `operationIndex`. It **defaults to
+`[]`**, so stored results and older workers' results remain readable without
+migration; the API and database need no change to accept it.

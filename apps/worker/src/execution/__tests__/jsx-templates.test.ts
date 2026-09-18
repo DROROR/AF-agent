@@ -1393,6 +1393,12 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     };
     function File(path) { this.fsName = path; this.exists = true; }
     function ImportOptions(file) { this.file = file; }
+
+    // A real After Effects 2026 build exposes both text-engine globals; every
+    // SET_TEXT fixture models that, because right-to-left text legitimately
+    // fails closed without them (see the bidirectional-text describe below).
+    var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };
+    var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };
   `;
 
   const NESTED_TARGET = [
@@ -1411,7 +1417,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const script = buildOperationScript(999, "irrelevant - nested resolution never uses this", op);
     const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
     const result = JSON.parse(resultText);
-    expect(result).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
+    expect(result).toMatchObject({ ok: true, previousValue: "old text", resultingValue: { text: "מבית DYO App" } });
   });
 
   it("real 2026-09-14: a LOCKED text layer gets its new text and is locked again afterwards", () => {
@@ -1422,7 +1428,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "מבית DYO App" };
     const script = buildOperationScript(999, "irrelevant", op).replace(/return __result;\s*$/, "__result = JSON.stringify({ step: __result, locked: __logoTextLayer.locked, text: __logoTextLayer.sourceText.value.text });\n  return __result;");
     const outcome = JSON.parse(runFixedScriptWithoutNativeJson(script, lockedTextSetup));
-    expect(JSON.parse(outcome.step)).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
+    expect(JSON.parse(outcome.step)).toMatchObject({ ok: true, previousValue: "old text", resultingValue: { text: "מבית DYO App" } });
     expect(outcome.text).toBe("מבית DYO App");
     expect(outcome.locked).toBe(true);
   });
@@ -1840,7 +1846,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const script = buildOperationScript(999, "irrelevant", op);
     const resultText = runFixedScriptWithoutNativeJson(script, threeHopSetup);
     const result = JSON.parse(resultText);
-    expect(result).toEqual({ ok: true, previousValue: "before", resultingValue: "after" });
+    expect(result).toMatchObject({ ok: true, previousValue: "before", resultingValue: { text: "after" } });
   });
 
   it("stale/broken path fails closed: an intermediate hop's real composition id no longer matches the expected one (e.g. the project was re-ordered) - never guesses, never mutates", () => {
@@ -1886,7 +1892,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     `;
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "מבית DYO App" };
     const result = JSON.parse(runFixedScriptWithoutNativeJson(buildOperationScript(999, "irrelevant", op), driftedSetup));
-    expect(result).toEqual({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
+    expect(result).toMatchObject({ ok: true, previousValue: "old text", resultingValue: { text: "מבית DYO App" } });
   });
 
   it("refuses an ambiguous step: two compositions carrying the same id are never guessed between", () => {
@@ -1957,7 +1963,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const script = buildOperationScript(1, COMP_NAME, op);
     const resultText = runFixedScriptWithoutNativeJson(script, flatSetup);
     const result = JSON.parse(resultText);
-    expect(result).toEqual({ ok: true, previousValue: "flat before", resultingValue: "flat after" });
+    expect(result).toMatchObject({ ok: true, previousValue: "flat before", resultingValue: { text: "flat after" } });
   });
 
   it("never mutates the source AEP directly - the nested script never calls app.project.save() or anything file-writing beyond the layer/footage mutation itself", () => {
@@ -2678,6 +2684,12 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
     for (var __i = 1; __i <= 3; __i++) { if (__order[__i]) { __order[__i].index = __i; __order[__i].containingComp = __comp; } }
     __comp.layer = function (i) { return __order[i] || null; };
     var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 7 ? __comp : null; } } };
+
+    // A real After Effects 2026 build exposes both text-engine globals; every
+    // SET_TEXT fixture models that, because right-to-left text legitimately
+    // fails closed without them (see the bidirectional-text describe below).
+    var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };
+    var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };
   `;
   const textIndex = (options: FitOptions) => (options.blockerAbove ? 2 : 2);
   const HEBREW = "מבית DYO App";
@@ -2698,7 +2710,7 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
 
   it("shrinks the replaced line uniformly about its anchor just enough to clear a same-coloured shape behind it (~66 %)", () => {
     const outcome = runFit();
-    expect(outcome.step).toEqual({ ok: true, previousValue: "Mixkit", resultingValue: HEBREW });
+    expect(outcome.step).toMatchObject({ ok: true, previousValue: "Mixkit", resultingValue: { text: HEBREW } });
     expect(outcome.text).toBe(HEBREW);
     expect(expectedFactor).toBeGreaterThan(0.8);
     expect(expectedFactor).toBeLessThan(0.85);
@@ -2844,5 +2856,205 @@ describe("buildDescribeProjectFontsScript (real 2026-09-17: the template's fonts
     expect(result.ok).toBe(true);
     expect(result.facts.fontsApiAvailable).toBe(false);
     expect(result.facts.fonts.map((f: { status: string }) => f.status)).toEqual(["unknown", "unknown", "unknown"]);
+  });
+});
+
+/**
+ * BIDIRECTIONAL TEXT (2026-09-18 stage 1). The fake After Effects object
+ * model below is built from a per-test description, so the SAME script logic
+ * is exercised against several unrelated synthetic templates - a point-text
+ * layer, a multiline box-text layer, a template that already renders
+ * right-to-left, and builds whose ParagraphDirection/ComposerEngine APIs are
+ * absent or refuse the assignment. Nothing here depends on any real
+ * template's names, indices, sizes or hierarchy.
+ */
+describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
+  interface FakeTemplate {
+    /** What the template's own TextDocument reports before the edit. */
+    initialDirection?: string | null;
+    initialComposer?: string | null;
+    /** Omit the global entirely, the way an older AE build would. */
+    paragraphDirectionApi?: boolean;
+    composerEngineApi?: boolean;
+    /** Simulate AE refusing the assignment (throws) or silently ignoring it (keeps the old value). */
+    directionWrite?: "accept" | "throw" | "ignore";
+    composerWrite?: "accept" | "throw" | "ignore";
+    /** Simulate AE storing something other than the exact requested code units. */
+    storeText?: "exact" | "reversed" | "truncated";
+    layerName?: string;
+    compositionName?: string;
+  }
+
+  function fakeTemplateSetup(template: FakeTemplate): string {
+    const {
+      initialDirection = "DIRECTION_LEFT_TO_RIGHT",
+      initialComposer = "LATIN_COMPOSER_ENGINE",
+      paragraphDirectionApi = true,
+      composerEngineApi = true,
+      directionWrite = "accept",
+      composerWrite = "accept",
+      storeText = "exact",
+      layerName = "any layer name",
+      compositionName = COMP_NAME
+    } = template;
+    return `
+      function CompItem() {}
+      function TextLayer() {}
+      var __stored = { text: "template original", direction: ${JSON.stringify(initialDirection)}, composerEngine: ${JSON.stringify(initialComposer)} };
+      var __doc = {};
+      __doc.text = __stored.text;
+      __doc.direction = __stored.direction;
+      __doc.composerEngine = __stored.composerEngine;
+      ${
+        directionWrite === "throw"
+          ? `__doc.__setDirectionThrows = true;`
+          : ""
+      }
+      var __layerObj = new TextLayer();
+      __layerObj.name = ${JSON.stringify(layerName)};
+      __layerObj.locked = false;
+      __layerObj.sourceText = {
+        value: __doc,
+        setValue: function (doc) {
+          var __text = doc.text;
+          ${storeText === "reversed" ? "__text = __text.split('').reverse().join('');" : ""}
+          ${storeText === "truncated" ? "__text = __text.substring(0, __text.length - 1);" : ""}
+          __stored.text = __text;
+          ${directionWrite === "ignore" ? "" : "__stored.direction = doc.direction;"}
+          ${composerWrite === "ignore" ? "" : "__stored.composerEngine = doc.composerEngine;"}
+          __doc.text = __stored.text;
+          __doc.direction = __stored.direction;
+          __doc.composerEngine = __stored.composerEngine;
+        }
+      };
+      var __comp = new CompItem();
+      __comp.name = ${JSON.stringify(compositionName)};
+      __comp.numLayers = 1;
+      __comp.layer = function (i) { return i === 1 ? __layerObj : null; };
+      var app = {
+        beginUndoGroup: function () {},
+        endUndoGroup: function () {},
+        project: { numItems: 1, item: function (i) { return i === 1 ? __comp : null; } }
+      };
+      ${paragraphDirectionApi ? `var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };` : ""}
+      ${composerEngineApi ? `var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };` : ""}
+    `;
+  }
+
+  function setText(text: string, template: FakeTemplate = {}): { result: { ok: boolean; failureReason?: string; resultingValue?: { text?: string; textDirection?: Record<string, unknown> } }; storedText: string; storedDirection: string; storedComposer: string } {
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-x", layerIndex: 1, nestedTarget: null, text };
+    const script = buildOperationScript(1, template.compositionName ?? COMP_NAME, op);
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(fakeTemplateSetup(template), context);
+    const resultText = vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context) as string;
+    return {
+      result: JSON.parse(resultText),
+      storedText: vm.runInContext("__stored.text", context) as string,
+      storedDirection: vm.runInContext("__stored.direction", context) as string,
+      storedComposer: vm.runInContext("__stored.composerEngine", context) as string
+    };
+  }
+
+  it("applies right-to-left direction and the Middle-Eastern-capable composer for Hebrew, storing the exact code points", () => {
+    const hebrew = "מבית DYO App";
+    const { result, storedText, storedDirection, storedComposer } = setText(hebrew);
+    expect(result.ok).toBe(true);
+    expect(storedText).toBe(hebrew);
+    expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
+    expect(storedComposer).toBe("UNIVERSAL_TYPE_ENGINE");
+    expect(result.resultingValue?.textDirection).toMatchObject({
+      requiredDirection: "RTL",
+      isMixed: true,
+      previousDirection: "DIRECTION_LEFT_TO_RIGHT",
+      appliedDirection: "DIRECTION_RIGHT_TO_LEFT",
+      appliedComposerEngine: "UNIVERSAL_TYPE_ENGINE",
+      directionVerified: true,
+      composerVerified: true,
+      textCodeUnitsVerified: true
+    });
+  });
+
+  it("does the same for Arabic multiline box text, on a differently-shaped template", () => {
+    const arabic = "مرحبا بالعالم\rسطر ثان";
+    const { result, storedText, storedDirection } = setText(arabic, { layerName: "any other name", compositionName: "Another Comp", initialDirection: "DIRECTION_LEFT_TO_RIGHT" });
+    expect(result.ok).toBe(true);
+    expect(storedText).toBe(arabic);
+    expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
+    expect(result.resultingValue?.textDirection).toMatchObject({ requiredDirection: "RTL", rtlScripts: ["Arabic"] });
+  });
+
+  it("leaves a template that already renders right-to-left in that direction", () => {
+    const { result, storedDirection } = setText("שלום", { initialDirection: "DIRECTION_RIGHT_TO_LEFT", initialComposer: "UNIVERSAL_TYPE_ENGINE" });
+    expect(result.ok).toBe(true);
+    expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
+  });
+
+  it("never touches the template's own direction or composer for left-to-right text", () => {
+    const { result, storedText, storedDirection, storedComposer } = setText("Everything your customers need");
+    expect(result.ok).toBe(true);
+    expect(storedText).toBe("Everything your customers need");
+    expect(storedDirection).toBe("DIRECTION_LEFT_TO_RIGHT");
+    expect(storedComposer).toBe("LATIN_COMPOSER_ENGINE");
+    expect(result.resultingValue?.textDirection).toMatchObject({ requiredDirection: "LTR", appliedDirection: null, appliedComposerEngine: null, directionVerified: true });
+    expect(String(result.resultingValue?.textDirection?.note)).toContain("left unchanged");
+  });
+
+  it("never touches direction for neutral text such as digits and punctuation", () => {
+    const { result, storedDirection } = setText("1,234.56 %", { initialDirection: "DIRECTION_RIGHT_TO_LEFT", initialComposer: "UNIVERSAL_TYPE_ENGINE" });
+    expect(result.ok).toBe(true);
+    expect(result.resultingValue?.textDirection).toMatchObject({ requiredDirection: "NEUTRAL", appliedDirection: null });
+    expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
+  });
+
+  it("fails closed when right-to-left text meets a build with no paragraph-direction API", () => {
+    const { result } = setText("שלום", { paragraphDirectionApi: false });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("no paragraph-direction API");
+  });
+
+  it("fails closed when right-to-left text meets a build with no Middle-Eastern-capable composer", () => {
+    const { result } = setText("مرحبا", { composerEngineApi: false });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("Middle-Eastern-capable composer engine");
+  });
+
+  it("fails closed when After Effects silently ignores the direction assignment", () => {
+    const { result } = setText("שלום", { directionWrite: "ignore" });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("did not report the requested right-to-left paragraph direction");
+    expect(result.resultingValue?.textDirection).toMatchObject({ directionVerified: false });
+  });
+
+  it("fails closed when After Effects silently ignores the composer assignment", () => {
+    const { result } = setText("שלום", { composerWrite: "ignore" });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("Middle-Eastern-capable composer engine after writing");
+  });
+
+  it("fails closed when the stored text is not the exact requested code units", () => {
+    const { result } = setText("שלום", { storeText: "reversed" });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("does not match the requested code units");
+    expect(result.failureReason).toContain("first difference at code unit");
+  });
+
+  it("fails closed when the stored text is the wrong length", () => {
+    const { result } = setText("Perfect", { storeText: "truncated" });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("length differs");
+  });
+
+  it("never reverses characters itself - the script contains no reversal and writes the text exactly as given", () => {
+    const script = buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-x", layerIndex: 1, nestedTarget: null, text: "מבית DYO App" });
+    expect(script).not.toContain("reverse");
+    expect(script).toContain(JSON.stringify("מבית DYO App"));
+  });
+
+  it("sets direction and composer BEFORE the auto-fit measures anything", () => {
+    const script = buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-x", layerIndex: 1, nestedTarget: null, text: "שלום" });
+    expect(script.indexOf("__td.direction = ParagraphDirection.DIRECTION_RIGHT_TO_LEFT")).toBeGreaterThan(-1);
+    expect(script.indexOf("__td.direction = ParagraphDirection.DIRECTION_RIGHT_TO_LEFT")).toBeLessThan(script.indexOf("__fitFailureReason"));
+    expect(script.indexOf("__td.composerEngine = ComposerEngine.UNIVERSAL_TYPE_ENGINE")).toBeLessThan(script.indexOf("__fitFailureReason"));
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { textDirectionEvidenceSchema } from "./text-direction.js";
 
 /**
  * Phase 7A foundation: the strict, allowlisted contract for a future
@@ -620,6 +621,25 @@ export const sceneEditResultSchema = z.object({
     })
     .nullable()
     .default(null),
+  /**
+   * One entry per SET_TEXT operation this job actually ran (in operation
+   * order), recording what writing direction the replacement text REQUIRED
+   * from Unicode alone, what After Effects reported after the write, and how
+   * the stored code units were verified - see text-direction.ts.
+   *
+   * Defaulted to `[]` rather than required, so a result written by an older
+   * worker (or an older stored job result being read back) still parses
+   * unchanged: absence means "this worker did not report direction
+   * evidence", never "the text was left-to-right".
+   */
+  textDirectionEvidence: z
+    .array(
+      textDirectionEvidenceSchema.extend({
+        /** Which operation in this job's own `operations` array produced this evidence. */
+        operationIndex: z.number().int().nonnegative()
+      })
+    )
+    .default([]),
   failureReason: z.string().nullable(),
   startedAt: z.string().datetime(),
   completedAt: z.string().datetime()
