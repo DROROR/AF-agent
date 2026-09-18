@@ -11,6 +11,10 @@ export default defineConfig({
       "apps/**/*.test.tsx",
       "packages/**/*.test.ts"
     ],
+    setupFiles: ["./apps/web/src/test-utils/vitest-setup.ts"],
+    // Comfortably above @testing-library's own async ceiling (5 s, see
+    // apps/web/src/test-utils/vitest-setup.ts), so a genuinely stuck test
+    // still fails as a timeout rather than hanging the run.
     passWithNoTests: false
   }
 });

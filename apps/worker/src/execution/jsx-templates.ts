@@ -255,19 +255,22 @@ export const TEXT_AUTO_FIT_MIN_FACTOR = 0.6;
  * BIDIRECTIONAL TEXT (2026-09-18, generic - no template, language or layer
  * name is ever consulted).
  *
- * `analyseTextDirection` derives from Unicode alone whether the REPLACEMENT
- * text is right-to-left. When it is, this mutation sets the paragraph
- * direction and a Middle-Eastern-capable composer engine on the same
- * TextDocument as the text itself, BEFORE the auto-fit measures anything -
- * both properties change the rendered rect, so fitting first would fit the
- * wrong shape.
+ * `analyseTextDirection` derives from Unicode alone (a) whether the
+ * REPLACEMENT text contains any right-to-left character and (b) its base
+ * direction, from the first strongly-directional character - UAX #9's own
+ * P2/P3 rule. When any right-to-left character is present, this mutation sets
+ * that base direction (right-to-left for a Hebrew-first line, left-to-right
+ * for a Latin-first line that merely contains Hebrew) AND a
+ * Middle-Eastern-capable composer engine on the same TextDocument as the text
+ * itself, BEFORE the auto-fit measures anything - both properties change the
+ * rendered rect, so fitting first would fit the wrong shape.
  *
- * FAILS CLOSED, NEVER "WARNS AND SUCCEEDS". If the text needs RTL and this
- * After Effects build exposes no ParagraphDirection/ComposerEngine, or an
- * assignment throws, or the read-back does not show the requested values,
- * the operation FAILS. Left-to-right or purely neutral text (digits,
- * punctuation) never overrides the template's own typography, so nothing is
- * assigned and nothing can fail.
+ * FAILS CLOSED, NEVER "WARNS AND SUCCEEDS". If the text contains
+ * right-to-left characters and this After Effects build exposes no
+ * ParagraphDirection/ComposerEngine, or an assignment throws, or the
+ * read-back does not show the requested values, the operation FAILS. Text
+ * with no right-to-left character at all never overrides the template's own
+ * typography, so nothing is assigned and nothing can fail.
  *
  * The characters themselves are never reordered, mirrored or reversed: the
  * exact code units are written, then read back and compared position by
@@ -277,14 +280,17 @@ function buildSetTextMutation(text: string): string {
   const textLiteral = JSON.stringify(text);
   const analysis = analyseTextDirection(text);
   const expectedCodeUnits = JSON.stringify(textCodeUnits(text));
-  const requiresRtl = analysis.requiredDirection === "RTL";
+  // Any right-to-left character means a plain Latin composer cannot shape
+  // this text correctly, whichever way the paragraph itself reads.
+  const requiresBidi = analysis.requiresBidiHandling;
+  const wantedDirectionMember = analysis.requiredDirection === "RTL" ? "DIRECTION_RIGHT_TO_LEFT" : "DIRECTION_LEFT_TO_RIGHT";
   return `
         if (!(__layer instanceof TextLayer)) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer is not a text layer" });
         } else {
           var __td = __layer.sourceText.value;
           var __previousText = __td.text;
-          var __requiresRtl = ${requiresRtl ? "true" : "false"};
+          var __requiresBidi = ${requiresBidi ? "true" : "false"};
           var __expectedCodeUnits = ${expectedCodeUnits};
           var __dirNote = null;
           var __dirFailureReason = null;
@@ -309,24 +315,24 @@ function buildSetTextMutation(text: string): string {
           var __wantedDirection = null;
           var __wantedComposer = null;
           __td.text = ${textLiteral};
-          if (__requiresRtl) {
-            if (typeof ParagraphDirection === "undefined" || ParagraphDirection.DIRECTION_RIGHT_TO_LEFT === undefined) {
-              __dirFailureReason = "this text is right-to-left, but this After Effects build exposes no paragraph-direction API (ParagraphDirection) - refusing to write right-to-left text that would render in the template's own left-to-right direction";
+          if (__requiresBidi) {
+            if (typeof ParagraphDirection === "undefined" || ParagraphDirection.${wantedDirectionMember} === undefined) {
+              __dirFailureReason = "this text contains right-to-left characters, but this After Effects build exposes no paragraph-direction API (ParagraphDirection) - refusing to write bidirectional text whose base direction cannot be set";
             } else if (typeof ComposerEngine === "undefined" || ComposerEngine.UNIVERSAL_TYPE_ENGINE === undefined) {
-              __dirFailureReason = "this text is right-to-left, but this After Effects build exposes no Middle-Eastern-capable composer engine (ComposerEngine.UNIVERSAL_TYPE_ENGINE) - refusing to write right-to-left text the composer cannot shape correctly";
+              __dirFailureReason = "this text contains right-to-left characters, but this After Effects build exposes no Middle-Eastern-capable composer engine (ComposerEngine.UNIVERSAL_TYPE_ENGINE) - refusing to write text the composer cannot shape correctly";
             } else {
-              __wantedDirection = String(ParagraphDirection.DIRECTION_RIGHT_TO_LEFT);
+              __wantedDirection = String(ParagraphDirection.${wantedDirectionMember});
               __wantedComposer = String(ComposerEngine.UNIVERSAL_TYPE_ENGINE);
               try {
-                __td.direction = ParagraphDirection.DIRECTION_RIGHT_TO_LEFT;
+                __td.direction = ParagraphDirection.${wantedDirectionMember};
               } catch (__directionWriteError) {
-                __dirFailureReason = "this text is right-to-left, but its paragraph direction could not be set: " + (__directionWriteError && __directionWriteError.toString ? __directionWriteError.toString() : String(__directionWriteError));
+                __dirFailureReason = "this text contains right-to-left characters, but its base paragraph direction could not be set: " + (__directionWriteError && __directionWriteError.toString ? __directionWriteError.toString() : String(__directionWriteError));
               }
               if (__dirFailureReason === null) {
                 try {
                   __td.composerEngine = ComposerEngine.UNIVERSAL_TYPE_ENGINE;
                 } catch (__composerWriteError) {
-                  __dirFailureReason = "this text is right-to-left, but its composer engine could not be set to the Middle-Eastern-capable engine: " + (__composerWriteError && __composerWriteError.toString ? __composerWriteError.toString() : String(__composerWriteError));
+                  __dirFailureReason = "this text contains right-to-left characters, but its composer engine could not be set to the Middle-Eastern-capable engine: " + (__composerWriteError && __composerWriteError.toString ? __composerWriteError.toString() : String(__composerWriteError));
                 }
               }
             }
@@ -353,26 +359,27 @@ function buildSetTextMutation(text: string): string {
                 }
               }
             }
-            var __directionVerified = __requiresRtl ? __appliedDirection !== null && __appliedDirection === __wantedDirection : true;
-            var __composerVerified = __requiresRtl ? __appliedComposer !== null && __appliedComposer === __wantedComposer : true;
-            if (!__requiresRtl) {
+            var __directionVerified = __requiresBidi ? __appliedDirection !== null && __appliedDirection === __wantedDirection : true;
+            var __composerVerified = __requiresBidi ? __appliedComposer !== null && __appliedComposer === __wantedComposer : true;
+            if (!__requiresBidi) {
               __dirNote = "text contains no right-to-left character - the template's own paragraph direction and composer were left unchanged";
             }
             if (!__textVerified) {
               __dirFailureReason = "the stored text does not match the requested code units" + (__mismatchAt >= 0 ? " (first difference at code unit " + __mismatchAt + ")" : " (length differs)") + " - refusing to report a text edit that After Effects did not store exactly";
             } else if (!__directionVerified) {
-              __dirFailureReason = "this text is right-to-left, but After Effects did not report the requested right-to-left paragraph direction after writing it (read back: " + (__appliedDirection === null ? "unreadable" : __appliedDirection) + ")";
+              __dirFailureReason = "this text contains right-to-left characters, but After Effects did not report the requested base paragraph direction (" + __wantedDirection + ") after writing it (read back: " + (__appliedDirection === null ? "unreadable" : __appliedDirection) + ")";
             } else if (!__composerVerified) {
-              __dirFailureReason = "this text is right-to-left, but After Effects did not report the requested Middle-Eastern-capable composer engine after writing it (read back: " + (__appliedComposer === null ? "unreadable" : __appliedComposer) + ")";
+              __dirFailureReason = "this text contains right-to-left characters, but After Effects did not report the requested Middle-Eastern-capable composer engine after writing it (read back: " + (__appliedComposer === null ? "unreadable" : __appliedComposer) + ")";
             }
             var __directionEvidence = {
               requiredDirection: ${JSON.stringify(analysis.requiredDirection)},
               rtlScripts: ${JSON.stringify(analysis.rtlScripts)},
               isMixed: ${analysis.isMixed ? "true" : "false"},
+              requiresBidiHandling: __requiresBidi,
               previousDirection: __previousDirection,
               previousComposerEngine: __previousComposer,
-              appliedDirection: __requiresRtl ? __appliedDirection : null,
-              appliedComposerEngine: __requiresRtl ? __appliedComposer : null,
+              appliedDirection: __requiresBidi ? __appliedDirection : null,
+              appliedComposerEngine: __requiresBidi ? __appliedComposer : null,
               directionVerified: __directionVerified,
               composerVerified: __composerVerified,
               textCodeUnitsVerified: __textVerified,
@@ -380,9 +387,13 @@ function buildSetTextMutation(text: string): string {
               note: __dirNote
             };
             if (__dirFailureReason !== null) {
-              __result = JSON.stringify({ ok: false, failureReason: __dirFailureReason, resultingValue: { textDirection: __directionEvidence } });
+              __result = JSON.stringify({ ok: false, failureReason: __dirFailureReason, textDirection: __directionEvidence });
             } else {
-              __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: { text: ${textLiteral}, textDirection: __directionEvidence } });
+              // resultingValue stays exactly what it has always been for
+              // SET_TEXT - the stored text string. The direction evidence is
+              // a SEPARATE, optional key, so no existing consumer of
+              // resultingValue can be affected by it existing.
+              __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${textLiteral}, textDirection: __directionEvidence });
               ${buildTextAutoFit()}
             }
           }

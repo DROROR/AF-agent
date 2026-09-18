@@ -96,13 +96,15 @@ The actual official DYO blue must come from an approved source/configuration; do
 template knowledge:
 
 - `analyseTextDirection(text) -> TextDirectionAnalysis` - `requiredDirection`
-  (`RTL` / `LTR` / `NEUTRAL`), `hasRtl`, `hasStrongLtr`, `isMixed`,
-  `rtlScripts`, character counts, and `codeUnitCount`/`codePointCount`.
+  (`RTL` / `LTR` / `NEUTRAL`, taken from the first strong character per UAX #9
+  P2/P3), `hasRtl`, `hasStrongLtr`, `requiresBidiHandling` (any RTL character
+  present), `isMixed`, `rtlScripts`, character counts, and
+  `codeUnitCount`/`codePointCount`.
 - `textCodeUnits(text) -> number[]` - the exact UTF-16 sequence a mutation
   must find in the project afterwards (order-sensitive, so reversed text can
   never verify as equal).
 - `textDirectionEvidenceSchema` - what one SET_TEXT operation reports back:
-  required direction, RTL scripts, mixed flag, previous and applied
+  base direction, RTL scripts, mixed flag, `requiresBidiHandling`, previous and applied
   direction/composer, `directionVerified`, `composerVerified`,
   `textCodeUnitsVerified`, `codeUnitCount` and an optional `note`.
 

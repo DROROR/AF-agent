@@ -26,14 +26,52 @@ describe("analyseTextDirection", () => {
     expect(analysis.strongLtrCharacterCount).toBe(0);
   });
 
-  it("treats mixed right-to-left and Latin text as a right-to-left paragraph", () => {
+  it("takes the base direction from the FIRST strong character: Hebrew-first mixed text reads right-to-left", () => {
     const analysis = analyseTextDirection("מבית DYO App");
     expect(analysis.requiredDirection).toBe("RTL");
     expect(analysis.isMixed).toBe(true);
     expect(analysis.hasRtl).toBe(true);
     expect(analysis.hasStrongLtr).toBe(true);
+    expect(analysis.requiresBidiHandling).toBe(true);
     expect(analysis.rtlCharacterCount).toBe(4);
     expect(analysis.strongLtrCharacterCount).toBe(6);
+  });
+
+  it("English-first mixed text reads left-to-right, even though it contains Hebrew", () => {
+    const analysis = analyseTextDirection("DYO App מבית");
+    expect(analysis.requiredDirection).toBe("LTR");
+    expect(analysis.isMixed).toBe(true);
+    expect(analysis.hasRtl).toBe(true);
+    // Still needs real bidi handling: a plain Latin composer cannot shape the
+    // Hebrew run, whichever way the paragraph itself reads.
+    expect(analysis.requiresBidiHandling).toBe(true);
+  });
+
+  it("Arabic-first mixed text reads right-to-left", () => {
+    expect(analyseTextDirection("مرحبا DYO App").requiredDirection).toBe("RTL");
+  });
+
+  it("ignores leading neutrals - digits, punctuation, quotes, whitespace - when choosing the base direction", () => {
+    expect(analyseTextDirection("  \"מבית\" DYO").requiredDirection).toBe("RTL");
+    expect(analyseTextDirection("  \"DYO\" מבית").requiredDirection).toBe("LTR");
+    expect(analyseTextDirection("2026 — מבית DYO").requiredDirection).toBe("RTL");
+    expect(analyseTextDirection("2026 — DYO מבית").requiredDirection).toBe("LTR");
+    expect(analyseTextDirection("(1) מבית").requiredDirection).toBe("RTL");
+  });
+
+  it("takes the base direction from the first strong character of the whole text, not of each line", () => {
+    // A multiline block is one TextDocument with one base direction: the
+    // first strong character decides it, wherever the later lines start.
+    expect(analyseTextDirection("DYO App\rמבית\rמשהו").requiredDirection).toBe("LTR");
+    expect(analyseTextDirection("מבית\rDYO App\rmore").requiredDirection).toBe("RTL");
+  });
+
+  it("a Hebrew line that merely ends in Latin still reads right-to-left", () => {
+    expect(analyseTextDirection("שלום עולם DYO").requiredDirection).toBe("RTL");
+  });
+
+  it("a Latin line that merely ends in Hebrew still reads left-to-right", () => {
+    expect(analyseTextDirection("Made by DYO שלום").requiredDirection).toBe("LTR");
   });
 
   it("reports every distinct right-to-left script that occurs", () => {
@@ -42,11 +80,12 @@ describe("analyseTextDirection", () => {
     expect([...analysis.rtlScripts].sort()).toEqual(["Arabic", "Hebrew"]);
   });
 
-  it("treats Latin-only text as left-to-right", () => {
+  it("treats Latin-only text as left-to-right and needing no bidi handling", () => {
     const analysis = analyseTextDirection("Perfect high-quality items");
     expect(analysis.requiredDirection).toBe("LTR");
     expect(analysis.hasRtl).toBe(false);
     expect(analysis.isMixed).toBe(false);
+    expect(analysis.requiresBidiHandling).toBe(false);
   });
 
   it("treats a non-Latin left-to-right script as left-to-right without enumerating it", () => {
@@ -60,6 +99,7 @@ describe("analyseTextDirection", () => {
       expect(analysis.requiredDirection).toBe("NEUTRAL");
       expect(analysis.hasRtl).toBe(false);
       expect(analysis.hasStrongLtr).toBe(false);
+      expect(analysis.requiresBidiHandling).toBe(false);
     }
   });
 
@@ -115,6 +155,7 @@ describe("textDirectionEvidenceSchema", () => {
       isMixed: true,
       previousDirection: "0",
       previousComposerEngine: "0",
+      requiresBidiHandling: true,
       appliedDirection: "1",
       appliedComposerEngine: "2",
       directionVerified: true,
@@ -141,5 +182,6 @@ describe("textDirectionEvidenceSchema", () => {
     });
     expect(parsed.rtlScripts).toEqual([]);
     expect(parsed.note).toBeNull();
+    expect(parsed.requiresBidiHandling).toBe(false);
   });
 });

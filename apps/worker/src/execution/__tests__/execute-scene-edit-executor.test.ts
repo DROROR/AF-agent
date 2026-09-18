@@ -175,6 +175,7 @@ describe("executeSceneEdit", () => {
       requiredDirection: "RTL" as const,
       rtlScripts: ["Hebrew"],
       isMixed: true,
+      requiresBidiHandling: true,
       previousDirection: "DIRECTION_LEFT_TO_RIGHT",
       previousComposerEngine: "LATIN_COMPOSER_ENGINE",
       appliedDirection: "DIRECTION_RIGHT_TO_LEFT",
@@ -189,7 +190,10 @@ describe("executeSceneEdit", () => {
       ok: true,
       operationType: operation.type,
       previousValue: null,
-      resultingValue: operation.type === "SET_TEXT" ? { text: "any replacement", textDirection: rtlEvidence } : null
+      // SET_TEXT's resultingValue keeps its long-standing string shape; the
+      // direction evidence travels beside it, exactly as the real script emits it.
+      resultingValue: operation.type === "SET_TEXT" ? "any replacement" : null,
+      textDirection: operation.type === "SET_TEXT" ? rtlEvidence : undefined
     }));
 
     const result = await executeSceneEdit(

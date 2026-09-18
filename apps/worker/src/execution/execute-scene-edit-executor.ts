@@ -31,14 +31,15 @@ const horizontalCompositionBuiltResultSchema = z.object({
 });
 
 /**
- * What jsx-templates.ts's SET_TEXT script's own resultingValue carries
- * alongside the stored text (2026-09-18 bidirectional-text stage): the
- * direction/composer/verification evidence defined in text-direction.ts.
- * Parsed defensively like every other resultingValue on this path - a script
- * result that does not match is simply not reported as evidence, and never
- * turns a completed operation into a failure.
+ * What jsx-templates.ts's SET_TEXT script reports BESIDE its resultingValue
+ * (2026-09-18 bidirectional-text stage): the direction/composer/verification
+ * evidence defined in text-direction.ts. Deliberately a separate key rather
+ * than part of resultingValue, which keeps its long-standing "the stored text
+ * string" shape for SET_TEXT. Parsed defensively like every other script
+ * value on this path - a result that does not match is simply not reported as
+ * evidence, and never turns a completed operation into a failure.
  */
-const setTextDirectionResultSchema = z.object({ textDirection: textDirectionEvidenceSchema });
+const setTextDirectionResultSchema = textDirectionEvidenceSchema;
 
 /**
  * The default frame this project's own "first-frame execution" workflow
@@ -378,9 +379,9 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     operationsAppliedThisRun++;
 
     if (operation.type === "SET_TEXT") {
-      const parsedResultingValue = setTextDirectionResultSchema.safeParse(outcome.resultingValue);
-      if (parsedResultingValue.success) {
-        textDirectionEvidence.push({ ...parsedResultingValue.data.textDirection, operationIndex: pendingIndex });
+      const parsedDirectionEvidence = setTextDirectionResultSchema.safeParse(outcome.textDirection);
+      if (parsedDirectionEvidence.success) {
+        textDirectionEvidence.push({ ...parsedDirectionEvidence.data, operationIndex: pendingIndex });
       }
     }
 

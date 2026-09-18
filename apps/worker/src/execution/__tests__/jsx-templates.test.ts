@@ -1417,7 +1417,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const script = buildOperationScript(999, "irrelevant - nested resolution never uses this", op);
     const resultText = runFixedScriptWithoutNativeJson(script, NESTED_FAKE_APP_SETUP);
     const result = JSON.parse(resultText);
-    expect(result).toMatchObject({ ok: true, previousValue: "old text", resultingValue: { text: "מבית DYO App" } });
+    expect(result).toMatchObject({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
   });
 
   it("real 2026-09-14: a LOCKED text layer gets its new text and is locked again afterwards", () => {
@@ -1428,7 +1428,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "מבית DYO App" };
     const script = buildOperationScript(999, "irrelevant", op).replace(/return __result;\s*$/, "__result = JSON.stringify({ step: __result, locked: __logoTextLayer.locked, text: __logoTextLayer.sourceText.value.text });\n  return __result;");
     const outcome = JSON.parse(runFixedScriptWithoutNativeJson(script, lockedTextSetup));
-    expect(JSON.parse(outcome.step)).toMatchObject({ ok: true, previousValue: "old text", resultingValue: { text: "מבית DYO App" } });
+    expect(JSON.parse(outcome.step)).toMatchObject({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
     expect(outcome.text).toBe("מבית DYO App");
     expect(outcome.locked).toBe(true);
   });
@@ -1846,7 +1846,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const script = buildOperationScript(999, "irrelevant", op);
     const resultText = runFixedScriptWithoutNativeJson(script, threeHopSetup);
     const result = JSON.parse(resultText);
-    expect(result).toMatchObject({ ok: true, previousValue: "before", resultingValue: { text: "after" } });
+    expect(result).toEqual({ ok: true, previousValue: "before", resultingValue: "after", textDirection: expect.any(Object) });
   });
 
   it("stale/broken path fails closed: an intermediate hop's real composition id no longer matches the expected one (e.g. the project was re-ordered) - never guesses, never mutates", () => {
@@ -1892,7 +1892,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     `;
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: null, layerIndex: null, nestedTarget: NESTED_TARGET, text: "מבית DYO App" };
     const result = JSON.parse(runFixedScriptWithoutNativeJson(buildOperationScript(999, "irrelevant", op), driftedSetup));
-    expect(result).toMatchObject({ ok: true, previousValue: "old text", resultingValue: { text: "מבית DYO App" } });
+    expect(result).toMatchObject({ ok: true, previousValue: "old text", resultingValue: "מבית DYO App" });
   });
 
   it("refuses an ambiguous step: two compositions carrying the same id are never guessed between", () => {
@@ -1963,7 +1963,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     const script = buildOperationScript(1, COMP_NAME, op);
     const resultText = runFixedScriptWithoutNativeJson(script, flatSetup);
     const result = JSON.parse(resultText);
-    expect(result).toMatchObject({ ok: true, previousValue: "flat before", resultingValue: { text: "flat after" } });
+    expect(result).toEqual({ ok: true, previousValue: "flat before", resultingValue: "flat after", textDirection: expect.any(Object) });
   });
 
   it("never mutates the source AEP directly - the nested script never calls app.project.save() or anything file-writing beyond the layer/footage mutation itself", () => {
@@ -2710,7 +2710,7 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
 
   it("shrinks the replaced line uniformly about its anchor just enough to clear a same-coloured shape behind it (~66 %)", () => {
     const outcome = runFit();
-    expect(outcome.step).toMatchObject({ ok: true, previousValue: "Mixkit", resultingValue: { text: HEBREW } });
+    expect(outcome.step).toMatchObject({ ok: true, previousValue: "Mixkit", resultingValue: HEBREW });
     expect(outcome.text).toBe(HEBREW);
     expect(expectedFactor).toBeGreaterThan(0.8);
     expect(expectedFactor).toBeLessThan(0.85);
@@ -2941,7 +2941,7 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
     `;
   }
 
-  function setText(text: string, template: FakeTemplate = {}): { result: { ok: boolean; failureReason?: string; resultingValue?: { text?: string; textDirection?: Record<string, unknown> } }; storedText: string; storedDirection: string; storedComposer: string } {
+  function setText(text: string, template: FakeTemplate = {}): { result: { ok: boolean; failureReason?: string; resultingValue?: unknown; textDirection?: Record<string, unknown> }; storedText: string; storedDirection: string; storedComposer: string } {
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-x", layerIndex: 1, nestedTarget: null, text };
     const script = buildOperationScript(1, template.compositionName ?? COMP_NAME, op);
     const context = vm.createContext({});
@@ -2956,6 +2956,31 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
     };
   }
 
+  it("sets a LEFT-to-right base direction for English-first mixed text, and still switches to the Middle-Eastern-capable composer", () => {
+    const englishFirst = "DYO App מבית";
+    const { result, storedText, storedDirection, storedComposer } = setText(englishFirst, { initialDirection: "DIRECTION_RIGHT_TO_LEFT", initialComposer: "LATIN_COMPOSER_ENGINE" });
+    expect(result.ok).toBe(true);
+    expect(storedText).toBe(englishFirst);
+    expect(storedDirection).toBe("DIRECTION_LEFT_TO_RIGHT");
+    expect(storedComposer).toBe("UNIVERSAL_TYPE_ENGINE");
+    expect(result.textDirection).toMatchObject({ requiredDirection: "LTR", isMixed: true, requiresBidiHandling: true, appliedDirection: "DIRECTION_LEFT_TO_RIGHT", directionVerified: true, composerVerified: true });
+  });
+
+  it("fails closed for English-first mixed text too when the base direction cannot be applied", () => {
+    // The template starts right-to-left, so an ignored assignment is genuinely
+    // detectable: silently leaving it RTL would render this line wrongly.
+    const { result } = setText("DYO App מבית", { directionWrite: "ignore", initialDirection: "DIRECTION_RIGHT_TO_LEFT" });
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toContain("did not report the requested base paragraph direction");
+    expect(result.failureReason).toContain("DIRECTION_LEFT_TO_RIGHT");
+  });
+
+  it("ignores leading neutrals when choosing the base direction, on either side", () => {
+    expect(setText("\"מבית\" DYO").storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
+    expect(setText("\"DYO\" מבית").storedDirection).toBe("DIRECTION_LEFT_TO_RIGHT");
+    expect(setText("2026 — מבית DYO").storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
+  });
+
   it("applies right-to-left direction and the Middle-Eastern-capable composer for Hebrew, storing the exact code points", () => {
     const hebrew = "מבית DYO App";
     const { result, storedText, storedDirection, storedComposer } = setText(hebrew);
@@ -2963,9 +2988,10 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
     expect(storedText).toBe(hebrew);
     expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
     expect(storedComposer).toBe("UNIVERSAL_TYPE_ENGINE");
-    expect(result.resultingValue?.textDirection).toMatchObject({
+    expect(result.textDirection).toMatchObject({
       requiredDirection: "RTL",
       isMixed: true,
+      requiresBidiHandling: true,
       previousDirection: "DIRECTION_LEFT_TO_RIGHT",
       appliedDirection: "DIRECTION_RIGHT_TO_LEFT",
       appliedComposerEngine: "UNIVERSAL_TYPE_ENGINE",
@@ -2981,7 +3007,7 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
     expect(result.ok).toBe(true);
     expect(storedText).toBe(arabic);
     expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
-    expect(result.resultingValue?.textDirection).toMatchObject({ requiredDirection: "RTL", rtlScripts: ["Arabic"] });
+    expect(result.textDirection).toMatchObject({ requiredDirection: "RTL", rtlScripts: ["Arabic"] });
   });
 
   it("leaves a template that already renders right-to-left in that direction", () => {
@@ -2996,14 +3022,14 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
     expect(storedText).toBe("Everything your customers need");
     expect(storedDirection).toBe("DIRECTION_LEFT_TO_RIGHT");
     expect(storedComposer).toBe("LATIN_COMPOSER_ENGINE");
-    expect(result.resultingValue?.textDirection).toMatchObject({ requiredDirection: "LTR", appliedDirection: null, appliedComposerEngine: null, directionVerified: true });
-    expect(String(result.resultingValue?.textDirection?.note)).toContain("left unchanged");
+    expect(result.textDirection).toMatchObject({ requiredDirection: "LTR", requiresBidiHandling: false, appliedDirection: null, appliedComposerEngine: null, directionVerified: true });
+    expect(String(result.textDirection?.note)).toContain("left unchanged");
   });
 
   it("never touches direction for neutral text such as digits and punctuation", () => {
     const { result, storedDirection } = setText("1,234.56 %", { initialDirection: "DIRECTION_RIGHT_TO_LEFT", initialComposer: "UNIVERSAL_TYPE_ENGINE" });
     expect(result.ok).toBe(true);
-    expect(result.resultingValue?.textDirection).toMatchObject({ requiredDirection: "NEUTRAL", appliedDirection: null });
+    expect(result.textDirection).toMatchObject({ requiredDirection: "NEUTRAL", appliedDirection: null });
     expect(storedDirection).toBe("DIRECTION_RIGHT_TO_LEFT");
   });
 
@@ -3022,8 +3048,9 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
   it("fails closed when After Effects silently ignores the direction assignment", () => {
     const { result } = setText("שלום", { directionWrite: "ignore" });
     expect(result.ok).toBe(false);
-    expect(result.failureReason).toContain("did not report the requested right-to-left paragraph direction");
-    expect(result.resultingValue?.textDirection).toMatchObject({ directionVerified: false });
+    expect(result.failureReason).toContain("did not report the requested base paragraph direction");
+    expect(result.failureReason).toContain("DIRECTION_RIGHT_TO_LEFT");
+    expect(result.textDirection).toMatchObject({ directionVerified: false });
   });
 
   it("fails closed when After Effects silently ignores the composer assignment", () => {
@@ -3056,5 +3083,17 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
     expect(script.indexOf("__td.direction = ParagraphDirection.DIRECTION_RIGHT_TO_LEFT")).toBeGreaterThan(-1);
     expect(script.indexOf("__td.direction = ParagraphDirection.DIRECTION_RIGHT_TO_LEFT")).toBeLessThan(script.indexOf("__fitFailureReason"));
     expect(script.indexOf("__td.composerEngine = ComposerEngine.UNIVERSAL_TYPE_ENGINE")).toBeLessThan(script.indexOf("__fitFailureReason"));
+  });
+
+  it("keeps SET_TEXT's resultingValue exactly the stored text string it has always been - the evidence rides beside it", () => {
+    const { result } = setText("מבית DYO App");
+    expect(result.resultingValue).toBe("מבית DYO App");
+    expect(typeof result.resultingValue).toBe("string");
+    expect(result.textDirection).toBeTypeOf("object");
+  });
+
+  it("emits no direction/composer assignment at all for text without right-to-left characters", () => {
+    const script = buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-x", layerIndex: 1, nestedTarget: null, text: "Plain Latin copy" });
+    expect(script).toContain("var __requiresBidi = false;");
   });
 });

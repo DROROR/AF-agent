@@ -108,16 +108,22 @@ from Unicode alone and nothing else in the system is allowed to decide it.
 - **Detection.** `analyseTextDirection(text)` matches every character against
   the RTL scripts listed in `RTL_SCRIPT_NAMES` through `Script_Extensions`
   (Hebrew, Arabic, Syriac, Thaana, N'Ko, Adlam and the rest), and counts any
-  other letter as strongly left-to-right. One RTL character makes the whole
-  paragraph RTL, so `"מבית DYO App"` is a right-to-left line containing a
-  Latin run - not a left-to-right one. Text with no strongly-directional
-  character at all (digits, punctuation, symbols, whitespace) is NEUTRAL.
-- **What is applied.** For RTL text, and only for RTL text, `SET_TEXT` sets
-  the layer's paragraph direction to right-to-left and its composer engine to
-  the Middle-Eastern-capable (universal) engine, on the same TextDocument as
-  the text, **before** the auto-fit measures anything - both change the
-  rendered rect, so fitting first would fit the wrong shape. LTR and NEUTRAL
-  text never override the template's own typography.
+  other letter as strongly left-to-right.
+- **Base direction is first-strong**, the same rule the Unicode Bidirectional
+  Algorithm uses to choose a paragraph's base direction (UAX #9, P2/P3): the
+  FIRST strongly-directional character decides it. So `"מבית DYO App"` is a
+  right-to-left paragraph, `"DYO App מבית"` is a left-to-right one, and
+  leading digits, punctuation, quotes or whitespace never decide anything.
+  Text with no strong character at all is NEUTRAL.
+- **What is applied.** Whenever the text contains ANY right-to-left character
+  (`requiresBidiHandling`), `SET_TEXT` sets that first-strong base direction -
+  right-to-left for a Hebrew-first line, left-to-right for a Latin-first line
+  that merely contains Hebrew - AND the Middle-Eastern-capable (universal)
+  composer engine, which a Latin composer cannot substitute for whichever way
+  the paragraph reads. Both are set on the same TextDocument as the text,
+  **before** the auto-fit measures anything, because both change the rendered
+  rect. Text with no right-to-left character never overrides the template's
+  own direction or composer, whether it is LTR or NEUTRAL.
 - **What is never done.** Characters are never reordered, mirrored or
   reversed. Visual ordering is After Effects' own bidi algorithm's job once
   direction and composer are right; reversing code points produces text that
@@ -136,17 +142,23 @@ silently be wrong.
 
 | Condition | Result |
 | --- | --- |
-| RTL text, build exposes no `ParagraphDirection` | fails: "no paragraph-direction API" |
-| RTL text, build exposes no Middle-Eastern-capable `ComposerEngine` | fails: "no Middle-Eastern-capable composer engine" |
+| Text contains RTL characters, build exposes no `ParagraphDirection` | fails: "no paragraph-direction API" |
+| Text contains RTL characters, build exposes no Middle-Eastern-capable `ComposerEngine` | fails: "no Middle-Eastern-capable composer engine" |
 | Direction or composer assignment throws | fails, quoting AE's own error |
-| Direction or composer not reported back after the write | fails, quoting what was read back |
+| Direction or composer not reported back after the write | fails, quoting the requested base direction and what was read back |
 | Stored text differs from the requested code units | fails, naming the first differing code unit (or that the length differs) |
 
 ### Evidence
 
 Each `SET_TEXT` operation reports a `textDirectionEvidence` entry on the job
-result (`sceneEditResultSchema`): the required direction, which RTL scripts
-occurred, whether the line is mixed, the layer's previous direction/composer,
-what was applied, and the three verification outcomes. The field defaults to
+result (`sceneEditResultSchema`): the base direction, which RTL scripts
+occurred, whether the line is mixed, whether bidi handling was required, the
+layer's previous direction/composer, what was applied, and the three
+verification outcomes.
+
+The operation's own `resultingValue` is unchanged by all of this - for
+SET_TEXT it is still the stored text string it has always been, and the
+evidence travels beside it as its own optional key, so nothing that already
+reads `resultingValue` can be affected. The field defaults to
 `[]`, so results written before this existed still parse; absence means "this
 worker reported no direction evidence", never "the text was left-to-right".

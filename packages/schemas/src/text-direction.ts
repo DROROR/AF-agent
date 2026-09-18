@@ -10,6 +10,16 @@ import { z } from "zod";
  * from Unicode alone - never from a layer/composition name, a template, a
  * language setting, or an operator's say-so.
  *
+ * BASE DIRECTION IS FIRST-STRONG, the rule the Unicode Bidirectional
+ * Algorithm itself uses to choose a paragraph's base direction (UAX #9, rules
+ * P2/P3): scan for the FIRST strongly-directional character and take its
+ * direction. So a Hebrew-first line that ends in Latin ("מבית DYO App") is a
+ * right-to-left paragraph, while an English-first line that contains Hebrew
+ * ("DYO App מבית") is a left-to-right one - which is exactly how each reads
+ * when set correctly. Leading digits, punctuation, quotes or whitespace are
+ * not strong, so they never decide the base direction; text with no strong
+ * character at all is NEUTRAL and the template's own settings are preserved.
+ *
  * WHAT IT DELIBERATELY NEVER DOES: reorder, mirror, reverse or otherwise
  * rewrite the characters. Visual ordering is After Effects' own bidi
  * algorithm's job once the paragraph direction and composer are correct.
@@ -81,15 +91,23 @@ const LETTER_PATTERN = /\p{L}/u;
 
 export interface TextDirectionAnalysis {
   /**
-   * What this text requires. RTL as soon as ONE strongly right-to-left
-   * character occurs - a line like "מבית DYO App" is a right-to-left
-   * paragraph that happens to contain a Latin run, not a left-to-right one.
-   * LTR only when strong left-to-right letters occur and no RTL ones do.
-   * NEUTRAL when the text is strongly-directional nowhere.
+   * The paragraph's base direction, taken from its FIRST strongly-directional
+   * character (UAX #9 P2/P3): RTL for a Hebrew/Arabic-first line even when it
+   * ends in Latin, LTR for a Latin-first line even when it contains Hebrew,
+   * NEUTRAL when no strong character occurs at all (then nothing about the
+   * text justifies changing the template's own direction).
    */
   requiredDirection: TextDirection;
+  /** True when ANY right-to-left character occurs anywhere, whatever the base direction is - this, not `requiredDirection`, is what decides whether a Middle-Eastern-capable composer is required to shape the text at all. */
   hasRtl: boolean;
   hasStrongLtr: boolean;
+  /**
+   * True when the text cannot be rendered correctly by a plain left-to-right
+   * Latin composer: any right-to-left character is present, so BOTH the base
+   * direction and the Middle-Eastern-capable composer engine must be applied
+   * and verified, and the mutation fails closed if they cannot be.
+   */
+  requiresBidiHandling: boolean;
   /** True when BOTH directions occur - the case that makes correct bidi handling (rather than reordering) unavoidable. */
   isMixed: boolean;
   /** Which RTL scripts actually occur, in the order this module checks them - evidence, never a decision input beyond `hasRtl`. */
@@ -110,11 +128,16 @@ export function analyseTextDirection(text: string): TextDirectionAnalysis {
   const rtlScripts: string[] = [];
   let rtlCharacterCount = 0;
   let strongLtrCharacterCount = 0;
+  /** The direction of the first strongly-directional character - UAX #9's own P2/P3 base-direction rule. */
+  let firstStrongDirection: TextDirection = "NEUTRAL";
 
   for (const character of text) {
     const isRtl = ANY_RTL_PATTERN !== null && ANY_RTL_PATTERN.test(character);
     if (isRtl) {
       rtlCharacterCount += 1;
+      if (firstStrongDirection === "NEUTRAL") {
+        firstStrongDirection = "RTL";
+      }
       for (const entry of RTL_SCRIPT_MATCHERS) {
         if (entry.pattern.test(character) && !rtlScripts.includes(entry.script)) {
           rtlScripts.push(entry.script);
@@ -124,15 +147,19 @@ export function analyseTextDirection(text: string): TextDirectionAnalysis {
     }
     if (LETTER_PATTERN.test(character)) {
       strongLtrCharacterCount += 1;
+      if (firstStrongDirection === "NEUTRAL") {
+        firstStrongDirection = "LTR";
+      }
     }
   }
 
   const hasRtl = rtlCharacterCount > 0;
   const hasStrongLtr = strongLtrCharacterCount > 0;
   return {
-    requiredDirection: hasRtl ? "RTL" : hasStrongLtr ? "LTR" : "NEUTRAL",
+    requiredDirection: firstStrongDirection,
     hasRtl,
     hasStrongLtr,
+    requiresBidiHandling: hasRtl,
     isMixed: hasRtl && hasStrongLtr,
     rtlScripts,
     rtlCharacterCount,
@@ -160,9 +187,12 @@ export function textCodeUnits(text: string): number[] {
  */
 export const textDirectionEvidenceSchema = z
   .object({
+    /** The base direction taken from the text's first strong character (UAX #9 P2/P3). */
     requiredDirection: textDirectionSchema,
     rtlScripts: z.array(z.string()).default([]),
     isMixed: z.boolean(),
+    /** True when the text contains any right-to-left character, so direction and composer had to be applied and verified rather than left to the template. Defaulted for records written before this field existed. */
+    requiresBidiHandling: z.boolean().default(false),
     /** The layer's own direction before this mutation, as AE reported it; null when this AE build does not expose paragraph direction at all. */
     previousDirection: z.string().nullable(),
     previousComposerEngine: z.string().nullable(),

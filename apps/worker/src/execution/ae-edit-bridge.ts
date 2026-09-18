@@ -20,6 +20,16 @@ const scriptResultSchema = z
     ok: z.boolean(),
     previousValue: z.unknown().optional(),
     resultingValue: z.unknown().optional(),
+    /**
+     * Optional per-operation evidence that is deliberately NOT part of
+     * `resultingValue` (2026-09-18 bidirectional-text stage): SET_TEXT's own
+     * resultingValue keeps its long-standing shape - the stored text string -
+     * so nothing that already reads it can be affected, and the direction/
+     * composer/verification record travels beside it instead. Shaped by
+     * text-direction.ts's textDirectionEvidenceSchema; validated where it is
+     * consumed (execute-scene-edit-executor.ts), never trusted here.
+     */
+    textDirection: z.unknown().optional(),
     failureReason: z.string().optional()
   })
   .strict();
@@ -41,6 +51,8 @@ export interface OperationExecutionSuccess {
   operationType: SceneEditOperationType;
   previousValue: unknown;
   resultingValue: unknown;
+  /** Present only for an operation whose script reported it (today: SET_TEXT's direction evidence) - see scriptResultSchema's own doc comment on why this is not folded into resultingValue. */
+  textDirection?: unknown;
 }
 
 export interface OperationExecutionFailure {
@@ -240,7 +252,13 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
     if (!outcome.ok) {
       return { ok: false, operationType: operation.type, failureReason: outcome.failureReason };
     }
-    return { ok: true, operationType: operation.type, previousValue: outcome.previousValue ?? null, resultingValue: outcome.resultingValue ?? null };
+    return {
+      ok: true,
+      operationType: operation.type,
+      previousValue: outcome.previousValue ?? null,
+      resultingValue: outcome.resultingValue ?? null,
+      textDirection: outcome.textDirection
+    };
   }
 
   async saveProject(): Promise<SaveProjectResult> {
@@ -255,7 +273,7 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
   /** Shared connect/run/parse/close pipeline for any FixedJsxScript - the one place that owns the mutation client's lifecycle. */
   private async runScript(
     script: FixedJsxScript
-  ): Promise<{ ok: true; previousValue?: unknown; resultingValue?: unknown } | { ok: false; failureReason: string }> {
+  ): Promise<{ ok: true; previousValue?: unknown; resultingValue?: unknown; textDirection?: unknown } | { ok: false; failureReason: string }> {
     const client = this.createMutationClient();
     try {
       await client.connect();
@@ -310,7 +328,7 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
         return { ok: false, failureReason: scriptResult.failureReason ?? "the AE-side script reported failure with no reason given" };
       }
 
-      return { ok: true, previousValue: scriptResult.previousValue, resultingValue: scriptResult.resultingValue };
+      return { ok: true, previousValue: scriptResult.previousValue, resultingValue: scriptResult.resultingValue, textDirection: scriptResult.textDirection };
     } finally {
       await client.close();
     }
