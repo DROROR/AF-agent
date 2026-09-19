@@ -1176,9 +1176,10 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     // No TrackMatteType/BlendingMode globals and no layer properties in this
     // fixture - every fact is unreadable, so every fact is null.
     expect(Object.values(plain.detail).every((value) => value === null)).toBe(true);
-    // 19 original layer-role facts, plus the captured template text and its
-    // truncation marker (leftover-template-copy gate).
-    expect(Object.keys(plain.detail)).toHaveLength(21);
+    // 19 original layer-role facts, plus the captured template text, its
+    // truncation marker and the complete text's own code-unit length
+    // (leftover-template-copy gate).
+    expect(Object.keys(plain.detail)).toHaveLength(22);
     const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
     expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
   });

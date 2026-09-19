@@ -79,11 +79,12 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
           layer,
           layerPath: [...layer.layerPath],
           nestedTarget: null,
-          classification
+          classification,
+          sourceProjectSha256: facts.projectSha256
         });
       });
 
-      placeholders.push(...collectNestedPlaceholders(composition, compositionById, maskedCompositionIds, unknownItems));
+      placeholders.push(...collectNestedPlaceholders(composition, compositionById, maskedCompositionIds, unknownItems, facts.projectSha256));
 
       return {
         sceneId: deterministicId([composition.compositionId, String(originalOrderIndex)]),
@@ -324,7 +325,8 @@ function collectNestedPlaceholders(
   scene: CompositionFact,
   compositionById: ReadonlyMap<string, CompositionFact>,
   maskedCompositionIds: ReadonlySet<string>,
-  unknownItems: TemplateManifest["unknownItems"]
+  unknownItems: TemplateManifest["unknownItems"],
+  sourceProjectSha256: string
 ): Placeholder[] {
   const placeholders: Placeholder[] = [];
   const seenLayers = new Set<string>();
@@ -391,7 +393,8 @@ function collectNestedPlaceholders(
           layer,
           layerPath: [...layerPath],
           nestedTarget: [...chainToParent, { compositionId: composition.compositionId, layerIndex: layer.index }],
-          classification: decision.classification
+          classification: decision.classification,
+          sourceProjectSha256
         })
       );
     }
@@ -461,6 +464,8 @@ function buildPlaceholder(args: {
   layerPath: string[];
   nestedTarget: NestedTargetStep[] | null;
   classification: Classification;
+  /** The immutable source .aep's own sha256 at inspection time - captured template-text evidence is tied to the exact source it was read from. */
+  sourceProjectSha256: string;
 }): Placeholder {
   const { layer, classification } = args;
   return {
@@ -476,13 +481,23 @@ function buildPlaceholder(args: {
     sourceType: layer.layerKind,
     // The untouched template's own text for this layer, carried onto the
     // manifest so leftover-template-copy detection has something real to
-    // compare an approved mapping against (template-copy.ts). Three distinct
-    // states are preserved exactly: a string (captured), null (captured, not
-    // a text layer), and ABSENT (never captured - e.g. an older worker build,
-    // or a text longer than the capture bound), which blocks approval and
-    // execution until the project is re-inspected.
+    // compare an approved mapping against (template-copy.ts).
+    //
+    // A text that FITS the scan's bound is stored in full. A longer one is
+    // stored as a display-only excerpt plus verification digests computed
+    // from the COMPLETE text (2026-09-19 correction: the previous "mark it
+    // truncated and demand re-inspection" rule could never resolve, because
+    // re-inspecting truncates the same text again). ABSENT everywhere means
+    // genuinely never captured - an older worker build - which is the only
+    // case that really needs re-inspection.
     ...(layer.sourceText === undefined || layer.sourceTextTruncated === true ? {} : { originalText: layer.sourceText }),
-    ...(layer.sourceTextTruncated === true ? { originalTextTruncated: true } : {}),
+    ...(layer.sourceTextTruncated === true
+      ? {
+          originalTextTruncated: true as const,
+          ...(layer.sourceText === undefined || layer.sourceText === null ? {} : { originalTextPreview: layer.sourceText })
+        }
+      : {}),
+    ...(layer.sourceTextVerification ? { originalTextVerification: { ...layer.sourceTextVerification, sourceProjectSha256: args.sourceProjectSha256 } } : {}),
     dimensions:
       layer.footage && layer.footage.widthPx !== null && layer.footage.heightPx !== null
         ? { width: layer.footage.widthPx, height: layer.footage.heightPx }

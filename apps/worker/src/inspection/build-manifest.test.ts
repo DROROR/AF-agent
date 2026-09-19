@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { computeTextVerification } from "@dyo/schemas";
 import { buildTemplateManifest, computeInspectionSummary } from "./build-manifest.js";
 import type { CompositionFact, LayerFact, ProjectFacts } from "./project-facts.js";
 
@@ -216,7 +217,49 @@ describe("buildTemplateManifest - template text capture (leftover-template-copy 
     expect(placeholder && "originalText" in placeholder).toBe(false);
   });
 
-  it("omits a TRUNCATED capture and marks it, so a partial string is never compared as the whole text", () => {
+  it("stores a long text as a labelled EXCERPT plus digests of the complete text - never as the original, and never as unverifiable", () => {
+    const completeText = `${"a".repeat(10_000)} and the real ending`;
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        compositions: [
+          composition({
+            layers: [
+              layer({
+                name: "Headline",
+                index: 1,
+                layerKind: "TextLayer",
+                sourceText: completeText.slice(0, 10_000),
+                sourceTextTruncated: true,
+                sourceTextCodeUnitLength: completeText.length,
+                sourceTextVerification: computeTextVerification(completeText)
+              })
+            ]
+          })
+        ]
+      }),
+      fixedNow
+    );
+    const placeholder = manifest.scenes[0]?.placeholders[0];
+    // The complete text is NOT stored, and the excerpt is kept under its own key.
+    expect(placeholder && "originalText" in placeholder).toBe(false);
+    expect(placeholder?.originalTextTruncated).toBe(true);
+    expect(placeholder?.originalTextPreview).toBe(completeText.slice(0, 10_000));
+    // ...but the digests describe the COMPLETE text, so it stays verifiable.
+    expect(placeholder?.originalTextVerification).toMatchObject(computeTextVerification(completeText));
+  });
+
+  it("ties captured text evidence to the immutable source fingerprint it was read from", () => {
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        projectSha256: "f".repeat(64),
+        compositions: [composition({ layers: [layer({ name: "Headline", index: 1, layerKind: "TextLayer", sourceText: "short", sourceTextVerification: computeTextVerification("short") })] })]
+      }),
+      fixedNow
+    );
+    expect(manifest.scenes[0]?.placeholders[0]?.originalTextVerification?.sourceProjectSha256).toBe("f".repeat(64));
+  });
+
+  it("leaves a truncated capture without digests genuinely unverifiable rather than guessing", () => {
     const manifest = buildTemplateManifest(
       baseFacts({
         compositions: [composition({ layers: [layer({ name: "Headline", index: 1, layerKind: "TextLayer", sourceText: "a very long line that was cut", sourceTextTruncated: true })] })]

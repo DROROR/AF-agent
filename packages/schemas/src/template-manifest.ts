@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { textVerificationSchema } from "./text-digest.js";
 
 /**
  * template-manifest.json - machine-generated scene/placeholder discovery,
@@ -104,21 +105,48 @@ export const placeholderSchema = z.object({
   /** Raw AE layer type (e.g. "TextLayer", "AVLayer") - a machine fact, not a classification. */
   sourceType: z.string().nullable(),
   /**
-   * The untouched template layer's own text, exactly as the source project
-   * stores it - code point for code point, never trimmed, folded or
+   * The untouched template layer's own text IN FULL, exactly as the source
+   * project stores it - code point for code point, never trimmed, folded or
    * normalised. This is what leftover-template-copy detection compares an
    * approved mapping against (see template-copy.ts).
    *
-   * THREE DISTINCT STATES, deliberately: a string is the captured text;
-   * `null` means "captured, and this placeholder is not a text layer";
-   * ABSENT means this manifest predates template-text capture, which blocks
-   * approval and execution until the project is re-inspected rather than
-   * silently passing. Optional so every manifest written before this field
-   * existed still parses unchanged.
+   * THREE DISTINCT STATES, deliberately: a string is the complete captured
+   * text; `null` means "captured, and this placeholder is not a text layer";
+   * ABSENT means the complete text is not stored here - either this manifest
+   * predates template-text capture, or the text was longer than the storage
+   * bound, in which case `originalTextPreview` and `originalTextVerification`
+   * carry the bounded display value and the metadata that still makes it
+   * verifiable. Optional so every manifest written before this field existed
+   * still parses unchanged.
    */
   originalText: z.string().nullable().optional(),
-  /** True when the layer's text was longer than the capture limit, so `originalText` is NOT the whole text and must not be compared as if it were. Treated exactly like an absent `originalText`. */
+  /**
+   * A BOUNDED, display-only excerpt of a text too long to store in full.
+   * Present only when `originalTextTruncated` is true, and never compared
+   * with anything: comparison uses `originalTextVerification`, which is
+   * computed from the complete text. Any UI showing this must label it as an
+   * excerpt, never as the original.
+   */
+  originalTextPreview: z.string().optional(),
+  /** True when the complete text exceeded the storage bound, so `originalText` is absent and `originalTextPreview`/`originalTextVerification` carry the excerpt and the metadata instead. */
   originalTextTruncated: z.boolean().optional(),
+  /**
+   * Digests and exact length computed from the COMPLETE, untruncated template
+   * text at inspection time (see text-digest.ts), so a text too long to store
+   * is still fully verifiable - identical, case-only variant,
+   * whitespace-only variant, or genuinely different - without storing it.
+   *
+   * REAL 2026-09-19 CORRECTION: without this, a text longer than the bound
+   * blocked approval with "re-run template inspection", which could never
+   * help, because re-inspecting truncates the same layer again. Only a
+   * manifest carrying NEITHER the complete text NOR this metadata genuinely
+   * needs re-inspection.
+   *
+   * `sourceProjectSha256` ties the evidence to the exact immutable source
+   * that was inspected: metadata captured from a different source revision is
+   * never silently trusted against this one.
+   */
+  originalTextVerification: textVerificationSchema.extend({ sourceProjectSha256: z.string().min(1) }).optional(),
   dimensions: dimensionsSchema.nullable(),
   startTimeSeconds: z.number().nullable(),
   durationSeconds: z.number().nullable(),

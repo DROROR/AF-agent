@@ -615,6 +615,9 @@ export const he: Dictionary = {
       templateCopyUnknownWarning: "המניפסט של הפרויקט אינו שומר את הטקסט המקורי של התבנית עבור שכבה זו, ולכן לא ניתן לבדוק אותו. הריצו מחדש בדיקת תבנית.",
       templateCopyStaleWarning: "ההחלטה שנשמרה התקבלה עבור טקסט אחר.",
       templateCopyTemplateTextLabel: "הטקסט המקורי של התבנית",
+      templateCopyExcerptLabel: "הטקסט המקורי של התבנית (קטע בלבד)",
+      templateCopyExcerptNote: (codeUnitLength: number) =>
+        `אורך הטקסט של התבנית בשכבה זו הוא ${codeUnitLength} תווים, ולכן מוצגת רק ההתחלה. ההשוואה שלמעלה מתבצעת על הטקסט המלא ולא על הקטע הזה.`,
       templateCopyDecisionHint: "בחרו אחת: החלפת הנוסח, או שמירה מכוונת של נוסח התבנית. השארה ללא החלטה חוסמת אישור.",
       templateCopyReplace: "החלפתי את הנוסח",
       templateCopyKeep: "שמירת נוסח התבנית",

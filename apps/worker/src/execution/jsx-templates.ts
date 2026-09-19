@@ -2340,14 +2340,22 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
 const LAYER_TEXT_PREVIEW_MAX_LENGTH = 120;
 
 /**
- * Upper bound on the FULL template text captured per text layer
- * (leftover-template-copy gate, 2026-09-18). A whole-project scan carries one
- * of these per text layer, so an unbounded read is a real memory/payload
- * hazard on a template with pathological text. Beyond this the capture is
- * marked truncated and the gate treats it as unverifiable (blocking) rather
- * than comparing a partial string as if it were the whole text.
+ * Upper bound on the template text carried per text layer IN THE PROJECT-WIDE
+ * SCAN (leftover-template-copy gate, 2026-09-18). One of these travels per
+ * text layer in a single MCP response, so an unbounded read is a real payload
+ * hazard on a template with pathological text.
+ *
+ * Beyond this bound the scan reports the bounded excerpt AND the complete
+ * text's real code-unit length, and the worker then reads that one layer's
+ * text in slices (buildReadLayerTextSliceScript) to compute verification
+ * digests from the COMPLETE text - see text-digest.ts. The 2026-09-19
+ * correction: a truncated capture must stay verifiable, because "re-run
+ * template inspection" could never resolve a text that is simply long.
  */
 const LAYER_SOURCE_TEXT_MAX_LENGTH = 10_000;
+
+/** Code units read per slice when fetching one long layer text in pieces. Bounded for the same payload reason as the scan itself; slices are concatenated in order before anything is hashed, so a surrogate pair split across a boundary is reassembled exactly. */
+export const LAYER_TEXT_SLICE_MAX_LENGTH = 8_000;
 
 /** AE scripting's documented TrackMatteType keys. */
 const TRACK_MATTE_TYPE_KEYS = ["NO_TRACK_MATTE", "ALPHA", "ALPHA_INVERTED", "LUMA", "LUMA_INVERTED"] as const;
@@ -2514,6 +2522,15 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
               if (!(__layer instanceof TextLayer)) { return null; }
               var __fullText = __layer.sourceText.value.text;
               return typeof __fullText === "string" ? __fullText.length > ${LAYER_SOURCE_TEXT_MAX_LENGTH} : null;
+            }),
+            // The COMPLETE text's own code-unit length, always - even when the
+            // text itself was bounded above. This is what tells the worker a
+            // slice-read is needed, and it is verified against the reassembled
+            // text before any digest is trusted.
+            sourceTextCodeUnitLength: __readNumberFact(function () {
+              if (!(__layer instanceof TextLayer)) { return null; }
+              var __fullText = __layer.sourceText.value.text;
+              return typeof __fullText === "string" ? __fullText.length : null;
             })
           };
           __layers.push({
@@ -2825,6 +2842,53 @@ export function buildDescribeLayerAtTimeScript(
  * "unknown" when the app.fonts API is unavailable. Helpers are declared at the
  * script's top level (ES3: no function declarations inside blocks).
  */
+/**
+ * READ-ONLY: one text layer's own text, one bounded slice at a time
+ * (leftover-template-copy gate, 2026-09-19).
+ *
+ * WHY SLICES: a template text longer than the project-wide scan's own bound
+ * must still be verified exactly, and the earlier design - marking it
+ * truncated and demanding a re-inspection - could never resolve, because
+ * re-inspecting truncates the same text again. The worker instead reads that
+ * one layer's text in order, reassembles it in Node, and computes the
+ * canonical digests from the COMPLETE string (text-digest.ts).
+ *
+ * Reads only: `sourceText.value.text` and `String.substring`. No setValue, no
+ * save, no undo-group mutation of any kind. Each response also reports the
+ * text's own total code-unit length, so the caller can verify it reassembled
+ * exactly what After Effects holds rather than assuming the loop terminated
+ * correctly.
+ *
+ * A slice boundary may fall between the two halves of a surrogate pair; that
+ * is safe by construction, because the caller concatenates the raw slices in
+ * order BEFORE any encoding or hashing, reproducing the original sequence.
+ */
+export function buildReadLayerTextSliceScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, startCodeUnit: number, maxCodeUnits: number): FixedJsxScript {
+  const body = `
+        if (!(__layer instanceof TextLayer)) {
+          __result = JSON.stringify({ ok: false, failureReason: "target layer is not a text layer" });
+        } else {
+          var __full = __layer.sourceText.value.text;
+          if (typeof __full !== "string") {
+            __result = JSON.stringify({ ok: false, failureReason: "layer's sourceText did not report a string" });
+          } else {
+            var __start = ${String(Math.max(0, Math.floor(startCodeUnit)))};
+            var __count = ${String(Math.max(1, Math.floor(maxCodeUnits)))};
+            var __end = __start + __count;
+            if (__end > __full.length) { __end = __full.length; }
+            __result = JSON.stringify({
+              ok: true,
+              resultingValue: {
+                totalCodeUnits: __full.length,
+                startCodeUnit: __start,
+                slice: __start >= __full.length ? "" : __full.substring(__start, __end)
+              }
+            });
+          }
+        }`;
+  return withTargets(wrapScript("READ_LAYER_TEXT_SLICE", body), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
+}
+
 export function buildDescribeProjectFontsScript(): FixedJsxScript {
   const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO DESCRIBE_PROJECT_FONTS")});
   var __result = null;

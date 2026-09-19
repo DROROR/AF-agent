@@ -179,9 +179,32 @@ mean different things:
 
 | State | Meaning |
 | --- | --- |
-| a string | captured |
+| a string | the complete text, captured and stored |
 | `null` | captured, and this placeholder is not a text layer |
-| key absent | never captured - an older inspection, or a text longer than the 10,000-character capture bound (then `originalTextTruncated: true`) |
+| key absent, with `originalTextVerification` | the text was longer than the 10,000-code-unit storage bound: `originalTextPreview` holds a display-only excerpt, and the digests describe the COMPLETE text |
+| key absent, with no verification metadata | never captured - an older inspection. The only state that genuinely needs re-inspection |
+
+### Text too long to store
+
+A template text longer than the bound is still verified exactly. The worker
+reads that one layer's text back in bounded slices, reassembles it in order,
+checks the reassembled length against what After Effects reports, and computes
+verification metadata from the COMPLETE string: its exact code-unit length and
+four digests (exact, case-folded, whitespace-stripped, and both). The manifest
+stores an excerpt plus that metadata, tied to the inspected source's own
+sha256.
+
+This replaced a rule that marked such a text "truncated" and blocked approval
+with "re-run template inspection" - advice that could never work, because
+re-inspecting truncates the same text again. The excerpt is never compared
+with anything, and any UI showing it must label it as an excerpt.
+
+The digest algorithm (`packages/schemas/src/text-digest.ts`) is one pure
+TypeScript implementation shared by the worker, the API and the dashboard, so
+a digest computed anywhere is byte-identical everywhere. It is pinned in tests
+against `node:crypto` and `TextEncoder`. Whitespace is defined as an explicit
+code-point set rather than a `\s` regex, and case folding is locale-independent,
+so the digest path and the full-text path can never reach different verdicts.
 
 ### The gate
 
@@ -192,7 +215,7 @@ its placeholder's `originalText`:
 | --- | --- |
 | `IDENTICAL` - equal code point for code point | yes, until an explicit **Keep template text** decision |
 | `TRIVIAL_VARIANT` - differs only in letter case, only in whitespace, or only in both | yes, until either explicit decision |
-| `TEMPLATE_TEXT_UNKNOWN` - never captured or truncated | yes; the fix is re-running template inspection, and no decision can override it |
+| `TEMPLATE_TEXT_UNKNOWN` - neither the text nor its digests are recorded | yes; the fix is re-running template inspection, and no decision can override it |
 | `REPLACED` - genuinely different | no |
 | `NOT_APPLICABLE` - no text on this mapping, or not a text placeholder | no |
 
@@ -204,9 +227,12 @@ different.
 ### Silence is never approval
 
 Clearing the gate takes an explicit decision recorded on the mapping
-(`keepTemplateText`), carrying the decision, who made it, when, and
-`textAtDecision` - the exact text it was made about. If the text later
-changes, the decision is **stale** and the mapping needs deciding again. A
+(`keepTemplateText`), carrying the decision, who made it, when,
+`textAtDecision` - the exact text it was made about - and
+`textDigestAtDecision`, that complete text's canonical digest. Staleness is
+judged by the digest whenever it is present, so a decision is never bound to
+an abbreviated rendering of the text. If the text later changes, the decision
+is **stale** and the mapping needs deciding again. A
 `REPLACE` decision never unblocks text that is still identical: saying
 "replaced" is not replacing.
 

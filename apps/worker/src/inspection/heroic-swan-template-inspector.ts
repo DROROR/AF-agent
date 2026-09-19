@@ -21,10 +21,12 @@ import {
   type CompositionDetail,
   type CompositionSummary
 } from "./parse-mcp-shapes.js";
-import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript } from "../execution/jsx-templates.js";
+import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript, type FixedJsxScript } from "../execution/jsx-templates.js";
+import { computeTextVerification } from "@dyo/schemas";
 import { prepareConversionCopy } from "./legacy-project-conversion.js";
 import { assessUnsavedProjectBlock } from "./assess-unsaved-project-block.js";
-import { boundLayerInventory, parseProjectPreflightScan, type ParseProjectPreflightScanResult } from "./parse-project-preflight-scan.js";
+import { boundLayerInventory, parseProjectPreflightScan, type ParseProjectPreflightScanResult, type ProjectPreflightEvidence } from "./parse-project-preflight-scan.js";
+import { readCompleteTextVerification, type RunSliceScript } from "./complete-template-text.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
@@ -365,6 +367,23 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       // A failed scan never blocks the manifest: it is surfaced as an
       // explicit unknownItems entry below instead.
       const preflightScan = await scanProjectPreflightEvidence(client, this.logger, this.retryOptions);
+
+      // COMPLETE-TEXT VERIFICATION (2026-09-19). Every text layer gets digests
+      // computed from its COMPLETE text: directly when the scan carried the
+      // whole thing, and otherwise by reading that one layer's text in bounded
+      // slices (complete-template-text.ts). Without this, a text longer than
+      // the scan's own bound blocked approval with "re-run template
+      // inspection" - advice that could never work, because re-inspecting
+      // truncates the same text again. A layer whose slice-read fails simply
+      // carries no digests and stays genuinely unverifiable; nothing is
+      // guessed, and the manifest is never blocked from being produced.
+      if (preflightScan.ok) {
+        await attachCompleteTextVerification(
+          preflightScan.evidence,
+          (script) => runReadOnlyScript(client, this.logger, this.retryOptions, script),
+          this.logger
+        );
+      }
 
       const facts = buildProjectFacts({
         templateId: request.templateId,
@@ -839,4 +858,67 @@ async function scanProjectPreflightEvidence(
 
 function rawCaptureFor(toolCalls: RawToolCallCapture[], note: string, projectOpenEvidence?: ProjectOpenEvidence): RawInspectionCapture {
   return { kind: "raw_capture", capturedAt: new Date().toISOString(), toolCalls, note, ...(projectOpenEvidence ? { projectOpenEvidence } : {}) };
+}
+
+/** One read-only script call with the same transient-retry handling every other inspection read uses. */
+async function runReadOnlyScript(
+  client: HeroicSwanMcpClient,
+  logger: pino.Logger | undefined,
+  retryOptions: TransientRetryOptions | undefined,
+  script: FixedJsxScript
+): Promise<{ ok: true; value: unknown } | { ok: false; reason: string }> {
+  const result = await callWithTransientRetry("read_layer_text_slice", logger, () => client.runFixedInspectionScript(script), retryOptions);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  return unwrapped.ok ? { ok: true, value: unwrapped.value } : { ok: false, reason: unwrapped.reason };
+}
+
+/**
+ * Fills in each text layer's complete-text verification digests on the scan
+ * evidence, in place. Text that fitted the scan's bound is digested directly;
+ * only text that did not is read back in slices, so the extra round trips
+ * happen exactly where they are unavoidable and nowhere else.
+ */
+async function attachCompleteTextVerification(
+  evidence: ProjectPreflightEvidence,
+  runScript: RunSliceScript,
+  logger: pino.Logger | undefined
+): Promise<void> {
+  for (const composition of evidence.layerInventory) {
+    for (const layer of composition.layers) {
+      const detail = layer.detail;
+      if (!detail || typeof detail.sourceText !== "string") {
+        continue;
+      }
+      const key = `comp-${composition.compositionId}:${layer.layerIndex}`;
+      const target = evidence.layerFactsByCompositionAndIndex.get(key);
+      if (!target) {
+        continue;
+      }
+      if (detail.sourceTextTruncated !== true) {
+        target.textVerification = computeTextVerification(detail.sourceText);
+        continue;
+      }
+      const expectedCodeUnitLength = typeof detail.sourceTextCodeUnitLength === "number" ? detail.sourceTextCodeUnitLength : null;
+      if (expectedCodeUnitLength === null) {
+        continue;
+      }
+      const complete = await readCompleteTextVerification(runScript, {
+        aeProjectItemIndex: composition.aeProjectItemIndex,
+        compositionName: composition.compositionName,
+        layerIndex: layer.layerIndex,
+        expectedCodeUnitLength
+      });
+      if (complete.ok) {
+        target.textVerification = complete.verification;
+      } else {
+        logger?.warn(
+          { composition: composition.compositionName, layerIndex: layer.layerIndex, reason: complete.reason },
+          "could not read a long template text in full - this layer stays unverifiable rather than compared against a partial string"
+        );
+      }
+    }
+  }
 }

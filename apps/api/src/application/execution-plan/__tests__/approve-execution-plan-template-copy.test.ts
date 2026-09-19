@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, type Placeholder, type TemplateManifest } from "@dyo/schemas";
+import { SCHEMA_VERSION, computeTextVerification, type Placeholder, type TemplateManifest } from "@dyo/schemas";
 import { PreconditionNotMetError } from "../../../errors/app-error.js";
 import { InMemoryProjectRepository } from "../../project/test-support/in-memory-project-repository.js";
 import { InMemoryExecutionPlanRepository } from "../test-support/in-memory-execution-plan-repository.js";
@@ -27,6 +27,8 @@ interface LayerSpec {
   layerName: string;
   /** Omitted entirely for a LEGACY manifest that never captured the template's own text. */
   originalText?: string;
+  /** A text too long to store in full: the manifest keeps a display-only excerpt plus digests of the COMPLETE text, which is what this carries. */
+  longText?: string;
 }
 
 /** Two synthetic scenes, so duplicate wording across scenes can be exercised end-to-end. */
@@ -42,6 +44,13 @@ function manifest(sceneALayers: readonly LayerSpec[], sceneBLayers: readonly Lay
     editable: true,
     sourceType: "TextLayer",
     ...(spec.originalText === undefined ? {} : { originalText: spec.originalText }),
+    ...(spec.longText === undefined
+      ? {}
+      : {
+          originalTextTruncated: true,
+          originalTextPreview: spec.longText.slice(0, 10_000),
+          originalTextVerification: { ...computeTextVerification(spec.longText), sourceProjectSha256: "a".repeat(64) }
+        }),
     dimensions: null,
     startTimeSeconds: 0,
     durationSeconds: 5,
@@ -217,6 +226,28 @@ describe("approveExecutionPlan - leftover template copy (real backend gate)", ()
 
     await edit([{ type: "SET_TEMPLATE_TEXT_DECISION", scenePlanId: sceneB.sceneId, mappingId: sceneB.mappingIds[0]!, decision: "KEEP_TEMPLATE_TEXT" }], 3);
     expect((await approve(4)).plan.status).toBe("APPROVED");
+  });
+
+  it("refuses approval for a template text too long to store, then approves after an explicit keep - never an impossible re-inspection", async () => {
+    const longTemplateText = `${"a".repeat(10_000)} and the template's own real ending`;
+    const { scenes, edit, approve } = await setup(manifest([{ placeholderId: "ph-1", layerName: "Long Line", longText: longTemplateText }]));
+    const scene = scenes[0]!;
+    await edit([{ type: "SET_TEXT", scenePlanId: scene.sceneId, mappingId: scene.mappingIds[0]!, text: longTemplateText }], 1);
+
+    const attempt = approve(2);
+    await expect(attempt).rejects.toThrow(/unreviewed template copy/i);
+    await expect(attempt).rejects.not.toThrow(/re-run template inspection/);
+
+    await edit([{ type: "SET_TEMPLATE_TEXT_DECISION", scenePlanId: scene.sceneId, mappingId: scene.mappingIds[0]!, decision: "KEEP_TEMPLATE_TEXT" }], 2);
+    expect((await approve(3)).plan.status).toBe("APPROVED");
+  });
+
+  it("approves a long text replaced only after character 10,000 - the difference is beyond any stored excerpt", async () => {
+    const shared = "a".repeat(10_000);
+    const { scenes, edit, approve } = await setup(manifest([{ placeholderId: "ph-1", layerName: "Long Line", longText: `${shared} template ending` }]));
+    const scene = scenes[0]!;
+    await edit([{ type: "SET_TEXT", scenePlanId: scene.sceneId, mappingId: scene.mappingIds[0]!, text: `${shared} the client's own ending` }], 1);
+    expect((await approve(2)).plan.status).toBe("APPROVED");
   });
 
   it("refuses approval against a LEGACY manifest that never captured template text, whatever the reviewer decides", async () => {

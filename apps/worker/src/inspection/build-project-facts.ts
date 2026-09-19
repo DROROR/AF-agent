@@ -1,3 +1,4 @@
+import type { TextVerification } from "@dyo/schemas";
 import type { CompositionFact, LayerFact, ProjectFacts } from "./project-facts.js";
 import type { CompositionDetail, CompositionSummary } from "./parse-mcp-shapes.js";
 
@@ -10,6 +11,8 @@ export interface ScannedLayerFactInput {
     | undefined;
   /** AE's own layer.enabled from the project scan - see LayerFact.enabled. Optional: a scan from an older worker build may not carry it. */
   enabled?: boolean;
+  /** Digests of this layer's COMPLETE template text, when the worker computed them (always for a text that fits the scan's bound; via a slice-read for one that does not). */
+  textVerification?: TextVerification | undefined;
   /** Layer-role facts from the same scan (only the ones classification uses). Absent on an older worker build's scan. */
   detail?:
     | {
@@ -20,6 +23,7 @@ export interface ScannedLayerFactInput {
         /** The layer's full template text and whether the capture bound was hit - absent on a scan from an older worker build (see LayerFact.sourceText). */
         sourceText?: string | null | undefined;
         sourceTextTruncated?: boolean | null | undefined;
+        sourceTextCodeUnitLength?: number | null | undefined;
       }
     | undefined;
 }
@@ -178,6 +182,8 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
           // blocking "re-inspect" state rather than a silent pass.
           sourceText: scanned?.detail ? (scanned.detail.sourceText ?? undefined) : undefined,
           sourceTextTruncated: scanned?.detail ? (scanned.detail.sourceTextTruncated ?? undefined) : undefined,
+          sourceTextCodeUnitLength: scanned?.detail ? (scanned.detail.sourceTextCodeUnitLength ?? undefined) : undefined,
+          ...(scanned?.textVerification ? { sourceTextVerification: scanned.textVerification } : {}),
           layerPath: [],
           startTimeSeconds: layer.inPointSeconds,
           durationSeconds: Math.max(0, layer.outPointSeconds - layer.inPointSeconds)

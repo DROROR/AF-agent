@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
+import { computeTextVerification } from "@dyo/schemas";
 import {
   PROJECT_ID,
   assetFixture,
@@ -164,6 +165,44 @@ describe("SceneEditDrawer", () => {
 
     await screen.findByText(/Re-run template inspection/);
     expect(screen.queryByRole("button", { name: "Keep template text" })).toBeNull();
+  });
+
+  it("labels a long template text as an excerpt and never presents it as the complete original", async () => {
+    const complete = `${"a".repeat(10_000)} and the real ending`;
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: complete })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: manifestFixture([
+            placeholderFixture({
+              originalText: undefined,
+              originalTextTruncated: true,
+              originalTextPreview: complete.slice(0, 10_000),
+              originalTextVerification: { ...computeTextVerification(complete), sourceProjectSha256: "a".repeat(64) }
+            })
+          ])
+        }
+      }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    // Still recognised as identical - never an impossible re-inspection request.
+    await screen.findByText("This text is still exactly the template's own wording.");
+    expect(screen.queryByText(/Re-run template inspection/)).toBeNull();
+    // The excerpt is labelled as an excerpt, with the complete length stated.
+    await screen.findByText("Template's own text (excerpt only):");
+    expect(screen.getByText(/only the beginning is shown/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${complete.length} characters long`))).toBeTruthy();
+    // ...and the plain "Template's own text" label is NOT used for it.
+    expect(screen.queryByText("Template's own text:")).toBeNull();
   });
 
   it("shows no template-copy warning at all once the text is genuinely different", async () => {

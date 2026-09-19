@@ -124,13 +124,36 @@ migration; the API and database need no change to accept it.
 
 Schema changes, all backward-readable with no migration:
 
-- `placeholderSchema.originalText` (optional, nullable) and
-  `originalTextTruncated` (optional) on the manifest - an absent key keeps its
-  own meaning, "never captured".
+- `placeholderSchema.originalText` (optional, nullable), plus
+  `originalTextTruncated`, `originalTextPreview` and `originalTextVerification`
+  on the manifest. An absent `originalText` WITH verification metadata means
+  "too long to store, still fully verifiable"; absent with no metadata keeps
+  its own meaning, "never captured".
 - `placeholderMappingSchema.keepTemplateText` - optional and nullable; absent
   and null both mean "no decision recorded", and there is deliberately no
   default, because any default would be a decision nobody made.
+- `templateTextDecisionRecordSchema.textDigestAtDecision` (optional) binds a
+  decision to the complete mapped text's digest; records without it fall back
+  to `textAtDecision`.
 - Two new plan edit operations: `SET_TEMPLATE_TEXT_DECISION` (with `decision`)
   and `CLEAR_TEMPLATE_TEXT_DECISION`. `updateExecutionPlan` takes the editing
   user so the decision is attributable; it refuses rather than record an
   unattributable one.
+
+## text-digest (canonical text verification)
+
+`packages/schemas/src/text-digest.ts` - pure TypeScript, no platform API, so
+the worker, the API and the browser all compute byte-identical results
+(pinned in tests against `node:crypto` and `TextEncoder`):
+
+- `sha256Hex(text)` / `utf8Bytes(text)` / `sha256HexOfBytes(bytes)`.
+- `stripWhitespace` (explicit code-point set) and `foldCase`
+  (locale-independent) - the ONLY normalizations, shared with the gate itself.
+- `computeTextVerification(completeText) -> TextVerification`:
+  `{ algorithm, codeUnitLength, fullDigest, caseFoldedDigest,
+  whitespaceStrippedDigest, caseFoldedWhitespaceStrippedDigest }`.
+- `compareByVerification(candidate, reference)` - identical / case-only /
+  whitespace-only / both, mirroring the full-text comparison exactly.
+
+`algorithm` is stored with every record (`sha256-utf8-v1`), so a record written
+under an older algorithm could never be silently compared under newer rules.

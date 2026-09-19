@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { compareByVerification, computeTextVerification, foldCase, sha256Hex, stripWhitespace, type TextVerification } from "./text-digest.js";
 
 /**
  * GENERIC LEFTOVER-TEMPLATE-COPY DETECTION (2026-09-18).
@@ -23,6 +24,14 @@ import { z } from "zod";
  * or deliberately keep the template's wording. The decision is stored on the
  * mapping with who made it, when, and the exact text it was made about, so a
  * later edit cannot silently inherit an old decision.
+ *
+ * A TEMPLATE TEXT TOO LONG TO STORE IS STILL VERIFIED (2026-09-19). Such a
+ * text is kept as a bounded, display-only excerpt plus verification metadata
+ * computed from the COMPLETE text (text-digest.ts), and this module compares
+ * through those digests. Only a manifest carrying neither the text nor the
+ * metadata needs re-inspection - the earlier rule asked for a re-inspection
+ * that could never succeed, because re-inspecting truncates the same text
+ * again.
  */
 
 /** What a reviewer can explicitly decide about a text that still matches the template's own wording. There is deliberately no third "unset" member - the ABSENCE of a decision is represented by a null decision record, never by a value that could be defaulted. */
@@ -46,8 +55,16 @@ export const templateTextDecisionRecordSchema = z
     /** Who recorded it - the same user identity the plan's own approvedBy carries. */
     decidedBy: z.string().min(1),
     decidedAt: z.string().datetime(),
-    /** The mapping's exact text at the moment of the decision, code point for code point. */
-    textAtDecision: z.string()
+    /** The mapping's exact text at the moment of the decision, code point for code point. Kept for human readability of the audit record. */
+    textAtDecision: z.string(),
+    /**
+     * The canonical digest (text-digest.ts) of the COMPLETE mapped text the
+     * decision was made about. Staleness is judged by this whenever it is
+     * present, so a decision can never be bound to a truncated or abbreviated
+     * rendering of the text. Optional so decisions recorded before this field
+     * existed still parse and still work, falling back to `textAtDecision`.
+     */
+    textDigestAtDecision: z.string().length(64).optional()
   })
   .strict();
 export type TemplateTextDecisionRecord = z.infer<typeof templateTextDecisionRecordSchema>;
@@ -57,10 +74,11 @@ export type TemplateTextDecisionRecord = z.infer<typeof templateTextDecisionReco
  *
  * - `NOT_APPLICABLE` - not a text decision at all (no text on this mapping,
  *   or the placeholder is not a text layer), so there is nothing to compare.
- * - `TEMPLATE_TEXT_UNKNOWN` - the manifest predates template-text capture (or
- *   the text was too long to capture in full), so this check CANNOT be
- *   performed. Deliberately blocking, never a warning: an unverifiable text
- *   is exactly the case the real incident shipped.
+ * - `TEMPLATE_TEXT_UNKNOWN` - the manifest carries NEITHER the template's own
+ *   text NOR its verification digests, so this check cannot be performed at
+ *   all. Deliberately blocking, never a warning: an unverifiable text is
+ *   exactly the case the real incident shipped. A text merely too long to
+ *   store is NOT this case - its digests answer every question here.
  * - `IDENTICAL` - the mapping's text equals the template's, code point for
  *   code point.
  * - `TRIVIAL_VARIANT` - it differs only in letter case, only in whitespace,
@@ -91,6 +109,13 @@ export interface TemplateCopyInput {
    * this placeholder genuinely has no text (it is not a text layer)".
    */
   templateText: string | null | undefined;
+  /**
+   * Digests of the COMPLETE template text, from the manifest. Used when
+   * `templateText` is not stored in full (a text longer than the storage
+   * bound): it keeps such a text fully verifiable instead of demanding an
+   * impossible re-inspection. Ignored when the complete text is available.
+   */
+  templateTextVerification?: TextVerification | null;
   /** The reviewer's explicit decision, or null when none has been recorded. */
   decision: TemplateTextDecisionRecord | null;
 }
@@ -107,14 +132,14 @@ export interface TemplateCopyAssessment {
   reason: string | null;
 }
 
-/** Letter-case-insensitive comparison that does not depend on the host's locale (`toLowerCase`, never `toLocaleLowerCase`, so the same plan is judged identically on every machine). */
+/**
+ * Case-insensitive comparison using the SAME canonical fold the digests are
+ * built from (text-digest.ts), never a second local definition - otherwise the
+ * full-text path and the digest path could reach different verdicts about the
+ * same pair of texts.
+ */
 function equalIgnoringCase(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
-}
-
-/** Every Unicode whitespace character, including the line separators real After Effects text uses (\r and \n) - removed entirely rather than collapsed, so "AB" and "A   B" and "A\rB" all compare equal here. */
-function stripWhitespace(value: string): string {
-  return value.replace(/\s+/gu, "");
+  return foldCase(a) === foldCase(b);
 }
 
 /**
@@ -124,8 +149,20 @@ function stripWhitespace(value: string): string {
 export function assessTemplateCopy(input: TemplateCopyInput): TemplateCopyAssessment {
   const { mappingText, templateText, decision } = input;
 
+  // Bound to the COMPLETE text's digest whenever the decision carries one, so
+  // a decision is never judged current on the strength of an abbreviated
+  // rendering; older records without a digest fall back to the text itself.
+  const currentText = mappingText ?? "";
   const decisionState: TemplateCopyDecisionState =
-    decision === null ? "NONE" : decision.textAtDecision === (mappingText ?? "") ? "CURRENT" : "STALE";
+    decision === null
+      ? "NONE"
+      : decision.textDigestAtDecision !== undefined
+        ? decision.textDigestAtDecision === sha256Hex(currentText)
+          ? "CURRENT"
+          : "STALE"
+        : decision.textAtDecision === currentText
+          ? "CURRENT"
+          : "STALE";
   const effectiveDecision = decisionState === "CURRENT" && decision !== null ? decision.decision : null;
 
   const notApplicable = (): TemplateCopyAssessment => ({
@@ -148,6 +185,49 @@ export function assessTemplateCopy(input: TemplateCopyInput): TemplateCopyAssess
     return notApplicable();
   }
 
+  const verification = input.templateTextVerification ?? null;
+
+  // The complete text is not stored, but its verification metadata is: every
+  // question this gate asks can still be answered exactly (real 2026-09-19
+  // correction - demanding re-inspection here was an unresolvable loop, since
+  // re-inspecting truncates the same text again).
+  if (templateText === undefined && verification !== null) {
+    const comparison = compareByVerification(computeTextVerification(mappingText), verification);
+    if (comparison.identical) {
+      const keep = effectiveDecision === "KEEP_TEMPLATE_TEXT";
+      return {
+        status: "IDENTICAL",
+        variantKind: null,
+        decisionState,
+        effectiveDecision,
+        blocks: !keep,
+        reason: keep
+          ? null
+          : decisionState === "STALE"
+            ? "this text is identical to the template's own wording, and the recorded decision was made about different text - decide again: replace it, or explicitly keep the template wording"
+            : "this text is identical to the template's own wording - replace it, or explicitly choose to keep the template wording"
+      };
+    }
+    if (comparison.caseOnly || comparison.whitespaceOnly || comparison.caseAndWhitespaceOnly) {
+      const variantKind: TemplateCopyVariantKind = comparison.caseOnly ? "CASE" : comparison.whitespaceOnly ? "WHITESPACE" : "CASE_AND_WHITESPACE";
+      const acknowledged = effectiveDecision !== null;
+      const difference = variantKind === "CASE" ? "letter case" : variantKind === "WHITESPACE" ? "whitespace" : "letter case and whitespace";
+      return {
+        status: "TRIVIAL_VARIANT",
+        variantKind,
+        decisionState,
+        effectiveDecision,
+        blocks: !acknowledged,
+        reason: acknowledged
+          ? null
+          : decisionState === "STALE"
+            ? `this text differs from the template's own wording only in ${difference}, and the recorded decision was made about different text - decide again: replace it, or explicitly keep it`
+            : `this text differs from the template's own wording only in ${difference} - replace it, or explicitly confirm you meant it`
+      };
+    }
+    return { status: "REPLACED", variantKind: null, decisionState, effectiveDecision, blocks: false, reason: null };
+  }
+
   if (templateText === undefined) {
     return {
       status: "TEMPLATE_TEXT_UNKNOWN",
@@ -156,7 +236,7 @@ export function assessTemplateCopy(input: TemplateCopyInput): TemplateCopyAssess
       effectiveDecision,
       blocks: true,
       reason:
-        "this project's manifest does not record the template's own text for this layer, so it cannot be checked for leftover template copy - re-run template inspection for this project before approving or executing",
+        "this project's manifest records neither the template's own text for this layer nor its verification digests, so it cannot be checked for leftover template copy - re-run template inspection for this project before approving or executing",
     };
   }
 

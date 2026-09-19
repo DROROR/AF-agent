@@ -636,6 +636,9 @@ export const en = {
       templateCopyUnknownWarning: "This project's manifest does not record the template's own text for this layer, so it cannot be checked. Re-run template inspection.",
       templateCopyStaleWarning: "The recorded decision was made about different text.",
       templateCopyTemplateTextLabel: "Template's own text",
+      templateCopyExcerptLabel: "Template's own text (excerpt only)",
+      templateCopyExcerptNote: (codeUnitLength: number) =>
+        `This layer's template text is ${codeUnitLength} characters long, so only the beginning is shown. The comparison above uses the complete text, not this excerpt.`,
       templateCopyDecisionHint: "Choose one: replace the wording, or deliberately keep the template's. Leaving it undecided blocks approval.",
       templateCopyReplace: "I replaced it",
       templateCopyKeep: "Keep template text",

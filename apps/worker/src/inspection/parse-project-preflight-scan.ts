@@ -1,3 +1,4 @@
+import type { TextVerification } from "@dyo/schemas";
 import { z } from "zod";
 
 /**
@@ -75,7 +76,9 @@ const layerDetailSchema = z
     textPreview: z.string().nullable(),
     /** The layer's full text (bounded) and whether that bound was hit. Optional: a response from an older worker build simply does not carry them, which the manifest then records as "template text not captured". */
     sourceText: z.string().nullable().optional(),
-    sourceTextTruncated: z.boolean().nullable().optional()
+    sourceTextTruncated: z.boolean().nullable().optional(),
+    /** The COMPLETE text's own code-unit length, even when `sourceText` above was bounded - what tells the worker a slice-read is needed (see complete-template-text.ts). */
+    sourceTextCodeUnitLength: z.number().nullable().optional()
   })
   .strict();
 
@@ -95,7 +98,15 @@ const layerEffectsSchema = z
   })
   .strict();
 
-export type ScannedLayerFact = z.infer<typeof layerEffectsSchema>;
+/**
+ * One scanned layer, plus the one field the WORKER fills in after parsing:
+ * `textVerification`, the digests of this layer's COMPLETE template text
+ * (computed directly when the scan carried the whole text, or from a
+ * slice-read reassembly when it did not - see complete-template-text.ts). It
+ * is deliberately not part of the parsed schema, because After Effects never
+ * sends it.
+ */
+export type ScannedLayerFact = z.infer<typeof layerEffectsSchema> & { textVerification?: TextVerification };
 
 /** One composition's complete, raw per-layer facts, in AE layer order - persisted as evidence, never classified here. */
 export interface ScannedCompositionInventory {

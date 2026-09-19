@@ -1,4 +1,4 @@
-import { assessTemplateCopy, type PlaceholderMapping, type ScenePlanEntry, type TemplateCopyAssessment, type TemplateManifest } from "@dyo/schemas";
+import { assessTemplateCopy, type PlaceholderMapping, type ScenePlanEntry, type TemplateCopyAssessment, type TemplateManifest, type TextVerification } from "@dyo/schemas";
 
 /**
  * THE LEFTOVER-TEMPLATE-COPY GATE (2026-09-18).
@@ -27,34 +27,47 @@ export interface TemplateCopyFinding {
   assessment: TemplateCopyAssessment;
 }
 
-/** Placeholder identity -> the template's own text for it. `undefined` for a placeholder whose manifest entry never captured it (see placeholderSchema.originalText). */
-function templateTextFor(manifest: TemplateManifest, manifestPlaceholderId: string | null): string | null | undefined {
+/**
+ * What the manifest knows about one placeholder's own template text: the
+ * COMPLETE text when it is stored, and/or the verification digests computed
+ * from the complete text when it is not (a text longer than the storage
+ * bound). `text: undefined` with `verification: null` is the only genuinely
+ * unverifiable case - the one that really needs re-inspection.
+ */
+function templateTextFor(
+  manifest: TemplateManifest,
+  manifestPlaceholderId: string | null
+): { text: string | null | undefined; verification: TextVerification | null } {
   if (manifestPlaceholderId === null) {
     // A human-added mapping has no manifest placeholder and therefore no
     // template wording it could be a leftover copy OF - the text came from a
     // person, not from the purchased template.
-    return null;
+    return { text: null, verification: null };
   }
   for (const scene of manifest.scenes) {
     for (const placeholder of scene.placeholders) {
       if (placeholder.placeholderId === manifestPlaceholderId) {
-        // A truncated capture is deliberately reported as "never captured":
-        // comparing a partial string as if it were the whole text could
-        // declare a genuinely different line identical.
-        return placeholder.originalTextTruncated === true ? undefined : placeholder.originalText;
+        // A truncated capture never contributes its EXCERPT to the comparison
+        // - comparing a partial string could declare a genuinely different
+        // line identical - but its digests, computed from the complete text,
+        // answer every question the gate asks.
+        const text = placeholder.originalTextTruncated === true ? undefined : placeholder.originalText;
+        return { text, verification: placeholder.originalTextVerification ?? null };
       }
     }
   }
   // The plan references a placeholder the current manifest no longer has.
   // Other gates (manifest sha256, composition resolution) already refuse that
   // case loudly; here it is simply unverifiable, so it blocks.
-  return undefined;
+  return { text: undefined, verification: null };
 }
 
 export function assessMappingTemplateCopy(mapping: PlaceholderMapping, manifest: TemplateManifest): TemplateCopyAssessment {
+  const template = templateTextFor(manifest, mapping.manifestPlaceholderId);
   return assessTemplateCopy({
     mappingText: mapping.text,
-    templateText: templateTextFor(manifest, mapping.manifestPlaceholderId),
+    templateText: template.text,
+    templateTextVerification: template.verification,
     // Absent and null both mean "no decision" - see placeholderMappingSchema.
     decision: mapping.keepTemplateText ?? null
   });

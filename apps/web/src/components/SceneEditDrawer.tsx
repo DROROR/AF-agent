@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import { assessTemplateCopy, type ExecutionPlanEditOperation, type MediaKind, type PlaceholderType, type TemplateCopyAssessment, type TemplateTextDecision } from "@dyo/schemas";
+import {
+  assessTemplateCopy,
+  sha256Hex,
+  type ExecutionPlanEditOperation,
+  type MediaKind,
+  type PlaceholderType,
+  type TemplateCopyAssessment,
+  type TemplateTextDecision,
+  type TextVerification
+} from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { Dialog } from "./ui/Dialog";
@@ -94,24 +103,38 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
   }
 
   /**
-   * The template's own wording for a mapping, from the project's CURRENT
-   * manifest. `undefined` means this manifest never captured it (an older
-   * inspection), which the shared gate reports as blocking - the dashboard
-   * never invents a value to make the warning go away.
+   * What the project's CURRENT manifest knows about a mapping's own template
+   * wording: the complete text when it is stored, a display-only excerpt plus
+   * verification digests when the text was too long to store, and neither
+   * when this manifest predates template-text capture (which the shared gate
+   * reports as blocking - the dashboard never invents a value to make the
+   * warning go away).
    */
-  function templateTextFor(mappingId: string): string | null | undefined {
+  function templateTextFor(mappingId: string): {
+    text: string | null | undefined;
+    preview: string | null;
+    truncated: boolean;
+    verification: TextVerification | null;
+  } {
+    const none = { text: null, preview: null, truncated: false, verification: null };
     const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
     if (!mapping || mapping.manifestPlaceholderId === null) {
-      return null;
+      return none;
     }
     for (const manifestScene of project?.manifest.scenes ?? []) {
       for (const placeholder of manifestScene.placeholders) {
         if (placeholder.placeholderId === mapping.manifestPlaceholderId) {
-          return placeholder.originalTextTruncated === true ? undefined : placeholder.originalText;
+          const truncated = placeholder.originalTextTruncated === true;
+          return {
+            text: truncated ? undefined : placeholder.originalText,
+            preview: truncated ? (placeholder.originalTextPreview ?? null) : null,
+            truncated,
+            verification: placeholder.originalTextVerification ?? null
+          };
         }
       }
     }
-    return undefined;
+    return { text: undefined, preview: null, truncated: false, verification: null };
   }
 
   /** Assessed with the SAME pure function the backend gate uses, against the text currently typed in the form - so the warning tracks what the reviewer is actually about to save. */
@@ -119,9 +142,11 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
     const original = scene!.mappings.find((candidate) => candidate.id === form.mappingId);
     const trimmed = form.text.trim();
     const typedText = trimmed === "" ? null : trimmed;
+    const template = templateTextFor(form.mappingId);
     return assessTemplateCopy({
       mappingText: typedText,
-      templateText: templateTextFor(form.mappingId),
+      templateText: template.text,
+      templateTextVerification: template.verification,
       decision:
         form.templateTextDecision === null
           ? null
@@ -130,8 +155,10 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
               decidedBy: original?.keepTemplateText?.decidedBy ?? "pending",
               decidedAt: original?.keepTemplateText?.decidedAt ?? new Date(0).toISOString(),
               // A choice made in this form session is about the text in this
-              // form session - saving records exactly that.
-              textAtDecision: typedText ?? ""
+              // form session - saving records exactly that, and binds it to
+              // that text's own complete digest.
+              textAtDecision: typedText ?? "",
+              textDigestAtDecision: sha256Hex(typedText ?? "")
             }
     });
   }
@@ -302,7 +329,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
               if (assessment.status === "NOT_APPLICABLE" || assessment.status === "REPLACED") {
                 return null;
               }
-              const templateText = templateTextFor(mapping.mappingId);
+              const template = templateTextFor(mapping.mappingId);
               const warning =
                 assessment.status === "TEMPLATE_TEXT_UNKNOWN"
                   ? t.projectWorkspace.editDrawer.templateCopyUnknownWarning
@@ -313,10 +340,20 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                 <div className="template-copy-warning" role="status" data-blocks={assessment.blocks ? "true" : "false"}>
                   <p>{warning}</p>
                   {assessment.decisionState === "STALE" ? <p>{t.projectWorkspace.editDrawer.templateCopyStaleWarning}</p> : null}
-                  {typeof templateText === "string" ? (
+                  {typeof template.text === "string" ? (
                     <p>
                       <span>{t.projectWorkspace.editDrawer.templateCopyTemplateTextLabel}: </span>
-                      <code>{templateText}</code>
+                      <code>{template.text}</code>
+                    </p>
+                  ) : null}
+                  {template.truncated && template.preview !== null ? (
+                    <p>
+                      <span>{t.projectWorkspace.editDrawer.templateCopyExcerptLabel}: </span>
+                      <code>{template.preview}</code>
+                      <span>
+                        {" "}
+                        {t.projectWorkspace.editDrawer.templateCopyExcerptNote(template.verification?.codeUnitLength ?? 0)}
+                      </span>
                     </p>
                   ) : null}
                   {assessment.status === "TEMPLATE_TEXT_UNKNOWN" ? null : (

@@ -18,11 +18,15 @@ export interface TextPlaceholderSpec {
   /** Absent key = this manifest never captured template text (legacy manifest). */
   originalText?: string | null;
   originalTextTruncated?: boolean;
+  /** Display-only excerpt of a text too long to store in full. */
+  originalTextPreview?: string;
+  /** Digests of the COMPLETE text - what keeps a too-long text verifiable. */
+  originalTextVerification?: Placeholder["originalTextVerification"];
   placeholderType?: Placeholder["placeholderType"];
 }
 
 export function placeholderFixture(spec: TextPlaceholderSpec): Placeholder {
-  const { placeholderId, layerName = "a layer", originalText, originalTextTruncated, placeholderType = "text" } = spec;
+  const { placeholderId, layerName = "a layer", originalText, originalTextTruncated, originalTextPreview, originalTextVerification, placeholderType = "text" } = spec;
   return {
     placeholderId,
     displayLabel: null,
@@ -36,6 +40,8 @@ export function placeholderFixture(spec: TextPlaceholderSpec): Placeholder {
     sourceType: placeholderType === "text" ? "TextLayer" : "AVLayer",
     ...(originalText === undefined ? {} : { originalText }),
     ...(originalTextTruncated === undefined ? {} : { originalTextTruncated }),
+    ...(originalTextPreview === undefined ? {} : { originalTextPreview }),
+    ...(originalTextVerification === undefined ? {} : { originalTextVerification }),
     dimensions: null,
     startTimeSeconds: 0,
     durationSeconds: 5,

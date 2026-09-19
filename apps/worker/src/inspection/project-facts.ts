@@ -1,3 +1,4 @@
+import type { TextVerification } from "@dyo/schemas";
 /**
  * Structural facts about an AE project, as they would be extracted by a
  * real read-only inspection execution once a bridge/transport exists (see
@@ -53,8 +54,12 @@ export interface LayerFact {
    * (leftover-template-copy gate); never trimmed or normalised.
    */
   sourceText?: string | null | undefined;
-  /** True when `sourceText` hit the capture bound and is therefore NOT the whole text. */
+  /** True when `sourceText` hit the scan's bound and is therefore a display-only excerpt, NOT the whole text. */
   sourceTextTruncated?: boolean | null | undefined;
+  /** The COMPLETE text's own code-unit length, whether or not the text itself was bounded. */
+  sourceTextCodeUnitLength?: number | null | undefined;
+  /** Digests of the COMPLETE text, computed from the whole string (directly when it fits, or from a slice-read reassembly when it does not) - see text-digest.ts. */
+  sourceTextVerification?: TextVerification | undefined;
   /** Nesting context by composition name, outermost first - empty if directly in the top-level composition. */
   layerPath: readonly string[];
   startTimeSeconds: number;

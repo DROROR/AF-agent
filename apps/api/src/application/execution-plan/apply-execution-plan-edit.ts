@@ -1,3 +1,4 @@
+import { sha256Hex } from "@dyo/schemas";
 import { randomUUID } from "node:crypto";
 import type { ExecutionPlanEditOperation, NestedTargetStep, PlaceholderMapping, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { computeSceneUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
@@ -288,7 +289,10 @@ function applyExecutionPlanEditRaw(
           decision: operation.decision,
           decidedBy: editedBy,
           decidedAt: timestamp,
-          textAtDecision: m.text ?? ""
+          textAtDecision: m.text ?? "",
+          // Bound to the COMPLETE mapped text's canonical digest, so staleness
+          // is never judged from an abbreviated rendering of it.
+          textDigestAtDecision: sha256Hex(m.text ?? "")
         },
         updatedAt: timestamp
       }));
