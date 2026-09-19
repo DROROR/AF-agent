@@ -613,6 +613,10 @@ export const he: Dictionary = {
       templateCopyIdenticalWarning: "הטקסט הזה עדיין זהה בדיוק לנוסח של התבנית.",
       templateCopyVariantWarning: "הטקסט הזה שונה מהנוסח של התבנית רק בעיצוב.",
       templateCopyUnknownWarning: "המניפסט של הפרויקט אינו שומר את הטקסט המקורי של התבנית עבור שכבה זו, ולכן לא ניתן לבדוק אותו. הריצו מחדש בדיקת תבנית.",
+      templateCopyCaptureFailedWarning:
+        "לא ניתן היה לקרוא את מלוא הטקסט של התבנית בשכבה זו בעת בדיקת הפרויקט, ולכן לא ניתן לבדוק אותו. הרצה חוזרת של בדיקת התבנית בדרך כלל פותרת זאת.",
+      templateCopyTooLargeWarning: (codeUnitLength: number) =>
+        `אורך הטקסט של התבנית בשכבה זו הוא ${codeUnitLength} תווים, יותר ממה שהמערכת יכולה לאמת. הרצה חוזרת של הבדיקה לא תשנה זאת: קצרו את הטקסט בתבנית, או הסירו את מיפוי הטקסט הזה.`,
       templateCopyStaleWarning: "ההחלטה שנשמרה התקבלה עבור טקסט אחר.",
       templateCopyTemplateTextLabel: "הטקסט המקורי של התבנית",
       templateCopyExcerptLabel: "הטקסט המקורי של התבנית (קטע בלבד)",

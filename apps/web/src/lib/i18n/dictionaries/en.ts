@@ -634,6 +634,10 @@ export const en = {
       templateCopyIdenticalWarning: "This text is still exactly the template's own wording.",
       templateCopyVariantWarning: "This text differs from the template's own wording only in formatting.",
       templateCopyUnknownWarning: "This project's manifest does not record the template's own text for this layer, so it cannot be checked. Re-run template inspection.",
+      templateCopyCaptureFailedWarning:
+        "This layer's template text could not be read completely when the project was inspected, so it cannot be checked. Re-running template inspection usually resolves this.",
+      templateCopyTooLargeWarning: (codeUnitLength: number) =>
+        `This layer's template text is ${codeUnitLength} characters, which is larger than this system can verify. Re-running inspection will not change that: shorten the text in the template, or remove this text mapping.`,
       templateCopyStaleWarning: "The recorded decision was made about different text.",
       templateCopyTemplateTextLabel: "Template's own text",
       templateCopyExcerptLabel: "Template's own text (excerpt only)",

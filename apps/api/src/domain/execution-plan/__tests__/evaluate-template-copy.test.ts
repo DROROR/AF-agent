@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../evaluate-template-copy.js";
-import { computeTextVerification, sha256Hex } from "@dyo/schemas";
+import { MAX_VERIFIABLE_TEXT_CODE_UNITS, computeTextVerification, sha256Hex } from "@dyo/schemas";
 import { manifestFixture, mappingFixture, scenePlanFixture } from "../test-support/template-copy-fixtures.js";
 
 const DECIDED_AT = "2026-01-01T00:00:00.000Z";
@@ -197,5 +197,75 @@ describe("findTemplateCopyBlockers - template text too long to store (2026-09-19
     const legacy = manifestFixture([{ placeholderId: "ph-1" }]);
     const scenes = [scenePlanFixture({ id: "scene-a", mappings: [mappingFixture({ id: "ph-1", text: "anything" })] })];
     expect(findTemplateCopyBlockers(scenes, legacy)[0]?.assessment.reason).toMatch(/re-run template inspection/);
+  });
+});
+
+describe("findTemplateCopyBlockers - capture states each get their own actionable reason", () => {
+  const tooLargeManifest = () =>
+    manifestFixture([
+      {
+        placeholderId: "ph-huge",
+        layerName: "Huge Line",
+        originalTextTruncated: true,
+        originalTextCaptureStatus: "TOO_LARGE",
+        originalTextCodeUnitLength: MAX_VERIFIABLE_TEXT_CODE_UNITS + 1
+      }
+    ]);
+
+  it("blocks an over-sized layer TERMINALLY, without ever asking for re-inspection", () => {
+    const scenes = [scenePlanFixture({ id: "scene-a", mappings: [mappingFixture({ id: "ph-huge", text: "anything" })] })];
+    const blockers = findTemplateCopyBlockers(scenes, tooLargeManifest());
+
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0]?.assessment.status).toBe("TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY");
+    const described = describeTemplateCopyBlockers(blockers)[0] ?? "";
+    expect(described).not.toMatch(/re-run template inspection/);
+    expect(described).toMatch(/shorten the layer's text/);
+  });
+
+  it("an over-sized layer cannot be cleared by keeping the template text", () => {
+    const scenes = [
+      scenePlanFixture({
+        id: "scene-a",
+        mappings: [
+          mappingFixture({
+            id: "ph-huge",
+            text: "anything",
+            keepTemplateText: {
+              decision: "KEEP_TEMPLATE_TEXT",
+              decidedBy: "user-1",
+              decidedAt: DECIDED_AT,
+              textAtDecision: "anything",
+              textDigestAtDecision: sha256Hex("anything")
+            }
+          })
+        ]
+      })
+    ];
+    expect(findTemplateCopyBlockers(scenes, tooLargeManifest())).toHaveLength(1);
+  });
+
+  it("blocks a transient capture failure WITH a re-inspection prompt - a different case entirely", () => {
+    const manifest = manifestFixture([{ placeholderId: "ph-1", layerName: "Line", originalTextTruncated: true, originalTextCaptureStatus: "CAPTURE_FAILED" }]);
+    const scenes = [scenePlanFixture({ id: "scene-a", mappings: [mappingFixture({ id: "ph-1", text: "anything" })] })];
+    const blockers = findTemplateCopyBlockers(scenes, manifest);
+
+    expect(blockers[0]?.assessment.status).toBe("TEMPLATE_TEXT_CAPTURE_FAILED");
+    expect(describeTemplateCopyBlockers(blockers)[0]).toMatch(/re-run template inspection/);
+  });
+
+  it("passes a verified excerpt whose text was genuinely replaced, whatever its size", () => {
+    const completeText = `${"a".repeat(MAX_VERIFIABLE_TEXT_CODE_UNITS / 4)} template ending`;
+    const manifest = manifestFixture([
+      {
+        placeholderId: "ph-long",
+        originalTextTruncated: true,
+        originalTextPreview: completeText.slice(0, 10_000),
+        originalTextCaptureStatus: "VERIFIED_EXCERPT",
+        originalTextVerification: { ...computeTextVerification(completeText), sourceProjectSha256: "a".repeat(64) }
+      }
+    ]);
+    const scenes = [scenePlanFixture({ id: "scene-a", mappings: [mappingFixture({ id: "ph-long", text: `${"a".repeat(MAX_VERIFIABLE_TEXT_CODE_UNITS / 4)} the client's own ending` })] })];
+    expect(findTemplateCopyBlockers(scenes, manifest)).toEqual([]);
   });
 });

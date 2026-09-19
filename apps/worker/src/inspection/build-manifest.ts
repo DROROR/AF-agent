@@ -498,6 +498,8 @@ function buildPlaceholder(args: {
         }
       : {}),
     ...(layer.sourceTextVerification ? { originalTextVerification: { ...layer.sourceTextVerification, sourceProjectSha256: args.sourceProjectSha256 } } : {}),
+    ...(layer.sourceTextCaptureStatus ? { originalTextCaptureStatus: layer.sourceTextCaptureStatus } : {}),
+    ...(typeof layer.sourceTextCodeUnitLength === "number" ? { originalTextCodeUnitLength: layer.sourceTextCodeUnitLength } : {}),
     dimensions:
       layer.footage && layer.footage.widthPx !== null && layer.footage.heightPx !== null
         ? { width: layer.footage.widthPx, height: layer.footage.heightPx }

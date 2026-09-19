@@ -22,11 +22,24 @@ export interface TextPlaceholderSpec {
   originalTextPreview?: string;
   /** Digests of the COMPLETE text - what keeps a too-long text verifiable. */
   originalTextVerification?: Placeholder["originalTextVerification"];
+  /** COMPLETE / VERIFIED_EXCERPT / CAPTURE_FAILED / TOO_LARGE - absent models a manifest predating capture. */
+  originalTextCaptureStatus?: Placeholder["originalTextCaptureStatus"];
+  originalTextCodeUnitLength?: number;
   placeholderType?: Placeholder["placeholderType"];
 }
 
 export function placeholderFixture(spec: TextPlaceholderSpec): Placeholder {
-  const { placeholderId, layerName = "a layer", originalText, originalTextTruncated, originalTextPreview, originalTextVerification, placeholderType = "text" } = spec;
+  const {
+    placeholderId,
+    layerName = "a layer",
+    originalText,
+    originalTextTruncated,
+    originalTextPreview,
+    originalTextVerification,
+    originalTextCaptureStatus,
+    originalTextCodeUnitLength,
+    placeholderType = "text"
+  } = spec;
   return {
     placeholderId,
     displayLabel: null,
@@ -42,6 +55,8 @@ export function placeholderFixture(spec: TextPlaceholderSpec): Placeholder {
     ...(originalTextTruncated === undefined ? {} : { originalTextTruncated }),
     ...(originalTextPreview === undefined ? {} : { originalTextPreview }),
     ...(originalTextVerification === undefined ? {} : { originalTextVerification }),
+    ...(originalTextCaptureStatus === undefined ? {} : { originalTextCaptureStatus }),
+    ...(originalTextCodeUnitLength === undefined ? {} : { originalTextCodeUnitLength }),
     dimensions: null,
     startTimeSeconds: 0,
     durationSeconds: 5,

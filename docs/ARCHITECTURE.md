@@ -199,12 +199,50 @@ with "re-run template inspection" - advice that could never work, because
 re-inspecting truncates the same text again. The excerpt is never compared
 with anything, and any UI showing it must label it as an excerpt.
 
-The digest algorithm (`packages/schemas/src/text-digest.ts`) is one pure
-TypeScript implementation shared by the worker, the API and the dashboard, so
-a digest computed anywhere is byte-identical everywhere. It is pinned in tests
-against `node:crypto` and `TextEncoder`. Whitespace is defined as an explicit
-code-point set rather than a `\s` regex, and case folding is locale-independent,
-so the digest path and the full-text path can never reach different verdicts.
+The digest algorithm (`packages/schemas/src/text-digest.ts`,
+`sha256-utf16le-code-units-v1`) is one pure TypeScript implementation shared by
+the worker, the API and the dashboard, so a digest computed anywhere is
+byte-identical everywhere. It is pinned in tests against `node:crypto`.
+
+**It hashes UTF-16 code units, not UTF-8.** After Effects and JavaScript both
+hold text as UTF-16, and a UTF-16 string can contain an unpaired surrogate.
+UTF-8 encoding maps every unpaired surrogate to U+FFFD, so a high lone
+surrogate, a low lone surrogate and U+FFFD all hashed alike - a real collision
+in a system whose job is exact verification. Encoding each code unit as two
+little-endian bytes is injective over every possible JavaScript string, so
+lone surrogates, valid pairs, U+FFFD, astral characters and composed versus
+decomposed forms are all preserved distinctly.
+
+Both normalizations are **context-free**, which is what lets them stream:
+whitespace is an explicit code-point set rather than a `\s` regex, and case
+folding is applied per code point rather than to the whole string. (Whole-string
+lowercasing is context sensitive - a Greek capital sigma lowercases differently
+at the end of a word - and a context-sensitive fold would give different
+answers depending on where a slice boundary fell.) The same two functions serve
+the full-text path, so the two paths can never reach different verdicts.
+
+### How a long text is read
+
+The worker reads the layer's text in bounded slices and **streams** each slice
+straight into four incremental digests, never assembling the complete string.
+A surrogate pair split across a slice boundary is carried inside the stream, so
+the digests are identical however the text is sliced.
+
+### Capture states, and why they differ
+
+| `originalTextCaptureStatus` | Meaning | What an operator should do |
+| --- | --- | --- |
+| `COMPLETE` | the whole text is stored | nothing |
+| `VERIFIED_EXCERPT` | too long to store, digests cover the complete text | nothing - it is fully verifiable |
+| `CAPTURE_FAILED` | a transient read failure | re-run template inspection; it usually resolves |
+| `TOO_LARGE` | beyond `MAX_VERIFIABLE_TEXT_CODE_UNITS` (2,000,000) | **terminal** - shorten the layer's text, or remove the mapping |
+| absent | manifest predates text capture | re-run template inspection |
+
+`TOO_LARGE` is reported as its own gate status
+(`TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY`) and is the one blocking state that
+**cannot** be cleared with "keep template text": nothing was verified, so there
+is nothing to keep. Telling an operator to re-inspect here would be an endless
+loop, so the gate never does.
 
 ### The gate
 
@@ -215,7 +253,9 @@ its placeholder's `originalText`:
 | --- | --- |
 | `IDENTICAL` - equal code point for code point | yes, until an explicit **Keep template text** decision |
 | `TRIVIAL_VARIANT` - differs only in letter case, only in whitespace, or only in both | yes, until either explicit decision |
-| `TEMPLATE_TEXT_UNKNOWN` - neither the text nor its digests are recorded | yes; the fix is re-running template inspection, and no decision can override it |
+| `TEMPLATE_TEXT_UNKNOWN` - neither the text nor its digests are recorded (or they were written under an older algorithm) | yes; the fix is re-running template inspection, and no decision can override it |
+| `TEMPLATE_TEXT_CAPTURE_FAILED` - a transient read failure | yes; re-inspection usually resolves it |
+| `TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY` - beyond the verifiable size | yes, terminally; no decision and no re-inspection can clear it |
 | `REPLACED` - genuinely different | no |
 | `NOT_APPLICABLE` - no text on this mapping, or not a text placeholder | no |
 

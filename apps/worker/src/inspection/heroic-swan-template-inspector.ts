@@ -899,10 +899,14 @@ async function attachCompleteTextVerification(
       }
       if (detail.sourceTextTruncated !== true) {
         target.textVerification = computeTextVerification(detail.sourceText);
+        target.textCaptureStatus = "COMPLETE";
         continue;
       }
       const expectedCodeUnitLength = typeof detail.sourceTextCodeUnitLength === "number" ? detail.sourceTextCodeUnitLength : null;
       if (expectedCodeUnitLength === null) {
+        // The scan bounded the text but never said how long it really is, so
+        // nothing here can be verified or sized - a genuinely failed capture.
+        target.textCaptureStatus = "CAPTURE_FAILED";
         continue;
       }
       const complete = await readCompleteTextVerification(runScript, {
@@ -913,10 +917,16 @@ async function attachCompleteTextVerification(
       });
       if (complete.ok) {
         target.textVerification = complete.verification;
+        target.textCaptureStatus = "VERIFIED_EXCERPT";
       } else {
+        // TOO_LARGE is terminal and must never be reported as "re-inspect";
+        // CAPTURE_FAILED is transient and worth re-inspecting for. Either way
+        // the layer stays unverifiable rather than compared against a partial
+        // string - see complete-template-text.ts.
+        target.textCaptureStatus = complete.status;
         logger?.warn(
-          { composition: composition.compositionName, layerIndex: layer.layerIndex, reason: complete.reason },
-          "could not read a long template text in full - this layer stays unverifiable rather than compared against a partial string"
+          { composition: composition.compositionName, layerIndex: layer.layerIndex, status: complete.status, reason: complete.reason },
+          "could not verify a long template text - recorded with its real capture status rather than silently left unknown"
         );
       }
     }

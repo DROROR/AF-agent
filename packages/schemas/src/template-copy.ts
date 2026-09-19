@@ -1,5 +1,16 @@
 import { z } from "zod";
-import { compareByVerification, computeTextVerification, foldCase, sha256Hex, stripWhitespace, type TextVerification } from "./text-digest.js";
+import {
+  MAX_VERIFIABLE_TEXT_CODE_UNITS,
+  compareByVerification,
+  computeTextVerification,
+  foldCase,
+  isCurrentDigestAlgorithm,
+  sha256Hex,
+  stripWhitespace,
+  TEXT_DIGEST_ALGORITHM,
+  type TextCaptureStatus,
+  type TextVerification
+} from "./text-digest.js";
 
 /**
  * GENERIC LEFTOVER-TEMPLATE-COPY DETECTION (2026-09-18).
@@ -74,11 +85,19 @@ export type TemplateTextDecisionRecord = z.infer<typeof templateTextDecisionReco
  *
  * - `NOT_APPLICABLE` - not a text decision at all (no text on this mapping,
  *   or the placeholder is not a text layer), so there is nothing to compare.
- * - `TEMPLATE_TEXT_UNKNOWN` - the manifest carries NEITHER the template's own
- *   text NOR its verification digests, so this check cannot be performed at
- *   all. Deliberately blocking, never a warning: an unverifiable text is
- *   exactly the case the real incident shipped. A text merely too long to
- *   store is NOT this case - its digests answer every question here.
+ * - `TEMPLATE_TEXT_UNKNOWN` - the manifest predates text capture, so this
+ *   check cannot be performed. Blocking, and re-inspection is the real fix.
+ * - `TEMPLATE_TEXT_CAPTURE_FAILED` - capture was attempted and failed
+ *   transiently. Blocking; re-inspection may well resolve it.
+ * - `TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY` - the layer's text is beyond the size
+ *   this system verifies at all. Blocking and TERMINAL: re-inspection can
+ *   never change it, and - unlike every other blocking state - it cannot be
+ *   cleared with "keep template text" either, because nothing was verified to
+ *   keep. Shortening the layer's text (or removing the mapping) is the only
+ *   real resolution.
+ *
+ *   A text merely too long to STORE is none of these: its digests answer
+ *   every question here.
  * - `IDENTICAL` - the mapping's text equals the template's, code point for
  *   code point.
  * - `TRIVIAL_VARIANT` - it differs only in letter case, only in whitespace,
@@ -86,7 +105,15 @@ export type TemplateTextDecisionRecord = z.infer<typeof templateTextDecisionReco
  *   genuinely rewrote the line does not produce one of these by accident.
  * - `REPLACED` - genuinely different text.
  */
-export const TEMPLATE_COPY_STATUSES = ["NOT_APPLICABLE", "TEMPLATE_TEXT_UNKNOWN", "IDENTICAL", "TRIVIAL_VARIANT", "REPLACED"] as const;
+export const TEMPLATE_COPY_STATUSES = [
+  "NOT_APPLICABLE",
+  "TEMPLATE_TEXT_UNKNOWN",
+  "TEMPLATE_TEXT_CAPTURE_FAILED",
+  "TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY",
+  "IDENTICAL",
+  "TRIVIAL_VARIANT",
+  "REPLACED"
+] as const;
 export const templateCopyStatusSchema = z.enum(TEMPLATE_COPY_STATUSES);
 export type TemplateCopyStatus = (typeof TEMPLATE_COPY_STATUSES)[number];
 
@@ -116,6 +143,14 @@ export interface TemplateCopyInput {
    * impossible re-inspection. Ignored when the complete text is available.
    */
   templateTextVerification?: TextVerification | null;
+  /**
+   * How completely this layer's text was captured. Distinguishes a transient
+   * capture failure (re-inspection may fix it) from a text that is simply
+   * beyond the size this system verifies (terminal - see
+   * TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY), so an operator is never sent round an
+   * endless re-inspection loop.
+   */
+  templateTextCaptureStatus?: TextCaptureStatus | null;
   /** The reviewer's explicit decision, or null when none has been recorded. */
   decision: TemplateTextDecisionRecord | null;
 }
@@ -185,7 +220,26 @@ export function assessTemplateCopy(input: TemplateCopyInput): TemplateCopyAssess
     return notApplicable();
   }
 
-  const verification = input.templateTextVerification ?? null;
+  const captureStatus = input.templateTextCaptureStatus ?? null;
+
+  // TERMINAL, and deliberately checked before anything else: no decision, and
+  // no amount of re-inspecting, can make an over-sized text verifiable.
+  if (captureStatus === "TOO_LARGE") {
+    return {
+      status: "TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY",
+      variantKind: null,
+      decisionState,
+      effectiveDecision,
+      blocks: true,
+      reason:
+        `this layer's template text is larger than the ${MAX_VERIFIABLE_TEXT_CODE_UNITS.toLocaleString("en-US")} characters this system can verify, so it can never be checked for leftover template copy - re-running template inspection cannot change that; shorten the layer's text in the template, or remove this text mapping`
+    };
+  }
+
+  const rawVerification = input.templateTextVerification ?? null;
+  // A digest is only meaningful under the algorithm that produced it.
+  const verification = rawVerification !== null && isCurrentDigestAlgorithm(rawVerification.algorithm) ? rawVerification : null;
+  const staleAlgorithm = rawVerification !== null && verification === null;
 
   // The complete text is not stored, but its verification metadata is: every
   // question this gate asks can still be answered exactly (real 2026-09-19
@@ -229,14 +283,26 @@ export function assessTemplateCopy(input: TemplateCopyInput): TemplateCopyAssess
   }
 
   if (templateText === undefined) {
+    if (captureStatus === "CAPTURE_FAILED") {
+      return {
+        status: "TEMPLATE_TEXT_CAPTURE_FAILED",
+        variantKind: null,
+        decisionState,
+        effectiveDecision,
+        blocks: true,
+        reason:
+          "this layer's template text could not be read completely when the project was inspected, so it cannot be checked for leftover template copy - re-run template inspection for this project, which usually resolves it"
+      };
+    }
     return {
       status: "TEMPLATE_TEXT_UNKNOWN",
       variantKind: null,
       decisionState,
       effectiveDecision,
       blocks: true,
-      reason:
-        "this project's manifest records neither the template's own text for this layer nor its verification digests, so it cannot be checked for leftover template copy - re-run template inspection for this project before approving or executing",
+      reason: staleAlgorithm
+        ? `this layer's template text was verified under an older algorithm (${rawVerification?.algorithm ?? "unknown"}, now ${TEXT_DIGEST_ALGORITHM}), so its digests can no longer be compared - re-run template inspection for this project before approving or executing`
+        : "this project's manifest records neither the template's own text for this layer nor its verification digests, so it cannot be checked for leftover template copy - re-run template inspection for this project before approving or executing"
     };
   }
 

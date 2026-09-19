@@ -146,14 +146,26 @@ Schema changes, all backward-readable with no migration:
 the worker, the API and the browser all compute byte-identical results
 (pinned in tests against `node:crypto` and `TextEncoder`):
 
-- `sha256Hex(text)` / `utf8Bytes(text)` / `sha256HexOfBytes(bytes)`.
-- `stripWhitespace` (explicit code-point set) and `foldCase`
-  (locale-independent) - the ONLY normalizations, shared with the gate itself.
+- `sha256Hex(text)` and `utf16leBytes(text)` - SHA-256 over the string's own
+  UTF-16 code units, little endian, no BOM (`sha256-utf16le-code-units-v1`).
+  Injective over every JavaScript string, including unpaired surrogates.
+- `Sha256Stream` and `TextVerificationStream` - incremental, so a text far too
+  large to hold can still be verified exactly, one bounded slice at a time.
+- `stripWhitespace` (explicit code-point set) and `foldCase` (per code point,
+  locale-independent) - the ONLY normalizations, shared with the gate itself,
+  and both context-free so they stream safely.
+- `TEXT_CAPTURE_STATUSES` (`COMPLETE`, `VERIFIED_EXCERPT`, `CAPTURE_FAILED`,
+  `TOO_LARGE`) and `MAX_VERIFIABLE_TEXT_CODE_UNITS`.
 - `computeTextVerification(completeText) -> TextVerification`:
   `{ algorithm, codeUnitLength, fullDigest, caseFoldedDigest,
   whitespaceStrippedDigest, caseFoldedWhitespaceStrippedDigest }`.
 - `compareByVerification(candidate, reference)` - identical / case-only /
   whitespace-only / both, mirroring the full-text comparison exactly.
 
-`algorithm` is stored with every record (`sha256-utf8-v1`), so a record written
-under an older algorithm could never be silently compared under newer rules.
+`algorithm` is stored with every record as a plain string, so a record written
+under an older algorithm still PARSES but is never compared - the gate reports
+it as uncheckable and names re-inspection as the fix.
+
+The manifest also carries `originalTextCaptureStatus` and
+`originalTextCodeUnitLength`, so the gate can distinguish a transient capture
+failure (re-inspectable) from a text beyond the verifiable size (terminal).

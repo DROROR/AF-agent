@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { textVerificationSchema } from "./text-digest.js";
+import { textCaptureStatusSchema, textVerificationSchema } from "./text-digest.js";
 
 /**
  * template-manifest.json - machine-generated scene/placeholder discovery,
@@ -147,6 +147,16 @@ export const placeholderSchema = z.object({
    * never silently trusted against this one.
    */
   originalTextVerification: textVerificationSchema.extend({ sourceProjectSha256: z.string().min(1) }).optional(),
+  /**
+   * How completely this layer's text was captured, so the gate can give
+   * DIFFERENT advice for cases that need it (2026-09-19 integrity
+   * correction): `COMPLETE`, `VERIFIED_EXCERPT`, a transient `CAPTURE_FAILED`
+   * that re-inspection may resolve, or a terminal `TOO_LARGE` that it never
+   * can. An absent status means the manifest predates text capture entirely.
+   */
+  originalTextCaptureStatus: textCaptureStatusSchema.optional(),
+  /** The COMPLETE text's own code-unit length, recorded even when the text itself is not stored - evidence for an operator deciding what to do about an over-sized layer. */
+  originalTextCodeUnitLength: z.number().int().nonnegative().optional(),
   dimensions: dimensionsSchema.nullable(),
   startTimeSeconds: z.number().nullable(),
   durationSeconds: z.number().nullable(),

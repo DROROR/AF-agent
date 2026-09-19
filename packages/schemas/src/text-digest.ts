@@ -8,29 +8,39 @@ import { z } from "zod";
  * through an MCP response, a manifest and a browser payload is not safe for a
  * pathological template, so long text is stored as a bounded PREVIEW - but a
  * preview cannot be compared, and "re-run template inspection" can never fix a
- * text that is simply longer than the bound. That was a permanent dead end.
+ * text that is simply longer than the bound. Verification metadata computed
+ * from the COMPLETE text closes that loop: exact code-unit length plus four
+ * digests (exact, case-folded, whitespace-stripped, and both).
  *
- * The fix is to store, alongside the preview, verification metadata computed
- * from the COMPLETE text: its exact code-unit length and four digests (exact,
- * case-folded, whitespace-stripped, and both). Those are enough to decide
- * every question the gate actually asks - identical, case-only variant,
- * whitespace-only variant, or genuinely different - without ever storing or
- * transmitting the whole text.
+ * UTF-16 CODE UNITS, NOT UTF-8 (2026-09-19 integrity correction). After
+ * Effects and JavaScript both hold text as UTF-16, and a UTF-16 string can
+ * contain an unpaired surrogate. Encoding to UTF-8 first maps EVERY unpaired
+ * surrogate to U+FFFD, so "\uD800", "\uDC00" and "�" all hashed alike -
+ * a real collision in a system whose whole job is exact verification. This
+ * module therefore hashes the string's own UTF-16 code units directly, little
+ * endian, two bytes each, with no BOM: that mapping is injective over every
+ * possible JavaScript string, so distinct strings always produce distinct
+ * digest inputs.
  *
- * ONE ALGORITHM, EVERY BOUNDARY. This module is pure TypeScript with no
- * platform API: the same code runs in the worker (Node), the API (Node) and
- * the dashboard (browser), so a digest computed anywhere is byte-identical
- * everywhere. `node:crypto` is deliberately NOT used - it does not exist in a
- * browser, and two implementations would be two chances to drift. The test
- * suite pins this implementation against `node:crypto` for exactly that
- * reason.
+ * ONE ALGORITHM, EVERY BOUNDARY. Pure TypeScript with no platform API: the
+ * same code runs in the worker (Node), the API (Node) and the dashboard
+ * (browser), so a digest computed anywhere is byte-identical everywhere.
+ * `node:crypto` is deliberately NOT used - it does not exist in a browser,
+ * and two implementations would be two chances to drift. The test suite pins
+ * the hash against `node:crypto` (fed the same UTF-16LE bytes) for exactly
+ * that reason.
  */
 
-/** Bumped only if the canonical algorithm itself ever changes; stored with every digest so an older record is never silently compared under newer rules. */
-export const TEXT_DIGEST_ALGORITHM = "sha256-utf8-v1" as const;
+/**
+ * Stored with every digest record, so a record written under an older
+ * algorithm is never silently compared under newer rules. The previous
+ * `sha256-utf8-v1` is deliberately NOT accepted anywhere: it could not
+ * distinguish an unpaired surrogate from U+FFFD.
+ */
+export const TEXT_DIGEST_ALGORITHM = "sha256-utf16le-code-units-v1" as const;
 
 /* ------------------------------------------------------------------ *
- * SHA-256, pure and synchronous.
+ * SHA-256, pure, synchronous, and incremental.
  * ------------------------------------------------------------------ */
 
 const K = [
@@ -46,39 +56,70 @@ function rotateRight(value: number, bits: number): number {
   return ((value >>> bits) | (value << (32 - bits))) >>> 0;
 }
 
-/** SHA-256 over raw bytes, returned as lowercase hex. */
-export function sha256HexOfBytes(bytes: readonly number[]): string {
-  const hash = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+/**
+ * Incremental SHA-256: `update` as many times as needed, then `digest`.
+ *
+ * Incremental rather than one-shot so a text far too large to hold in memory
+ * can still be verified exactly - the worker streams one bounded slice at a
+ * time into these, and never assembles the whole string (see
+ * complete-template-text.ts).
+ */
+export class Sha256Stream {
+  private readonly state = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  private readonly block = new Uint8Array(64);
+  private blockLength = 0;
+  private totalBytes = 0;
+  private readonly w = new Array<number>(64);
 
-  // Padding: one 0x80 byte, then zeros, then the 64-bit big-endian bit length.
-  const bitLength = bytes.length * 8;
-  const padded = [...bytes, 0x80];
-  while (padded.length % 64 !== 56) {
-    padded.push(0);
+  update(bytes: ArrayLike<number>): this {
+    for (let index = 0; index < bytes.length; index += 1) {
+      this.block[this.blockLength] = (bytes[index] as number) & 0xff;
+      this.blockLength += 1;
+      this.totalBytes += 1;
+      if (this.blockLength === 64) {
+        this.compress();
+        this.blockLength = 0;
+      }
+    }
+    return this;
   }
-  // JavaScript numbers hold the full bit length exactly for any realistic
-  // text (2^53 bits is ~1 petabyte), so the high word is derived by division
-  // rather than by a 32-bit shift, which would overflow.
-  const highWord = Math.floor(bitLength / 0x100000000);
-  const lowWord = bitLength >>> 0;
-  padded.push((highWord >>> 24) & 0xff, (highWord >>> 16) & 0xff, (highWord >>> 8) & 0xff, highWord & 0xff);
-  padded.push((lowWord >>> 24) & 0xff, (lowWord >>> 16) & 0xff, (lowWord >>> 8) & 0xff, lowWord & 0xff);
 
-  const w = new Array<number>(64);
-  for (let chunkStart = 0; chunkStart < padded.length; chunkStart += 64) {
+  /** Finalises and returns lowercase hex. The instance must not be updated afterwards. */
+  digest(): string {
+    const bitLength = this.totalBytes * 8;
+    const tail: number[] = [0x80];
+    while ((this.blockLength + tail.length) % 64 !== 56) {
+      tail.push(0);
+    }
+    // JavaScript numbers hold the full bit length exactly for any realistic
+    // text (2^53 bits is ~1 petabyte), so the high word is derived by division
+    // rather than a 32-bit shift, which would overflow.
+    const highWord = Math.floor(bitLength / 0x100000000);
+    const lowWord = bitLength >>> 0;
+    tail.push((highWord >>> 24) & 0xff, (highWord >>> 16) & 0xff, (highWord >>> 8) & 0xff, highWord & 0xff);
+    tail.push((lowWord >>> 24) & 0xff, (lowWord >>> 16) & 0xff, (lowWord >>> 8) & 0xff, lowWord & 0xff);
+    // Padding must not count toward the length already recorded above.
+    const recordedTotal = this.totalBytes;
+    this.update(tail);
+    this.totalBytes = recordedTotal;
+    return this.state.map((word) => word.toString(16).padStart(8, "0")).join("");
+  }
+
+  private compress(): void {
+    const w = this.w;
     for (let i = 0; i < 16; i += 1) {
-      const offset = chunkStart + i * 4;
-      w[i] = (((padded[offset] as number) << 24) | ((padded[offset + 1] as number) << 16) | ((padded[offset + 2] as number) << 8) | (padded[offset + 3] as number)) >>> 0;
+      const offset = i * 4;
+      w[i] = (((this.block[offset] as number) << 24) | ((this.block[offset + 1] as number) << 16) | ((this.block[offset + 2] as number) << 8) | (this.block[offset + 3] as number)) >>> 0;
     }
     for (let i = 16; i < 64; i += 1) {
       const a = w[i - 15] as number;
       const b = w[i - 2] as number;
       const s0 = (rotateRight(a, 7) ^ rotateRight(a, 18) ^ (a >>> 3)) >>> 0;
       const s1 = (rotateRight(b, 17) ^ rotateRight(b, 19) ^ (b >>> 10)) >>> 0;
-      w[i] = (((w[i - 16] as number) + s0 + (w[i - 7] as number) + s1) >>> 0) >>> 0;
+      w[i] = ((w[i - 16] as number) + s0 + (w[i - 7] as number) + s1) >>> 0;
     }
 
-    let [a, b, c, d, e, f, g, h] = hash as [number, number, number, number, number, number, number, number];
+    let [a, b, c, d, e, f, g, h] = this.state as [number, number, number, number, number, number, number, number];
     for (let i = 0; i < 64; i += 1) {
       const s1 = (rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25)) >>> 0;
       const ch = ((e & f) ^ (~e & g)) >>> 0;
@@ -95,81 +136,65 @@ export function sha256HexOfBytes(bytes: readonly number[]): string {
       b = a;
       a = (temp1 + temp2) >>> 0;
     }
-    hash[0] = ((hash[0] as number) + a) >>> 0;
-    hash[1] = ((hash[1] as number) + b) >>> 0;
-    hash[2] = ((hash[2] as number) + c) >>> 0;
-    hash[3] = ((hash[3] as number) + d) >>> 0;
-    hash[4] = ((hash[4] as number) + e) >>> 0;
-    hash[5] = ((hash[5] as number) + f) >>> 0;
-    hash[6] = ((hash[6] as number) + g) >>> 0;
-    hash[7] = ((hash[7] as number) + h) >>> 0;
+    this.state[0] = ((this.state[0] as number) + a) >>> 0;
+    this.state[1] = ((this.state[1] as number) + b) >>> 0;
+    this.state[2] = ((this.state[2] as number) + c) >>> 0;
+    this.state[3] = ((this.state[3] as number) + d) >>> 0;
+    this.state[4] = ((this.state[4] as number) + e) >>> 0;
+    this.state[5] = ((this.state[5] as number) + f) >>> 0;
+    this.state[6] = ((this.state[6] as number) + g) >>> 0;
+    this.state[7] = ((this.state[7] as number) + h) >>> 0;
   }
-
-  return hash.map((word) => word.toString(16).padStart(8, "0")).join("");
 }
 
 /**
- * UTF-8 bytes of a JavaScript string, done explicitly rather than through
- * `TextEncoder`/`Buffer` so the encoding is identical on every runtime and is
- * itself testable. A lone surrogate (possible in a JS string, and therefore
- * possible in a template) is encoded as U+FFFD, exactly as `TextEncoder`
- * does, so an unpaired half can never make two different texts hash alike.
+ * The string's own UTF-16 code units, little endian, two bytes each, no BOM.
+ *
+ * Injective over every JavaScript string - including one containing an
+ * unpaired surrogate - which is exactly why this replaced UTF-8 encoding: a
+ * high lone surrogate, a low lone surrogate and U+FFFD are three different
+ * strings and must produce three different digests.
  */
-export function utf8Bytes(text: string): number[] {
-  const bytes: number[] = [];
+export function utf16leBytes(text: string): number[] {
+  const bytes: number[] = new Array<number>(text.length * 2);
   for (let index = 0; index < text.length; index += 1) {
-    let codePoint = text.charCodeAt(index);
-    if (codePoint >= 0xd800 && codePoint <= 0xdbff) {
-      const next = index + 1 < text.length ? text.charCodeAt(index + 1) : 0;
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        codePoint = (codePoint - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000;
-        index += 1;
-      } else {
-        codePoint = 0xfffd;
-      }
-    } else if (codePoint >= 0xdc00 && codePoint <= 0xdfff) {
-      codePoint = 0xfffd;
-    }
-
-    if (codePoint < 0x80) {
-      bytes.push(codePoint);
-    } else if (codePoint < 0x800) {
-      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
-    } else if (codePoint < 0x10000) {
-      bytes.push(0xe0 | (codePoint >> 12), 0x80 | ((codePoint >> 6) & 0x3f), 0x80 | (codePoint & 0x3f));
-    } else {
-      bytes.push(0xf0 | (codePoint >> 18), 0x80 | ((codePoint >> 12) & 0x3f), 0x80 | ((codePoint >> 6) & 0x3f), 0x80 | (codePoint & 0x3f));
-    }
+    const codeUnit = text.charCodeAt(index);
+    bytes[index * 2] = codeUnit & 0xff;
+    bytes[index * 2 + 1] = (codeUnit >>> 8) & 0xff;
   }
   return bytes;
 }
 
-/** SHA-256 of a string's UTF-8 bytes, lowercase hex - the one hashing entry point this project uses for text. */
+/** SHA-256 of a string's UTF-16LE code units, lowercase hex - the one hashing entry point this project uses for text. */
 export function sha256Hex(text: string): string {
-  return sha256HexOfBytes(utf8Bytes(text));
+  return new Sha256Stream().update(utf16leBytes(text)).digest();
 }
 
 /* ------------------------------------------------------------------ *
- * Canonical normalizations.
+ * Canonical normalizations - both context-free, so both can stream.
  * ------------------------------------------------------------------ */
 
 /**
  * Every code point treated as whitespace, listed explicitly rather than left
  * to a `\s` regex whose meaning differs between engines and Unicode versions.
- * Matches ECMAScript's own WhiteSpace + LineTerminator production, which is
- * what `String.prototype.trim` and `/\s/` mean on a modern engine.
+ * Matches ECMAScript's own WhiteSpace + LineTerminator production.
  */
 const WHITESPACE_CODE_POINTS = new Set([
   0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x0085, 0x00a0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
   0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff
 ]);
 
-/** Removes every whitespace character entirely (never collapses to one space), so "A B" and "A\r\nB" and "AB" normalise alike. */
+/** True for a code point this project treats as whitespace. Per code point and context-free, so stripping can be done a chunk at a time. */
+export function isCanonicalWhitespace(codePoint: number): boolean {
+  return WHITESPACE_CODE_POINTS.has(codePoint);
+}
+
+/** Removes every whitespace character entirely (never collapses to one space), so "A B", "A\r\nB" and "AB" normalise alike. */
 export function stripWhitespace(text: string): string {
   let out = "";
   for (const character of text) {
     const codePoint = character.codePointAt(0);
-    if (codePoint !== undefined && WHITESPACE_CODE_POINTS.has(codePoint)) {
+    if (codePoint !== undefined && isCanonicalWhitespace(codePoint)) {
       continue;
     }
     out += character;
@@ -177,9 +202,24 @@ export function stripWhitespace(text: string): string {
   return out;
 }
 
-/** Locale-independent lowercasing (`toLowerCase`, never `toLocaleLowerCase`), so the same plan is judged identically on every machine. */
+/**
+ * Canonical case folding: lowercase applied PER CODE POINT.
+ *
+ * Deliberately not `wholeString.toLowerCase()`. Whole-string lowercasing is
+ * context sensitive (Greek final sigma is the standard example: the same
+ * capital sigma lowercases differently depending on what surrounds it), and a
+ * context-sensitive fold cannot be computed a slice at a time - the verdict
+ * would depend on where the slice boundaries happened to fall. Per-code-point
+ * lowercasing is context-free, so the streaming path and the whole-string path
+ * are guaranteed to agree, which matters far more here than matching
+ * `toLowerCase` on the handful of context-sensitive code points.
+ */
 export function foldCase(text: string): string {
-  return text.toLowerCase();
+  let out = "";
+  for (const character of text) {
+    out += character.toLowerCase();
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ *
@@ -189,37 +229,135 @@ export function foldCase(text: string): string {
 /**
  * Everything needed to compare a text that is NOT stored in full - computed
  * from the complete text, never from a preview. Four digests answer the gate's
- * four questions; the code-unit length is carried for evidence and for cheap
- * inequality.
+ * four questions; the code-unit length is carried for evidence.
  */
 export const textVerificationSchema = z
   .object({
-    algorithm: z.literal(TEXT_DIGEST_ALGORITHM),
+    /**
+     * Which canonical algorithm produced these digests. A plain string rather
+     * than a literal so a record written by an older build still PARSES; the
+     * gate then refuses to compare it, because a digest is only meaningful
+     * under the algorithm that produced it.
+     */
+    algorithm: z.string().min(1),
     /** UTF-16 code units of the COMPLETE text - what After Effects' own String.length reports. */
     codeUnitLength: z.number().int().nonnegative(),
     /** Exact text. */
     fullDigest: z.string().length(64),
-    /** Lowercased. */
+    /** Case-folded. */
     caseFoldedDigest: z.string().length(64),
     /** All whitespace removed. */
     whitespaceStrippedDigest: z.string().length(64),
-    /** Lowercased AND whitespace removed. */
+    /** Case-folded AND whitespace removed. */
     caseFoldedWhitespaceStrippedDigest: z.string().length(64)
   })
   .strict();
 export type TextVerification = z.infer<typeof textVerificationSchema>;
 
-/** Computes all verification metadata for a COMPLETE text. Never call this with a preview. */
+/**
+ * How completely a template layer's own text was captured at inspection time.
+ * Distinguishes the cases that need DIFFERENT advice from an operator:
+ *
+ * - `COMPLETE` - the whole text is stored on the placeholder.
+ * - `VERIFIED_EXCERPT` - too long to store, but its digests were computed from
+ *   the complete text, so it is fully verifiable.
+ * - `CAPTURE_FAILED` - a transient failure while reading it (a dropped MCP
+ *   call, a project that changed mid-read). Re-inspection may well resolve it.
+ * - `TOO_LARGE` - beyond the size this system verifies at all. TERMINAL:
+ *   re-inspection can never change it, so telling an operator to re-inspect
+ *   would be an endless loop.
+ *
+ * An ABSENT status means the manifest predates text capture entirely.
+ */
+export const TEXT_CAPTURE_STATUSES = ["COMPLETE", "VERIFIED_EXCERPT", "CAPTURE_FAILED", "TOO_LARGE"] as const;
+export const textCaptureStatusSchema = z.enum(TEXT_CAPTURE_STATUSES);
+export type TextCaptureStatus = (typeof TEXT_CAPTURE_STATUSES)[number];
+
+/**
+ * The largest text this system verifies. A text beyond it is classified
+ * TOO_LARGE rather than silently unverified: the digests themselves stream
+ * and would cope, but each bounded slice costs a round trip to After Effects,
+ * so an unbounded read is its own denial of service.
+ */
+export const MAX_VERIFIABLE_TEXT_CODE_UNITS = 2_000_000;
+
+/** True when this record was produced by the algorithm currently in force, and may therefore be compared. */
+export function isCurrentDigestAlgorithm(algorithm: string): boolean {
+  return algorithm === TEXT_DIGEST_ALGORITHM;
+}
+
+/**
+ * Computes all four digests incrementally, one chunk at a time, WITHOUT ever
+ * holding the complete text.
+ *
+ * Both normalizations are context-free (see `foldCase`), so feeding the same
+ * text in different chunk sizes always produces the same digests. The only
+ * boundary hazard is a surrogate pair split across two chunks: a trailing high
+ * surrogate is therefore carried over and re-joined with the next chunk before
+ * normalisation, so the pair is always normalised as one character.
+ */
+export class TextVerificationStream {
+  private readonly exact = new Sha256Stream();
+  private readonly folded = new Sha256Stream();
+  private readonly stripped = new Sha256Stream();
+  private readonly foldedStripped = new Sha256Stream();
+  private codeUnitLength = 0;
+  /** A high surrogate seen at the very end of the previous chunk, whose pair may begin the next one. */
+  private pendingHighSurrogate = "";
+
+  update(chunk: string): this {
+    if (chunk.length === 0) {
+      return this;
+    }
+    this.codeUnitLength += chunk.length;
+
+    // The EXACT digest is over raw code units, so it never needs the carry -
+    // it can consume every chunk immediately, split pairs and all.
+    this.exact.update(utf16leBytes(chunk));
+
+    let working = this.pendingHighSurrogate + chunk;
+    this.pendingHighSurrogate = "";
+    const lastUnit = working.charCodeAt(working.length - 1);
+    if (lastUnit >= 0xd800 && lastUnit <= 0xdbff) {
+      // Hold it back: its low half may arrive in the next chunk.
+      this.pendingHighSurrogate = working.slice(-1);
+      working = working.slice(0, -1);
+    }
+    this.consumeNormalised(working);
+    return this;
+  }
+
+  /** Finalises every digest. Any held-back lone high surrogate is normalised on its own, exactly as a whole-string pass would treat it. */
+  finish(): TextVerification {
+    if (this.pendingHighSurrogate !== "") {
+      this.consumeNormalised(this.pendingHighSurrogate);
+      this.pendingHighSurrogate = "";
+    }
+    return {
+      algorithm: TEXT_DIGEST_ALGORITHM,
+      codeUnitLength: this.codeUnitLength,
+      fullDigest: this.exact.digest(),
+      caseFoldedDigest: this.folded.digest(),
+      whitespaceStrippedDigest: this.stripped.digest(),
+      caseFoldedWhitespaceStrippedDigest: this.foldedStripped.digest()
+    };
+  }
+
+  private consumeNormalised(text: string): void {
+    if (text.length === 0) {
+      return;
+    }
+    const folded = foldCase(text);
+    const stripped = stripWhitespace(text);
+    this.folded.update(utf16leBytes(folded));
+    this.stripped.update(utf16leBytes(stripped));
+    this.foldedStripped.update(utf16leBytes(foldCase(stripped)));
+  }
+}
+
+/** Computes all verification metadata for a COMPLETE text held in memory. Never call this with a preview. */
 export function computeTextVerification(text: string): TextVerification {
-  const stripped = stripWhitespace(text);
-  return {
-    algorithm: TEXT_DIGEST_ALGORITHM,
-    codeUnitLength: text.length,
-    fullDigest: sha256Hex(text),
-    caseFoldedDigest: sha256Hex(foldCase(text)),
-    whitespaceStrippedDigest: sha256Hex(stripped),
-    caseFoldedWhitespaceStrippedDigest: sha256Hex(foldCase(stripped))
-  };
+  return new TextVerificationStream().update(text).finish();
 }
 
 /** How one complete text relates to another, decided from verification metadata alone. Mirrors the direct string comparison exactly, so a digest-based verdict and a full-text verdict can never disagree. */

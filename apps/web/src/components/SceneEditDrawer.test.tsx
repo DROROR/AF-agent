@@ -205,6 +205,65 @@ describe("SceneEditDrawer", () => {
     expect(screen.queryByText("Template's own text:")).toBeNull();
   });
 
+  it("tells the reviewer an over-sized template text can never be verified, and offers no decision at all", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "anything the reviewer typed" })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: manifestFixture([
+            placeholderFixture({
+              originalText: undefined,
+              originalTextTruncated: true,
+              originalTextCaptureStatus: "TOO_LARGE",
+              originalTextCodeUnitLength: 2_000_001
+            })
+          ])
+        }
+      }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText(/larger than this system can verify/);
+    // Actionable, and explicitly NOT an endless re-inspection prompt.
+    expect(screen.getByText(/Re-running inspection will not change that/)).toBeTruthy();
+    expect(screen.queryByText(/Re-run template inspection\./)).toBeNull();
+    // Nothing was verified, so there is nothing to keep or replace.
+    expect(screen.queryByRole("button", { name: "Keep template text" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "I replaced it" })).toBeNull();
+  });
+
+  it("tells the reviewer a transient capture failure is worth re-inspecting for", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "anything" })] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: manifestFixture([placeholderFixture({ originalText: undefined, originalTextTruncated: true, originalTextCaptureStatus: "CAPTURE_FAILED" })])
+        }
+      }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText(/could not be read completely/);
+    expect(screen.getByText(/usually resolves this/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Keep template text" })).toBeNull();
+  });
+
   it("shows no template-copy warning at all once the text is genuinely different", async () => {
     const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "Completely different words" })] })];
     stubFetchByUrl({

@@ -9,6 +9,7 @@ import {
   type PlaceholderType,
   type TemplateCopyAssessment,
   type TemplateTextDecision,
+  type TextCaptureStatus,
   type TextVerification
 } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
@@ -115,8 +116,10 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
     preview: string | null;
     truncated: boolean;
     verification: TextVerification | null;
+    captureStatus: TextCaptureStatus | null;
+    codeUnitLength: number | null;
   } {
-    const none = { text: null, preview: null, truncated: false, verification: null };
+    const none = { text: null, preview: null, truncated: false, verification: null, captureStatus: null, codeUnitLength: null };
     const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
     if (!mapping || mapping.manifestPlaceholderId === null) {
       return none;
@@ -129,12 +132,15 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
             text: truncated ? undefined : placeholder.originalText,
             preview: truncated ? (placeholder.originalTextPreview ?? null) : null,
             truncated,
-            verification: placeholder.originalTextVerification ?? null
+            verification: placeholder.originalTextVerification ?? null,
+            captureStatus: placeholder.originalTextCaptureStatus ?? null,
+            codeUnitLength:
+              placeholder.originalTextCodeUnitLength ?? placeholder.originalTextVerification?.codeUnitLength ?? null
           };
         }
       }
     }
-    return { text: undefined, preview: null, truncated: false, verification: null };
+    return { ...none, text: undefined };
   }
 
   /** Assessed with the SAME pure function the backend gate uses, against the text currently typed in the form - so the warning tracks what the reviewer is actually about to save. */
@@ -147,6 +153,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
       mappingText: typedText,
       templateText: template.text,
       templateTextVerification: template.verification,
+      templateTextCaptureStatus: template.captureStatus,
       decision:
         form.templateTextDecision === null
           ? null
@@ -333,9 +340,17 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
               const warning =
                 assessment.status === "TEMPLATE_TEXT_UNKNOWN"
                   ? t.projectWorkspace.editDrawer.templateCopyUnknownWarning
-                  : assessment.status === "IDENTICAL"
-                    ? t.projectWorkspace.editDrawer.templateCopyIdenticalWarning
-                    : t.projectWorkspace.editDrawer.templateCopyVariantWarning;
+                  : assessment.status === "TEMPLATE_TEXT_CAPTURE_FAILED"
+                    ? t.projectWorkspace.editDrawer.templateCopyCaptureFailedWarning
+                    : assessment.status === "TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY"
+                      ? t.projectWorkspace.editDrawer.templateCopyTooLargeWarning(template.codeUnitLength ?? 0)
+                      : assessment.status === "IDENTICAL"
+                        ? t.projectWorkspace.editDrawer.templateCopyIdenticalWarning
+                        : t.projectWorkspace.editDrawer.templateCopyVariantWarning;
+              // A terminal size blocker and an uncheckable manifest both offer
+              // NO decision: there is nothing verified to keep or replace.
+              const offersDecision =
+                assessment.status === "IDENTICAL" || assessment.status === "TRIVIAL_VARIANT";
               return (
                 <div className="template-copy-warning" role="status" data-blocks={assessment.blocks ? "true" : "false"}>
                   <p>{warning}</p>
@@ -356,7 +371,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                       </span>
                     </p>
                   ) : null}
-                  {assessment.status === "TEMPLATE_TEXT_UNKNOWN" ? null : (
+                  {!offersDecision ? null : (
                     <>
                       <p>{t.projectWorkspace.editDrawer.templateCopyDecisionHint}</p>
                       <div className="template-copy-actions">

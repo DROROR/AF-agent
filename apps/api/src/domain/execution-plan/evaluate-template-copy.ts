@@ -1,4 +1,12 @@
-import { assessTemplateCopy, type PlaceholderMapping, type ScenePlanEntry, type TemplateCopyAssessment, type TemplateManifest, type TextVerification } from "@dyo/schemas";
+import {
+  assessTemplateCopy,
+  type PlaceholderMapping,
+  type ScenePlanEntry,
+  type TemplateCopyAssessment,
+  type TemplateManifest,
+  type TextCaptureStatus,
+  type TextVerification
+} from "@dyo/schemas";
 
 /**
  * THE LEFTOVER-TEMPLATE-COPY GATE (2026-09-18).
@@ -37,12 +45,12 @@ export interface TemplateCopyFinding {
 function templateTextFor(
   manifest: TemplateManifest,
   manifestPlaceholderId: string | null
-): { text: string | null | undefined; verification: TextVerification | null } {
+): { text: string | null | undefined; verification: TextVerification | null; captureStatus: TextCaptureStatus | null } {
   if (manifestPlaceholderId === null) {
     // A human-added mapping has no manifest placeholder and therefore no
     // template wording it could be a leftover copy OF - the text came from a
     // person, not from the purchased template.
-    return { text: null, verification: null };
+    return { text: null, verification: null, captureStatus: null };
   }
   for (const scene of manifest.scenes) {
     for (const placeholder of scene.placeholders) {
@@ -52,14 +60,18 @@ function templateTextFor(
         // line identical - but its digests, computed from the complete text,
         // answer every question the gate asks.
         const text = placeholder.originalTextTruncated === true ? undefined : placeholder.originalText;
-        return { text, verification: placeholder.originalTextVerification ?? null };
+        return {
+          text,
+          verification: placeholder.originalTextVerification ?? null,
+          captureStatus: placeholder.originalTextCaptureStatus ?? null
+        };
       }
     }
   }
   // The plan references a placeholder the current manifest no longer has.
   // Other gates (manifest sha256, composition resolution) already refuse that
   // case loudly; here it is simply unverifiable, so it blocks.
-  return { text: undefined, verification: null };
+  return { text: undefined, verification: null, captureStatus: null };
 }
 
 export function assessMappingTemplateCopy(mapping: PlaceholderMapping, manifest: TemplateManifest): TemplateCopyAssessment {
@@ -68,6 +80,7 @@ export function assessMappingTemplateCopy(mapping: PlaceholderMapping, manifest:
     mappingText: mapping.text,
     templateText: template.text,
     templateTextVerification: template.verification,
+    templateTextCaptureStatus: template.captureStatus,
     // Absent and null both mean "no decision" - see placeholderMappingSchema.
     decision: mapping.keepTemplateText ?? null
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assessTemplateCopy, templateTextDecisionRecordSchema, type TemplateTextDecisionRecord } from "../template-copy.js";
-import { computeTextVerification, sha256Hex } from "../text-digest.js";
+import { MAX_VERIFIABLE_TEXT_CODE_UNITS, computeTextVerification, sha256Hex, TEXT_DIGEST_ALGORITHM } from "../text-digest.js";
 
 const DECIDED_AT = "2026-01-01T00:00:00.000Z";
 
@@ -275,5 +275,81 @@ describe("assessTemplateCopy with verification metadata instead of the full text
       expect(byDigest.variantKind).toBe(byText.variantKind);
       expect(byDigest.blocks).toBe(byText.blocks);
     }
+  });
+});
+
+/**
+ * SIZE AND CAPTURE STATES (2026-09-19 integrity correction). A text beyond the
+ * supported size can never be verified, so telling an operator to re-inspect
+ * would be an endless loop; a transient capture failure genuinely is worth
+ * re-inspecting for; and a manifest that predates capture is a third case
+ * again. Each needs its own actionable reason.
+ */
+describe("assessTemplateCopy - capture states", () => {
+  it("reports a text beyond the supported size as TERMINAL, never as 're-run inspection'", () => {
+    const result = assessTemplateCopy({
+      mappingText: "whatever the reviewer typed",
+      templateText: undefined,
+      templateTextCaptureStatus: "TOO_LARGE",
+      decision: null
+    });
+    expect(result.status).toBe("TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY");
+    expect(result.blocks).toBe(true);
+    expect(result.reason).not.toMatch(/re-run template inspection/);
+    expect(result.reason).toMatch(/shorten the layer's text|remove this text mapping/);
+    expect(result.reason).toContain(MAX_VERIFIABLE_TEXT_CODE_UNITS.toLocaleString("en-US"));
+  });
+
+  it("a terminal size blocker can NEVER be cleared with Keep Template Text", () => {
+    for (const decision of ["KEEP_TEMPLATE_TEXT", "REPLACE"] as const) {
+      const result = assessTemplateCopy({
+        mappingText: "whatever",
+        templateText: undefined,
+        templateTextCaptureStatus: "TOO_LARGE",
+        decision: { decision, decidedBy: "user-1", decidedAt: DECIDED_AT, textAtDecision: "whatever", textDigestAtDecision: sha256Hex("whatever") }
+      });
+      expect(result.blocks).toBe(true);
+      expect(result.status).toBe("TEMPLATE_TEXT_TOO_LARGE_TO_VERIFY");
+    }
+  });
+
+  it("reports a transient capture failure as re-inspectable", () => {
+    const result = assessTemplateCopy({
+      mappingText: "whatever",
+      templateText: undefined,
+      templateTextCaptureStatus: "CAPTURE_FAILED",
+      decision: null
+    });
+    expect(result.status).toBe("TEMPLATE_TEXT_CAPTURE_FAILED");
+    expect(result.blocks).toBe(true);
+    expect(result.reason).toMatch(/re-run template inspection/);
+    expect(result.reason).toMatch(/usually resolves it/);
+  });
+
+  it("keeps a legacy manifest distinct from both of those", () => {
+    const result = assessTemplateCopy({ mappingText: "whatever", templateText: undefined, decision: null });
+    expect(result.status).toBe("TEMPLATE_TEXT_UNKNOWN");
+    expect(result.reason).toMatch(/records neither the template's own text .* nor its verification digests/);
+  });
+
+  it("refuses to compare digests written under an older algorithm, and says re-inspection fixes it", () => {
+    const stale = { ...computeTextVerification("Assets"), algorithm: "sha256-utf8-v1" };
+    const result = assessTemplateCopy({ mappingText: "Assets", templateText: undefined, templateTextVerification: stale, decision: null });
+    expect(result.status).toBe("TEMPLATE_TEXT_UNKNOWN");
+    expect(result.reason).toContain("sha256-utf8-v1");
+    expect(result.reason).toContain(TEXT_DIGEST_ALGORITHM);
+    expect(result.reason).toMatch(/re-run template inspection/);
+  });
+
+  it("still verifies normally when capture succeeded, whatever the status says about how", () => {
+    const text = "Assets";
+    const result = assessTemplateCopy({
+      mappingText: text,
+      templateText: undefined,
+      templateTextVerification: computeTextVerification(text),
+      templateTextCaptureStatus: "VERIFIED_EXCERPT",
+      decision: null
+    });
+    expect(result.status).toBe("IDENTICAL");
   });
 });
