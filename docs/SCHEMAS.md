@@ -169,3 +169,31 @@ it as uncheckable and names re-inspection as the fix.
 The manifest also carries `originalTextCaptureStatus` and
 `originalTextCodeUnitLength`, so the gate can distinguish a transient capture
 failure (re-inspectable) from a text beyond the verifiable size (terminal).
+
+## disposable-inspection (safe-inspection evidence)
+
+`packages/schemas/src/disposable-inspection.ts`:
+
+- `disposableInspectionEvidenceSchema` - the auditable record every safe
+  inspection reports: operation, target path and expected/actual hash, the
+  disposable copy's path and hash, source and working-copy hashes before and
+  after, `priorAeProjectState`, `restoration`, `cleanup`, their notes,
+  `unresolvedFootage`, and timestamps.
+- `DISPOSABLE_INSPECTION_FAILURE_CODES` - `BUSY`, `TARGET_HASH_MISMATCH`,
+  `TARGET_DIRECTORY_NOT_WRITABLE`, `COPY_FAILED`, `AE_STATE_UNKNOWN`,
+  `AE_PROJECT_NOT_SAFE_TO_REPLACE`, `OPEN_FAILED`, `FOOTAGE_UNRESOLVED`,
+  `INSPECTION_FAILED`, `PROTECTED_FILE_CHANGED`.
+- `RESTORATION_OUTCOMES` - `NOTHING_TO_RESTORE`, `RESTORED`, `RESTORE_FAILED`,
+  `NOT_DISTURBED`.
+- `CLEANUP_OUTCOMES` - `DELETED`, `NOTHING_TO_CLEAN`, `QUARANTINED`,
+  `CLEANUP_FAILED`, `LEFT_IN_PLACE_STILL_OPEN`.
+
+Carried as an OPTIONAL `safeInspection` field on
+`rawInspectionCaptureSchema`, `manifestInspectionResultSchema`,
+`sceneEvidenceResponseSchema` and `inspectRenderCapabilitiesResponseSchema`, so
+results written before Stage 3 still parse.
+
+`inspectRenderCapabilitiesRequestSchema` gains optional `sourceProjectPath` and
+`sourceProjectSha256`, and the dispatch request gains an optional `projectId`;
+the API resolves the real path and sha256 from its own project record, so the
+browser never supplies a path.

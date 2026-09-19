@@ -1,3 +1,4 @@
+import type { DisposableInspectionEvidence } from "@dyo/schemas";
 import type { InspectTemplateRequest, InspectTemplateResponse } from "@dyo/schemas";
 import type { AllowedInspectionTool } from "./heroic-swan-mcp-client.js";
 import type { BoundedLayerInventory } from "./parse-project-preflight-scan.js";
@@ -99,6 +100,8 @@ export interface RawInspectionCapture {
   note: string;
   /** Present only when the P0 open/verify step itself ran and is the reason for this fallback - see ProjectOpenEvidence's own doc comment. */
   projectOpenEvidence?: ProjectOpenEvidence;
+  /** Stage 3: which disposable copy was inspected, what After Effects held beforehand, and how it was restored and cleaned up - see disposable-project.ts. */
+  safeInspection?: DisposableInspectionEvidence;
 }
 
 /**
@@ -126,6 +129,8 @@ export interface ManifestInspectionResult {
    * report past the API's body limit.
    */
   layerInventory?: BoundedLayerInventory;
+  /** Stage 3 safe-inspection record - see RawInspectionCapture.safeInspection. */
+  safeInspection?: DisposableInspectionEvidence;
 }
 
 export type InspectTemplateResult = RawInspectionCapture | ManifestInspectionResult;

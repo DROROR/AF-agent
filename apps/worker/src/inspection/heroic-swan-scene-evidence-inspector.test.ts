@@ -140,7 +140,7 @@ async function writeFakeServer(
     calls.push("ae_run_jsx");
     ${
       options.captureReceivedJsxCodeToFile
-        ? `require("node:fs").writeFileSync(${JSON.stringify(options.captureReceivedJsxCodeToFile)}, String(args && args.code));`
+        ? `if (String(args && args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") === -1 && String(args && args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") === -1 && String(args && args.code).indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") === -1 && String(args && args.code).indexOf("ensure target project open") === -1) { require("node:fs").writeFileSync(${JSON.stringify(options.captureReceivedJsxCodeToFile)}, String(args && args.code)); }`
         : ""
     }
     // Real 2026-09-11 incident fix: this inspector always sends this
@@ -151,10 +151,39 @@ async function writeFakeServer(
     // test in this file keeps exercising the SAME composition identity
     // it always did - no behavior change for any of them.
     const jsxCode = String(args && args.code);
-    const jsxKind = jsxCode.indexOf("ensure target project open") !== -1 ? "OPEN" : jsxCode.indexOf("DYO RESOLVE_COMPOSITION_INDEX") !== -1 ? "RESOLVE" : "OTHER";
-    ${options.jsxCallLogFile ? `require("node:fs").appendFileSync(${JSON.stringify(options.jsxCallLogFile)}, jsxKind + "\\n");` : ""}
+    // Stage 3: the safe-inspection wrapper's own fixed scripts are logged as
+    // "SAFE" so a test asserting the INSPECTION's own call order stays about
+    // that, not about the wrapper's bookkeeping (which has its own tests).
+    const jsxKind =
+      jsxCode.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1 || jsxCode.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1 || jsxCode.indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1
+        ? "SAFE"
+        : jsxCode.indexOf("ensure target project open") !== -1
+          ? "OPEN"
+          : jsxCode.indexOf("DYO RESOLVE_COMPOSITION_INDEX") !== -1
+            ? "RESOLVE"
+            : "OTHER";
+    ${options.jsxCallLogFile ? `if (jsxKind !== "SAFE") { require("node:fs").appendFileSync(${JSON.stringify(options.jsxCallLogFile)}, jsxKind + "\\n"); }` : ""}
+    // Stage 3 safe-inspection scripts: the wrapper asks what AE holds, opens
+    // its disposable copy, proves footage resolves and closes it again. The
+    // fake answers each the way a healthy, empty After Effects would.
+    if (jsxCode.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1) {
+      const inner = JSON.stringify({ ok: true, resultingValue: { projectOpen: false, projectPath: null, projectName: null, itemCount: 0, dirty: null, dirtyAvailable: true } });
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
+    }
+    if (jsxCode.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1) {
+      const inner = JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: 0, missing: [] } });
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
+    }
+    if (jsxCode.indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1) {
+      const inner = JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: null } });
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
+    }
     if (jsxKind === "OPEN") {
-      const openedPath = ${JSON.stringify(options.openBehavior ?? "opens")} === "wrongProject" ? "C:\\\\somewhere\\\\else\\\\other.aep" : targetProjectPath;
+      // Stage 3: the wrapper asks to open its own DISPOSABLE COPY, so the fake
+      // echoes back whatever path was requested rather than a fixed one.
+      const requestedMatch = /new File\\((".*?")\\)/.exec(jsxCode);
+      const requestedPath = requestedMatch ? JSON.parse(requestedMatch[1]) : targetProjectPath;
+      const openedPath = ${JSON.stringify(options.openBehavior ?? "opens")} === "wrongProject" ? "C:\\somewhere\\else\\other.aep" : requestedPath;
       openProject = { projectOpen: true, projectPath: openedPath, projectName: "opened.aep", numItems: 21 };
       return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { openedPath, openedName: "opened.aep" } }) }) }] };
     }
@@ -307,14 +336,19 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
       expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["OPEN", "RESOLVE"]);
     });
 
-    it("never re-opens a project that is already open at exactly the requested path", async () => {
+    it("Stage 3: opens its own disposable copy even when the requested project is already open - the real file is never inspected", async () => {
       const jsxCallLogFile = join(dir, "jsx-calls.log");
+      const capturePath = join(dir, "received-open.jsx");
       await writeFakeServer(dir, { projectAtStart: "target", jsxCallLogFile });
       const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
       const result = await inspector.inspect(baseRequest());
 
       expect(result.kind).toBe("evidence");
-      expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["RESOLVE"]);
+      // The previous behaviour reused whatever was already open (["RESOLVE"]
+      // alone). That is exactly what Stage 3 removes: the requested file may
+      // be open, but evidence is still read from a disposable copy of it.
+      expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["OPEN", "RESOLVE"]);
+      expect(capturePath).toBeTruthy();
     });
 
     it("fails closed - never resolving a composition in the wrong project - when the requested project cannot be confirmed open", async () => {
@@ -325,7 +359,10 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
 
       expect(result.kind).toBe("failure");
       if (result.kind !== "failure") return;
-      expect(result.reason).toContain("could not confirm the scene's project is open in After Effects");
+      // Stage 3 wording: the wrapper owns this refusal, and says plainly that
+      // nothing was touched.
+      expect(result.reason).toContain("could not be safely inspected");
+      expect(result.reason).toContain("OPEN_FAILED");
       expect((await readFile(jsxCallLogFile, "utf8")).trim().split("\n")).toEqual(["OPEN"]);
     });
   });

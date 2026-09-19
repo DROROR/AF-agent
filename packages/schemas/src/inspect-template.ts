@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { disposableInspectionEvidenceSchema } from "./disposable-inspection.js";
 import { templateManifestSchema } from "./template-manifest.js";
 
 /**
@@ -139,7 +140,9 @@ export const rawInspectionCaptureSchema = z.object({
   capturedAt: z.string(),
   toolCalls: z.array(inspectionToolCallCaptureSchema),
   note: z.string(),
-  projectOpenEvidence: projectOpenEvidenceSchema.optional()
+  projectOpenEvidence: projectOpenEvidenceSchema.optional(),
+  /** Stage 3 safe-inspection record: which disposable copy was inspected, what After Effects held beforehand, and how it was restored and cleaned up. Optional so results written before safe inspections still parse. */
+  safeInspection: disposableInspectionEvidenceSchema.optional()
 });
 export type RawInspectionCapture = z.infer<typeof rawInspectionCaptureSchema>;
 
@@ -156,7 +159,9 @@ export const manifestInspectionResultSchema = z.object({
   kind: z.literal("manifest"),
   response: inspectTemplateResponseSchema,
   diagnostics: z.array(inspectionToolCallCaptureSchema),
-  projectOpenEvidence: projectOpenEvidenceSchema
+  projectOpenEvidence: projectOpenEvidenceSchema,
+  /** Stage 3 safe-inspection record - see rawInspectionCaptureSchema.safeInspection. */
+  safeInspection: disposableInspectionEvidenceSchema.optional()
 });
 export type ManifestInspectionResult = z.infer<typeof manifestInspectionResultSchema>;
 

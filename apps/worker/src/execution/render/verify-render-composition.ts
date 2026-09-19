@@ -5,6 +5,7 @@ import { windowsPathsEqual } from "../../inspection/canonical-windows-path.js";
 import { buildOpenProjectScript } from "../jsx-templates.js";
 import { unwrapJsxResult } from "../unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../resolve-composition-index.js";
+import { withDisposableProject } from "../../inspection/disposable-project.js";
 
 export interface VerifyRenderCompositionParams {
   workingProjectPath: string;
@@ -12,6 +13,11 @@ export interface VerifyRenderCompositionParams {
   manifestCompositionId: string;
   aeProjectItemIndex: number;
   compositionName: string;
+  /** The working copy's own expected sha256 - Stage 3 verifies a byte-identical disposable copy of it rather than opening the artifact aerender will render. */
+  workingProjectSha256: string;
+  /** The immutable source .aep, hashed before and after this verification like every other safe inspection. */
+  sourceProjectPath: string;
+  sourceProjectSha256: string;
 }
 
 export type VerifyRenderCompositionResult =
@@ -107,35 +113,51 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
     }
 
     try {
-      // Step 0 (the real 2026-09-11 fix): never trust "whatever project is
-      // currently open in AE" - explicitly (re-)open the session's own
-      // working copy and independently verify AE's own self-reported path
-      // matches it exactly, BEFORE ever resolving a composition against it.
-      const openScript = buildOpenProjectScript(params.workingProjectPath);
-      const openResult = await client.runFixedInspectionScript(openScript);
-      if (!openResult.ok) {
-        return { ok: false, reason: `could not confirm the session working copy is open in After Effects: ae_run_jsx failed: ${openResult.error.message}` };
-      }
-      const unwrappedOpen = unwrapJsxResult(openResult.content);
-      if (!unwrappedOpen.ok) {
-        return { ok: false, reason: `could not confirm the session working copy is open in After Effects: ${unwrappedOpen.reason}` };
-      }
-      const parsedOpen = openProjectScriptResultSchema.safeParse(unwrappedOpen.value);
-      if (!parsedOpen.success) {
-        return {
-          ok: false,
-          reason: `could not confirm the session working copy is open in After Effects: open-project script's response did not match the expected shape: ${parsedOpen.error.message}`
-        };
-      }
-      if (!parsedOpen.data.ok) {
-        return { ok: false, reason: `could not confirm the session working copy is open in After Effects: ${parsedOpen.data.failureReason}` };
-      }
-      if (!windowsPathsEqual(parsedOpen.data.resultingValue.openedPath, params.workingProjectPath)) {
-        return {
-          ok: false,
-          reason: `AE reports "${parsedOpen.data.resultingValue.openedPath ?? "no project"}" is open, not the requested working copy ("${params.workingProjectPath}") - refusing to verify a composition against the wrong project`
-        };
-      }
+      // STAGE 3 (2026-09-19): the session working copy is NEVER opened for
+      // verification. A hash-verified, byte-identical disposable copy of it is
+      // opened instead, beside it, so relative footage resolves identically -
+      // and the artifact aerender will actually render is left closed and
+      // untouched. Verifying the copy is equivalent by construction: the
+      // wrapper refuses unless the copy hashes exactly the same as the
+      // original, and re-hashes the original afterwards.
+      //
+      // This keeps the real 2026-09-11 fix intact (never trust "whatever
+      // project happens to be open") - the wrapper proves which file is open
+      // before anything is resolved against it.
+      return await this.verifyThroughDisposableCopy(client, params);
+    } finally {
+      await client.close();
+    }
+  }
+
+  private async verifyThroughDisposableCopy(client: HeroicSwanMcpClient, params: VerifyRenderCompositionParams): Promise<VerifyRenderCompositionResult> {
+    const safe = await withDisposableProject(
+      {
+        runScript: async (script, timeoutMs) => {
+          const outcome = await client.runFixedInspectionScript(script, timeoutMs);
+          if (!outcome.ok) {
+            return { ok: false, reason: `ae_run_jsx failed: ${outcome.error.message}` };
+          }
+          const unwrappedScript = unwrapJsxResult(outcome.content);
+          return unwrappedScript.ok ? { ok: true, value: unwrappedScript.value } : { ok: false, reason: unwrappedScript.reason };
+        }
+      },
+      {
+        operation: "VERIFY_RENDER_COMPOSITION",
+        targetPath: params.workingProjectPath,
+        targetSha256: params.workingProjectSha256,
+        sourceProjectPath: params.sourceProjectPath,
+        sourceProjectSha256: params.sourceProjectSha256,
+        workingProjectPath: params.workingProjectPath,
+        workingProjectSha256: params.workingProjectSha256
+      },
+      async () => this.resolveAndDescribe(client, params)
+    );
+    return safe.ok ? safe.value : { ok: false, reason: `${safe.code}: ${safe.reason}` };
+  }
+
+  private async resolveAndDescribe(client: HeroicSwanMcpClient, params: VerifyRenderCompositionParams): Promise<VerifyRenderCompositionResult> {
+    {
 
       // CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9):
       // params.aeProjectItemIndex is only ever a snapshot of the
@@ -189,8 +211,6 @@ export class HeroicSwanCompositionVerifier implements CompositionVerifier {
       }
 
       return { ok: true, durationSeconds: atIndex.durationSeconds, frameRate: atIndex.frameRate };
-    } finally {
-      await client.close();
     }
   }
 }

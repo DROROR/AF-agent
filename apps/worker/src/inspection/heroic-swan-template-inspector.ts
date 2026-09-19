@@ -27,6 +27,7 @@ import { prepareConversionCopy } from "./legacy-project-conversion.js";
 import { assessUnsavedProjectBlock } from "./assess-unsaved-project-block.js";
 import { boundLayerInventory, parseProjectPreflightScan, type ParseProjectPreflightScanResult, type ProjectPreflightEvidence } from "./parse-project-preflight-scan.js";
 import { readCompleteTextVerification, type RunSliceScript } from "./complete-template-text.js";
+import { withDisposableProject } from "./disposable-project.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { windowsPathsEqual } from "./canonical-windows-path.js";
 import { callWithTransientRetry, type TransientRetryOptions } from "./retry-transient-mcp-call.js";
@@ -262,33 +263,109 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
     }
 
     try {
-      // ---- P0 fix: ensure the REQUESTED sourceProjectPath is actually
-      // open in AE before trusting anything else. A real client attempt
-      // proved AE can have an unrelated project open ("Untitled",
-      // projectPath: null) - see ensureTargetProjectOpen's own doc
-      // comment. Fails closed immediately (no further discovery tool is
-      // even attempted) if this cannot be confirmed - never queries or
-      // builds a manifest from evidence that might belong to the wrong
-      // project. ---
+      // ---- STAGE 3 (2026-09-19): the immutable source is NEVER opened. This
+      // whole inspection runs against a disposable copy created beside it (so
+      // relative footage still resolves), through the one shared wrapper that
+      // also refuses to disturb an unsaved project, restores whatever After
+      // Effects held, hashes the source before and after, and cleans the copy
+      // up - see disposable-project.ts. ----
       const healthCapture = await captureOneToolWithRetry(client, "ae_health", this.logger, this.retryOptions);
-      const openEvidence = await ensureTargetProjectOpen(
-        client,
-        request.sourceProjectPath,
-        healthCapture,
-        this.logger,
-        this.retryOptions,
-        this.openProjectOptions,
-        this.workRoot
-      );
-      if (!openEvidence.matched) {
+
+      // The API's own schema already rejects a non-.aep sourceProjectPath, but
+      // this boundary re-checks it (defence in depth) BEFORE the file is
+      // hashed or copied - a non-project file should never reach either.
+      if (!hasAepExtension(request.sourceProjectPath)) {
+        return rawCaptureFor([healthCapture], `sourceProjectPath (${request.sourceProjectPath}) does not end in .aep - no manifest was attempted.`);
+      }
+
+      const preHash = await hashSourceProject(request.sourceProjectPath);
+      if (!preHash.ok) {
         return rawCaptureFor(
           [healthCapture],
-          `Could not confirm the requested target project is open in After Effects (${openEvidence.note ?? "unknown reason"}) - ` +
-            "no other discovery tool was attempted and no manifest was built; falling back to a raw capture. " +
-            "No client action is required - re-dispatching this inspection is safe once the underlying issue is resolved.",
-          openEvidence
+          `Could not hash the real source .aep at sourceProjectPath (${preHash.reason}) - CLAUDE.md Safety Rule 8 requires a verified hash before the project is copied or opened, so no inspection was attempted.`
         );
       }
+
+      const safe = await withDisposableProject(
+        {
+          runScript: (script, timeoutMs) => runReadOnlyScript(client, this.logger, this.retryOptions, script, timeoutMs),
+          openTimeoutMs: this.openProjectOptions?.timeoutMs ?? OPEN_PROJECT_TIMEOUT_MS,
+          // EXACTLY ONE app.open(), structurally: a single direct call, never
+          // routed through callWithTransientRetry (real 2026-09-03 incident).
+          runOpenScript: async (script, timeoutMs) => {
+            const outcome = await client.runFixedInspectionScript(script, timeoutMs);
+            if (!outcome.ok) {
+              return { ok: false, reason: `ae_run_jsx failed: ${outcome.error.message}` };
+            }
+            const unwrappedOpen = unwrapJsxResult(outcome.content);
+            return unwrappedOpen.ok ? { ok: true, value: unwrappedOpen.value } : { ok: false, reason: unwrappedOpen.reason };
+          },
+          // Preserves the real 2026-09-03 poll-not-reopen fix for the copy.
+          pollForOpenedPath: async (expectedPath) => {
+            const polled = await pollForProjectOpen(
+              client,
+              expectedPath,
+              this.logger,
+              this.retryOptions,
+              this.openProjectOptions?.pollIntervalMs ?? OPEN_PROJECT_POLL_INTERVAL_MS,
+              Date.now() + (this.openProjectOptions?.pollBudgetMs ?? OPEN_PROJECT_POLL_BUDGET_MS)
+            );
+            return { matched: polled.matched, actualOpenedPath: polled.actualOpenedPath, ...(polled.note ? { note: polled.note } : {}) };
+          },
+          ...(this.logger ? { logger: this.logger } : {})
+        },
+        {
+          operation: "INSPECT_TEMPLATE",
+          targetPath: request.sourceProjectPath,
+          targetSha256: preHash.value.sha256,
+          sourceProjectPath: request.sourceProjectPath,
+          sourceProjectSha256: preHash.value.sha256
+        },
+        async ({ disposablePath }) => this.inspectOpenProject(client, request, healthCapture, disposablePath, preHash.value.sha256)
+      );
+
+      if (!safe.ok) {
+        return {
+          ...rawCaptureFor(
+            [healthCapture],
+            `The template could not be safely inspected (${safe.code}: ${safe.reason}). Nothing was changed: the source .aep was never opened, and After Effects' own open project was left exactly as it was found.`
+          ),
+          safeInspection: safe.evidence
+        };
+      }
+      return safe.value.kind === "manifest"
+        ? { ...safe.value, safeInspection: safe.evidence }
+        : { ...safe.value, safeInspection: safe.evidence };
+    } finally {
+      await client.close();
+      unregister?.();
+    }
+  }
+
+  /**
+   * Everything this inspector does ONCE a project is open - run against the
+   * disposable copy the wrapper created, never the original. `openedPath` is
+   * that copy; `sourceProjectSha256` is the ORIGINAL source's hash, which is
+   * what the manifest records, because that is the file the manifest describes.
+   */
+  private async inspectOpenProject(
+    client: HeroicSwanMcpClient,
+    request: InspectTemplateRequest,
+    healthCapture: RawToolCallCapture,
+    openedPath: string,
+    sourceProjectSha256: string
+  ): Promise<InspectTemplateResult> {
+    {
+      // The requested path stays the file the operator asked about; the
+      // actually-opened one is honestly the disposable copy of it, and is
+      // never "reused" - Stage 3 always opens its own copy.
+      const openEvidence: ProjectOpenEvidence = {
+        requestedPath: request.sourceProjectPath,
+        actualOpenedPath: openedPath,
+        reused: false,
+        matched: true,
+        note: `inspected through a disposable copy of the requested project (${openedPath}) - the original was never opened`
+      };
 
       const discovery: RawToolCallCapture[] = [healthCapture];
       for (const tool of REMAINING_DISCOVERY_TOOLS) {
@@ -477,9 +554,6 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         ...(preflightScan.ok ? { layerInventory: boundLayerInventory(preflightScan.evidence.layerInventory) } : {})
       };
       return result;
-    } finally {
-      await client.close();
-      unregister?.();
     }
   }
 }
@@ -865,9 +939,10 @@ async function runReadOnlyScript(
   client: HeroicSwanMcpClient,
   logger: pino.Logger | undefined,
   retryOptions: TransientRetryOptions | undefined,
-  script: FixedJsxScript
+  script: FixedJsxScript,
+  timeoutMs?: number
 ): Promise<{ ok: true; value: unknown } | { ok: false; reason: string }> {
-  const result = await callWithTransientRetry("read_layer_text_slice", logger, () => client.runFixedInspectionScript(script), retryOptions);
+  const result = await callWithTransientRetry("read_only_script", logger, () => client.runFixedInspectionScript(script, timeoutMs), retryOptions);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
   }

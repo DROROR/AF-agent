@@ -27,3 +27,4 @@ export * from "./ai-provider.js";
 export * from "./text-direction.js";
 export * from "./text-digest.js";
 export * from "./template-copy.js";
+export * from "./disposable-inspection.js";

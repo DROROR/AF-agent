@@ -294,3 +294,81 @@ are not judged at all.
 The dashboard's scene editor shows the template's own text beside the warning
 and offers the two explicit choices, using the same pure function, so it can
 never claim a plan is ready when the backend would refuse it.
+
+## Safe inspections - the disposable-project wrapper (Stage 3)
+
+Every inspection that opens an After Effects project goes through ONE wrapper,
+`apps/worker/src/inspection/disposable-project.ts`. The immutable source `.aep`
+and a session working copy are never opened for inspection: a uniquely-named
+disposable copy is, and it is disposed of afterwards.
+
+**Why a copy.** Opening a project marks it modified in After Effects' memory,
+leaves AE sitting on a file the next operation assumes is untouched, and makes
+an accidental save catastrophic. That is precisely the 2026-09-18 incident: a
+capability check left a session's approved working copy open and modified, and
+something later wrote it to disk.
+
+### What the wrapper does, in order
+
+1. **Takes the project-state lock** (`project-state-lock.ts`). It refuses
+   rather than queues - a queued inspection would act on a project state it
+   sampled minutes earlier - and names what holds it.
+2. **Hashes every protected file first**: the immutable source, and the session
+   working copy when one is involved. "Unchanged afterwards" only means
+   something if "before" was measured before anything was touched.
+3. **Verifies the file to inspect** against its expected sha256.
+4. **Proves the directory is writable** by creating and removing a real file in
+   it, and refuses before After Effects is involved if it is not.
+5. **Copies beside the original.** Template footage is routinely referenced by
+   RELATIVE path; a copy in a scratch directory would resolve those against the
+   wrong base and report missing footage the real project resolves. The copy
+   is hashed and must equal its source exactly.
+6. **Reads what After Effects already holds**, and refuses to touch it unless
+   it can prove it is safe: a dirty project, an untitled/never-saved project,
+   an unreadable state, or a build exposing no reliable `app.project.dirty`
+   flag all stop the inspection. It never answers a Save Changes prompt and
+   never discards unknown work.
+7. **Opens the copy** - exactly one `app.open` attempt, never routed through
+   transient retry (re-issuing it is the real 2026-09-03 incident). A timed-out
+   open is resolved by read-only polling, never by a second open.
+8. **Proves relative footage still resolves** in the copy, and fails closed
+   rather than publishing evidence describing a project missing content the
+   original has.
+9. **Runs the inspection** against the copy.
+10. **Re-hashes the protected files.** Any change is a safety violation and
+    fails the inspection closed, whatever it returned.
+11. **In `finally`, always**: closes the copy - only after proving the open
+    project IS this operation's own copy - restores whatever After Effects held
+    and verifies its identity, then removes the copy.
+
+### Cleanup and quarantine
+
+| Situation | Outcome |
+| --- | --- |
+| Copy closed and deleted | `DELETED` |
+| Copy could not be proven closed | `LEFT_IN_PLACE_STILL_OPEN` - never deleted underneath a live handle |
+| Delete failed | `QUARANTINED` - renamed to `<copy>.quarantine`, exact path reported |
+| Delete and rename both failed | `CLEANUP_FAILED` - exact path reported for a human |
+
+There is **no wildcard sweep**. `findStaleDisposableCopies` lists only files
+matching this wrapper's own `.dyo-inspect-<uuid>.aep` marker, and only reports
+them; nothing is ever deleted by pattern.
+
+### Evidence
+
+Every inspection reports a `safeInspection` record
+(`disposableInspectionEvidenceSchema`): target path and expected/actual hashes,
+the disposable copy's path and hash, source and working-copy hashes before and
+after, the prior After Effects state, the restoration outcome, the cleanup
+outcome, any unresolved footage, and timestamps. A refusal carries it too -
+that is when an operator most needs to know how things were left.
+
+### Coverage
+
+| Path | Through the wrapper |
+| --- | --- |
+| `INSPECT_TEMPLATE` | yes |
+| `INSPECT_SCENE_EVIDENCE` | yes |
+| `INSPECT_RENDER_CAPABILITIES` | yes - and it now names the project to inspect; a request without one fails closed rather than reading whatever is open |
+| `VERIFY_RENDER_COMPOSITION` (RENDER / CREATE_PREVIEW pre-check) | yes - verifies a hash-identical copy, so the artifact aerender renders is never opened |
+| `RUN_DIAGNOSTIC`, `CHECK_HEALTH` | not applicable - they read logs, processes and health only, and open no project |

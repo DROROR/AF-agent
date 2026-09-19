@@ -285,6 +285,21 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       throw new PreconditionNotMetError(resolved.reason);
     }
     payload = resolved.payload;
+  } else if (request.operation === "INSPECT_RENDER_CAPABILITIES" && request.projectId) {
+    // STAGE 3 (2026-09-19): this inspection OPENS a project, so the API names
+    // the one to inspect from its own freshly-read project record - the
+    // browser never supplies a path. The worker then inspects a disposable
+    // copy of it (see the worker's disposable-project.ts) instead of reading
+    // whatever After Effects happens to be holding.
+    const capabilityProject = await deps.projectRepository.findById(request.projectId);
+    if (!capabilityProject) {
+      throw new ProjectNotFoundError(request.projectId);
+    }
+    projectId = request.projectId;
+    payload = {
+      sourceProjectPath: capabilityProject.manifest.sourceProject.path,
+      sourceProjectSha256: capabilityProject.sourceProjectSha256
+    };
   } else {
     payload = request.payload;
   }

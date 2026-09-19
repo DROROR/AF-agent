@@ -13,12 +13,21 @@ let dir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "dyo-heroicswan-inspector-"));
+  // Stage 3: the inspector hashes and copies the source before anything is
+  // opened, so every test needs a REAL file to inspect.
+  request.sourceProjectPath = join(dir, "test.aep");
+  await writeFile(request.sourceProjectPath, "fake-aep-bytes", "utf8");
 });
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/**
+ * Stage 3: the inspector now copies and hashes the source before anything is
+ * opened, so this must be a REAL file. Mutated in beforeEach so every existing
+ * call site keeps using `request` unchanged.
+ */
 const request = { templateId: "tmpl-1", sourceProjectPath: "/copies/test.aep" };
 
 /**
@@ -87,6 +96,18 @@ async function writeFakeServer(aeMcpPath: string, options: { oversized?: boolean
     { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } },
     async (args) => {
     calls.push("ae_run_jsx");
+    // Stage 3 safe-inspection scripts - answered the way a healthy, empty
+    // After Effects would: nothing open, no missing footage, clean close.
+    if (String(args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1) {
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { projectOpen: false, projectPath: null, projectName: null, itemCount: 0, dirty: null, dirtyAvailable: true } }) }) }] };
+    }
+    if (String(args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1) {
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: 0, missing: [] } }) }) }] };
+    }
+    if (String(args.code).indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1) {
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: null } }) }) }] };
+    }
+
     // P0 fix (2026-09-03): the open-project script is now called before
     // any other real inspection tool - generically detected here (rather
     // than per-test-customized) and always reports success, echoing back
@@ -333,6 +354,17 @@ async function writeRealShapeFakeServer(
   });
 
   server.registerTool("ae_run_jsx", { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } }, async (args) => {
+    // Stage 3 safe-inspection scripts - answered the way a healthy, empty
+    // After Effects would: nothing open, no missing footage, clean close.
+    if (String(args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1) {
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { projectOpen: false, projectPath: null, projectName: null, itemCount: 0, dirty: null, dirtyAvailable: true } }) }) }] };
+    }
+    if (String(args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1) {
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: 0, missing: [] } }) }) }] };
+    }
+    if (String(args.code).indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1) {
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: null } }) }) }] };
+    }
     var scriptResult;
     // P0 fix (2026-09-03): the open-project script is now called before
     // any other real inspection tool - generically detected here (checked
@@ -512,9 +544,26 @@ async function writeFlakyDiscoveryFakeServer(
   server.registerTool(
     "ae_run_jsx",
     { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } },
-    async () => ({
-      content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, precompLayers: [] }) }) }]
-    })
+    async (args) => {
+      // Stage 3 safe-inspection scripts, answered as a healthy empty AE would;
+      // everything else in this fixture is the precomp-facts script.
+      const code = String(args && args.code);
+      if (code.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1) {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { projectOpen: false, projectPath: null, projectName: null, itemCount: 0, dirty: null, dirtyAvailable: true } }) }) }] };
+      }
+      if (code.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1) {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: 0, missing: [] } }) }) }] };
+      }
+      if (code.indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1) {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: null } }) }) }] };
+      }
+      const openMatch = /new File\\((".*?")\\)/.exec(code);
+      if (openMatch) {
+        const openedPath = JSON.parse(openMatch[1]);
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { openedPath, openedName: "copy" } }) }) }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, precompLayers: [] }) }) }] };
+    }
   );
 
   const transport = new StdioServerTransport();
@@ -535,12 +584,12 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as ManifestInspectionResult;
 
     expect(result.kind).toBe("manifest");
-    expect(result.projectOpenEvidence).toEqual({
-      requestedPath: sourceProjectPath,
-      actualOpenedPath: sourceProjectPath,
-      reused: true,
-      matched: true
-    });
+    // Stage 3: the requested project may already be open, but the inspection
+    // still runs against its own disposable copy - never the original.
+    expect(result.projectOpenEvidence.requestedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence.actualOpenedPath).toContain(".dyo-inspect-");
+    expect(result.projectOpenEvidence.reused).toBe(false);
+    expect(result.projectOpenEvidence.matched).toBe(true);
   });
 
   it("2. Untitled project open -> requested AEP automatically opened", async () => {
@@ -554,7 +603,10 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     expect(result.kind).toBe("manifest");
     expect(result.projectOpenEvidence.reused).toBe(false);
     expect(result.projectOpenEvidence.matched).toBe(true);
-    expect(result.projectOpenEvidence.actualOpenedPath).toBe(sourceProjectPath);
+    // Stage 3: the file actually opened is a disposable COPY of the requested
+    // project - the original is never opened.
+    expect(result.projectOpenEvidence.requestedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence.actualOpenedPath).toContain(".dyo-inspect-");
   });
 
   it("3. a different AEP open -> requested AEP automatically opened", async () => {
@@ -570,7 +622,10 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     expect(result.kind).toBe("manifest");
     expect(result.projectOpenEvidence.reused).toBe(false);
     expect(result.projectOpenEvidence.matched).toBe(true);
-    expect(result.projectOpenEvidence.actualOpenedPath).toBe(sourceProjectPath);
+    // Stage 3: the file actually opened is a disposable COPY of the requested
+    // project - the original is never opened.
+    expect(result.projectOpenEvidence.requestedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence.actualOpenedPath).toContain(".dyo-inspect-");
   });
 
   it("4. open succeeds but the actual opened path mismatches the requested path -> fails closed", async () => {
@@ -582,10 +637,14 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
     expect(result.kind).toBe("raw_capture");
-    expect(result.projectOpenEvidence?.matched).toBe(false);
-    expect(result.projectOpenEvidence?.reused).toBe(false);
-    expect(result.projectOpenEvidence?.actualOpenedPath).not.toBe(sourceProjectPath);
-    expect(result.note).toMatch(/Could not confirm the requested target project is open/);
+    // Stage 3: the safe-inspection wrapper owns opening, so a mismatched open
+    // is reported on the note (and in the safeInspection evidence), and the
+    // inspection never proceeds.
+    expect(result.note).toMatch(/could not be safely inspected/);
+    expect(result.note).toContain("OPEN_FAILED");
+    // Nothing was open beforehand in this fixture, so there was nothing to restore.
+    expect(result.safeInspection?.restoration).toBe("NOTHING_TO_RESTORE");
+    expect(result.safeInspection?.cleanup).toBe("DELETED");
     // 9. no other discovery tool was attempted, and the source AEP was
     // never even hashed - the only tool call captured is the initial
     // ae_health check.
@@ -604,33 +663,27 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
     expect(result.kind).toBe("raw_capture");
-    expect(result.projectOpenEvidence?.matched).toBe(false);
-    expect(result.projectOpenEvidence?.actualOpenedPath).toBeNull();
-    expect(result.projectOpenEvidence?.requiresInteractiveConfirmation).toBe(true);
+    // Stage 3: the same signature is still classified as "needs an interactive
+    // one-time confirmation", and still explicitly disclaims corruption - it is
+    // now reported by the safe-inspection wrapper, which had already made its
+    // own disposable copy, so no separate conversion copy is needed.
     expect(result.note).toMatch(/interactive one-time confirmation/i);
-    // Explicitly disclaims corruption as the cause - never asserts corruption without human confirmation.
     expect(result.note).toMatch(/never automatic file corruption/i);
+    expect(result.note).toContain("OPEN_FAILED");
 
-    const conversionCopy = result.projectOpenEvidence?.conversionCopy;
-    expect(conversionCopy?.ok).toBe(true);
-    if (!conversionCopy?.ok) return;
-    const expectedSha256 = createHash("sha256").update(sourceContent).digest("hex");
-    expect(conversionCopy.sourceSha256).toBe(expectedSha256);
-    expect(conversionCopy.path).toContain(expectedSha256);
-
-    // The disposable copy really exists on disk with the source's real bytes.
-    expect(existsSync(conversionCopy.path)).toBe(true);
-    expect(await readFile(conversionCopy.path, "utf8")).toBe(sourceContent);
-
-    // The ORIGINAL source file itself was never touched - same bytes, same hash, still at its own path.
+    // The ORIGINAL source file itself was never touched - same bytes, still at its own path.
     expect(await readFile(sourceProjectPath, "utf8")).toBe(sourceContent);
+    expect(result.safeInspection?.sourceSha256Before).toBe(createHash("sha256").update(sourceContent).digest("hex"));
+    // ...and the copy it made was cleaned up rather than left behind.
+    expect(result.safeInspection?.cleanup).toBe("DELETED");
+    expect(existsSync(result.safeInspection?.disposablePath ?? "")).toBe(false);
 
     // No further discovery tool was attempted from evidence that might belong to the wrong project.
     expect(result.toolCalls).toHaveLength(1);
     expect(result.toolCalls[0]?.tool).toBe("ae_health");
   });
 
-  it("4c. same signature, but with no workRoot configured -> still classified correctly, no copy is attempted (never crashes)", async () => {
+  it("4c. Stage 3: the same signature is classified identically with no workRoot configured - the disposable copy never depended on one", async () => {
     const sourceProjectPath = join(dir, "dro tempelate.aep");
     await writeFile(sourceProjectPath, "fake legacy AE 23.2.1 project bytes");
     await writeRealShapeFakeServer(dir, { openBehavior: "requires-conversion" });
@@ -639,11 +692,10 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
     expect(result.kind).toBe("raw_capture");
-    expect(result.projectOpenEvidence?.matched).toBe(false);
-    // No workRoot was configured, so requiresInteractiveConfirmation/conversionCopy are never set -
-    // this is the same, pre-existing generic mismatch message, not a crash.
-    expect(result.projectOpenEvidence?.requiresInteractiveConfirmation).toBeUndefined();
-    expect(result.projectOpenEvidence?.conversionCopy).toBeUndefined();
+    // The copy lives beside the inspected project, not in a work root, so the
+    // classification and the cleanup are exactly the same either way.
+    expect(result.note).toMatch(/interactive one-time confirmation/i);
+    expect(result.safeInspection?.cleanup).toBe("DELETED");
   });
 
   it("5. the project-open operation itself fails -> inspection fails clearly, closed, no manifest", async () => {
@@ -655,8 +707,10 @@ describe("HeroicSwanTemplateInspector - P0/P1/P2 target-project open and MCP ret
     const result = (await inspector.inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
     expect(result.kind).toBe("raw_capture");
-    expect(result.projectOpenEvidence?.matched).toBe(false);
-    expect(result.note).toMatch(/the open-project script itself reported a failure/);
+    // Stage 3: the wrapper reports the failed open, and says plainly that
+    // nothing was touched. Only the initial health call was ever made.
+    expect(result.note).toContain("OPEN_FAILED");
+    expect(result.note).toMatch(/could not be safely inspected/);
     expect(result.toolCalls).toHaveLength(1);
   });
 
@@ -826,10 +880,11 @@ describe("HeroicSwanTemplateInspector - real confirmed shapes build a validated 
 
     expect(result.kind).toBe("raw_capture");
     expect(result.note).toMatch(/hash/i);
-    // The four discovery calls still succeeded and are still captured -
-    // only the manifest build was refused, not the whole inspection.
-    expect(result.toolCalls).toHaveLength(4);
-    expect(result.toolCalls.every((c) => c.ok)).toBe(true);
+    // Stage 3: hashing now happens BEFORE anything is copied or opened, so a
+    // missing file is refused up front - after the initial health call only.
+    // Nothing is inspected, which is the point: there is no project to copy.
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]?.tool).toBe("ae_health");
   });
 
   it("falls back to a raw capture (never even attempts to hash) when sourceProjectPath is a directory with no .aep filename - real production bug, 2026-08-30 (C:\\DYO-Agent\\copy accepted and reported SUCCEEDED)", async () => {
@@ -1053,6 +1108,9 @@ async function writeOpenPollFakeServer(
   const wrongPath = ${JSON.stringify(wrongPath)};
   let healthCalls = 0;
   let openScriptCalls = 0;
+  // Stage 3: the inspector opens a DISPOSABLE COPY, so "target" means
+  // whatever path the open script actually asked for.
+  let lastRequestedOpenPath = sourceProjectPath;
 
   server.registerTool("ae_health", { description: "d" }, async () => {
     healthCalls++;
@@ -1061,7 +1119,7 @@ async function writeOpenPollFakeServer(
     }
     const idx = Math.min(healthCalls - 1, sequence.length - 1);
     const entry = sequence[idx];
-    const projectPath = entry === "target" ? sourceProjectPath : entry === "wrong" ? wrongPath : null;
+    const projectPath = entry === "target" ? lastRequestedOpenPath : entry === "wrong" ? wrongPath : null;
     return {
       content: [{ type: "text", text: JSON.stringify({
         connected: true, ae_running: true,
@@ -1089,6 +1147,17 @@ async function writeOpenPollFakeServer(
     "ae_run_jsx",
     { description: "d", inputSchema: { code: z.string(), args: z.record(z.string(), z.unknown()).optional(), mode: z.string().optional() } },
     async (args) => {
+    // Stage 3 safe-inspection scripts - answered the way a healthy, empty
+      // After Effects would: nothing open, no missing footage, clean close.
+      if (String(args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1) {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { projectOpen: false, projectPath: null, projectName: null, itemCount: 0, dirty: null, dirtyAvailable: true } }) }) }] };
+      }
+      if (String(args.code).indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1) {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: 0, missing: [] } }) }) }] };
+      }
+      if (String(args.code).indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1) {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: null } }) }) }] };
+      }
       const openMatch = /new File\\((".*?")\\)/.exec(args.code);
       if (openMatch) {
         openScriptCalls++;
@@ -1098,6 +1167,11 @@ async function writeOpenPollFakeServer(
         // in-memory-only counter (or an MCP tool exposing it) would be
         // unobservable once that happens. This file survives the kill.
         writeFileSync(openScriptCallsFile, String(openScriptCalls), "utf8");
+        // Recorded BEFORE any hang: the real incident is an open that
+        // eventually completes after the client gave up waiting, so health
+        // polling must be able to report that path while this call is still
+        // hanging.
+        lastRequestedOpenPath = JSON.parse(openMatch[1]);
         if (${JSON.stringify(Boolean(options.openHangs))}) {
           await sleep(999999);
         }
@@ -1137,15 +1211,18 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
     });
   }
 
-  it("1. target already open -> zero app.open calls", async () => {
+  it("1. Stage 3: even when the target is already open, exactly one app.open call is made - of this operation's own disposable copy", async () => {
     const sourceProjectPath = join(dir, "template-copy.aep");
     await writeFile(sourceProjectPath, "sanitized fixture bytes");
     await writeOpenPollFakeServer(dir, sourceProjectPath, { healthSequence: ["target"] });
 
     const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
-    expect(result.projectOpenEvidence?.reused).toBe(true);
+    // The old behaviour reused an already-open project; Stage 3 always opens
+    // its own copy instead, so the original is never the inspected file.
+    expect(result.projectOpenEvidence?.reused).toBe(false);
     expect(result.projectOpenEvidence?.matched).toBe(true);
+    expect(result.projectOpenEvidence?.actualOpenedPath).toContain(".dyo-inspect-");
   });
 
   it("2. different/Untitled project -> exactly one app.open call, which completes normally -> success", async () => {
@@ -1157,7 +1234,8 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
 
     expect(result.projectOpenEvidence?.reused).toBe(false);
     expect(result.projectOpenEvidence?.matched).toBe(true);
-    expect(result.projectOpenEvidence?.actualOpenedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence?.requestedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence?.actualOpenedPath).toContain(".dyo-inspect-");
     const callCount = await readFile(join(dir, "open-script-calls.txt"), "utf8");
     expect(callCount).toBe("1");
   });
@@ -1179,7 +1257,8 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
 
       expect(result.projectOpenEvidence?.reused).toBe(false);
       expect(result.projectOpenEvidence?.matched).toBe(true);
-      expect(result.projectOpenEvidence?.actualOpenedPath).toBe(sourceProjectPath);
+      expect(result.projectOpenEvidence?.requestedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence?.actualOpenedPath).toContain(".dyo-inspect-");
     },
     HANG_TEST_TIMEOUT_MS
   );
@@ -1193,10 +1272,12 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
 
       const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
-      expect(result.projectOpenEvidence?.matched).toBe(false);
-      expect(result.projectOpenEvidence?.actualOpenedPath).toBeNull();
-      expect(result.projectOpenEvidence?.note).toMatch(/timed out and the target project never appeared within the bounded polling budget/);
-      expect(result.projectOpenEvidence?.note).toMatch(/no app\.open\(\) retry was attempted/);
+      // Stage 3: the wrapper owns opening, so the refusal is reported on the
+      // raw capture's own note - still bounded, still never a second app.open.
+      expect(result.projectOpenEvidence).toBeUndefined();
+      expect(result.note).toContain("could not be safely inspected");
+      expect(result.note).toContain("OPEN_FAILED");
+      expect(result.note).toContain("never appeared as the open project within the polling budget");
     },
     HANG_TEST_TIMEOUT_MS
   );
@@ -1210,9 +1291,9 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
 
       const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
-      expect(result.projectOpenEvidence?.matched).toBe(false);
-      expect(result.projectOpenEvidence?.actualOpenedPath).toBe("C:\\DYO-Agent\\some-other-unrelated-project.aep");
-      expect(result.projectOpenEvidence?.note).toMatch(/does not exactly match the requested sourceProjectPath/);
+      expect(result.projectOpenEvidence).toBeUndefined();
+      expect(result.note).toContain("OPEN_FAILED");
+      expect(result.note).toContain("could not be safely inspected");
     },
     HANG_TEST_TIMEOUT_MS
   );
@@ -1239,7 +1320,8 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
       const result = (await fastInspector().inspect({ templateId: "tmpl-1", sourceProjectPath })) as RawInspectionCapture;
 
       expect(result.projectOpenEvidence?.matched).toBe(true);
-      expect(result.projectOpenEvidence?.actualOpenedPath).toBe(sourceProjectPath);
+      expect(result.projectOpenEvidence?.requestedPath).toBe(sourceProjectPath);
+    expect(result.projectOpenEvidence?.actualOpenedPath).toContain(".dyo-inspect-");
     },
     HANG_TEST_TIMEOUT_MS
   );
@@ -1308,7 +1390,7 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
 
     // Reused (health already showed the target) - ordinary discovery
     // tools still ran afterward exactly as before this fix.
-    expect(result.projectOpenEvidence?.reused).toBe(true);
+    expect(result.projectOpenEvidence?.reused).toBe(false);
     expect(result.toolCalls.map((c) => c.tool)).toContain("ae_list_instances");
   });
 

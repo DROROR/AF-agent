@@ -151,7 +151,12 @@ export async function executeRenderProject(
         workingProjectPath,
         manifestCompositionId: request.manifestCompositionId,
         aeProjectItemIndex: request.aeProjectItemIndex,
-        compositionName: request.compositionName
+        compositionName: request.compositionName,
+        // Stage 3: verification opens a hash-verified disposable copy, never
+        // the working copy aerender itself will render.
+        workingProjectSha256: request.expectedWorkingProjectSha256,
+        sourceProjectPath: request.sourceProjectPath,
+        sourceProjectSha256: request.sourceProjectSha256
       });
       if (!verified.ok) {
         checkpoint = markFailed(checkpoint, `composition verification failed: ${verified.reason}`, deps.now());
@@ -194,7 +199,12 @@ export async function executeRenderProject(
         workingProjectPath,
         manifestCompositionId: request.manifestCompositionId,
         aeProjectItemIndex: request.aeProjectItemIndex,
-        compositionName: request.compositionName
+        compositionName: request.compositionName,
+        // Stage 3: verification opens a hash-verified disposable copy, never
+        // the working copy aerender itself will render.
+        workingProjectSha256: request.expectedWorkingProjectSha256,
+        sourceProjectPath: request.sourceProjectPath,
+        sourceProjectSha256: request.sourceProjectSha256
       });
       if (!revalidated.ok) {
         checkpoint = markFailed(checkpoint, `composition verification failed: ${revalidated.reason}`, deps.now());

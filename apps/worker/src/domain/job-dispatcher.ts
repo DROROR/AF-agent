@@ -1,4 +1,5 @@
 import {
+  inspectRenderCapabilitiesRequestSchema,
   validateJobPayload,
   type AeStatus,
   type CheckHealthResponse,
@@ -572,7 +573,10 @@ async function runInspectRenderCapabilities(deps: JobDispatcherDeps, job: JobDto
   }
 
   try {
-    const result = await deps.renderCapabilitiesInspector.inspect();
+    // Stage 3: the capability inspection opens a project, so it is given the
+    // one the job names and runs through the disposable-copy wrapper.
+    const capabilitiesRequest = inspectRenderCapabilitiesRequestSchema.parse(job.payload ?? {});
+    const result = await deps.renderCapabilitiesInspector.inspect(capabilitiesRequest);
     if (result.kind === "failure") {
       return { status: "FAILED", error: { code: "NOT_AVAILABLE", message: result.reason } };
     }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,9 +6,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeroicSwanCompositionVerifier, NotAvailableCompositionVerifier, CompositionVerifierUnavailableError } from "../verify-render-composition.js";
 
 let dir: string;
+/** A REAL file on disk, because Stage 3's wrapper genuinely hashes and copies the working copy before anything is opened. */
+let workingCopyPath: string;
+let workingCopySha256: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "dyo-verify-render-composition-"));
+  workingCopyPath = join(dir, "working-copy.aep");
+  await writeFile(workingCopyPath, "fake-aep-bytes", "utf8");
+  workingCopySha256 = createHash("sha256").update("fake-aep-bytes").digest("hex");
 });
 
 afterEach(async () => {
@@ -88,6 +95,22 @@ async function writeFakeServer(
       return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
     }
 
+    // Stage 3 safe-inspection scripts. The fake answers each the way a
+    // healthy, empty After Effects would: nothing open, no missing footage,
+    // and a clean close of whatever copy was opened.
+    if (args.code.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_STATE") !== -1) {
+      const inner = JSON.stringify({ ok: true, resultingValue: { projectOpen: false, projectPath: null, projectName: null, itemCount: 0, dirty: null, dirtyAvailable: true } });
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
+    }
+    if (args.code.indexOf("DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE") !== -1) {
+      const inner = JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: 0, missing: [] } });
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
+    }
+    if (args.code.indexOf("DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE") !== -1) {
+      const inner = JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: null } });
+      return { content: [{ type: "text", text: JSON.stringify({ result: inner }) }] };
+    }
+
     if (openBehavior === "toolError") {
       return { isError: true, content: [{ type: "text", text: "simulated ae_run_jsx failure" }] };
     }
@@ -124,7 +147,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
       { index: 9, name: "Reels Master" }
     ]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 5, compositionName: "Landscape Master" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 5, compositionName: "Landscape Master", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(true);
   });
 
@@ -138,7 +161,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
   it("returns the composition's own real durationSeconds/frameRate on success - from the SAME ae_list_compositions scan, zero extra cost", async () => {
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // writeFakeServer's own fixed fixture values (frameRate: 30, duration: 4) - real, read back, never fabricated by the verifier itself.
@@ -149,7 +172,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
   it("fails when aeProjectItemIndex does not resolve to any composition", async () => {
     await writeFakeServer(dir, [{ index: 1, name: "Intro" }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 99, compositionName: "Landscape Master" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 99, compositionName: "Landscape Master", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("does not resolve");
@@ -158,7 +181,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
   it("fails closed when the resolved composition's real name does not match the expected name", async () => {
     await writeFakeServer(dir, [{ index: 5, name: "Some Other Scene" }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 5, compositionName: "Landscape Master" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 5, compositionName: "Landscape Master", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("resolved to composition");
@@ -171,7 +194,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
       { index: 12, name: "Landscape Master" }
     ]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 5, compositionName: "Landscape Master" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 5, compositionName: "Landscape Master", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("ambiguous");
@@ -194,11 +217,10 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }], { openedPath: null });
     const verifier = new HeroicSwanCompositionVerifier(dir);
     const result = await verifier.verify({
-      workingProjectPath: "/work/jobs/session-a7fee3d9/working-copy.aep",
+      workingProjectPath: workingCopyPath,
       manifestCompositionId: DERIVED_MASTER_ID,
       aeProjectItemIndex: 3,
-      compositionName: "!Render (Landscape)"
-    });
+      compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("no project");
@@ -209,47 +231,51 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }], { openedPath: "C:\\DYO-Agent\\source-template.aep" });
     const verifier = new HeroicSwanCompositionVerifier(dir);
     const result = await verifier.verify({
-      workingProjectPath: "C:\\DYO-Agent\\jobs\\session-a7fee3d9\\working-copy.aep",
+      workingProjectPath: workingCopyPath,
       manifestCompositionId: DERIVED_MASTER_ID,
       aeProjectItemIndex: 3,
-      compositionName: "!Render (Landscape)"
-    });
+      compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("source-template.aep");
-    expect(result.reason).toContain("refusing to verify a composition against the wrong project");
+    // The wrapper owns this refusal now: it proves WHICH file is open before
+    // anything is resolved against it, and names the copy it asked for.
+    expect(result.reason).toContain("OPEN_FAILED");
+    expect(result.reason).toContain("not this operation's disposable copy");
   });
 
   it("fails closed when the open-project script itself reports a script-level failure (e.g. app.open() returned falsy)", async () => {
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }], "scriptFailure");
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("app.open()");
+    expect(result.reason).toContain("OPEN_FAILED");
   });
 
   it("fails closed when ae_run_jsx itself errors while trying to open the working copy", async () => {
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }], "toolError");
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("simulated ae_run_jsx failure");
   });
 
-  it("never derives or accepts the immutable source .aep - this function's only path parameter is workingProjectPath, and a mismatched open never falls back to trying anything else", async () => {
+  it("never opens the working copy itself - it opens a disposable copy beside it, and a mismatched open never falls back to trying anything else", async () => {
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }], { openedPath: "/some/unrelated/project.aep" });
     const verifier = new HeroicSwanCompositionVerifier(dir);
     const result = await verifier.verify({
-      workingProjectPath: "/work/jobs/session-a7fee3d9/working-copy.aep",
+      workingProjectPath: workingCopyPath,
       manifestCompositionId: DERIVED_MASTER_ID,
       aeProjectItemIndex: 3,
-      compositionName: "!Render (Landscape)"
-    });
+      compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toContain("/work/jobs/session-a7fee3d9/working-copy.aep");
+    // Whatever AE reported is named, and the file it asked for was a
+    // disposable copy beside the working copy - never the working copy itself.
+    expect(result.reason).toContain("/some/unrelated/project.aep");
+    expect(result.reason).toContain("disposable copy");
   });
 
   /**
@@ -272,14 +298,14 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
       { index: 48, name: "Scene 1", id: 1 }
     ]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: "comp-1", aeProjectItemIndex: 1, compositionName: "Scene 1" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: "comp-1", aeProjectItemIndex: 1, compositionName: "Scene 1", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(true);
   });
 
   it("real 2026-09-11 incident: fails closed with an honest, specific reason (never falls back to the stale index) when a durable id no longer resolves to anything", async () => {
     await writeFakeServer(dir, [{ index: 1, name: "Pre-comp 5" }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: "comp-1", aeProjectItemIndex: 1, compositionName: "Scene 1" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: "comp-1", aeProjectItemIndex: 1, compositionName: "Scene 1", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("could not re-resolve composition");
@@ -290,7 +316,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
   it("real 2026-09-11 incident: fails closed when an id match resolves to a composition whose name no longer matches - never silently trusted", async () => {
     await writeFakeServer(dir, [{ index: 48, name: "Something Else Entirely", id: 1 }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: "comp-1", aeProjectItemIndex: 1, compositionName: "Scene 1" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: "comp-1", aeProjectItemIndex: 1, compositionName: "Scene 1", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("could not re-resolve composition");
@@ -301,7 +327,7 @@ describe("HeroicSwanCompositionVerifier - real spawned MCP server, not mocked", 
     await writeFakeServer(dir, [{ index: 3, name: "!Render (Landscape)" }]);
     const verifier = new HeroicSwanCompositionVerifier(dir);
     // manifestCompositionId here is a synthetic deterministicId, never "comp-<N>" - parseStableCompositionNumericId must return null, so no resolve script is ever sent (proven by the fact this still succeeds even with no `id` in the fixture at all).
-    const result = await verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)" });
+    const result = await verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 3, compositionName: "!Render (Landscape)", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 });
     expect(result.ok).toBe(true);
   });
 });
@@ -310,7 +336,7 @@ describe("NotAvailableCompositionVerifier", () => {
   it("never fabricates a result - always throws CompositionVerifierUnavailableError", async () => {
     const verifier = new NotAvailableCompositionVerifier();
     await expect(
-      verifier.verify({ workingProjectPath: "/w.aep", manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 1, compositionName: "X" })
+      verifier.verify({ workingProjectPath: workingCopyPath, manifestCompositionId: DERIVED_MASTER_ID, aeProjectItemIndex: 1, compositionName: "X", workingProjectSha256: workingCopySha256, sourceProjectPath: workingCopyPath, sourceProjectSha256: workingCopySha256 })
     ).rejects.toBeInstanceOf(CompositionVerifierUnavailableError);
   });
 });

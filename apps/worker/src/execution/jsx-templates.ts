@@ -2863,6 +2863,137 @@ export function buildDescribeLayerAtTimeScript(
  * is safe by construction, because the caller concatenates the raw slices in
  * order BEFORE any encoding or hashing, reproducing the original sequence.
  */
+/**
+ * Unique markers identifying each safe-inspection script (Stage 3).
+ *
+ * Matching on ordinary content is not safe: the project-wide preflight scan
+ * legitimately reads `footageMissing` too, so a fake server (or any dispatcher)
+ * keying on that would answer the wrong script. Each of these strings appears
+ * in exactly one script and nowhere else.
+ */
+export const SAFE_INSPECTION_STATE_MARKER = "DYO_SAFE_INSPECTION_DESCRIBE_STATE";
+export const SAFE_INSPECTION_FOOTAGE_MARKER = "DYO_SAFE_INSPECTION_DESCRIBE_FOOTAGE";
+export const SAFE_INSPECTION_CLOSE_MARKER = "DYO_SAFE_INSPECTION_CLOSE_DISPOSABLE";
+
+/**
+ * READ-ONLY: what After Effects is holding right now (Stage 3 safe
+ * inspections, 2026-09-19).
+ *
+ * Reports the open project's own canonical path, its name, its item count and
+ * - critically - `app.project.dirty`, AE's own unsaved-changes flag. The
+ * caller refuses to replace anything it cannot positively prove is safe:
+ * `dirtyAvailable: false` means this build exposes no reliable dirty-state
+ * API, which fails an inspection closed whenever a project is open rather
+ * than guessing. Nothing here opens, closes, saves or modifies anything.
+ */
+export function buildDescribeOpenProjectStateScript(): FixedJsxScript {
+  const script = `${JSON_STRINGIFY_POLYFILL}// ${SAFE_INSPECTION_STATE_MARKER}
+  var __result = null;
+  try {
+    var __proj = app.project;
+    var __open = __proj ? true : false;
+    var __path = null;
+    var __name = null;
+    var __items = null;
+    var __dirty = null;
+    var __dirtyAvailable = false;
+    if (__open) {
+      try { __path = __proj.file ? __proj.file.fsName : null; } catch (__pathError) { __path = null; }
+      try { __name = __proj.file ? __proj.file.name : null; } catch (__nameError) { __name = null; }
+      try { __items = __proj.numItems; } catch (__itemsError) { __items = null; }
+      try {
+        if (__proj.dirty !== undefined && __proj.dirty !== null) {
+          __dirty = __proj.dirty === true;
+          __dirtyAvailable = true;
+        }
+      } catch (__dirtyError) {
+        __dirty = null;
+        __dirtyAvailable = false;
+      }
+      // AE always has SOME project object; "open" here means it holds
+      // anything at all, which the caller judges together with path/items.
+      __open = __path !== null || (typeof __items === "number" && __items > 0);
+    }
+    __result = JSON.stringify({
+      ok: true,
+      resultingValue: { projectOpen: __open, projectPath: __path, projectName: __name, itemCount: __items, dirty: __dirty, dirtyAvailable: __dirtyAvailable }
+    });
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "could not read the open project's state: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
+ * Closes the open project WITHOUT saving - but only after proving that what
+ * is open is exactly the disposable copy this operation created (Stage 3).
+ *
+ * The path check is the whole point: DO_NOT_SAVE_CHANGES against anything
+ * else would discard a human's unsaved work. If the open project is not the
+ * expected copy, this refuses and reports what it actually found, so the
+ * caller can leave it alone and say so.
+ */
+export function buildCloseDisposableProjectScript(expectedDisposablePath: string): FixedJsxScript {
+  const expectedLiteral = JSON.stringify(expectedDisposablePath);
+  const script = `${JSON_STRINGIFY_POLYFILL}// ${SAFE_INSPECTION_CLOSE_MARKER}
+  var __result = null;
+  try {
+    var __openPath = null;
+    try { __openPath = app.project && app.project.file ? app.project.file.fsName : null; } catch (__pathError) { __openPath = null; }
+    var __normalise = function (__p) { return __p === null ? null : String(__p).replace(/\\//g, "\\\\").toLowerCase(); };
+    if (__normalise(__openPath) !== __normalise(${expectedLiteral})) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "refusing to close: the open project is " + (__openPath === null ? "not a saved file" : __openPath) + ", not this operation's own disposable copy (" + ${expectedLiteral} + ")",
+        resultingValue: { closed: false, openPath: __openPath }
+      });
+    } else {
+      app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+      var __afterPath = null;
+      try { __afterPath = app.project && app.project.file ? app.project.file.fsName : null; } catch (__afterError) { __afterPath = null; }
+      __result = JSON.stringify({ ok: true, resultingValue: { closed: true, openPath: __afterPath } });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "closing the disposable copy failed: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)), resultingValue: { closed: false, openPath: null } });
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
+ * READ-ONLY: every footage item the currently-open project cannot resolve
+ * (Stage 3). A disposable copy is created BESIDE the file it copies precisely
+ * so relative footage paths keep resolving; this proves it, rather than
+ * assuming it. Any item AE reports as missing is returned by name and path so
+ * the caller can fail closed instead of publishing misleading evidence.
+ */
+export function buildDescribeMissingFootageScript(): FixedJsxScript {
+  const script = `${JSON_STRINGIFY_POLYFILL}// ${SAFE_INSPECTION_FOOTAGE_MARKER}
+  var __result = null;
+  try {
+    var __missing = [];
+    var __checked = 0;
+    for (var __i = 1; __i <= app.project.numItems; __i++) {
+      var __item = null;
+      try { __item = app.project.item(__i); } catch (__itemError) { __item = null; }
+      if (!__item || !(__item instanceof FootageItem)) { continue; }
+      __checked++;
+      var __isMissing = false;
+      try { __isMissing = __item.footageMissing === true; } catch (__missingError) { __isMissing = false; }
+      if (!__isMissing) { continue; }
+      var __path = null;
+      try { __path = __item.file ? __item.file.fsName : null; } catch (__fileError) { __path = null; }
+      __missing.push({ name: __item.name, path: __path });
+    }
+    __result = JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: __checked, missing: __missing } });
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "could not check footage resolution: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
 export function buildReadLayerTextSliceScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, startCodeUnit: number, maxCodeUnits: number): FixedJsxScript {
   const body = `
         if (!(__layer instanceof TextLayer)) {

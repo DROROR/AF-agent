@@ -81,7 +81,7 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
 
   return (
     <div className="overview-grid">
-      <InspectRenderCapabilitiesCard />
+      <InspectRenderCapabilitiesCard projectId={projectId} />
       <BuildHorizontalCompositionCard projectId={projectId} session={session} />
       <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
       <DescribeAnyCompositionCard projectId={projectId} session={session} />
@@ -156,7 +156,7 @@ export function FinalOutputsCard({ projectId }: { projectId: string }): ReactEle
   );
 }
 
-function InspectRenderCapabilitiesCard(): ReactElement {
+function InspectRenderCapabilitiesCard({ projectId }: { projectId: string }): ReactElement {
   const { t } = useLocale();
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [isDispatching, setIsDispatching] = useState(false);
@@ -172,8 +172,10 @@ function InspectRenderCapabilitiesCard(): ReactElement {
     setIsDispatching(true);
     setDispatchError(null);
     setDispatchSuccess(null);
-    // Not project-bound - see job-dispatch.ts's own doc comment.
-    const result = await dispatchJob({ operation: "INSPECT_RENDER_CAPABILITIES", workerId: worker.workerId, payload: {} });
+    // Stage 3: names WHICH project to inspect - the API resolves its real
+    // path and sha256 itself, and the worker inspects a disposable copy of it
+    // rather than whatever After Effects happens to be holding.
+    const result = await dispatchJob({ operation: "INSPECT_RENDER_CAPABILITIES", workerId: worker.workerId, projectId, payload: {} });
     setIsDispatching(false);
     if (!result.ok) {
       setDispatchError(result.message);

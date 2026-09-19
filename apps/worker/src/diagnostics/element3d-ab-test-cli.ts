@@ -134,6 +134,12 @@ async function main(): Promise<void> {
     log(`Resolving "${MANIFEST_COMPOSITION_ID}" (expected name "${COMPOSITION_NAME}") and checking for name ambiguity...`);
     const verifyResult = await verifier.verify({
       workingProjectPath: tempProjectPath,
+      // This one-off diagnostic already works on its own scratch copy, so its
+      // "source" and "working copy" are that same file - the Stage 3 wrapper
+      // then verifies a disposable copy of it, and leaves it untouched.
+      workingProjectSha256: tempHash.value.sha256,
+      sourceProjectPath: tempProjectPath,
+      sourceProjectSha256: tempHash.value.sha256,
       manifestCompositionId: MANIFEST_COMPOSITION_ID,
       // Placeholder only - HeroicSwanCompositionVerifier re-resolves the
       // real index from MANIFEST_COMPOSITION_ID's durable numeric id before

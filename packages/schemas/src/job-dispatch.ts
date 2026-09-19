@@ -60,9 +60,11 @@ export const dispatchableOperationSchema = z.enum(DISPATCHABLE_OPERATIONS);
  * the execution session's own `assignedWorkerId` (multi-scene-accumulation
  * phase, section 8: "worker affinity" - a session's cumulative working
  * copy exists on ONE worker's local disk, so it can never be dispatched to
- * a different one). INSPECT_RENDER_CAPABILITIES needs no project/scene/
- * session context at all - its payload is a fixed empty object, identical
- * in spirit to CHECK_HEALTH's.
+ * a different one). INSPECT_RENDER_CAPABILITIES takes a projectId (Stage 3:
+ * it opens a project to read the render-queue templates, and is inspected
+ * through a disposable copy like every other project-opening inspection); its
+ * own payload stays caller-empty, with the real path/sha256 resolved
+ * server-side.
  */
 export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
   z.object({
@@ -244,6 +246,14 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
   z.object({
     operation: z.literal("INSPECT_RENDER_CAPABILITIES"),
     workerId: z.string().uuid(),
+    /**
+     * Stage 3 (2026-09-19): this inspection opens a project, so the caller
+     * names WHICH project - by id only. The API resolves its real path and
+     * sha256 from its own project record; the browser never supplies a path.
+     * Optional so an older caller still validates, but the worker then fails
+     * the job closed rather than inspecting whatever is open.
+     */
+    projectId: z.string().uuid().optional(),
     payload: inspectRenderCapabilitiesRequestSchema
   }),
   z

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { disposableInspectionEvidenceSchema } from "./disposable-inspection.js";
 
 /**
  * READ-ONLY worker capability preparing for final Windows Worker
@@ -13,7 +14,22 @@ import { z } from "zod";
  * own doc comment for exactly how this reads AE's real Render Queue
  * template lists without leaving any observable trace.
  */
-export const inspectRenderCapabilitiesRequestSchema = z.object({}).strict();
+/**
+ * Stage 3: this inspection OPENS a project, so it must name one. It is then
+ * inspected through a disposable copy like every other project-opening
+ * inspection (see the worker's disposable-project.ts), never by reading
+ * whatever After Effects happens to be holding.
+ *
+ * Both fields are optional so an older API can still dispatch this operation,
+ * but a worker that receives neither fails the job closed rather than
+ * inspecting an unknown project.
+ */
+export const inspectRenderCapabilitiesRequestSchema = z
+  .object({
+    sourceProjectPath: z.string().min(1).optional(),
+    sourceProjectSha256: z.string().length(64).optional()
+  })
+  .strict();
 export type InspectRenderCapabilitiesRequest = z.infer<typeof inspectRenderCapabilitiesRequestSchema>;
 
 export const inspectRenderCapabilitiesResponseSchema = z
@@ -24,7 +40,9 @@ export const inspectRenderCapabilitiesResponseSchema = z
     renderSettingsTemplateNames: z.array(z.string()),
     /** Real Output Module template names as AE itself reports them right now. */
     outputModuleTemplateNames: z.array(z.string()),
-    capturedAt: z.string().datetime()
+    capturedAt: z.string().datetime(),
+    /** Stage 3 safe-inspection record - see disposable-inspection.ts. Absent on a response from an older worker. */
+    safeInspection: disposableInspectionEvidenceSchema.optional()
   })
   .strict();
 export type InspectRenderCapabilitiesResponse = z.infer<typeof inspectRenderCapabilitiesResponseSchema>;

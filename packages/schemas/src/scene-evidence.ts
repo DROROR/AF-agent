@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { disposableInspectionEvidenceSchema } from "./disposable-inspection.js";
 
 /**
  * Request/response contract for the INSPECT_SCENE_EVIDENCE worker
@@ -472,6 +473,8 @@ export const sceneEvidenceResponseSchema = z
   .object({
     /** Confirmed to match the request's sourceProjectSha256 before this response was ever built - see heroic-swan-scene-evidence-inspector.ts. */
     verifiedSourceProjectSha256: z.string().length(64),
+    /** Stage 3 safe-inspection record: the disposable copy this evidence was actually read from, what After Effects held beforehand, and how it was restored and cleaned up. Optional so responses written before safe inspections still parse. */
+    safeInspection: disposableInspectionEvidenceSchema.optional(),
     manifestCompositionId: z.string().min(1),
     /** Echoed from the request's own aeProjectItemIndex - the runtime locator this evidence was actually captured against. */
     aeProjectItemIndex: z.number().int().positive(),

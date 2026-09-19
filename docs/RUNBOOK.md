@@ -234,3 +234,37 @@ Before mutation:
 
 After completion:
 - re-hash original and verify unchanged.
+
+## Safe inspections (Stage 3) - what an operator sees and does
+
+Every inspection that opens a project now works on a disposable copy of it.
+You will see a file appear briefly beside the inspected `.aep`, named
+`<project>.dyo-inspect-<uuid>.aep`, and disappear again.
+
+### Refusals, and what each one means
+
+| Reported code | What happened | What to do |
+| --- | --- | --- |
+| `BUSY` | another job or inspection holds the project lock | wait for it to finish, then retry |
+| `AE_PROJECT_NOT_SAFE_TO_REPLACE` | After Effects holds unsaved changes, an untitled project, or a build with no reliable dirty flag | **you** decide: save or close that project in After Effects yourself, then retry. The worker will never save or discard it for you |
+| `AE_STATE_UNKNOWN` | After Effects' state could not be read | check the bridge (Window → ae-mcp-status.jsx → Connect bridge), then retry |
+| `TARGET_DIRECTORY_NOT_WRITABLE` | the folder holding the project is not writable | fix permissions/free space on that folder - the copy must live beside the project so relative footage resolves |
+| `TARGET_HASH_MISMATCH` / `COPY_FAILED` | the file changed, or the copy did not match it | re-check which file you meant; re-run template inspection if the project genuinely changed |
+| `OPEN_FAILED` (with "interactive one-time confirmation") | After Effects needs a one-off confirmation (version conversion, missing font/plugin warning) | open the project in After Effects yourself once, confirm what it asks, then retry |
+| `FOOTAGE_UNRESOLVED` | the copy could not resolve footage the original resolves | investigate the footage links before trusting any inspection of this project |
+| `PROTECTED_FILE_CHANGED` | the source or working copy changed during the inspection | treat as a safety incident: find what wrote to it before re-running anything |
+
+### Leftover copies
+
+Cleanup runs in a `finally` block, so a copy is normally removed even when the
+inspection fails. If you ever see one left behind, the job's own evidence says
+why:
+
+- `LEFT_IN_PLACE_STILL_OPEN` - After Effects could not be proven to have closed
+  it. Close After Effects (or the copy) first, then delete the named file.
+- `QUARANTINED` - it could not be deleted and was renamed to
+  `...aep.quarantine`. Safe to delete by hand.
+- `CLEANUP_FAILED` - delete the named file by hand.
+
+**Never delete `*.dyo-inspect-*` files by wildcard while a job is running** -
+one of them may be the copy the current inspection is reading.

@@ -6,13 +6,15 @@ import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-sw
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
+import { withDisposableProject } from "./disposable-project.js";
 import {
   buildDescribeCompositionSummaryScript,
   buildFindHostLayersScript,
   buildInspectCompositionLayerDetailsScript,
   buildInspectLayerTransformScript,
   buildDescribeLayerAtTimeScript,
-  buildDescribeProjectFontsScript
+  buildDescribeProjectFontsScript,
+  type FixedJsxScript
 } from "../execution/jsx-templates.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
@@ -315,32 +317,44 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
     request: SceneEvidenceRequest,
     verifiedSourceProjectSha256: string
   ): Promise<SceneEvidenceResult> {
-    try {
-      // REAL 2026-09-14 FAILURE (every scene preview of a real project, Main
-      // scene included): After Effects had an empty "Untitled" project open
-      // (projectPath null, 0 items), and this job resolved compositions
-      // against whatever AE happened to have open - so every durable id came
-      // back "no composition with id ... exists in this project". Template
-      // inspection has always proven the requested file is open first; scene
-      // evidence now does exactly the same, through the same single-open,
-      // poll-not-reopen, unsaved-work-refusing step, and fails closed with
-      // that step's own reason when it cannot confirm the project.
-      const healthCapture = await captureOneToolWithRetry(client, "ae_health", undefined, undefined);
-      const openEvidence = await ensureTargetProjectOpen(
-        client,
-        request.sourceProjectPath,
-        healthCapture,
-        undefined,
-        undefined,
-        this.openProjectOptions,
-        undefined
-      );
-      if (!openEvidence.matched) {
-        return {
-          kind: "failure",
-          reason: `could not confirm the scene's project is open in After Effects: ${openEvidence.note ?? "unknown reason"}`
-        };
-      }
+    // STAGE 3 (2026-09-19): scene evidence is read from a DISPOSABLE COPY of
+    // the requested project, never from the file itself. The wrapper creates
+    // it beside the original (so relative footage still resolves), refuses to
+    // disturb an unsaved project, restores whatever After Effects held,
+    // re-hashes the protected files afterwards and cleans the copy up - see
+    // disposable-project.ts.
+    //
+    // This replaces the previous "open the requested file and verify it"
+    // step, which solved the same 2026-09-14 failure (evidence read from
+    // whatever AE happened to hold) while leaving the real project open and
+    // modifiable afterwards.
+    const safe = await withDisposableProject(
+      { runScript: (script, timeoutMs) => runInspectionScript(client, script, timeoutMs) },
+      {
+        operation: "INSPECT_SCENE_EVIDENCE",
+        targetPath: request.sourceProjectPath,
+        targetSha256: verifiedSourceProjectSha256,
+        sourceProjectPath: request.sourceProjectPath,
+        sourceProjectSha256: verifiedSourceProjectSha256
+      },
+      async () => this.captureEvidence(client, request, verifiedSourceProjectSha256)
+    );
+    if (!safe.ok) {
+      return {
+        kind: "failure",
+        reason: `the scene's project could not be safely inspected (${safe.code}: ${safe.reason}). Nothing was changed: the project itself was never opened, and After Effects' own open project was left exactly as it was found.`
+      };
+    }
+    return safe.value.kind === "evidence" ? { ...safe.value, response: { ...safe.value.response, safeInspection: safe.evidence } } : safe.value;
+  }
+
+  /** Everything this inspector reads once the disposable copy is open - it never opens or closes anything itself. */
+  private async captureEvidence(
+    client: HeroicSwanMcpClient,
+    request: SceneEvidenceRequest,
+    verifiedSourceProjectSha256: string
+  ): Promise<SceneEvidenceResult> {
+    {
 
       // CRITICAL SAFETY FIX (real 2026-09-11 incident, session a7fee3d9):
       // request.aeProjectItemIndex is only ever a snapshot of the
@@ -574,8 +588,20 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           capturedAt: new Date().toISOString()
         }
       };
-    } finally {
-      await client.close();
     }
   }
+}
+
+/** One read-only script call, unwrapped into the shape the disposable-project wrapper expects. */
+async function runInspectionScript(
+  client: HeroicSwanMcpClient,
+  script: FixedJsxScript,
+  timeoutMs?: number
+): Promise<{ ok: true; value: unknown } | { ok: false; reason: string }> {
+  const result = await client.runFixedInspectionScript(script, timeoutMs);
+  if (!result.ok) {
+    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  }
+  const unwrapped = unwrapJsxResult(result.content);
+  return unwrapped.ok ? { ok: true, value: unwrapped.value } : { ok: false, reason: unwrapped.reason };
 }

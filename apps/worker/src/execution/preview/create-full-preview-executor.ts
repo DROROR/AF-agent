@@ -95,7 +95,12 @@ export async function executeCreateFullPreview(deps: CreateFullPreviewExecutorDe
     workingProjectPath,
     manifestCompositionId: request.manifestCompositionId,
     aeProjectItemIndex: request.aeProjectItemIndex,
-    compositionName: request.compositionName
+    compositionName: request.compositionName,
+    // Stage 3: verification runs against a hash-verified disposable copy of
+    // the working copy, so the artifact aerender renders is never opened.
+    workingProjectSha256: request.expectedWorkingProjectSha256,
+    sourceProjectPath: request.sourceProjectPath,
+    sourceProjectSha256: request.sourceProjectSha256
   });
   if (!verified.ok) {
     return finish(`composition verification failed: ${verified.reason}`, null);
