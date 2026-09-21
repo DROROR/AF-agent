@@ -3069,6 +3069,24 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
   const stepsLiteral = JSON.stringify(steps.map((step) => ({ compositionId: step.compositionId, aeProjectItemIndex: step.aeProjectItemIndex, layerIndex: step.layerIndex })));
   const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
   try {
+    // THE SAME ENUM VOCABULARY THE PROJECT SCAN USES (2026-09-21). The stored
+    // fingerprint was built from the scan, which records a track matte as its
+    // documented KEY NAME ("LUMA", "NO_TRACK_MATTE"). Stringifying AE's enum
+    // object here instead produced its raw numeric form, so the live digest
+    // could never equal the approved one and EVERY footage edit was refused as
+    // "structure changed" on a project nobody had touched. Both sides must
+    // encode the same fact the same way.
+    var __enumLabel = function (enumObject, value, knownKeys) {
+      if (enumObject === null || enumObject === undefined) { return null; }
+      for (var __knownIndex = 0; __knownIndex < knownKeys.length; __knownIndex++) {
+        if (enumObject[knownKeys[__knownIndex]] === value) { return knownKeys[__knownIndex]; }
+      }
+      for (var __key in enumObject) {
+        if (enumObject[__key] === value) { return __key; }
+      }
+      return null;
+    };
+    var __trackMatteTypeKeys = ${JSON.stringify(TRACK_MATTE_TYPE_KEYS)};
     var __steps = ${stepsLiteral};
     var __hops = [];
     var __targetWidth = null;
@@ -3097,7 +3115,7 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
         layerIndex: __step.layerIndex,
         threeDLayer: __read(function () { return __layer.threeDLayer === true; }),
         hasTrackMatte: __read(function () { return __layer.hasTrackMatte === true; }),
-        trackMatteType: __read(function () { return __layer.trackMatteType === undefined || __layer.trackMatteType === null ? null : String(__layer.trackMatteType); }),
+        trackMatteType: __read(function () { return __enumLabel(TrackMatteType, __layer.trackMatteType, __trackMatteTypeKeys); }),
         parentLayerIndex: __read(function () { return __layer.parent ? __layer.parent.index : null; }),
         scalePercent: __scale,
         rotationDegrees: __read(function () { return __layer.property("ADBE Transform Group").property("ADBE Rotate Z").value; })

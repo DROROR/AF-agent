@@ -16,7 +16,8 @@ import {
   buildOpenProjectScript,
   buildReopenProjectFromDiskScript,
   buildDescribeLayerAtTimeScript,
-  buildDescribeProjectFontsScript
+  buildDescribeProjectFontsScript,
+  buildDescribeChainStructureScript
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -3116,5 +3117,78 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
   it("emits no direction/composer assignment at all for text without right-to-left characters", () => {
     const script = buildOperationScript(1, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-x", layerIndex: 1, nestedTarget: null, text: "Plain Latin copy" });
     expect(script).toContain("var __requiresBidi = false;");
+  });
+});
+
+/**
+ * REAL INCIDENT (2026-09-21, first executed frame). The stored mutation
+ * fingerprint is built from the PROJECT SCAN, which records a track matte as
+ * its documented key name ("LUMA", "NO_TRACK_MATTE"). The live re-check
+ * stringified After Effects' enum object instead, producing its raw numeric
+ * form - so the two digests could never be equal and EVERY footage edit was
+ * refused as "this slot's structure has changed" on a project nobody had
+ * touched. Both scripts must encode the same fact the same way.
+ */
+describe("buildDescribeChainStructureScript speaks the same enum vocabulary as the project scan", () => {
+  const CHAIN_SETUP = `
+    function CompItem() {}
+    var TrackMatteType = { NO_TRACK_MATTE: 6012, ALPHA: 6013, ALPHA_INVERTED: 6014, LUMA: 6015, LUMA_INVERTED: 6016 };
+    function makeTransform(scale, rotation) {
+      return {
+        property: function (name) {
+          if (name === "ADBE Scale") { return { value: scale }; }
+          if (name === "ADBE Rotate Z") { return { value: rotation }; }
+          return { value: null };
+        }
+      };
+    }
+    function makeLayer(spec) {
+      return {
+        index: spec.index,
+        threeDLayer: spec.threeDLayer === true,
+        hasTrackMatte: spec.hasTrackMatte === true,
+        trackMatteType: spec.trackMatteType,
+        parent: spec.parent || null,
+        source: spec.source || null,
+        property: function (name) { return name === "ADBE Transform Group" ? makeTransform(spec.scale || [40, 40], spec.rotation || 0) : { value: null }; }
+      };
+    }
+    var targetSource = { width: 1080, height: 2160 };
+    var theLayer = makeLayer({ index: 3, threeDLayer: true, hasTrackMatte: true, trackMatteType: TrackMatteType.LUMA, source: targetSource });
+    var theComp = new CompItem();
+    theComp.id = 48;
+    theComp.layer = function (index) { return index === 3 ? theLayer : null; };
+    var app = { project: { item: function () { return theComp; } } };
+  `;
+
+  it("reports a bound matte by its KEY NAME, exactly as the scan does - never a raw enum value", () => {
+    const script = buildDescribeChainStructureScript([{ compositionId: "comp-48", aeProjectItemIndex: 5, layerIndex: 3 }]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, CHAIN_SETUP));
+    expect(parsed.ok).toBe(true);
+    const hop = parsed.resultingValue.hops[0];
+    expect(hop.trackMatteType).toBe("LUMA");
+    expect(hop.trackMatteType).not.toMatch(/^\d+$/);
+    expect(hop.hasTrackMatte).toBe(true);
+    expect(hop.threeDLayer).toBe(true);
+    expect(parsed.resultingValue.targetWidthPx).toBe(1080);
+    expect(parsed.resultingValue.targetHeightPx).toBe(2160);
+  });
+
+  it("uses the same key vocabulary the scan's own enum labelling uses", () => {
+    const script = buildDescribeChainStructureScript([{ compositionId: "comp-48", aeProjectItemIndex: 5, layerIndex: 3 }]);
+    // The documented keys the scan labels track mattes with - the chain script
+    // must draw from exactly this list, or a stored fingerprint can never be
+    // compared with a live one.
+    for (const key of ["NO_TRACK_MATTE", "ALPHA", "ALPHA_INVERTED", "LUMA", "LUMA_INVERTED"]) {
+      expect(String(script)).toContain(key);
+    }
+  });
+
+  it("reports an unmatted layer as NO_TRACK_MATTE rather than a stringified enum", () => {
+    const setup = CHAIN_SETUP.replace("trackMatteType: TrackMatteType.LUMA", "trackMatteType: TrackMatteType.NO_TRACK_MATTE").replace("hasTrackMatte: true", "hasTrackMatte: false");
+    const script = buildDescribeChainStructureScript([{ compositionId: "comp-48", aeProjectItemIndex: 5, layerIndex: 3 }]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.resultingValue.hops[0].trackMatteType).toBe("NO_TRACK_MATTE");
   });
 });
