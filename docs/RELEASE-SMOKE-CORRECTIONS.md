@@ -78,13 +78,37 @@ from the corrected fixture. It has NOT been deleted here.
 
 Neither is deployed or installed here.
 
-| | |
-|---|---|
-| Worker | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-<sha>.zip` |
-| Fixture | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip` |
+Built from `e78dbf41ecd2c761fe9378e012dae5feb60a8068`.
 
-Exact filenames, sizes and SHA-256 values are in the report accompanying this
-release.
+| | Worker | QA fixture |
+|---|---|---|
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-e78dbf4.zip` | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip` |
+| SHA-256 | `384e2e406aa5598fe72c374c156b7176c502899cbfe16fd9faac5bdffbc78385` | `ff09852c17de0058b3afaef86c17b27f8b3052869e568790a3c0093ed0ac40c4` |
+| Size | 860,797 bytes | 96,016 bytes |
+
+```powershell
+# Worker
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-e78dbf4.zip "$env:USERPROFILE\Downloads\DYO-SS3.zip"
+$e="384e2e406aa5598fe72c374c156b7176c502899cbfe16fd9faac5bdffbc78385"
+$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-SS3.zip" -Algorithm SHA256).Hash.ToLower()
+if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-SS3.zip" "$env:USERPROFILE\Downloads\DYO-SS3" -Force
+ cd "$env:USERPROFILE\Downloads\DYO-SS3"
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\DYO-Worker-SlotSemantics-Update.ps1"
+ Write-Host ("build commit: " + (Get-Content "C:\DYO-Agent\app\BUILD_INFO.json" -Raw))
+}
+
+# QA fixture (new folder - the broken one is never reused)
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip "$env:USERPROFILE\Downloads\DYO-QA-v3.zip"
+$e="ff09852c17de0058b3afaef86c17b27f8b3052869e568790a3c0093ed0ac40c4"
+$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" -Algorithm SHA256).Hash.ToLower()
+if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
+ New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v3" | Out-Null
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" "C:\DYO-Agent\qa\smoke-fixture-v3" -Force
+}
+```
+
+`BUILD_INFO.json` must read `e78dbf4…` after the worker install.
 
 ### Rollback
 
