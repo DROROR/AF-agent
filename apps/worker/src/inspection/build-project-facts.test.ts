@@ -40,6 +40,7 @@ const detailA: CompositionDetail = {
 describe("buildProjectFacts", () => {
   it("uses comp.id (more stable than project-item index) for compositionId when a detail was fetched", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -53,6 +54,7 @@ describe("buildProjectFacts", () => {
 
   it("falls back to the project-item index when the detail fetch failed for that composition", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -68,6 +70,7 @@ describe("buildProjectFacts", () => {
 
   it("excludes null-object layers from the composition's layers (excluded from placeholder candidates)", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -83,6 +86,7 @@ describe("buildProjectFacts", () => {
 
   it("always records layerKind as Unknown - the confirmed ae_get_composition shape has no type discriminator, and this never guesses one", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -98,6 +102,7 @@ describe("buildProjectFacts", () => {
 
   it("computes layer duration from outPoint - inPoint", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -112,6 +117,7 @@ describe("buildProjectFacts", () => {
 
   it("defaults isNestedOnlyReferenced to false and parentCompositionIds to [] - genuinely unconfirmable from this tool set, never guessed from naming", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -126,6 +132,7 @@ describe("buildProjectFacts", () => {
 
   it("preserves discovery order across multiple compositions", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -146,6 +153,7 @@ describe("buildProjectFacts", () => {
       ]
     };
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -172,6 +180,7 @@ describe("buildProjectFacts", () => {
       ]
     };
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -188,6 +197,7 @@ describe("buildProjectFacts", () => {
 
   it("a null precompFacts entry for one composition (failed/never attempted) never affects another composition's own real nesting facts", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -204,6 +214,7 @@ describe("buildProjectFacts", () => {
 
   it("leaves fonts/footage/missingFootage/pluginReferences honestly empty - not determinable from this tool set", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -233,6 +244,7 @@ describe("buildProjectFacts - inputs for nested composition traversal (2026-09-1
 
   it("PRESERVES precomp-reference edges as precompChildren - named by the parent's own layer, in layer-index order", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",
@@ -257,6 +269,7 @@ describe("buildProjectFacts - inputs for nested composition traversal (2026-09-1
 
   it("gives a composition with no precomp evidence an empty edge list rather than inventing one", () => {
     const facts = buildProjectFacts({
+      layerFactsByCompositionAndIndex: new Map(),
       templateId: "tmpl-1",
       sourceProjectPath: "/copies/test.aep",
       sourceProjectName: "test.aep",

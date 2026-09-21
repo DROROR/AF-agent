@@ -308,7 +308,7 @@ function buildSlotEvidence(args: {
   chainToParent: readonly NestedTargetStep[];
   depth: number;
   allCompositions: readonly CompositionFact[];
-  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer> | undefined;
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>;
   /** A screen card IS its composition, placed by its hosts; every other footage slot is a layer carrying its own matte, 3D state and parent. */
   slotIsWholeComposition: boolean;
 }): { facts: SlotStructuralFacts; semantics: SlotSemanticsResult; fingerprint: SlotFingerprint; mutationFingerprint: SlotFingerprint } {
@@ -327,7 +327,7 @@ function buildSlotEvidence(args: {
   // like.
   const chainSteps = [...args.chainToParent, { compositionId: composition.compositionId, layerIndex: layer.index }];
   const chain = chainSteps.map((step) => {
-    const scanned = layerFactsByCompositionAndIndex?.get(`${step.compositionId}:${step.layerIndex}`);
+    const scanned = layerFactsByCompositionAndIndex.get(`${step.compositionId}:${step.layerIndex}`);
     return {
       compositionId: step.compositionId,
       layerIndex: step.layerIndex,
@@ -423,7 +423,7 @@ function collectNestedPlaceholders(
   /** Every composition, so a slot's HOSTS can be found wherever in the graph they live (Stage 4). */
   allCompositions: readonly CompositionFact[],
   /** The project-wide scan, for the geometry/matte/animation facts a slot verdict is built from. */
-  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer> | undefined
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>
 ): Placeholder[] {
   const placeholders: Placeholder[] = [];
   const seenLayers = new Set<string>();

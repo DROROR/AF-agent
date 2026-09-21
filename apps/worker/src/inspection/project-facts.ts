@@ -153,7 +153,13 @@ export interface ProjectFacts {
    * The project-wide scan this was built from, keyed `comp-<id>:<layerIndex>`
    * (Stage 4). Carried through so slot semantics can read the geometry, matte
    * and animation facts of layers OTHER than the slot itself - its hosts, its
-   * mattes and its siblings. Absent when no scan completed.
+   * mattes and its siblings.
+   *
+   * REQUIRED, deliberately: when it was optional, `buildProjectFacts` consumed
+   * it and forgot to return it, TypeScript stayed silent, and every structural
+   * slot verdict in production came out `unknown` with no facts at all - while
+   * the unit tests passed, because each one built the map itself. A scan that
+   * did not run is an EMPTY map passed explicitly, never an absent field.
    */
-  layerFactsByCompositionAndIndex?: ReadonlyMap<string, ScannedSlotLayer> | undefined;
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>;
 }

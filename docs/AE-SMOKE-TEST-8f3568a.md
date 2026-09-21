@@ -34,18 +34,18 @@ three footage files and its own README:
 
 | | |
 |---|---|
-| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-6acb375.zip` |
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip` |
 | SHA-256 | `dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78` |
 | Size | 94,972 bytes |
 
 ```powershell
-scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-6acb375.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
 $e="dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78"
 $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
 if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
- New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-75bcd90" | Out-Null
- Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-75bcd90" -Force
- Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-75bcd90" | Select-Object FullName, Length
+ New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v3" | Out-Null
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-fixture-v3" -Force
+ Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-fixture-v3" | Select-Object FullName, Length
 }
 ```
 
@@ -53,22 +53,25 @@ Then, with After Effects open and **nothing** in it - no project, no unsaved
 changes, an empty project panel:
 
 **File → Scripts → Run Script File…** →
-`C:\DYO-Agent\qa\smoke-75bcd90\build-qa-smoke-project.jsx`
+`C:\DYO-Agent\qa\smoke-fixture-v3\build-qa-smoke-project.jsx`
 
 It refuses, changing nothing, if a saved project is open, if there are unsaved
 changes, if the untitled project is not empty, if it is running from anywhere
-other than that folder, or if `QA-Smoke.aep` already exists. It never closes,
+other than that folder, if `QA-Smoke.aep` already exists, if After Effects
+imports the hardware sequence as a still, or if After Effects does not confirm
+each track matte it binds (`hasTrackMatte` true, and the bound layer being the
+one intended). It never closes,
 saves or discards a project it did not create, and it never answers a "Save
 changes?" prompt.
 
-On success it creates `C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep`, saves
+On success it creates `C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep`, saves
 it, closes it, and leaves After Effects blank - which is the state the worker
 needs.
 
 Record the fixture's hash before any job touches it:
 
 ```powershell
-Get-FileHash "C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep" -Algorithm SHA256
+Get-FileHash "C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep" -Algorithm SHA256
 ```
 
 What the project contains, and what each part is there to test:
@@ -106,7 +109,7 @@ That equality was the real defect corrected in this build: After Effects sets
 
 ## Step 2 - register it as a project in the dashboard
 
-1. Dashboard → New Project → inspect `C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep`.
+1. Dashboard → New Project → inspect `C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep`.
 2. **While the inspection runs, watch the file itself.** Expected, and the
    first thing this build must prove:
    - a file named `QA-Smoke.dyo-inspect-<uuid>.aep` appears next to it, and
@@ -180,7 +183,7 @@ Map assets deliberately wrongly, and confirm each refusal:
 
 ## Step 8 - tidy up
 
-Delete `C:\DYO-Agent\qa\smoke-75bcd90\` and the QA project from the dashboard.
+Delete `C:\DYO-Agent\qa\smoke-fixture-v3\` and the QA project from the dashboard.
 The QA project exists only for this test.
 
 ## Stop conditions

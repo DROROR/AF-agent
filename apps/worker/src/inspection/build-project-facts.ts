@@ -78,7 +78,7 @@ export interface BuildProjectFactsInput {
    * and EVERY template inspected to editablePlaceholderCount: 0. A layer
    * with no entry here still falls back to "Unknown", never a guess.
    */
-  layerFactsByCompositionAndIndex?: ReadonlyMap<string, ScannedLayerFactInput>;
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedLayerFactInput>;
   /** Real text-layer fonts from the same single scan - what the project ASKS FOR, never a claim that each is installed on this machine (AE exposes no such flag). Omitted when the scan failed/was never run. */
   requiredFonts?: readonly string[];
   /** Real resolvable footage paths from the same single scan. Omitted when the scan failed/was never run. */
@@ -268,6 +268,14 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
     requiredFonts: input.requiredFonts ? [...input.requiredFonts] : [],
     footageReferenced: input.footageReferenced ? [...input.footageReferenced] : [],
     missingFootage: input.missingFootage ? input.missingFootage.map((item) => ({ ...item })) : [],
-    pluginReferences: input.pluginReferences ? [...input.pluginReferences] : []
+    pluginReferences: input.pluginReferences ? [...input.pluginReferences] : [],
+    // CARRIED THROUGH, NOT CONSUMED AND DROPPED (2026-09-21 smoke-test
+    // finding). Slot semantics needs the facts of layers OTHER than the slot
+    // itself - its hosts, its mattes, its siblings - and reads them from this
+    // same map in build-slot-facts.ts. Omitting it here silently disabled
+    // every structural verdict in production while every unit test passed,
+    // because each test built the map itself. It is required on both sides
+    // now, so it cannot be dropped again without a type error.
+    layerFactsByCompositionAndIndex: input.layerFactsByCompositionAndIndex
   };
 }

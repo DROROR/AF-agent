@@ -48,6 +48,9 @@ function baseFacts(overrides: Partial<ProjectFacts> = {}): ProjectFacts {
     footageReferenced: [],
     missingFootage: [],
     pluginReferences: [],
+    // Required on ProjectFacts: a scan that did not run is an EMPTY map,
+    // never an absent field - see ProjectFacts' own doc comment.
+    layerFactsByCompositionAndIndex: new Map(),
     ...overrides
   };
 }

@@ -120,7 +120,9 @@ describe("buildSlotStructuralFacts - matte source is read from what the matte is
       slotLayerIndex: 1,
       slotLayerName: null,
       compositions: [slotComposition, host],
-      layerFactsByCompositionAndIndex: undefined,
+      // A scan that did not run at all: an EMPTY map, which is now the only
+      // way to express it - the field can no longer simply be absent.
+      layerFactsByCompositionAndIndex: new Map(),
       hostDepth: 1,
       slotIsWholeComposition: true
     });

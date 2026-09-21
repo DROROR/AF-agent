@@ -61,8 +61,8 @@ export interface SlotFactsInput {
   slotLayerName: string | null;
   /** Every composition in the project, so hosts can be found wherever they are. */
   compositions: readonly CompositionFact[];
-  /** The project-wide scan, keyed `comp-<id>:<layerIndex>` - the same map build-project-facts.ts already uses. */
-  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer> | undefined;
+  /** The project-wide scan, keyed `comp-<id>:<layerIndex>` - the same map build-project-facts.ts already uses. Required: a scan that did not run is an EMPTY map, never an absent field (see ProjectFacts). */
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>;
   /** How many precomp hops separate this slot from the scene being planned. */
   hostDepth: number;
   /**
@@ -77,7 +77,7 @@ export interface SlotFactsInput {
 
 /** The scanned layer facts for one layer, or undefined when the scan has no entry for it. */
 function scannedLayer(input: SlotFactsInput, compositionId: string, layerIndex: number): ScannedSlotLayer | undefined {
-  return input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${layerIndex}`);
+  return input.layerFactsByCompositionAndIndex.get(`${compositionId}:${layerIndex}`);
 }
 
 /**
@@ -151,7 +151,7 @@ export function classifyMatteSource(input: SlotFactsInput, compositionId: string
  * a matte that is itself video footage is one render split into passes.
  */
 function hasSiblingPreRenderedPass(input: SlotFactsInput, compositionId: string, hostLayerIndex: number, composition: CompositionFact | undefined): boolean | null {
-  if (!composition || input.layerFactsByCompositionAndIndex === undefined) {
+  if (!composition) {
     return null;
   }
   let sawAnyScannedSibling = false;

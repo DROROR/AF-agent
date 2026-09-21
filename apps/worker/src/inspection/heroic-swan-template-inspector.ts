@@ -485,10 +485,14 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         discovered,
         details,
         precompFacts,
+        // A scan that did not run is an EMPTY map, passed explicitly - never an
+        // absent field. The manifest already records the failure as an
+        // unknownItems warning; what must never happen again is the facts
+        // quietly disappearing between here and the slot classifier.
+        layerFactsByCompositionAndIndex: preflightScan.ok ? preflightScan.evidence.layerFactsByCompositionAndIndex : new Map(),
         ...(preflightScan.ok
           ? {
               pluginReferences: preflightScan.evidence.pluginReferences,
-              layerFactsByCompositionAndIndex: preflightScan.evidence.layerFactsByCompositionAndIndex,
               ...(preflightScan.evidence.fontAndFootageScanned
                 ? {
                     requiredFonts: preflightScan.evidence.requiredFonts,

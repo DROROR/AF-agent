@@ -91,7 +91,10 @@ function facts(compositions: CompositionFact[]): ProjectFacts {
     requiredFonts: ["Arial-BoldMT", "HelveticaNeue", "HelveticaNeue-Bold"],
     footageReferenced: [],
     missingFootage: [],
-    pluginReferences: []
+    pluginReferences: [],
+    // Required on ProjectFacts: a scan that did not run is an EMPTY map,
+    // never an absent field - see ProjectFacts' own doc comment.
+    layerFactsByCompositionAndIndex: new Map()
   };
 }
 

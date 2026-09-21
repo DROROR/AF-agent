@@ -37,18 +37,18 @@ somewhere other than beside the project:
   $e="<SHA-256 from the release notes>"
   $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
   if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
-   New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-75bcd90" | Out-Null
-   Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-75bcd90" -Force
-   Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-75bcd90" | Select-Object FullName, Length
+   New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v3" | Out-Null
+   Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-fixture-v3" -Force
+   Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-fixture-v3" | Select-Object FullName, Length
   }
 
 Expected afterwards:
-  C:\DYO-Agent\qa\smoke-75bcd90\build-qa-smoke-project.jsx
-  C:\DYO-Agent\qa\smoke-75bcd90\README-QA-SMOKE-FIXTURE.txt
-  C:\DYO-Agent\qa\smoke-75bcd90\footage\hardware-pass.png
-  C:\DYO-Agent\qa\smoke-75bcd90\footage\screenshot.png
-  C:\DYO-Agent\qa\smoke-75bcd90\footage\logo.png
-  C:\DYO-Agent\qa\smoke-75bcd90\footage\hardware-pass-sequence\hardware-pass_0000.png
+  C:\DYO-Agent\qa\smoke-fixture-v3\build-qa-smoke-project.jsx
+  C:\DYO-Agent\qa\smoke-fixture-v3\README-QA-SMOKE-FIXTURE.txt
+  C:\DYO-Agent\qa\smoke-fixture-v3\footage\hardware-pass.png
+  C:\DYO-Agent\qa\smoke-fixture-v3\footage\screenshot.png
+  C:\DYO-Agent\qa\smoke-fixture-v3\footage\logo.png
+  C:\DYO-Agent\qa\smoke-fixture-v3\footage\hardware-pass-sequence\hardware-pass_0000.png
   ... through hardware-pass_0011.png (12 frames)
 
 
@@ -58,29 +58,31 @@ STEP 2 - BUILD THE QA PROJECT IN AFTER EFFECTS
    empty project panel. If a project is open, close it yourself first
    (File > Close Project). The script will not close, save or discard anything.
 2. File > Scripts > Run Script File...
-3. Choose  C:\DYO-Agent\qa\smoke-75bcd90\build-qa-smoke-project.jsx
-4. It creates C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep, saves it, closes it,
+3. Choose  C:\DYO-Agent\qa\smoke-fixture-v3\build-qa-smoke-project.jsx
+4. It creates C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep, saves it, closes it,
    and leaves After Effects blank again. It tells you so in a dialog.
 
 If it refuses, it says exactly why and changes nothing. The refusals are:
+  - After Effects did not accept a track matte, or bound the wrong layer as
+    one (verified immediately after each binding - see below);
   - a saved project is open;
   - there are unsaved changes;
   - the untitled project is not empty;
-  - the script is not running from C:\DYO-Agent\qa\smoke-75bcd90;
+  - the script is not running from C:\DYO-Agent\qa\smoke-fixture-v3;
   - QA-Smoke.aep already exists there;
   - a footage file or the hardware-pass-sequence folder is missing;
   - After Effects imported the sequence as a still (the matte-source check
     below would then be meaningless, so it stops rather than build it).
 
 Do not re-run it over an existing QA-Smoke.aep. To start again, delete the whole
-C:\DYO-Agent\qa\smoke-75bcd90 folder and extract the ZIP again.
+C:\DYO-Agent\qa\smoke-fixture-v3 folder and extract the ZIP again.
 
 
 STEP 3 - RECORD THE FIXTURE HASH, THEN RUN THE SMOKE TEST
 ----------------------------------------------------------
 Before any job touches it:
 
-  Get-FileHash "C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep" -Algorithm SHA256
+  Get-FileHash "C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep" -Algorithm SHA256
 
 Keep that value. The whole point of the first smoke-test step is that the hash
 is IDENTICAL afterwards - inspections work on a disposable copy, never on the
@@ -120,6 +122,21 @@ WHAT THE QA PROJECT CONTAINS, AND WHY
 
 Every layer has staggered in/out points, so the moment chosen for an evidence
 frame has to fall inside a genuinely visible window rather than at t=0.
+
+
+HOW THE MATTES ARE BOUND, AND WHY IT IS CHECKED
+------------------------------------------------
+On After Effects 2023 and newer, setting a layer's track-matte TYPE does not
+bind a matte LAYER - the project ends up with matte modes and no mattes. The
+first version of this fixture did exactly that: After Effects reported
+hasTrackMatte=false on every host, and the inspection that followed could not
+tell a screen from a card, because there were no mattes to read.
+
+This version binds each matte with setTrackMatte(matteLayer, type) (falling
+back to the pre-2023 way, with the matte placed directly above its host), and
+then asks After Effects to confirm it: hasTrackMatte must be true, and the
+bound matte layer must be the exact layer intended. If either check fails, the
+script STOPS and saves nothing.
 
 
 THE MATTE-SOURCE CHECK THIS FIXTURE EXISTS TO MAKE
