@@ -264,3 +264,96 @@ describe("scan -> facts -> manifest -> slot verdicts (the real chain)", () => {
     }
   });
 });
+
+/**
+ * THE SHAPE THE QA FIXTURE MUST HAVE (2026-09-21, second smoke run).
+ *
+ * The v3 fixture gave both hosts the SAME slot composition. Two hosts of one
+ * slot are two hosts of ONE slot: the classifier saw them disagree and
+ * correctly reported a single conflicting verdict, so the moving-matte and
+ * still-matte cases could not be told apart in the result. Each case needs its
+ * own slot composition. This pins that distinction at the level the fixture
+ * relies on, before it is ever run against real After Effects.
+ */
+describe("two hosts, two slot compositions - one verdict each", () => {
+  const SECOND_SLOT_ID = 7;
+
+  function twoSlotScan() {
+    const raw = JSON.parse(JSON.stringify(RAW_SCAN)) as typeof RAW_SCAN;
+    // The still-matted host now places its OWN slot composition.
+    raw.compositions.push({
+      aeProjectItemIndex: 7,
+      compositionId: SECOND_SLOT_ID,
+      compositionName: "QA_ScreenStill",
+      layers: [scanLayer({ layerIndex: 1, layerName: "slot", footage: { ...stillFootage, isSolid: true } })]
+    });
+    return raw;
+  }
+
+  it("gives the moving-matte slot a confident device screen and the still-matte slot a conflicting verdict", () => {
+    const scan = parseProjectPreflightScan(twoSlotScan());
+    if (!scan.ok) {
+      throw new Error(scan.reason);
+    }
+    const stillSlotSummary: CompositionSummary = { index: 7, name: "QA_ScreenStill", widthPx: 1080, heightPx: 2160, frameRate: 25, durationSeconds: 10, numLayers: 1 };
+    const stillSlotDetail: CompositionDetail = {
+      compId: SECOND_SLOT_ID,
+      name: "QA_ScreenStill",
+      widthPx: 1080,
+      heightPx: 2160,
+      frameRate: 25,
+      durationSeconds: 10,
+      numLayers: 1,
+      layers: [{ index: 1, name: "slot", inPointSeconds: 0, outPointSeconds: 10, nullLayer: false }]
+    };
+    const facts = buildProjectFacts({
+      templateId: "qa-chain",
+      sourceProjectPath: "/qa/chain.aep",
+      sourceProjectName: "chain.aep",
+      projectSha256: "a".repeat(64),
+      aeVersion: "26.3x87",
+      discovered: [sceneSummary, slotSummary, stillSlotSummary],
+      details: [sceneDetail, slotDetail, stillSlotDetail],
+      precompFacts: [
+        [
+          { layerIndex: 2, sourceCompositionId: `comp-${SLOT_ID}` },
+          { layerIndex: 4, sourceCompositionId: `comp-${SECOND_SLOT_ID}` }
+        ],
+        [],
+        []
+      ],
+      layerFactsByCompositionAndIndex: scan.evidence.layerFactsByCompositionAndIndex
+    });
+    const manifest = buildTemplateManifest(facts, fixedNow);
+    const placeholders = manifest.scenes.flatMap((scene) => scene.placeholders).filter((placeholder) => placeholder.slotFacts);
+
+    const movingSlot = placeholders.find((placeholder) => placeholder.slotFacts!.slotCompositionId === `comp-${SLOT_ID}`);
+    const stillSlot = placeholders.find((placeholder) => placeholder.slotFacts!.slotCompositionId === `comp-${SECOND_SLOT_ID}`);
+    expect(movingSlot).toBeDefined();
+    expect(stillSlot).toBeDefined();
+
+    // Each slot has exactly ONE host, so each gets its own verdict.
+    expect(movingSlot!.slotFacts!.hosts).toHaveLength(1);
+    expect(stillSlot!.slotFacts!.hosts).toHaveLength(1);
+    expect(movingSlot!.slotFacts!.hosts[0]!.matteSource).toBe("RENDERED_FOOTAGE");
+    expect(stillSlot!.slotFacts!.hosts[0]!.matteSource).toBe("DRAWN_MASK_OR_SOLID");
+
+    // The moving matte is a confident screen; the still matte argues both ways
+    // and is handed to a human instead.
+    expect(movingSlot!.slotSemantics!.classification).toBe("device_screen");
+    expect(movingSlot!.slotSemantics!.requiresHumanDecision).toBe(false);
+    expect(stillSlot!.slotSemantics!.conflicting).toBe(true);
+    expect(stillSlot!.slotSemantics!.requiresHumanDecision).toBe(true);
+    expect(stillSlot!.slotSemantics!.confidence).toBeLessThan(movingSlot!.slotSemantics!.confidence);
+  });
+
+  it("REGRESSION: sharing one slot composition collapses them into a single conflicting verdict", () => {
+    // This is exactly what the v3 fixture produced, and why it could not show
+    // the two matte types apart - kept so the difference stays visible.
+    const { manifest } = runChain();
+    const shared = manifest.scenes.flatMap((scene) => scene.placeholders).find((placeholder) => placeholder.slotFacts?.hosts.length === 2);
+    expect(shared).toBeDefined();
+    expect(shared!.slotSemantics!.conflicting).toBe(true);
+    expect(shared!.slotSemantics!.requiresHumanDecision).toBe(true);
+  });
+});

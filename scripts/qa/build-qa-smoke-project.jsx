@@ -10,7 +10,7 @@
  *     project panel. If anything is open it STOPS and changes nothing - it
  *     never closes, saves or discards someone else's project, and it never
  *     answers a "Save changes?" prompt.
- *   - It creates exactly one file: C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep.
+ *   - It creates exactly one file: C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep.
  *     It refuses if that file already exists.
  *   - It imports ONLY the footage shipped beside this script, by relative
  *     position, so the project and its footage live in the same folder - which
@@ -23,7 +23,7 @@
  */
 (function () {
   // The one folder this script is allowed to touch. Not a parameter.
-  var QA_ROOT = "C:\\DYO-Agent\\qa\\smoke-fixture-v3";
+  var QA_ROOT = "C:\\DYO-Agent\\qa\\smoke-fixture-v4";
   var PROJECT_PATH = QA_ROOT + "\\QA-Smoke.aep";
   var FOOTAGE_NAMES = ["hardware-pass.png", "screenshot.png", "logo.png"];
   // The MOVING hardware pass: a numbered PNG sequence. After Effects imports
@@ -131,7 +131,7 @@
     stop(
       "QA-Smoke.aep already exists:\n  " +
         existing.fsName +
-        "\n\nThis script never overwrites it. Delete the whole smoke-fixture-v3 folder, extract the fixture again, and re-run - so the test never reuses an earlier run's state."
+        "\n\nThis script never overwrites it. Delete the whole smoke-fixture-v4 folder, extract the fixture again, and re-run - so the test never reuses an earlier run's state."
     );
   }
 
@@ -195,6 +195,15 @@
     var screenSlot = app.project.items.addComp("QA_Screen", 1080, 2160, 1, 10, 25);
     screenSlot.layers.addSolid([0.1, 0.1, 0.1], "slot", 1080, 2160, 1);
 
+    // A SEPARATE slot composition for the still-matted control case. It must
+    // not share QA_Screen: two hosts of the SAME slot are two hosts of one
+    // slot, and the classifier then reports a single conflicting verdict for
+    // it rather than one verdict per matte type - which is exactly what the
+    // 2026-09-21 v3 run produced, and why it could not show the two cases
+    // apart. Identical in every respect except its own identity.
+    var screenSlotStill = app.project.items.addComp("QA_ScreenStill", 1080, 2160, 1, 10, 25);
+    screenSlotStill.layers.addSolid([0.1, 0.1, 0.1], "slot", 1080, 2160, 1);
+
     var cardSlot = app.project.items.addComp("QA_Card", 1600, 900, 1, 10, 25);
     cardSlot.layers.addSolid([0.1, 0.1, 0.1], "slot", 1600, 900, 1);
 
@@ -243,7 +252,7 @@
     stillMatte.property("ADBE Transform Group").property("ADBE Scale").setValue([25, 25]);
     stillMatte.property("ADBE Transform Group").property("ADBE Position").setValue([300, 300]);
 
-    var stillMattedSlot = scene.layers.add(screenSlot);
+    var stillMattedSlot = scene.layers.add(screenSlotStill);
     stillMattedSlot.name = "QA_StillMattedHost";
     stillMattedSlot.threeDLayer = true;
     stillMattedSlot.property("ADBE Transform Group").property("ADBE Scale").setValue([25, 25, 100]);

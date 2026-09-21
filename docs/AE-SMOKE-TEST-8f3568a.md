@@ -34,18 +34,18 @@ three footage files and its own README:
 
 | | |
 |---|---|
-| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip` |
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip` |
 | SHA-256 | `dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78` |
 | Size | 94,972 bytes |
 
 ```powershell
-scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
 $e="dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78"
 $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
 if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
- New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v3" | Out-Null
- Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-fixture-v3" -Force
- Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-fixture-v3" | Select-Object FullName, Length
+ New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v4" | Out-Null
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-fixture-v4" -Force
+ Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-fixture-v4" | Select-Object FullName, Length
 }
 ```
 
@@ -53,7 +53,7 @@ Then, with After Effects open and **nothing** in it - no project, no unsaved
 changes, an empty project panel:
 
 **File → Scripts → Run Script File…** →
-`C:\DYO-Agent\qa\smoke-fixture-v3\build-qa-smoke-project.jsx`
+`C:\DYO-Agent\qa\smoke-fixture-v4\build-qa-smoke-project.jsx`
 
 It refuses, changing nothing, if a saved project is open, if there are unsaved
 changes, if the untitled project is not empty, if it is running from anywhere
@@ -64,14 +64,14 @@ one intended). It never closes,
 saves or discards a project it did not create, and it never answers a "Save
 changes?" prompt.
 
-On success it creates `C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep`, saves
+On success it creates `C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep`, saves
 it, closes it, and leaves After Effects blank - which is the state the worker
 needs.
 
 Record the fixture's hash before any job touches it:
 
 ```powershell
-Get-FileHash "C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep" -Algorithm SHA256
+Get-FileHash "C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep" -Algorithm SHA256
 ```
 
 What the project contains, and what each part is there to test:
@@ -80,7 +80,7 @@ What the project contains, and what each part is there to test:
 |---|---|
 | `QA_Scene` | the scene composition |
 | `QA_ScreenHost` - places `QA_Screen` with a **LUMA matte from the MOVING hardware pass (image sequence)**, 3D, parented to an animated null | matte source **RENDERED_FOOTAGE**; confident **device_screen** |
-| `QA_StillMattedHost` - the **same** 3D animated shape, cut by the **STILL** hardware image | matte source **DRAWN_MASK_OR_SOLID**; **conflicting**, needs a human decision |
+| `QA_StillMattedHost` - the **same** 3D animated shape, cut by the **STILL** hardware image, placing its own slot composition `QA_ScreenStill` | matte source **DRAWN_MASK_OR_SOLID**; **conflicting**, needs a human decision |
 | `QA_CardHost` - places `QA_Card` with an **ALPHA matte from a drawn solid**, 2D, unparented | must classify as **flat_card** |
 | `QA_Hebrew` text layer | RTL application and code-point read-back verification |
 | `QA_Offscreen` - the card parked entirely outside the frame | must produce **no** evidence frame |
@@ -99,9 +99,12 @@ The footage's measured facts, for the fit/alpha checks later:
 
 **The matte-source check.** `QA_ScreenHost` and `QA_StillMattedHost` are
 identical in every respect except what their matte is made of - a moving image
-sequence versus a still image. They must report **different** matte sources
+sequence versus a still image. They place different slot compositions on purpose, so each gets its OWN
+verdict, and they must report **different** matte sources
 (`RENDERED_FOOTAGE` versus `DRAWN_MASK_OR_SOLID`) and different verdicts
-(confident `device_screen` versus conflicting, needing a human). **If the two
+(confident `device_screen` versus conflicting, needing a human). Two hosts
+sharing one slot composition collapse into a single conflicting verdict - the
+previous fixture's mistake. **If the two
 report the same matte source, the smoke test has failed - stop and report it.**
 That equality was the real defect corrected in this build: After Effects sets
 `hasVideo` for a still image as well as for a movie, and the rule was checking
@@ -109,7 +112,7 @@ That equality was the real defect corrected in this build: After Effects sets
 
 ## Step 2 - register it as a project in the dashboard
 
-1. Dashboard → New Project → inspect `C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep`.
+1. Dashboard → New Project → inspect `C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep`.
 2. **While the inspection runs, watch the file itself.** Expected, and the
    first thing this build must prove:
    - a file named `QA-Smoke.dyo-inspect-<uuid>.aep` appears next to it, and
@@ -127,10 +130,10 @@ Open the project's scene table. Expected:
 - `QA_Screen` (through `QA_ScreenHost`) is classified **device_screen** with
   high confidence, and its evidence lists the rendered-footage matte, the 3D
   host and the animated parent.
-- The same slot through `QA_StillMattedHost` reports a
+- `QA_ScreenStill` (through `QA_StillMattedHost`) reports a
   **DRAWN_MASK_OR_SOLID** matte and comes out **conflicting**, needing a human
   decision - never a confident device screen. **Identical matte sources for the
-  two hosts is a failure.**
+  two hosts is a failure**, and so is a single shared verdict instead of two.
 - `QA_Card` is classified **flat_card**, its evidence naming the drawn matte.
 - Neither classification mentions a layer name as a reason.
 - The Hebrew text layer carries the template's own wording as captured text.
@@ -183,7 +186,7 @@ Map assets deliberately wrongly, and confirm each refusal:
 
 ## Step 8 - tidy up
 
-Delete `C:\DYO-Agent\qa\smoke-fixture-v3\` and the QA project from the dashboard.
+Delete `C:\DYO-Agent\qa\smoke-fixture-v4\` and the QA project from the dashboard.
 The QA project exists only for this test.
 
 ## Stop conditions

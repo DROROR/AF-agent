@@ -37,18 +37,18 @@ somewhere other than beside the project:
   $e="<SHA-256 from the release notes>"
   $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
   if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
-   New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v3" | Out-Null
-   Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-fixture-v3" -Force
-   Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-fixture-v3" | Select-Object FullName, Length
+   New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v4" | Out-Null
+   Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-fixture-v4" -Force
+   Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-fixture-v4" | Select-Object FullName, Length
   }
 
 Expected afterwards:
-  C:\DYO-Agent\qa\smoke-fixture-v3\build-qa-smoke-project.jsx
-  C:\DYO-Agent\qa\smoke-fixture-v3\README-QA-SMOKE-FIXTURE.txt
-  C:\DYO-Agent\qa\smoke-fixture-v3\footage\hardware-pass.png
-  C:\DYO-Agent\qa\smoke-fixture-v3\footage\screenshot.png
-  C:\DYO-Agent\qa\smoke-fixture-v3\footage\logo.png
-  C:\DYO-Agent\qa\smoke-fixture-v3\footage\hardware-pass-sequence\hardware-pass_0000.png
+  C:\DYO-Agent\qa\smoke-fixture-v4\build-qa-smoke-project.jsx
+  C:\DYO-Agent\qa\smoke-fixture-v4\README-QA-SMOKE-FIXTURE.txt
+  C:\DYO-Agent\qa\smoke-fixture-v4\footage\hardware-pass.png
+  C:\DYO-Agent\qa\smoke-fixture-v4\footage\screenshot.png
+  C:\DYO-Agent\qa\smoke-fixture-v4\footage\logo.png
+  C:\DYO-Agent\qa\smoke-fixture-v4\footage\hardware-pass-sequence\hardware-pass_0000.png
   ... through hardware-pass_0011.png (12 frames)
 
 
@@ -58,8 +58,8 @@ STEP 2 - BUILD THE QA PROJECT IN AFTER EFFECTS
    empty project panel. If a project is open, close it yourself first
    (File > Close Project). The script will not close, save or discard anything.
 2. File > Scripts > Run Script File...
-3. Choose  C:\DYO-Agent\qa\smoke-fixture-v3\build-qa-smoke-project.jsx
-4. It creates C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep, saves it, closes it,
+3. Choose  C:\DYO-Agent\qa\smoke-fixture-v4\build-qa-smoke-project.jsx
+4. It creates C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep, saves it, closes it,
    and leaves After Effects blank again. It tells you so in a dialog.
 
 If it refuses, it says exactly why and changes nothing. The refusals are:
@@ -68,21 +68,21 @@ If it refuses, it says exactly why and changes nothing. The refusals are:
   - a saved project is open;
   - there are unsaved changes;
   - the untitled project is not empty;
-  - the script is not running from C:\DYO-Agent\qa\smoke-fixture-v3;
+  - the script is not running from C:\DYO-Agent\qa\smoke-fixture-v4;
   - QA-Smoke.aep already exists there;
   - a footage file or the hardware-pass-sequence folder is missing;
   - After Effects imported the sequence as a still (the matte-source check
     below would then be meaningless, so it stops rather than build it).
 
 Do not re-run it over an existing QA-Smoke.aep. To start again, delete the whole
-C:\DYO-Agent\qa\smoke-fixture-v3 folder and extract the ZIP again.
+C:\DYO-Agent\qa\smoke-fixture-v4 folder and extract the ZIP again.
 
 
 STEP 3 - RECORD THE FIXTURE HASH, THEN RUN THE SMOKE TEST
 ----------------------------------------------------------
 Before any job touches it:
 
-  Get-FileHash "C:\DYO-Agent\qa\smoke-fixture-v3\QA-Smoke.aep" -Algorithm SHA256
+  Get-FileHash "C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep" -Algorithm SHA256
 
 Keep that value. The whole point of the first smoke-test step is that the hash
 is IDENTICAL afterwards - inspections work on a disposable copy, never on the
@@ -104,7 +104,8 @@ WHAT THE QA PROJECT CONTAINS, AND WHY
                     -> matte source must be RENDERED_FOOTAGE
                     -> must be classified device_screen, confidently
   QA_StillMattedHost the SAME 3D animated shape, cut by the STILL hardware image
-                    instead of the sequence
+                    instead of the sequence, placing its OWN slot composition
+                    (QA_ScreenStill) so it gets its own verdict
                     -> matte source must be DRAWN_MASK_OR_SOLID
                     -> must NOT be a confident device screen: it is reported as
                        conflicting and handed to a human
@@ -143,7 +144,11 @@ THE MATTE-SOURCE CHECK THIS FIXTURE EXISTS TO MAKE
 ---------------------------------------------------
 QA_ScreenHost and QA_StillMattedHost are deliberately identical in every way
 except what their matte is made of: one is cut by the moving image sequence,
-the other by the still image.
+the other by the still image. They place DIFFERENT slot compositions
+(QA_Screen and QA_ScreenStill) on purpose - two hosts of the SAME slot are two
+hosts of ONE slot, and the classifier then reports a single conflicting verdict
+for it rather than one verdict per matte type. That is exactly what the
+previous fixture did, and why it could not show the two cases apart.
 
   - QA_ScreenHost      matte source RENDERED_FOOTAGE, confident device_screen
   - QA_StillMattedHost matte source DRAWN_MASK_OR_SOLID, conflicting, needs a
