@@ -52,8 +52,26 @@ changes, a non-empty untitled project, running from the wrong folder, an
 existing `QA-Smoke.aep`, missing footage, or the hardware sequence importing as
 a still.
 
-The corrected fixture extracts to **`C:\DYO-Agent\qa\smoke-fixture-v3`** - a new
-folder, so the broken fixture cannot be reused by accident.
+The corrected fixture extracts to a new folder each time one is corrected, so a
+broken one cannot be reused by accident. Current: **`C:\DYO-Agent\qa\smoke-fixture-v4`**.
+
+### 2b. The two control cases shared one slot (fixture, second smoke run)
+
+v3 pointed `QA_ScreenHost` and `QA_StillMattedHost` at the same `QA_Screen`
+composition. Two hosts of the same slot are two hosts of ONE slot: the
+classifier saw them disagree and reported a single conflicting verdict
+(`device_screen`, confidence 0.613, conflicting) - correct behaviour, but it
+meant the moving-matte and still-matte cases could not be told apart, which is
+the one thing that pair exists to show.
+
+**The fix.** `QA_StillMattedHost` now places its own `QA_ScreenStill`
+composition, identical but for its identity, so each case gets its own verdict:
+a confident `device_screen` from the moving sequence, and a conflicting one
+needing a human from the still image. The integration test pins both halves,
+including the shared-slot collapse as a regression.
+
+**Nothing in the product changed for this**, so the worker package built from
+`e78dbf4` stays correct and is not rebuilt.
 
 ## Model version: kept at `slot-semantics-v2`
 
@@ -82,9 +100,12 @@ Built from `e78dbf41ecd2c761fe9378e012dae5feb60a8068`.
 
 | | Worker | QA fixture |
 |---|---|---|
-| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-e78dbf4.zip` | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip` |
-| SHA-256 | `384e2e406aa5598fe72c374c156b7176c502899cbfe16fd9faac5bdffbc78385` | `ff09852c17de0058b3afaef86c17b27f8b3052869e568790a3c0093ed0ac40c4` |
-| Size | 860,797 bytes | 96,016 bytes |
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-e78dbf4.zip` | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip` |
+| SHA-256 | `384e2e406aa5598fe72c374c156b7176c502899cbfe16fd9faac5bdffbc78385` | `441f38109612c2b37f91075542fd82ce45343a283b93b724d1bdecadbd911721` |
+| Size | 860,797 bytes | 96,381 bytes |
+
+The worker is unchanged since `e78dbf4` - if it is already installed, only the
+fixture below needs replacing.
 
 ```powershell
 # Worker
@@ -99,12 +120,12 @@ if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
 }
 
 # QA fixture (new folder - the broken one is never reused)
-scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v3.zip "$env:USERPROFILE\Downloads\DYO-QA-v3.zip"
-$e="ff09852c17de0058b3afaef86c17b27f8b3052869e568790a3c0093ed0ac40c4"
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip "$env:USERPROFILE\Downloads\DYO-QA-v3.zip"
+$e="441f38109612c2b37f91075542fd82ce45343a283b93b724d1bdecadbd911721"
 $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" -Algorithm SHA256).Hash.ToLower()
 if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
- New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v3" | Out-Null
- Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" "C:\DYO-Agent\qa\smoke-fixture-v3" -Force
+ New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v4" | Out-Null
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" "C:\DYO-Agent\qa\smoke-fixture-v4" -Force
 }
 ```
 
@@ -135,6 +156,6 @@ deployed build (`dc14516`) stays as it is. If it is ever rolled back, use the
 previous release directory that is still on disk, exactly as
 `RELEASE-8f3568a.md` describes.
 
-**Fixture.** Delete `C:\DYO-Agent\qa\smoke-fixture-v3` and extract the ZIP
+**Fixture.** Delete `C:\DYO-Agent\qa\smoke-fixture-v4` and extract the ZIP
 again; the builder refuses to overwrite an existing QA project, so a clean
 folder is always the way back.
