@@ -479,3 +479,106 @@ describe("buildSlotStructuralFacts - effective visibility facts", () => {
     expect(selectEvidenceFrameSeconds(facts)).toBeNull();
   });
 });
+
+/**
+ * 2026-09-21 CORRECTION. After Effects sets `hasVideo` for a STILL image as
+ * well as for a movie, so checking `hasVideo` first called every imported PNG
+ * matte a rendered hardware pass - and gave a static card a confident
+ * device_screen verdict. These pin the corrected order and the two categories.
+ */
+describe("classifyMatteSource - a still is never moving footage", () => {
+  const slotComposition = composition({ compositionId: "comp-slot", widthPx: 1080, heightPx: 2160, layers: [layer({ index: 1 })] });
+
+  /** The host carries the matte; `matte` is the layer directly above it, exactly as After Effects reports it. */
+  function matteSourceFor(matte: ScannedSlotLayer): string {
+    const host = composition({
+      compositionId: "comp-host",
+      layers: [layer({ index: 2, name: "matte" })],
+      precompChildren: [{ layerIndex: 3, layerName: "host", sourceCompositionId: "comp-slot", enabled: true }]
+    });
+    const facts = buildSlotStructuralFacts({
+      slotComposition,
+      slotLayerIndex: 1,
+      slotLayerName: null,
+      compositions: [slotComposition, host],
+      layerFactsByCompositionAndIndex: new Map<string, ScannedSlotLayer>([
+        ["comp-host:3", scanned({ detail: { hasTrackMatte: true, trackMatteLayerIndex: 2 } })],
+        ["comp-host:2", matte]
+      ]),
+      hostDepth: 1,
+      slotIsWholeComposition: true
+    });
+    return facts.hosts[0]!.matteSource;
+  }
+
+  it("an IMPORTED STILL (hasVideo true, isStill true) is an authored shape, not a rendered pass", () => {
+    expect(matteSourceFor(scanned({ footage: { hasVideo: true, isStill: true, isSolid: false } }))).toBe("DRAWN_MASK_OR_SOLID");
+  });
+
+  it("MOVING FOOTAGE (hasVideo true, isStill false) - a video file or an image sequence - is a rendered pass", () => {
+    expect(matteSourceFor(scanned({ footage: { hasVideo: true, isStill: false, isSolid: false } }))).toBe("RENDERED_FOOTAGE");
+  });
+
+  it("an AFTER EFFECTS SOLID is an authored shape, whatever else it reports", () => {
+    expect(matteSourceFor(scanned({ footage: { hasVideo: true, isStill: true, isSolid: true } }))).toBe("DRAWN_MASK_OR_SOLID");
+    expect(matteSourceFor(scanned({ footage: { hasVideo: true, isStill: false, isSolid: true } }))).toBe("DRAWN_MASK_OR_SOLID");
+  });
+
+  it("a DRAWN MASK - a shape or text layer used as a matte - is an authored shape", () => {
+    expect(matteSourceFor(scanned({ kind: "ShapeLayer", footage: null }))).toBe("DRAWN_MASK_OR_SOLID");
+    expect(matteSourceFor(scanned({ kind: "TextLayer", footage: null }))).toBe("DRAWN_MASK_OR_SOLID");
+  });
+
+  it("MISSING OR UNKNOWN source facts are never guessed either way", () => {
+    // No footage record at all (an AV layer whose source could not be read).
+    expect(matteSourceFor(scanned({ footage: null }))).toBe("UNKNOWN");
+    // A scan from an older worker build: the layer is there, its facts are not.
+    expect(matteSourceFor({ kind: "AVLayer" })).toBe("UNKNOWN");
+    // Footage that reports neither video nor still - nothing to conclude from.
+    expect(matteSourceFor(scanned({ footage: { hasVideo: false, isStill: false, isSolid: false } }))).toBe("UNKNOWN");
+  });
+
+  it("the two source types must NOT produce the same fact - that equality is the bug this corrects", () => {
+    const still = matteSourceFor(scanned({ footage: { hasVideo: true, isStill: true, isSolid: false } }));
+    const moving = matteSourceFor(scanned({ footage: { hasVideo: true, isStill: false, isSolid: false } }));
+    expect(still).not.toBe(moving);
+  });
+
+  it("carries through to the verdict: the same 3D animated host reads as a card with a still matte and a screen with a moving one", () => {
+    const hostWith = (matte: ScannedSlotLayer) => {
+      const host = composition({
+        compositionId: "comp-host",
+        layers: [layer({ index: 2, name: "matte" })],
+        precompChildren: [{ layerIndex: 3, layerName: "host", sourceCompositionId: "comp-slot", enabled: true }]
+      });
+      return buildSlotStructuralFacts({
+        slotComposition,
+        slotLayerIndex: 1,
+        slotLayerName: null,
+        compositions: [slotComposition, host],
+        layerFactsByCompositionAndIndex: new Map<string, ScannedSlotLayer>([
+          ["comp-host:3", scanned({ detail: { hasTrackMatte: true, trackMatteLayerIndex: 2, threeDLayer: true, parentLayerIndex: 4 } })],
+          ["comp-host:4", scanned({ detail: { hasTransformKeyframes: true } })],
+          ["comp-host:2", matte]
+        ]),
+        hostDepth: 1,
+        slotIsWholeComposition: true
+      });
+    };
+
+    const stillVerdict = classifySlotSemantics(hostWith(scanned({ footage: { hasVideo: true, isStill: true, isSolid: false } })));
+    const movingVerdict = classifySlotSemantics(hostWith(scanned({ footage: { hasVideo: true, isStill: false, isSolid: false } })));
+
+    // Moving footage: hardware was rendered and a window cut in it. Confident.
+    expect(movingVerdict.classification).toBe("device_screen");
+    expect(movingVerdict.requiresHumanDecision).toBe(false);
+
+    // The same host with a STILL matte argues both ways at once - 3D on an
+    // animated parent says screen, an authored matte says card - so it is
+    // reported as conflicting and handed to a human, instead of the confident
+    // device_screen the old ordering produced.
+    expect(stillVerdict.conflicting).toBe(true);
+    expect(stillVerdict.requiresHumanDecision).toBe(true);
+    expect(stillVerdict.confidence).toBeLessThan(movingVerdict.confidence);
+  });
+});

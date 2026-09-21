@@ -27,8 +27,17 @@ import { sha256Hex } from "./text-digest.js";
  * gate, for the same reason.
  */
 
-/** Bumped whenever the rules or weights below change, so a stored verdict is never silently reinterpreted under different rules. */
-export const SLOT_SEMANTICS_MODEL_VERSION = "slot-semantics-v1";
+/**
+ * Bumped whenever the rules or weights below change, so a stored verdict is
+ * never silently reinterpreted under different rules.
+ *
+ * v2 (2026-09-21): the matte-source rule was corrected - After Effects reports
+ * `hasVideo` for a still image as well as a movie, so a still matte was being
+ * read as a rendered hardware pass and could carry a confident device_screen
+ * verdict. Any verdict produced by the previous rule is refused as stale and
+ * re-inspected rather than trusted.
+ */
+export const SLOT_SEMANTICS_MODEL_VERSION = "slot-semantics-v2";
 
 /** Bumped whenever the fingerprint's own inputs change - a fingerprint from an older version can never be compared with a new one. */
 export const SLOT_FINGERPRINT_VERSION = "slot-fingerprint-v1";

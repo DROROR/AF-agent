@@ -26,6 +26,12 @@
   var QA_ROOT = "C:\\DYO-Agent\\qa\\smoke-8f3568a";
   var PROJECT_PATH = QA_ROOT + "\\QA-Smoke.aep";
   var FOOTAGE_NAMES = ["hardware-pass.png", "screenshot.png", "logo.png"];
+  // The MOVING hardware pass: a numbered PNG sequence. After Effects imports
+  // it as one footage item with hasVideo true and isStill FALSE, which is what
+  // makes it a rendered pass rather than an authored shape - the whole point
+  // of the QA_Screen slot below.
+  var SEQUENCE_FOLDER = "footage\\hardware-pass-sequence";
+  var SEQUENCE_FIRST_FRAME = "hardware-pass_0000.png";
 
   function stop(message) {
     alert("QA smoke project NOT created.\n\n" + message);
@@ -99,6 +105,11 @@
     footageFiles.push(f);
   }
 
+  var sequenceFirst = new File(QA_ROOT + "\\" + SEQUENCE_FOLDER + "\\" + SEQUENCE_FIRST_FRAME);
+  if (!sequenceFirst.exists) {
+    stop("Missing the moving hardware pass:\n  " + sequenceFirst.fsName + "\n\nExtract the whole QA fixture ZIP, keeping its footage folder and the hardware-pass-sequence folder inside it.");
+  }
+
   /* ---------------------------------------------------------------- *
    * 3. Build the project. Everything from here is in ITS OWN project -
    *    created by this script, never anybody else's.
@@ -115,8 +126,20 @@
     for (var j = 0; j < footageFiles.length; j++) {
       imported.push(app.project.importFile(new ImportOptions(footageFiles[j])));
     }
-    var hardware = imported[0];
+    var stillHardware = imported[0];
     var screenshot = imported[1];
+
+    // Imported as a SEQUENCE - one moving footage item, not twelve stills.
+    var sequenceOptions = new ImportOptions(sequenceFirst);
+    sequenceOptions.sequence = true;
+    var movingHardware = app.project.importFile(sequenceOptions);
+    imported.push(movingHardware);
+    if (movingHardware.mainSource.isStill) {
+      stop(
+        "After Effects imported the hardware pass as a STILL, not as a sequence.\n\n" +
+          "The smoke test cannot tell moving footage from a still matte without it. Delete the QA folder, extract the fixture again, and make sure the whole hardware-pass-sequence folder came with it."
+      );
+    }
 
     // Every import must have resolved - a missing one here would make the
     // whole smoke test meaningless.
@@ -148,7 +171,7 @@
     helperPosition.setValueAtTime(0, [860, 540, 0]);
     helperPosition.setValueAtTime(5, [1060, 540, 0]);
 
-    var hardwareMatte = scene.layers.add(hardware);
+    var hardwareMatte = scene.layers.add(movingHardware);
     hardwareMatte.name = "QA_HardwarePass";
     hardwareMatte.property("ADBE Transform Group").property("ADBE Scale").setValue([40, 40]);
 
@@ -170,6 +193,26 @@
     cardLayer.trackMatteType = TrackMatteType.ALPHA;
     cardLayer.inPoint = 2;
     cardLayer.outPoint = 8;
+
+    // THE CONTROL CASE for the 2026-09-21 matte-source correction: the same
+    // 3D, animated-parent shape as QA_ScreenHost, but cut by a STILL image
+    // instead of the sequence. It must NOT come out as a confident device
+    // screen - a still matte is an authored shape, and the two sources must
+    // never produce the same matte-source fact.
+    var stillMatte = scene.layers.add(stillHardware);
+    stillMatte.name = "QA_StillPass";
+    stillMatte.property("ADBE Transform Group").property("ADBE Scale").setValue([25, 25]);
+    stillMatte.property("ADBE Transform Group").property("ADBE Position").setValue([300, 300]);
+
+    var stillMattedSlot = scene.layers.add(screenSlot);
+    stillMattedSlot.name = "QA_StillMattedHost";
+    stillMattedSlot.threeDLayer = true;
+    stillMattedSlot.property("ADBE Transform Group").property("ADBE Scale").setValue([25, 25, 100]);
+    stillMattedSlot.property("ADBE Transform Group").property("ADBE Position").setValue([300, 300, 0]);
+    stillMattedSlot.parent = helper;
+    stillMattedSlot.trackMatteType = TrackMatteType.LUMA;
+    stillMattedSlot.inPoint = 1;
+    stillMattedSlot.outPoint = 7;
 
     // NEVER ON SCREEN - positioned entirely outside the frame.
     var offscreen = scene.layers.add(cardSlot);

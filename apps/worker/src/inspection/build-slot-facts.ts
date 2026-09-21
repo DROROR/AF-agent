@@ -84,10 +84,31 @@ function scannedLayer(input: SlotFactsInput, compositionId: string, layerIndex: 
  * What a host layer's track matte is made OF - the strongest single signal,
  * and the reason matte presence alone proves nothing.
  *
- * A matte whose own source is rendered footage is a designer's rendered
- * hardware pass (so the window it cuts is a device screen); a matte that is a
- * solid, a shape or a drawn mask is a rectangle the designer drew (so it is a
- * flat card). Anything unreadable is UNKNOWN, never assumed.
+ * TWO CATEGORIES, AND WHAT FALLS IN EACH:
+ *
+ *   RENDERED_FOOTAGE - a matte that is MOVING footage: a video file, or an
+ *     image sequence. Somebody rendered hardware and cut a window in it, so
+ *     the window is a device screen. Requires `hasVideo` AND NOT `isStill`.
+ *
+ *   DRAWN_MASK_OR_SOLID - a matte somebody AUTHORED as a static shape. Three
+ *     different things are deliberately grouped here, because they are the
+ *     same claim about intent - a designer drew a rectangle:
+ *       - an After Effects solid (`isSolid`),
+ *       - a shape or text layer used as a matte,
+ *       - an imported STILL image (`isStill`) - a PNG/JPEG cut-out is an
+ *         authored shape, not a render of moving hardware.
+ *     They are distinguished from each other in the scan itself (`isSolid`,
+ *     the layer's `kind`, `isStill`) and reported individually in evidence;
+ *     they are only grouped for the purpose of this verdict.
+ *
+ *   UNKNOWN - anything unreadable. Never guessed either way.
+ *
+ * ORDER MATTERS, AND THIS IS THE 2026-09-21 CORRECTION. After Effects sets
+ * `hasVideo` to true for a STILL image as well as for a movie - a still has
+ * visual content. Checking `hasVideo` first therefore called every imported
+ * PNG matte a rendered hardware pass, and made the `isStill` branch below
+ * unreachable for real footage. `isStill` is now checked first, so
+ * RENDERED_FOOTAGE means what it says: moving footage, never a still.
  */
 export function classifyMatteSource(input: SlotFactsInput, compositionId: string, host: ScannedSlotLayer | undefined, hostLayerIndex: number): MatteSource {
   const detail = host?.detail;
@@ -108,16 +129,16 @@ export function classifyMatteSource(input: SlotFactsInput, compositionId: string
   if (footage && footage.isSolid) {
     return "DRAWN_MASK_OR_SOLID";
   }
-  if (footage && footage.hasVideo) {
-    return "RENDERED_FOOTAGE";
-  }
   if (matteLayer.kind === "ShapeLayer" || matteLayer.kind === "TextLayer") {
     return "DRAWN_MASK_OR_SOLID";
   }
   if (footage && footage.isStill) {
-    // A still image used as a matte is a drawn/authored shape, not a render
-    // of moving hardware.
+    // Checked BEFORE hasVideo: After Effects reports hasVideo for a still too.
     return "DRAWN_MASK_OR_SOLID";
+  }
+  if (footage && footage.hasVideo) {
+    // Moving footage - a video file or an image sequence.
+    return "RENDERED_FOOTAGE";
   }
   return "UNKNOWN";
 }

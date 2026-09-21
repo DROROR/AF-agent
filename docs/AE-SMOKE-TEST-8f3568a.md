@@ -76,7 +76,8 @@ What the project contains, and what each part is there to test:
 | Composition / layer | What it is there to test |
 |---|---|
 | `QA_Scene` | the scene composition |
-| `QA_ScreenHost` - places `QA_Screen` with a **LUMA matte from the imported hardware pass**, 3D, parented to an animated null | must classify as **device_screen** |
+| `QA_ScreenHost` - places `QA_Screen` with a **LUMA matte from the MOVING hardware pass (image sequence)**, 3D, parented to an animated null | matte source **RENDERED_FOOTAGE**; confident **device_screen** |
+| `QA_StillMattedHost` - the **same** 3D animated shape, cut by the **STILL** hardware image | matte source **DRAWN_MASK_OR_SOLID**; **conflicting**, needs a human decision |
 | `QA_CardHost` - places `QA_Card` with an **ALPHA matte from a drawn solid**, 2D, unparented | must classify as **flat_card** |
 | `QA_Hebrew` text layer | RTL application and code-point read-back verification |
 | `QA_Offscreen` - the card parked entirely outside the frame | must produce **no** evidence frame |
@@ -88,15 +89,20 @@ The footage's measured facts, for the fit/alpha checks later:
 
 | File | Measured |
 |---|---|
-| `hardware-pass.png` | 1080×2160, no alpha channel, opaque, coverage 100% |
+| `hardware-pass.png` (still matte) | 1080×2160, no alpha channel, opaque, coverage 100% |
+| `hardware-pass-sequence/` (moving matte) | 12 frames, 1080×2160, imported as one sequence |
 | `screenshot.png` | 1080×2160, no alpha channel, opaque, coverage 100% |
 | `logo.png` | 800×800, alpha channel present, **69.5% see-through**, visible content 500×500 at (150,150), coverage **30.8%** |
 
-**Known limit.** The screen slot's matte is a still PNG, and the worker decides
-"rendered footage matte" from After Effects' own `hasVideo` flag, which After
-Effects also sets for stills. So this fixture cannot tell a still matte from a
-real rendered video pass, and neither would the worker. The `device_screen`
-verdict expected here is right in outcome but does not test that distinction.
+**The matte-source check.** `QA_ScreenHost` and `QA_StillMattedHost` are
+identical in every respect except what their matte is made of - a moving image
+sequence versus a still image. They must report **different** matte sources
+(`RENDERED_FOOTAGE` versus `DRAWN_MASK_OR_SOLID`) and different verdicts
+(confident `device_screen` versus conflicting, needing a human). **If the two
+report the same matte source, the smoke test has failed - stop and report it.**
+That equality was the real defect corrected in this build: After Effects sets
+`hasVideo` for a still image as well as for a movie, and the rule was checking
+`hasVideo` first.
 
 ## Step 2 - register it as a project in the dashboard
 
@@ -115,9 +121,13 @@ verdict expected here is right in outcome but does not test that distinction.
 
 Open the project's scene table. Expected:
 
-- `QA_Screen` is classified **device_screen** with high confidence, and its
-  evidence lists the rendered-footage matte, the 3D host and the animated
-  parent.
+- `QA_Screen` (through `QA_ScreenHost`) is classified **device_screen** with
+  high confidence, and its evidence lists the rendered-footage matte, the 3D
+  host and the animated parent.
+- The same slot through `QA_StillMattedHost` reports a
+  **DRAWN_MASK_OR_SOLID** matte and comes out **conflicting**, needing a human
+  decision - never a confident device screen. **Identical matte sources for the
+  two hosts is a failure.**
 - `QA_Card` is classified **flat_card**, its evidence naming the drawn matte.
 - Neither classification mentions a layer name as a reason.
 - The Hebrew text layer carries the template's own wording as captured text.
