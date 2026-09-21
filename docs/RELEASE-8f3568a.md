@@ -124,4 +124,7 @@ previous API build runs unchanged against the current schema.
   `e0483ad6…` were not touched: no job was dispatched for that project, and no
   Revision 5 exists.
 - The first real AE smoke test uses a purpose-built disposable QA project -
-  see `AE-SMOKE-TEST-8f3568a.md`.
+  see `AE-SMOKE-TEST-8f3568a.md`. Its fixture is published alongside the worker
+  package: `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-8f3568a.zip`
+  (43,935 bytes, sha256
+  `7be65d6ae3ef4567d09c0fdec87f0737341d26acba2f0c6adeba2617a99f2a78`).

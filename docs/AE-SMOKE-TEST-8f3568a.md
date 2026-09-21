@@ -29,38 +29,74 @@ in one file, each shape the new code must tell apart.
 
 ## Step 1 - build the QA project (QA machine, ~5 minutes)
 
-On the worker machine, create the folder layout first. Relative footage is the
-point: the disposable-copy wrapper places its copy BESIDE the project so
-relative paths still resolve, and this proves it.
+Everything needed is published as one fixture ZIP - the builder script, the
+three footage files and its own README:
 
+| | |
+|---|---|
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-8f3568a.zip` |
+| SHA-256 | `7be65d6ae3ef4567d09c0fdec87f0737341d26acba2f0c6adeba2617a99f2a78` |
+| Size | 43,935 bytes |
+
+```powershell
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-8f3568a.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
+$e="7be65d6ae3ef4567d09c0fdec87f0737341d26acba2f0c6adeba2617a99f2a78"
+$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
+if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
+ New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-8f3568a" | Out-Null
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-8f3568a" -Force
+ Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-8f3568a" | Select-Object FullName, Length
+}
 ```
-C:\DYO-Agent\qa\smoke-8f3568a\
-    QA-Smoke.aep            <- created by the script below
-    footage\
-        hardware-pass.png   <- any opaque image, 1080x2160 portrait
-        screenshot.png      <- any opaque image, 1080x2160 portrait
-        logo.png            <- an image WITH a transparent background
+
+Then, with After Effects open and **nothing** in it - no project, no unsaved
+changes, an empty project panel:
+
+**File → Scripts → Run Script File…** →
+`C:\DYO-Agent\qa\smoke-8f3568a\build-qa-smoke-project.jsx`
+
+It refuses, changing nothing, if a saved project is open, if there are unsaved
+changes, if the untitled project is not empty, if it is running from anywhere
+other than that folder, or if `QA-Smoke.aep` already exists. It never closes,
+saves or discards a project it did not create, and it never answers a "Save
+changes?" prompt.
+
+On success it creates `C:\DYO-Agent\qa\smoke-8f3568a\QA-Smoke.aep`, saves
+it, closes it, and leaves After Effects blank - which is the state the worker
+needs.
+
+Record the fixture's hash before any job touches it:
+
+```powershell
+Get-FileHash "C:\DYO-Agent\qa\smoke-8f3568a\QA-Smoke.aep" -Algorithm SHA256
 ```
 
-Any three images will do; they only need those shapes and transparency
-properties. Put them in `footage\` before running the script.
-
-Then in After Effects: **File → Scripts → Run Script File…** and choose
-`scripts/qa/build-qa-smoke-project.jsx` from this release's ZIP (it is also in
-the repository). It creates `QA-Smoke.aep` containing:
+What the project contains, and what each part is there to test:
 
 | Composition / layer | What it is there to test |
 |---|---|
 | `QA_Scene` | the scene composition |
-| `QA_Screen` precomp, placed in `QA_Scene` with an **ALPHA matte from the rendered hardware image**, 3D enabled, parented to an animated null | must classify as **device_screen** |
-| `QA_Card` precomp, placed with an **ALPHA matte from a drawn solid**, 2D, unparented | must classify as **flat_card** |
-| `QA_Hebrew` text layer, initial text `טקסט תבנית` | RTL application and read-back verification |
-| `QA_Offscreen` copy of the card, positioned entirely outside the frame | must be reported as NOT on screen |
-| `QA_FadedOut` copy of the card, opacity keyframed 0 → 0 across its whole span | must be reported as NOT on screen |
-| Every layer's in/out points staggered | evidence-frame moment must land inside a genuinely visible window |
+| `QA_ScreenHost` - places `QA_Screen` with a **LUMA matte from the imported hardware pass**, 3D, parented to an animated null | must classify as **device_screen** |
+| `QA_CardHost` - places `QA_Card` with an **ALPHA matte from a drawn solid**, 2D, unparented | must classify as **flat_card** |
+| `QA_Hebrew` text layer | RTL application and code-point read-back verification |
+| `QA_Offscreen` - the card parked entirely outside the frame | must produce **no** evidence frame |
+| `QA_FadedOut` - the card held at 0% opacity for its whole span | must produce **no** evidence frame |
+| `QA_DirectImage` - a screenshot placed straight into the scene | a top-level slot (a layer, not a whole composition) |
+| every layer's in/out points staggered | the evidence-frame moment must land inside a genuinely visible window |
 
-Save and CLOSE the project in After Effects before continuing. The worker must
-find it closed.
+The footage's measured facts, for the fit/alpha checks later:
+
+| File | Measured |
+|---|---|
+| `hardware-pass.png` | 1080×2160, no alpha channel, opaque, coverage 100% |
+| `screenshot.png` | 1080×2160, no alpha channel, opaque, coverage 100% |
+| `logo.png` | 800×800, alpha channel present, **69.5% see-through**, visible content 500×500 at (150,150), coverage **30.8%** |
+
+**Known limit.** The screen slot's matte is a still PNG, and the worker decides
+"rendered footage matte" from After Effects' own `hasVideo` flag, which After
+Effects also sets for stills. So this fixture cannot tell a still matte from a
+real rendered video pass, and neither would the worker. The `device_screen`
+verdict expected here is right in outcome but does not test that distinction.
 
 ## Step 2 - register it as a project in the dashboard
 
