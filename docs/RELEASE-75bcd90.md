@@ -1,8 +1,10 @@
 # Correction release 75bcd90 - a still matte is not a rendered hardware pass
 
-Build commit: `75bcd908d05752d573eedd55587c244f1076e270` (branch `main`).
-Corrects `8f3568a`; see `RELEASE-8f3568a.md` for everything else that build
-shipped.
+Correction commit: `75bcd908d05752d573eedd55587c244f1076e270` (branch `main`).
+Packaged build: `6acb3752329886d0b91da3ee2f58a371e35c5c6d` - the same code plus
+this release documentation, and what `BUILD_INFO.json` inside the worker ZIP
+reads. Corrects `8f3568a`; see `RELEASE-8f3568a.md` for everything else that
+build shipped.
 
 ## What was wrong
 
@@ -56,7 +58,7 @@ still holds `v1`, every image mapping blocks as `SLOT_SEMANTICS_STALE_MODEL` -
 fail-closed, but useless. Deploy as usual:
 
 ```bash
-bash scripts/deploy-production.sh 75bcd908d05752d573eedd55587c244f1076e270
+bash scripts/deploy-production.sh 6acb3752329886d0b91da3ee2f58a371e35c5c6d
 ```
 
 ## Replacement worker package
@@ -65,13 +67,27 @@ The `8f3568a` worker ZIP is superseded. Do not install it.
 
 | | |
 |---|---|
-| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-75bcd90.zip` |
-| SHA-256 | see the report accompanying this release |
-| Build commit | `75bcd908d05752d573eedd55587c244f1076e270` (in `worker-app/BUILD_INFO.json`) |
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-6acb375.zip` |
+| SHA-256 | `0da3dec46a1292db1b5975035776561d2496c47a10150358d96510fc059f1599` |
+| Size | 860,152 bytes |
+| Build commit | `6acb3752329886d0b91da3ee2f58a371e35c5c6d` (in `worker-app/BUILD_INFO.json`) |
 | Installer | `DYO-Worker-SlotSemantics-Update.ps1` (unchanged in behaviour) |
 
-Install exactly as documented in `RELEASE-8f3568a.md`, substituting this
-filename and hash, and expecting `BUILD_INFO.json` to read `75bcd90…`.
+```powershell
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-6acb375.zip "$env:USERPROFILE\Downloads\DYO-SS2.zip"
+$e="0da3dec46a1292db1b5975035776561d2496c47a10150358d96510fc059f1599"
+$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-SS2.zip" -Algorithm SHA256).Hash.ToLower()
+if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-SS2.zip" "$env:USERPROFILE\Downloads\DYO-SS2" -Force
+ cd "$env:USERPROFILE\Downloads\DYO-SS2"
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\DYO-Worker-SlotSemantics-Update.ps1"
+ Write-Host ("build commit: " + (Get-Content "C:\DYO-Agent\app\BUILD_INFO.json" -Raw))
+}
+```
+
+`BUILD_INFO.json` must read `6acb375…` afterwards. Everything else about the
+install - what it preserves, its backup and automatic rollback - is unchanged
+from `RELEASE-8f3568a.md`.
 
 ## Corrected QA fixture
 
@@ -86,6 +102,13 @@ are identical in every way except what their matte is made of:
 | `QA_StillMattedHost` | the still image | `DRAWN_MASK_OR_SOLID`, conflicting, needs a human decision |
 
 **If those two report the same matte source, the smoke test has failed.**
+
+| | |
+|---|---|
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-6acb375.zip` |
+| SHA-256 | `dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78` |
+| Size | 94,972 bytes (17 entries, including the 12 sequence frames) |
+| Extracts to | `C:\DYO-Agent\qa\smoke-75bcd90` |
 
 The builder also refuses to produce the project at all if After Effects imports
 the sequence as a still, rather than building a fixture that cannot test

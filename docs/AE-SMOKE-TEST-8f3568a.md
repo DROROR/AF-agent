@@ -34,13 +34,13 @@ three footage files and its own README:
 
 | | |
 |---|---|
-| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-75bcd90.zip` |
-| SHA-256 | `7be65d6ae3ef4567d09c0fdec87f0737341d26acba2f0c6adeba2617a99f2a78` |
-| Size | 43,935 bytes |
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-6acb375.zip` |
+| SHA-256 | `dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78` |
+| Size | 94,972 bytes |
 
 ```powershell
-scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-75bcd90.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
-$e="7be65d6ae3ef4567d09c0fdec87f0737341d26acba2f0c6adeba2617a99f2a78"
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-6acb375.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
+$e="dc27767826e155c0bbaf9f95a22fec476796aed9f8eb65d729c7606734357b78"
 $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
 if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
  New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-75bcd90" | Out-Null
