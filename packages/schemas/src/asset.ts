@@ -24,6 +24,8 @@ export const assetDtoSchema = z.object({
   sha256: z.string().length(64),
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
+  /** Whether the asset's own encoding carries transparency, measured from its bytes at upload. Null = never measured (video, or an upload from before measurement existed) - never silently "opaque". Absent in payloads produced before this field existed. */
+  hasAlpha: z.boolean().nullable().optional(),
   durationSeconds: z.number().nonnegative().nullable(),
   label: z.string().nullable(),
   notes: z.string().nullable(),

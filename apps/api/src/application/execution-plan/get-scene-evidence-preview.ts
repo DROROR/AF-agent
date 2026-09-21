@@ -9,7 +9,19 @@ export interface GetSceneEvidencePreviewDeps {
   sceneEvidencePreviewRepository: SceneEvidencePreviewRepository;
 }
 
-function toDto(record: { id: string; projectId: string; manifestCompositionId: string; sourceProjectSha256: string; filename: string; mimeType: string; byteSize: number; capturedAt: Date; createdAt: Date }): SceneEvidencePreviewDto {
+function toDto(record: {
+  id: string;
+  projectId: string;
+  manifestCompositionId: string;
+  sourceProjectSha256: string;
+  filename: string;
+  mimeType: string;
+  byteSize: number;
+  storageKey: string;
+  capturedAt: Date;
+  capturedAtSeconds: number | null;
+  createdAt: Date;
+}): SceneEvidencePreviewDto {
   return {
     id: record.id,
     projectId: record.projectId,
@@ -19,6 +31,8 @@ function toDto(record: { id: string; projectId: string; manifestCompositionId: s
     mimeType: record.mimeType,
     byteSize: record.byteSize,
     capturedAt: record.capturedAt.toISOString(),
+    capturedAtSeconds: record.capturedAtSeconds,
+    storageKey: record.storageKey,
     createdAt: record.createdAt.toISOString()
   };
 }

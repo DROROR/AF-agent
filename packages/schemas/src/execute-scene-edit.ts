@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { textDirectionEvidenceSchema } from "./text-direction.js";
+import { slotFingerprintSchema } from "./slot-semantics.js";
 
 /**
  * Phase 7A foundation: the strict, allowlisted contract for a future
@@ -102,7 +103,16 @@ const mapFootageOperationSchema = z
      * media centred on the card, never cropped or stretched (logos - see
      * jsx-templates.ts). Ignored for a layer that is not a solid card.
      */
-    fit: z.enum(["cover", "contain"]).optional()
+    fit: z.enum(["cover", "contain"]).optional(),
+    /**
+     * Stage 4: the structural fingerprint this slot had when the plan was
+     * approved. The worker recomputes it from the LIVE project immediately
+     * before mutating and refuses when it differs - an approved edit must
+     * never land on a layer whose structure has since changed. Optional, so a
+     * plan built before Stage 4 still dispatches; the worker then simply has
+     * nothing to re-check, which the plan gate itself already blocks on.
+     */
+    expectedSlotFingerprint: slotFingerprintSchema.optional()
   })
   .strict();
 
@@ -284,7 +294,16 @@ const mapFootageOperationIntentSchema = z
      * media centred on the card, never cropped or stretched (logos - see
      * jsx-templates.ts). Ignored for a layer that is not a solid card.
      */
-    fit: z.enum(["cover", "contain"]).optional()
+    fit: z.enum(["cover", "contain"]).optional(),
+    /**
+     * Stage 4: the structural fingerprint this slot had when the plan was
+     * approved. The worker recomputes it from the LIVE project immediately
+     * before mutating and refuses when it differs - an approved edit must
+     * never land on a layer whose structure has since changed. Optional, so a
+     * plan built before Stage 4 still dispatches; the worker then simply has
+     * nothing to re-check, which the plan gate itself already blocks on.
+     */
+    expectedSlotFingerprint: slotFingerprintSchema.optional()
   })
   .strict();
 

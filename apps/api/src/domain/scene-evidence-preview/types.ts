@@ -16,6 +16,8 @@ export interface SceneEvidencePreviewRecord {
   storageKey: string;
   sha256: string;
   capturedAt: Date;
+  /** The moment in the composition's own timeline this frame shows, or null when the capture predates this being recorded. */
+  capturedAtSeconds: number | null;
   createdAt: Date;
 }
 
@@ -31,6 +33,7 @@ export interface NewSceneEvidencePreviewRecord {
   storageKey: string;
   sha256: string;
   capturedAt: Date;
+  capturedAtSeconds: number | null;
 }
 
 /**

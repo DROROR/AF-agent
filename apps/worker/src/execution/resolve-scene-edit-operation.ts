@@ -47,7 +47,10 @@ export async function resolveSceneEditOperation(
       layerIndex: intent.layerIndex,
       nestedTarget: intent.nestedTarget,
       assetPath: resolved.assetPath,
-      ...(intent.fit !== undefined ? { fit: intent.fit } : {})
+      ...(intent.fit !== undefined ? { fit: intent.fit } : {}),
+      // Stage 4: carried through untouched so the executor can re-check the
+      // slot's live structure immediately before mutating it.
+      ...(intent.expectedSlotFingerprint !== undefined ? { expectedSlotFingerprint: intent.expectedSlotFingerprint } : {})
     }
   };
 }

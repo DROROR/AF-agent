@@ -57,7 +57,11 @@ export default [
       ...tseslint.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       "@typescript-eslint/no-explicit-any": "error",
-      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      // `_name` marks a binding that exists only to be discarded - an
+      // unused function argument, or the sibling a `const { x: _x, ...rest }`
+      // omit needs to name in order to drop it. Flagging those would force
+      // the alternative spellings, which are strictly worse.
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true }],
       "no-console": "off",
       // TypeScript itself (via tsc, run separately as `npm run typecheck`)
       // already catches real undefined-variable errors, and understands

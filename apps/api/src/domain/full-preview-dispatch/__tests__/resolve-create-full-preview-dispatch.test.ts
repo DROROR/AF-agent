@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RenderOutputConfig, ScenePlanEntry } from "@dyo/schemas";
+import { conflictingSlotFacts, deviceScreenSlotFacts, imagePlaceholderFixture } from "../../execution-plan/test-support/slot-fixtures.js";
 import { manifestFixture, mappingFixture, scenePlanFixture } from "../../execution-plan/test-support/template-copy-fixtures.js";
 import {
   resolveCreateFullPreviewDispatch,
@@ -170,6 +171,57 @@ describe("resolveCreateFullPreviewDispatch - second leftover-template-copy gate"
     });
 
     expect(resolveCreateFullPreviewDispatch(baseInput({ currentProjectManifest: manifest, currentPlan: validPlan({ scenePlans: [scene] }) })).ok).toBe(true);
+  });
+});
+
+describe("resolveCreateFullPreviewDispatch - second slot-semantics and fit gate", () => {
+  const SCREEN_ASSET = { id: "asset-1", width: 1080, height: 2160, hasAlpha: false };
+
+  function manifestWithSlot(facts: NonNullable<Parameters<typeof imagePlaceholderFixture>[0]["slotFacts"]>) {
+    const base = manifestFixture([]);
+    return { ...base, scenes: [{ ...base.scenes[0]!, placeholders: [imagePlaceholderFixture({ placeholderId: "ph-1", compositionId: "comp-1", slotFacts: facts })] }] };
+  }
+
+  const sceneWith = (overrides: Parameters<typeof mappingFixture>[0]) =>
+    scenePlanFixture({
+      id: "scene-1",
+      manifestCompositionId: "comp-1",
+      mappings: [mappingFixture({ placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] }, ...overrides })]
+    });
+
+  it("refuses a complete preview while a slot's classification is uncertain", () => {
+    const result = resolveCreateFullPreviewDispatch(
+      baseInput({
+        currentProjectManifest: manifestWithSlot(conflictingSlotFacts()),
+        projectAssets: [SCREEN_ASSET],
+        currentPlan: validPlan({ scenePlans: [sceneWith({ id: "ph-1", selectedAssetId: SCREEN_ASSET.id, selectedAssetType: "image" })] })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/SLOT_CLASSIFICATION_UNCERTAIN/);
+  });
+
+  it("refuses a complete preview when an asset does not belong in its slot", () => {
+    const result = resolveCreateFullPreviewDispatch(
+      baseInput({
+        currentProjectManifest: manifestWithSlot(deviceScreenSlotFacts()),
+        projectAssets: [{ id: "asset-logo", width: 800, height: 800, hasAlpha: true }],
+        currentPlan: validPlan({ scenePlans: [sceneWith({ id: "ph-1", selectedAssetId: "asset-logo", selectedAssetType: "logo" })] })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/ASSET_SLOT_CONFLICT/);
+  });
+
+  it("allows a complete preview when every slot is confident and every asset fits", () => {
+    const result = resolveCreateFullPreviewDispatch(
+      baseInput({
+        currentProjectManifest: manifestWithSlot(deviceScreenSlotFacts()),
+        projectAssets: [SCREEN_ASSET],
+        currentPlan: validPlan({ scenePlans: [sceneWith({ id: "ph-1", selectedAssetId: SCREEN_ASSET.id, selectedAssetType: "image" })] })
+      })
+    );
+    expect(result.ok).toBe(true);
   });
 });
 

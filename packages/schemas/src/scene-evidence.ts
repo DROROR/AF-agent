@@ -598,6 +598,10 @@ export const sceneEvidencePreviewDtoSchema = z
     mimeType: z.string().min(1),
     byteSize: z.number().int().nonnegative(),
     capturedAt: z.string().datetime(),
+    /** The moment in the composition's own timeline this frame shows. Null for a capture taken before this was recorded - a slot decision cannot be bound to such a frame, since nothing proves what it shows. Absent in payloads from before this field existed. */
+    capturedAtSeconds: z.number().nonnegative().nullable().optional(),
+    /** The opaque storage identifier a recorded slot decision is bound to - the same identifier SET_SLOT_REVIEW carries. Never a filesystem path. */
+    storageKey: z.string().min(1).optional(),
     createdAt: z.string().datetime()
   })
   .strict();

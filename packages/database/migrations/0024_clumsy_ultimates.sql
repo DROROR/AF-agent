@@ -1,0 +1,1 @@
+ALTER TABLE "scene_evidence_previews" ADD COLUMN "captured_at_seconds" double precision;

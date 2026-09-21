@@ -19,7 +19,7 @@ import {
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../execution/resolve-composition-index.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
-import { captureOneToolWithRetry, ensureTargetProjectOpen, type OpenProjectOptions } from "./heroic-swan-template-inspector.js";
+import { type OpenProjectOptions } from "./heroic-swan-template-inspector.js";
 
 const layerDetailsScriptResultSchema = z.union([
   z.object({ ok: z.literal(true), layerDetails: z.array(layerDetailFactSchema) }).strict(),

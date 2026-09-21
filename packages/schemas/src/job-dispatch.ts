@@ -114,6 +114,14 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        */
       discoverLayerDetails: z.boolean().optional(),
       /**
+       * STAGE 4 SLOT EVIDENCE: names the MAPPING whose slot a reviewer must
+       * be shown before deciding about it. Same "intent only, never a raw
+       * worker payload" convention as discoverLayerDetails - the frame's own
+       * timestamp is resolved SERVER-side from that slot's structural facts
+       * (selectEvidenceFrameSeconds), never supplied by the browser.
+       */
+      slotEvidenceMappingId: z.string().min(1).optional(),
+      /**
        * Preview Timing Analysis (live QA, 2026-09-09, extended to
        * arbitrary nested depth 2026-09-10) - opt-in intent flag only, same
        * "never a raw worker payload passthrough" convention as

@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type ReactElement } from "react";
 import {
+  assessMappingSlot,
   assessTemplateCopy,
+  slotEvidenceDigest,
   sha256Hex,
   type ExecutionPlanEditOperation,
   type MediaKind,
@@ -10,7 +12,9 @@ import {
   type TemplateCopyAssessment,
   type TemplateTextDecision,
   type TextCaptureStatus,
-  type TextVerification
+  type TextVerification,
+  type PlaceholderMapping,
+  type SlotAssessment
 } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectAssets } from "../lib/use-project-assets";
@@ -21,6 +25,7 @@ import { Select } from "./ui/Select";
 import { Button } from "./ui/Button";
 import { ErrorState } from "./ErrorState";
 import { useLocale } from "./LocaleProvider";
+import { SlotReviewPanel, type SlotReviewChoice } from "./SlotReviewPanel";
 
 /** Every real asset kind maps to the closest real placeholderType MAP_ASSET requires; a non-visual kind (AUDIO/DOCUMENT/OTHER) is honestly "unknown" rather than a fabricated visual type. */
 function placeholderTypeForMediaKind(mediaKind: MediaKind): PlaceholderType {
@@ -49,6 +54,10 @@ interface MappingFormState {
   selectedAssetId: string;
   /** The reviewer's explicit choice in THIS form session, or null while undecided - never defaulted, since a default would be a decision nobody made. */
   templateTextDecision: TemplateTextDecision | null;
+  /** The reviewer's explicit SLOT decision in this form session (Stage 4), or null while undecided - same rule. */
+  slotDecision: SlotReviewChoice | null;
+  /** The evidence frame the panel is currently showing, which is the only frame a slot decision may be recorded against. */
+  slotEvidenceFrameStorageKey: string | null;
 }
 
 /**
@@ -93,7 +102,16 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
         text: mapping.text ?? "",
         assetTimestamp: mapping.assetTimestamp !== null ? String(mapping.assetTimestamp) : "",
         selectedAssetId: mapping.selectedAssetId ?? "",
-        templateTextDecision: mapping.keepTemplateText?.decision ?? null
+        templateTextDecision: mapping.keepTemplateText?.decision ?? null,
+        slotDecision:
+          mapping.slotReview == null
+            ? null
+            : mapping.slotReview.decision === "ACCEPT"
+              ? { kind: "ACCEPT" }
+              : mapping.slotReview.classification === null
+                ? null
+                : { kind: "OVERRIDE", classification: mapping.slotReview.classification },
+        slotEvidenceFrameStorageKey: mapping.slotReview?.evidenceFrameStorageKey ?? null
       }))
     );
     setError(null);
@@ -254,9 +272,60 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
           }
         }
       }
+
+      // STAGE 4 - emitted LAST for this mapping, after any asset change above,
+      // so the findings the API binds the decision to are the ones this same
+      // request produces. A decision saved against the previous asset would be
+      // stale the moment it landed.
+      const previousSlotDecision = originalMapping.slotReview ?? null;
+      if (form.slotDecision === null) {
+        if (previousSlotDecision !== null) {
+          ops.push({ type: "CLEAR_SLOT_REVIEW", scenePlanId: currentScene.id, mappingId: form.mappingId });
+        }
+      } else {
+        ops.push({
+          type: "SET_SLOT_REVIEW",
+          scenePlanId: currentScene.id,
+          mappingId: form.mappingId,
+          decision: form.slotDecision.kind === "ACCEPT" ? "ACCEPT" : "OVERRIDE_CLASSIFICATION",
+          ...(form.slotDecision.kind === "OVERRIDE" ? { classification: form.slotDecision.classification } : {}),
+          ...(form.slotEvidenceFrameStorageKey === null ? {} : { evidenceFrameStorageKey: form.slotEvidenceFrameStorageKey })
+        });
+      }
     }
 
     return ops;
+  }
+
+  /**
+   * The slot findings for a mapping AS THE FORM CURRENTLY STANDS - including
+   * an asset the reviewer has just picked but not yet saved, so the panel
+   * shows what the plan would actually be judged on, not what it said before.
+   * Uses the same shared assessment the backend gate runs, so the dashboard
+   * can never disagree with the refusal that follows.
+   */
+  function assessSlot(form: MappingFormState): SlotAssessment | null {
+    const currentScene = scene;
+    const original = currentScene?.mappings.find((candidate) => candidate.id === form.mappingId);
+    if (!currentScene || !original || !project) {
+      return null;
+    }
+    const selectedAssetId = form.selectedAssetId === "" ? null : form.selectedAssetId;
+    const selectedAsset = (assets ?? []).find((asset) => asset.id === selectedAssetId) ?? null;
+    const mapping: PlaceholderMapping = {
+      ...original,
+      selectedAssetId,
+      selectedAssetType: selectedAsset ? placeholderTypeForMediaKind(selectedAsset.mediaKind) : null
+    };
+    return assessMappingSlot({
+      scene: currentScene,
+      mapping,
+      manifest: project.manifest,
+      asset:
+        selectedAsset === null
+          ? null
+          : { id: selectedAsset.id, widthPx: selectedAsset.width, heightPx: selectedAsset.height, hasAlpha: selectedAsset.hasAlpha ?? null }
+    });
   }
 
   async function handleSave(): Promise<void> {
@@ -418,6 +487,42 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                     </>
                   )}
                 </div>
+              );
+            })()}
+            {(() => {
+              const slotAssessment = assessSlot(mapping);
+              if (!slotAssessment || slotAssessment.blockers.length === 0) {
+                return null;
+              }
+              const recorded = scene!.mappings.find((candidate) => candidate.id === mapping.mappingId)?.slotReview ?? null;
+              const currentDigest = slotEvidenceDigest(slotAssessment);
+              return (
+                <SlotReviewPanel
+                  scenePlanId={scene!.id}
+                  mappingId={mapping.mappingId}
+                  assessment={slotAssessment}
+                  decisionIsStale={recorded !== null && recorded.evidenceDigest !== currentDigest}
+                  choice={mapping.slotDecision}
+                  onChoose={(choice) => {
+                    const next = [...mappings];
+                    next[index] = { ...mapping, slotDecision: choice };
+                    setMappings(next);
+                  }}
+                  onEvidenceFrame={(storageKey) => {
+                    // Returns the SAME array when nothing changed: a new array
+                    // every time would re-render the panel, which reports the
+                    // frame again, which sets state again - a loop.
+                    setMappings((current) => {
+                      const existing = current.find((entry) => entry.mappingId === mapping.mappingId);
+                      if (!existing || existing.slotEvidenceFrameStorageKey === storageKey) {
+                        return current;
+                      }
+                      return current.map((entry) =>
+                        entry.mappingId === mapping.mappingId ? { ...entry, slotEvidenceFrameStorageKey: storageKey } : entry
+                      );
+                    });
+                  }}
+                />
               );
             })()}
             <Field label={t.projectWorkspace.editDrawer.assetTimestampLabel} htmlFor={`mapping-timestamp-${mapping.mappingId}`}>

@@ -2,10 +2,11 @@ import { z } from "zod";
 import type { SceneEditOperation, SceneEditOperationType } from "@dyo/schemas";
 import { parseJsonTextContent } from "../inspection/parse-mcp-shapes.js";
 import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
-import { buildOperationScript, buildOpenProjectScript, buildReopenProjectFromDiskScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
+import { buildDescribeChainStructureScript, buildOperationScript, buildOpenProjectScript, buildReopenProjectFromDiskScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
 import { HeroicSwanAeMutationClient, type MutationCallResult } from "./heroic-swan-ae-mutation-client.js";
 import { describeMcpFailure } from "./classify-mcp-failure.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "./resolve-composition-index.js";
+import type { ResolvedNestedTargetStep, SlotChainHop } from "@dyo/schemas";
 
 /** The minimal shape HeroicSwanAeEditBridge needs from a mutation client - HeroicSwanAeMutationClient's real implementation satisfies this; tests inject a fake one instead of spawning a real ae-mcp process. */
 export interface AeMutationClient {
@@ -126,6 +127,24 @@ export type ResolveCompositionIndexResult =
  * never a name-only guess) - see that function's own doc comment for the
  * full verification.
  */
+/** What buildDescribeChainStructureScript's own resultingValue contains - parsed defensively, never trusted blindly. */
+const chainStructureResultSchema = z.object({
+  hops: z.array(
+    z.object({
+      compositionId: z.string(),
+      layerIndex: z.number(),
+      threeDLayer: z.boolean().nullable(),
+      hasTrackMatte: z.boolean().nullable(),
+      trackMatteType: z.string().nullable(),
+      parentLayerIndex: z.number().nullable(),
+      scalePercent: z.number().nullable(),
+      rotationDegrees: z.number().nullable()
+    })
+  ),
+  targetWidthPx: z.number().nullable(),
+  targetHeightPx: z.number().nullable()
+});
+
 export interface AeEditBridge {
   /**
    * Ensures EXACTLY `expectedPath` is open in AE before anything else runs
@@ -146,6 +165,15 @@ export interface AeEditBridge {
    */
   resolveCompositionIndex(manifestCompositionId: string, expectedName: string): Promise<ResolveCompositionIndexResult>;
   applyOperation(params: { aeProjectItemIndex: number; compositionName: string; operation: SceneEditOperation }): Promise<OperationExecutionResult>;
+  /**
+   * Stage 4: reads the LIVE structure of one nested chain - each hop's 3D
+   * state, matte wiring, parent and transform, plus the target layer's own
+   * size - so the caller can recompute the approved fingerprint and refuse to
+   * mutate a slot whose structure has changed. Read-only.
+   */
+  describeChainStructure(nestedTarget: readonly ResolvedNestedTargetStep[]): Promise<
+    { ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null } | { ok: false; reason: string }
+  >;
   /** Saves the currently-open project IN PLACE (the working copy - see buildSaveProjectScript's own doc comment for why this can never reach the original source, and openProject's own doc comment for why that guarantee now actually holds). */
   saveProject(): Promise<SaveProjectResult>;
 }
@@ -169,6 +197,9 @@ export class NotAvailableAeEditBridge implements AeEditBridge {
     throw new AeMutationTransportUnavailableError();
   }
   async saveProject(): Promise<SaveProjectResult> {
+    throw new AeMutationTransportUnavailableError();
+  }
+  async describeChainStructure(): Promise<{ ok: false; reason: string }> {
     throw new AeMutationTransportUnavailableError();
   }
 }
@@ -259,6 +290,26 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
       resultingValue: outcome.resultingValue ?? null,
       textDirection: outcome.textDirection
     };
+  }
+
+  /**
+   * Stage 4: the live structural re-check. Read-only, and deliberately its
+   * own call rather than part of the mutation script - the caller compares the
+   * recomputed fingerprint and decides, so a refusal happens BEFORE anything
+   * is touched.
+   */
+  async describeChainStructure(
+    nestedTarget: readonly ResolvedNestedTargetStep[]
+  ): Promise<{ ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null } | { ok: false; reason: string }> {
+    const outcome = await this.runScript(buildDescribeChainStructureScript(nestedTarget));
+    if (!outcome.ok) {
+      return { ok: false, reason: outcome.failureReason };
+    }
+    const parsed = chainStructureResultSchema.safeParse(outcome.resultingValue);
+    if (!parsed.success) {
+      return { ok: false, reason: `the chain-structure script's response did not match the expected shape: ${parsed.error.message}` };
+    }
+    return { ok: true, hops: parsed.data.hops, targetWidthPx: parsed.data.targetWidthPx, targetHeightPx: parsed.data.targetHeightPx };
   }
 
   async saveProject(): Promise<SaveProjectResult> {

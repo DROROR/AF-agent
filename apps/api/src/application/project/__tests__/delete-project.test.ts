@@ -111,6 +111,7 @@ describe("deleteProject", () => {
         sha256: storedAsset.sha256,
         width: null,
         height: null,
+        hasAlpha: null,
         durationSeconds: null,
         label: null,
         notes: null
@@ -151,6 +152,7 @@ describe("deleteProject", () => {
         sha256: "b".repeat(64),
         width: null,
         height: null,
+        hasAlpha: null,
         durationSeconds: null,
         label: null,
         notes: null

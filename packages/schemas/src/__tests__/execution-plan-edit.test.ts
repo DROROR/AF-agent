@@ -163,3 +163,34 @@ describe("SET_TEMPLATE_TEXT_DECISION / CLEAR_TEMPLATE_TEXT_DECISION", () => {
     expect(() => executionPlanEditOperationSchema.parse({ type: "CLEAR_TEMPLATE_TEXT_DECISION", scenePlanId: "scene-1" })).toThrow();
   });
 });
+
+describe("SET_SLOT_REVIEW / CLEAR_SLOT_REVIEW", () => {
+  const base = { type: "SET_SLOT_REVIEW", scenePlanId: "scene-1", mappingId: "mapping-1" };
+
+  it("accepts an acceptance, and an override that names what the slot actually is", () => {
+    expect(() => executionPlanEditOperationSchema.parse({ ...base, decision: "ACCEPT" })).not.toThrow();
+    expect(() =>
+      executionPlanEditOperationSchema.parse({ ...base, decision: "OVERRIDE_CLASSIFICATION", classification: "device_screen", evidenceFrameStorageKey: "evidence/f.png" })
+    ).not.toThrow();
+  });
+
+  it("rejects an invented decision or classification, and a missing decision", () => {
+    expect(() => executionPlanEditOperationSchema.parse({ ...base, decision: "PROBABLY_FINE" })).toThrow();
+    expect(() => executionPlanEditOperationSchema.parse({ ...base, decision: "OVERRIDE_CLASSIFICATION", classification: "a phone I think" })).toThrow();
+    expect(() => executionPlanEditOperationSchema.parse(base)).toThrow();
+  });
+
+  it("never accepts the decider's identity or the findings digest from the caller - the server supplies both", () => {
+    expect(() => executionPlanEditOperationSchema.parse({ ...base, decision: "ACCEPT", decidedBy: "someone the caller made up" })).toThrow();
+    expect(() => executionPlanEditOperationSchema.parse({ ...base, decision: "ACCEPT", evidenceDigest: "f".repeat(64) })).toThrow();
+  });
+
+  it("rejects an empty evidence-frame key rather than storing a reference to nothing", () => {
+    expect(() => executionPlanEditOperationSchema.parse({ ...base, decision: "ACCEPT", evidenceFrameStorageKey: "" })).toThrow();
+  });
+
+  it("clearing needs only the scene and mapping", () => {
+    expect(() => executionPlanEditOperationSchema.parse({ type: "CLEAR_SLOT_REVIEW", scenePlanId: "scene-1", mappingId: "mapping-1" })).not.toThrow();
+    expect(() => executionPlanEditOperationSchema.parse({ type: "CLEAR_SLOT_REVIEW", scenePlanId: "scene-1" })).toThrow();
+  });
+});

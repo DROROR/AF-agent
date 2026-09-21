@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { textDirectionEvidenceSchema } from "@dyo/schemas";
-import type { ExecuteSceneEditRequest, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult, WorkingCopyFailureCode } from "@dyo/schemas";
+import type { ExecuteSceneEditRequest, ResolvedNestedTargetStep, SceneEditCheckpoint, SceneEditOperationIntent, SceneEditResult, SlotFingerprint, WorkingCopyFailureCode } from "@dyo/schemas";
 import { prepareSessionWorkingCopy, type WorkingCopyFailureReason } from "../workspace/working-copy.js";
 import { hashSourceProject } from "../inspection/hash-source-project.js";
 import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
@@ -79,6 +79,13 @@ export interface SceneEditExecutorDeps {
   uploadPreview: (filePath: string) => Promise<UploadPreviewResult>;
   persistCheckpoint: PersistCheckpoint;
   resolveOperation: ResolveOperation;
+  /**
+   * Stage 4: re-reads a slot's live structure and compares it with the
+   * fingerprint the plan was approved with. Optional so existing callers and
+   * tests are unaffected; when absent, no re-check happens and the plan gate
+   * remains the only guard.
+   */
+  verifySlotStructure?: (params: { nestedTarget: ResolvedNestedTargetStep[]; expected: SlotFingerprint }) => Promise<{ ok: true } | { ok: false; reason: string }>;
   now: () => Date;
 }
 
@@ -353,6 +360,34 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       }
       if (reResolved.resolved) {
         effectiveAeProjectItemIndex = reResolved.aeProjectItemIndex;
+      }
+    }
+
+    // STAGE 4 - THE LAST CHECK BEFORE ANY CHANGE. For a slot edit carrying an
+    // approved structural fingerprint, re-read the chain's live structure and
+    // recompute the digest. A layer inserted, a host reparented, a matte
+    // changed, a slot resized - anything that moves the structure - fails the
+    // operation closed rather than editing something that is no longer what
+    // was approved.
+    if (operation.type === "MAP_FOOTAGE" && operation.expectedSlotFingerprint) {
+      // A slot in the scene's own composition is a one-hop chain: the same
+      // check, not a skipped one, because a top-level layer's structure can
+      // move exactly as easily as a nested one's.
+      const chain =
+        operation.nestedTarget ??
+        (operation.layerIndex === null
+          ? null
+          : [{ compositionId: request.manifestCompositionId, aeProjectItemIndex: effectiveAeProjectItemIndex, layerIndex: operation.layerIndex }]);
+      const recheck = chain === null ? null : await deps.verifySlotStructure?.({ nestedTarget: chain, expected: operation.expectedSlotFingerprint });
+      if (recheck && !recheck.ok) {
+        checkpoint = markFailed(checkpoint, `operation ${pendingIndex} (MAP_FOOTAGE) refused: ${recheck.reason}`, deps.now());
+        return finish({
+          sourceProjectSha256: workingCopy.sourceProjectSha256,
+          workingProjectPath: workingCopy.workingProjectPath,
+          workingProjectSha256: workingCopy.workingProjectSha256,
+          previewFramePath: null,
+          previewTimestampSeconds: null
+        });
       }
     }
 

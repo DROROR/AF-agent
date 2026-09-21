@@ -268,3 +268,49 @@ why:
 
 **Never delete `*.dyo-inspect-*` files by wildcard while a job is running** -
 one of them may be the copy the current inspection is reading.
+
+## Slot findings block approval (Stage 4)
+
+`Plan has unresolved slot findings: ...` from approval, or `Scene "..." has
+unresolved slot findings: ...` from execution/complete preview, means a mapping
+that places an asset has an unanswered question about the SLOT it lands in.
+
+| Reported kind | What it means | What to do |
+| --- | --- | --- |
+| `SLOT_SEMANTICS_MISSING` | this project's manifest predates slot discovery, so the slot was never structurally inspected | re-run template inspection for the project |
+| `SLOT_SEMANTICS_STALE_MODEL` | the stored verdict came from an older classifier and is never reinterpreted | re-run template inspection for the project |
+| `SLOT_CLASSIFICATION_UNCERTAIN` | the structure is not confident enough, or argues both ways at once | open the scene editor, capture the evidence frame, and record an explicit decision |
+| `ASSET_SLOT_CONFLICT` | the asset does not belong in this slot (a logo in a phone screen, a transparent image in a screen, a full screenshot in a decorative card), or it was never measured | map a suitable asset, or decide explicitly after looking at the frame |
+| `UNSAFE_FIT` | the chosen fit would stretch, over-crop or mostly-empty the slot | use a better-shaped asset, or decide explicitly after looking at the frame |
+
+### Deciding about a slot
+
+The scene editor shows what the structure says, why, and the captured frame of
+the moment the slot is on screen. The decision buttons stay disabled until that
+frame exists, because the API refuses a decision without it.
+
+- **No evidence frame yet** - click "Capture evidence frame". The worker
+  captures the slot's own moment (chosen by the server, not the browser) through
+  the usual read-only inspection path.
+- **"does not show the moment this slot is on screen"** - the last capture was
+  taken elsewhere in the timeline (older captures are taken at 0s). Capture
+  again.
+- **"never presents a moment where it is provably visible"** - the layer's
+  timing in the template gives no window at all. Fix the template's timing or
+  remove the mapping; there is nothing to look at, so nothing can be decided.
+- **"made about different findings"** - the mapping changed after the decision
+  was recorded. Look again and decide again.
+
+### Structure changed since approval
+
+`refused: the slot's structure changed since this plan was approved` from a
+worker means the live project no longer matches the fingerprint the plan was
+approved against - a layer inserted, a host reparented, a matte changed, the slot
+resized. Nothing was edited. Re-run template inspection and re-approve; do not
+retry the job.
+
+### Assets with no measurements
+
+An asset uploaded before Stage 4, or in a format this API cannot measure (video,
+audio, PDF), has no dimensions and blocks every slot it is mapped to. Re-upload
+the image, or record an explicit decision about it.

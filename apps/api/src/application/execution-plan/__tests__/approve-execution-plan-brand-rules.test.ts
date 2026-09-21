@@ -94,7 +94,7 @@ describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, n
     });
 
     const attempt = approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: REAL_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: REAL_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 2 }
@@ -121,6 +121,7 @@ describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, n
         sha256: "b".repeat(64),
         width: 512,
         height: 512,
+        hasAlpha: null,
         durationSeconds: null,
         label: null,
         notes: null
@@ -137,7 +138,7 @@ describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, n
     });
 
     const approved = await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: REAL_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: REAL_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 2 }
@@ -146,13 +147,13 @@ describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, n
   });
 
   it("defaults to reading the REAL dyo-brand-rules.yaml when no override is supplied - the production wiring path", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, project, assetRepository } = await setup();
 
     // No brandRulesConfig override - exercises loadBrandRulesConfig()
     // against the real repo-root file, exactly as routes/projects.ts does
     // in production.
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, assetRepository, now: fixedNow }, project.projectId, USER_ID, { baseRevision: 1 })
     ).rejects.toThrow(PreconditionNotMetError);
   });
 });

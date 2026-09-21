@@ -7,6 +7,7 @@ import { createProject } from "../../project/create-project.js";
 import { InMemoryAssetRepository } from "../test-support/in-memory-asset-repository.js";
 import { InMemoryAssetStorage } from "../test-support/in-memory-asset-storage.js";
 import { uploadAsset } from "../upload-asset.js";
+import { realImageBytes } from "../../../domain/asset/test-support/real-image-fixtures.js";
 import type { AssetRepository, AssetUpdate, NewAssetRecord, AssetRecord } from "../../../domain/asset/types.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
@@ -49,6 +50,50 @@ describe("uploadAsset", () => {
     expect(asset.byteSize).toBe(buffer.length);
     expect(asset.sha256).toBe(createHash("sha256").update(buffer).digest("hex"));
     expect(assetStorage.has(asset.storageKey)).toBe(true);
+  });
+
+  it("measures real dimensions and transparency from the uploaded bytes", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const buffer = realImageBytes("pngRgba");
+    const asset = await uploadAsset(
+      { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
+      project.projectId,
+      // A filename that lies about the picture entirely - nothing here may be
+      // read from it.
+      { originalFilename: "1920x1080-opaque-banner.png", mimeType: "image/png", buffer, requestedMediaKind: null }
+    );
+
+    expect(asset.width).toBe(9);
+    expect(asset.height).toBe(18);
+    expect(asset.hasAlpha).toBe(true);
+  });
+
+  it("records an opaque JPEG as measured and opaque, not as unmeasured", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const asset = await uploadAsset(
+      { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
+      project.projectId,
+      { originalFilename: "photo.jpg", mimeType: "image/jpeg", buffer: realImageBytes("jpeg"), requestedMediaKind: null }
+    );
+
+    expect(asset.width).toBe(8);
+    expect(asset.height).toBe(8);
+    expect(asset.hasAlpha).toBe(false);
+  });
+
+  it("leaves dimensions unmeasured rather than guessing when the bytes cannot be read", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const asset = await uploadAsset(
+      { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
+      project.projectId,
+      // A real MP4 needs a demuxer this host does not have; an unreadable PNG
+      // is measured as nothing at all rather than as a default size.
+      { originalFilename: "clip.mp4", mimeType: "video/mp4", buffer: Buffer.from("not really a video"), requestedMediaKind: null }
+    );
+
+    expect(asset.width).toBeNull();
+    expect(asset.height).toBeNull();
+    expect(asset.hasAlpha).toBeNull();
   });
 
   it("never derives a storage path/name from the client's original filename - two uploads with the IDENTICAL filename never collide or overwrite", async () => {

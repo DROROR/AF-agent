@@ -1,8 +1,5 @@
-import { z } from "zod";
 import { HeroicSwanMcpClient } from "../../inspection/heroic-swan-mcp-client.js";
 import { parseCompositionList } from "../../inspection/parse-mcp-shapes.js";
-import { windowsPathsEqual } from "../../inspection/canonical-windows-path.js";
-import { buildOpenProjectScript } from "../jsx-templates.js";
 import { unwrapJsxResult } from "../unwrap-jsx-result.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "../resolve-composition-index.js";
 import { withDisposableProject } from "../../inspection/disposable-project.js";
@@ -37,24 +34,13 @@ export type VerifyRenderCompositionResult =
     }
   | { ok: false; reason: string };
 
-/** What buildOpenProjectScript's own JSON.stringify(...) result actually contains - mirrors ae-edit-bridge.ts's openProjectResultValueSchema/heroic-swan-template-inspector.ts's openProjectScriptResultSchema exactly (this file goes through HeroicSwanMcpClient.runFixedInspectionScript + unwrapJsxResult, neither of theirs, so it needs its own copy rather than importing a module-private schema). */
-const openProjectScriptResultSchema = z.union([
-  z
-    .object({
-      ok: z.literal(true),
-      resultingValue: z.object({ openedPath: z.string().nullable(), openedName: z.string().nullable() })
-    })
-    .strict(),
-  z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
-]);
-
 /**
  * Canonical composition addressing safety net for RENDER/CREATE_PREVIEW
  * (render-engine phase section 6): aerender itself only ever addresses a
  * composition by NAME (`-comp <name>` - see aerender-args.ts), so before
  * ever invoking it this worker independently, read-only-ly (never a
- * mutation - only the allowlisted `ae_list_compositions` tool, plus the
- * one fixed, versioned `buildOpenProjectScript` open-check below) proves:
+ * mutation - only the allowlisted `ae_list_compositions` tool, run
+ * against a disposable copy opened by withDisposableProject) proves:
  *
  *   0. the session's own real WORKING COPY - never the immutable source
  *      .aep, and never "whatever happens to already be open" - is

@@ -100,7 +100,8 @@ describe("getSceneEvidencePreviewMetadata", () => {
         byteSize: 42,
         storageKey: "key-1",
         sha256: "b".repeat(64),
-        capturedAt: NOW
+        capturedAt: NOW,
+        capturedAtSeconds: null
       },
       NOW
     );
@@ -133,7 +134,8 @@ describe("getSceneEvidencePreviewFile", () => {
         byteSize: stored.byteSize,
         storageKey: stored.storageKey,
         sha256: stored.sha256,
-        capturedAt: NOW
+        capturedAt: NOW,
+        capturedAtSeconds: null
       },
       NOW
     );

@@ -1,4 +1,6 @@
 import {
+  computeSlotMutationFingerprint,
+  slotFingerprintsMatch,
   inspectRenderCapabilitiesRequestSchema,
   validateJobPayload,
   type AeStatus,
@@ -365,6 +367,27 @@ async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<Jo
         persistCheckpoint: deps.persistCheckpoint,
         resolveOperation: (intent) =>
           resolveSceneEditOperation({ workRoot: deps.workRoot, jobId: job.jobId, assetDownloadClient: deps.assetDownloadClient }, intent),
+        // STAGE 4: the live structural re-check, immediately before a slot is
+        // mutated. Reads the chain, recomputes the approved fingerprint, and
+        // refuses when the structure has changed since approval.
+        verifySlotStructure: async ({ nestedTarget, expected }) => {
+          const live = await deps.aeEditBridge.describeChainStructure(nestedTarget);
+          if (!live.ok) {
+            return { ok: false, reason: `the slot's live structure could not be read, so it could not be proven unchanged since approval (${live.reason})` };
+          }
+          const recomputed = computeSlotMutationFingerprint({
+            chain: live.hops,
+            targetLayerIndex: nestedTarget[nestedTarget.length - 1]?.layerIndex ?? 0,
+            targetWidthPx: live.targetWidthPx,
+            targetHeightPx: live.targetHeightPx
+          });
+          return slotFingerprintsMatch(recomputed, expected)
+            ? { ok: true }
+            : {
+                ok: false,
+                reason: `this slot's structure has changed since the plan was approved (approved ${expected.digest.slice(0, 12)}, now ${recomputed.digest.slice(0, 12)}) - refusing to edit a layer that is no longer the one that was reviewed; re-run template inspection and re-approve`
+              };
+        },
         now: deps.now
       },
       payload as ExecuteSceneEditRequest

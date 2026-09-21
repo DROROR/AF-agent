@@ -78,7 +78,12 @@ const layerDetailSchema = z
     sourceText: z.string().nullable().optional(),
     sourceTextTruncated: z.boolean().nullable().optional(),
     /** The COMPLETE text's own code-unit length, even when `sourceText` above was bounded - what tells the worker a slice-read is needed (see complete-template-text.ts). */
-    sourceTextCodeUnitLength: z.number().nullable().optional()
+    sourceTextCodeUnitLength: z.number().nullable().optional(),
+    /** Stage 4 slot-semantics geometry/animation facts. Optional: a scan from an older worker build simply does not carry them, and the classifier then treats them as unread rather than as false. */
+    scalePercent: z.number().nullable().optional(),
+    scalePercentY: z.number().nullable().optional(),
+    rotationDegrees: z.number().nullable().optional(),
+    hasTransformKeyframes: z.boolean().nullable().optional()
   })
   .strict();
 

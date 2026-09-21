@@ -63,6 +63,7 @@ function asset(overrides: Partial<AssetRecord> = {}): AssetRecord {
     sha256: "a".repeat(64),
     width: null,
     height: null,
+    hasAlpha: null,
     durationSeconds: null,
     label: null,
     notes: null,

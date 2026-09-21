@@ -1178,8 +1178,10 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     expect(Object.values(plain.detail).every((value) => value === null)).toBe(true);
     // 19 original layer-role facts, plus the captured template text, its
     // truncation marker and the complete text's own code-unit length
-    // (leftover-template-copy gate).
-    expect(Object.keys(plain.detail)).toHaveLength(22);
+    // (leftover-template-copy gate), plus the four geometry/animation facts
+    // the slot-semantics gate reads (scale on both axes, rotation, and
+    // whether the transform is keyframed at all).
+    expect(Object.keys(plain.detail)).toHaveLength(26);
     const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
     expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
   });

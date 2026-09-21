@@ -97,6 +97,11 @@ class FakeAeEditBridge implements AeEditBridge {
     return this.opResult(operation, callIndex);
   }
 
+  /** Stage 4: fakes report an unchanged structure unless a test overrides this. */
+  async describeChainStructure(): Promise<{ ok: true; hops: never[]; targetWidthPx: null; targetHeightPx: null }> {
+    return { ok: true, hops: [], targetWidthPx: null, targetHeightPx: null };
+  }
+
   async saveProject(): Promise<SaveProjectResult> {
     this.saveCalls++;
     // Simulates a REAL mutation actually landing on disk - a real AE save
@@ -885,6 +890,9 @@ describe("executeSceneEdit", () => {
         },
         async saveProject() {
           return { ok: true, resultingValue: null };
+        },
+        async describeChainStructure() {
+          return { ok: true as const, hops: [], targetWidthPx: null, targetHeightPx: null };
         }
       };
       const request = makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha });
@@ -964,6 +972,92 @@ describe("executeSceneEdit", () => {
       expect(bridge.calls[0]?.operation.type).toBe("MAP_FOOTAGE");
       expect(bridge.calls[1]?.operation.type).toBe("SET_TEXT");
       expect(result.workingCopyFailureCode).toBeNull();
+    });
+  });
+
+  /**
+   * STAGE 4: the structural re-check that runs immediately before a slot is
+   * mutated. The plan's gate proves a slot was right when it was approved;
+   * this proves it is still right now, against the live project.
+   */
+  describe("slot structure is re-proved immediately before the mutation", () => {
+    const FINGERPRINT = { version: "slot-fingerprint-v1", digest: "d".repeat(64) };
+
+    const mapFootage = (overrides: Partial<Extract<SceneEditOperationIntent, { type: "MAP_FOOTAGE" }>> = {}): SceneEditOperationIntent => ({
+      type: "MAP_FOOTAGE",
+      manifestPlaceholderId: null,
+      layerIndex: 2,
+      nestedTarget: null,
+      assetId: "22222222-2222-2222-2222-222222222222",
+      expectedSha256: "b".repeat(64),
+      mimeType: "image/png",
+      expectedSlotFingerprint: FINGERPRINT,
+      ...overrides
+    });
+
+    async function run(operation: SceneEditOperationIntent, verifySlotStructure: NonNullable<Parameters<typeof executeSceneEdit>[0]["verifySlotStructure"]>) {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      const result = await executeSceneEdit(
+        {
+          workRoot: join(root, "work-root"),
+          aeEditBridge: bridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          verifySlotStructure,
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [operation] })
+      );
+      return { result, bridge };
+    }
+
+    it("refuses the operation - and never touches the layer - when the live structure no longer matches", async () => {
+      const { result, bridge } = await run(mapFootage(), async () => ({ ok: false as const, reason: "the slot's structure changed since this plan was approved" }));
+
+      expect(result.failureReason).toMatch(/structure changed since this plan was approved/);
+      expect(result.operationsCompleted).toEqual([]);
+      expect(bridge.calls).toHaveLength(0);
+    });
+
+    it("re-checks a NESTED slot through its own chain", async () => {
+      const seen: unknown[] = [];
+      const nestedTarget = [
+        { compositionId: "comp-a", aeProjectItemIndex: 7, layerIndex: 3 },
+        { compositionId: "comp-b", aeProjectItemIndex: 9, layerIndex: 1 }
+      ];
+      const { result } = await run(mapFootage({ layerIndex: null, nestedTarget }), async (params) => {
+        seen.push(params);
+        return { ok: true as const };
+      });
+
+      expect(result.failureReason).toBeNull();
+      expect(seen).toEqual([{ nestedTarget, expected: FINGERPRINT }]);
+    });
+
+    it("re-checks a TOP-LEVEL slot as a one-hop chain in the scene's own composition", async () => {
+      const seen: { nestedTarget: unknown[] }[] = [];
+      const { result } = await run(mapFootage(), async (params) => {
+        seen.push(params);
+        return { ok: true as const };
+      });
+
+      expect(result.failureReason).toBeNull();
+      expect(seen[0]?.nestedTarget).toEqual([{ compositionId: "comp-1", aeProjectItemIndex: 1, layerIndex: 2 }]);
+    });
+
+    it("does not re-check an operation the plan carried no fingerprint for - and still applies it", async () => {
+      let called = 0;
+      const { result, bridge } = await run(mapFootage({ expectedSlotFingerprint: undefined }), async () => {
+        called += 1;
+        return { ok: true as const };
+      });
+
+      expect(called).toBe(0);
+      expect(result.failureReason).toBeNull();
+      expect(bridge.calls).toHaveLength(1);
     });
   });
 

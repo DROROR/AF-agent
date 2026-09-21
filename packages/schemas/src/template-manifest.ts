@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { textCaptureStatusSchema, textVerificationSchema } from "./text-digest.js";
+import { slotFingerprintSchema, slotSemanticsResultSchema, slotStructuralFactsSchema } from "./slot-semantics.js";
 
 /**
  * template-manifest.json - machine-generated scene/placeholder discovery,
@@ -157,6 +158,23 @@ export const placeholderSchema = z.object({
   originalTextCaptureStatus: textCaptureStatusSchema.optional(),
   /** The COMPLETE text's own code-unit length, recorded even when the text itself is not stored - evidence for an operator deciding what to do about an over-sized layer. */
   originalTextCodeUnitLength: z.number().int().nonnegative().optional(),
+  /**
+   * Stage 4 slot semantics (image slots only): the structural facts this slot
+   * was judged from, the verdict itself, and a versioned fingerprint of that
+   * structure.
+   *
+   * `slotSemantics.requiresHumanDecision` blocks plan approval until a human
+   * records an explicit decision; `slotFingerprint` is recomputed from the
+   * LIVE project immediately before any mutation and must still match, so an
+   * approved plan can never edit a slot whose structure has since changed.
+   * All optional, so manifests written before Stage 4 still parse - they
+   * simply carry no verdict, which itself blocks and asks for re-inspection.
+   */
+  slotFacts: slotStructuralFactsSchema.optional(),
+  slotSemantics: slotSemanticsResultSchema.optional(),
+  slotFingerprint: slotFingerprintSchema.optional(),
+  /** The narrower fingerprint of the chain an edit traverses plus this slot's own geometry - recomputed live immediately before any mutation (see computeSlotMutationFingerprint). */
+  slotMutationFingerprint: slotFingerprintSchema.optional(),
   dimensions: dimensionsSchema.nullable(),
   startTimeSeconds: z.number().nullable(),
   durationSeconds: z.number().nullable(),

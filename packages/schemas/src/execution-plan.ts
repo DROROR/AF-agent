@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { templateTextDecisionRecordSchema } from "./template-copy.js";
+import { slotReviewRecordSchema } from "./slot-semantics.js";
 import { nestedTargetStepSchema, placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
 
@@ -104,6 +105,18 @@ export const placeholderMappingSchema = z.object({
    * nobody made.
    */
   keepTemplateText: templateTextDecisionRecordSchema.nullable().optional(),
+  /**
+   * The reviewer's explicit, auditable decision about this mapping's SLOT
+   * (Stage 4): its structural classification, whether the asset belongs in it,
+   * and whether the chosen fit renders correctly.
+   *
+   * Absent or null means no decision - never "accepted". While any slot
+   * blocker stands, that blocks plan approval, execution dispatch and the
+   * complete-preview gate. The record carries the digest of the findings it
+   * was made about, so new findings make it stale rather than inherited - see
+   * slot-semantics.ts and evaluate-slot-readiness.ts.
+   */
+  slotReview: slotReviewRecordSchema.nullable().optional(),
   /** Explicit SET_LAYER_VISIBILITY intent - null means "no override, leave the layer exactly as authored", never defaulted to true/false. */
   layerVisible: z.boolean().nullable(),
   /** Explicit SET_TIME_REMAP_FREEZE intent (seconds) - null means no freeze-frame override requested for this layer. Never guessed from assetTimestamp or any other field. */

@@ -19,6 +19,7 @@ function toDomain(row: SceneEvidencePreviewRow): SceneEvidencePreviewRecord {
     storageKey: row.storageKey,
     sha256: row.sha256,
     capturedAt: row.capturedAt,
+    capturedAtSeconds: row.capturedAtSeconds,
     createdAt: row.createdAt
   };
 }
@@ -45,6 +46,7 @@ export class DrizzleSceneEvidencePreviewRepository implements SceneEvidencePrevi
         storageKey: row.storageKey,
         sha256: row.sha256,
         capturedAt: row.capturedAt,
+        capturedAtSeconds: row.capturedAtSeconds,
         createdAt: now
       })
       .returning();

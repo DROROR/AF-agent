@@ -97,8 +97,10 @@ function applyExecutionPlanEditRaw(
   operation: ExecutionPlanEditOperation,
   now: () => Date,
   currentManifest?: TemplateManifest,
-  /** The authenticated user making this edit. Required only by operations that record an attributable human decision (SET_TEMPLATE_TEXT_DECISION); every other operation ignores it, so existing callers keep working unchanged. */
-  editedBy?: string
+  /** The authenticated user making this edit. Required only by operations that record an attributable human decision (SET_TEMPLATE_TEXT_DECISION, SET_SLOT_REVIEW); every other operation ignores it, so existing callers keep working unchanged. */
+  editedBy?: string,
+  /** The digest of the slot findings a SET_SLOT_REVIEW is being recorded about, computed by the caller from live state. */
+  slotEvidenceDigest?: string
 ): ApplyEditResult {
   const plans = [...scenePlans];
   const sceneIndex = plans.findIndex((s) => s.id === operation.scenePlanId);
@@ -216,6 +218,7 @@ function applyExecutionPlanEditRaw(
         // No decision is ever written by default - see placeholderMappingSchema's
         // own doc comment on why null can never mean "keep".
         keepTemplateText: null,
+        slotReview: null,
         placeholderName: operation.placeholderName,
         placeholderClassification: { value: operation.placeholderClassification, source: "HUMAN", evidence: [] },
         selectedAssetId: isAssetClassification ? selectedAssetId : null,
@@ -302,6 +305,42 @@ function applyExecutionPlanEditRaw(
 
     case "CLEAR_TEMPLATE_TEXT_DECISION": {
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, keepTemplateText: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    // The slot gate's only escape hatch (Stage 4). The digest of the findings
+    // this decision is about is computed by the caller from live state and
+    // passed in - a decision can never be attached to findings the reviewer
+    // never saw, and a later change makes it stale rather than inherited.
+    case "SET_SLOT_REVIEW": {
+      if (editedBy === undefined || editedBy.trim() === "") {
+        return { ok: false, reason: "SET_SLOT_REVIEW requires the deciding user's identity - refusing to record an unattributable decision" };
+      }
+      if (slotEvidenceDigest === undefined) {
+        return { ok: false, reason: "SET_SLOT_REVIEW requires the digest of the findings being decided about - refusing to record a decision that is not bound to what was on screen" };
+      }
+      if (operation.decision === "OVERRIDE_CLASSIFICATION" && operation.classification === undefined) {
+        return { ok: false, reason: "SET_SLOT_REVIEW with OVERRIDE_CLASSIFICATION requires the classification the reviewer says this slot actually is" };
+      }
+      const result = updateMapping(scene, operation.mappingId, (m) => ({
+        ...m,
+        slotReview: {
+          decision: operation.decision,
+          classification: operation.classification ?? null,
+          decidedBy: editedBy,
+          decidedAt: timestamp,
+          evidenceDigest: slotEvidenceDigest,
+          evidenceFrameStorageKey: operation.evidenceFrameStorageKey ?? null
+        },
+        updatedAt: timestamp
+      }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_SLOT_REVIEW": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, slotReview: null, updatedAt: timestamp }));
       if (!result.ok) return result;
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
     }
@@ -522,9 +561,10 @@ export function applyExecutionPlanEdit(
   operation: ExecutionPlanEditOperation,
   now: () => Date,
   currentManifest?: TemplateManifest,
-  editedBy?: string
+  editedBy?: string,
+  slotEvidenceDigest?: string
 ): ApplyEditResult {
-  const result = applyExecutionPlanEditRaw(scenePlans, operation, now, currentManifest, editedBy);
+  const result = applyExecutionPlanEditRaw(scenePlans, operation, now, currentManifest, editedBy, slotEvidenceDigest);
   if (!result.ok) {
     return result;
   }

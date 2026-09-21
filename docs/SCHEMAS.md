@@ -197,3 +197,56 @@ results written before Stage 3 still parse.
 `sourceProjectSha256`, and the dispatch request gains an optional `projectId`;
 the API resolves the real path and sha256 from its own project record, so the
 browser never supplies a path.
+
+## slot-semantics / slot-readiness (Stage 4)
+
+`packages/schemas/src/slot-semantics.ts` - what a slot IS, whether an asset
+belongs in it, and whether the fit will render correctly:
+
+- `SLOT_SEMANTICS_MODEL_VERSION`, `SLOT_FINGERPRINT_VERSION`,
+  `SLOT_CONFIDENCE_THRESHOLD` - a stored verdict produced by another model
+  version is never reinterpreted, it is reported as uncheckable.
+- `MATTE_SOURCES` - `RENDERED_FOOTAGE` / `DRAWN_MASK_OR_SOLID` / `NONE` /
+  `UNKNOWN`. Matte PRESENCE proves nothing; what the matte is MADE OF is the
+  strongest single signal.
+- `slotHostFactsSchema` / `slotStructuralFactsSchema` - one slot's structure:
+  hosts, host depth, reuse count, 3D state, parent animation, sibling
+  pre-rendered pass, dimensions, transformed bounds and `visibleWindowSeconds`.
+  `slotLayerName`/`slotCompositionName` are carried for display and weak
+  evidence only.
+- `classifySlotSemantics(facts)` -> `{ classification, confidence, conflicting,
+  positiveEvidence, negativeEvidence, requiresHumanDecision, reason }`. Name
+  evidence is collected but never added to the decision sums.
+- `computeSlotFingerprint` / `slotFingerprintsMatch` /
+  `computeSlotMutationFingerprint` - names excluded; a rename is not a
+  structural change and must not fail an approved plan.
+- `assessAssetSlotCompatibility(slot, asset)` - `AssetFacts` has NO filename
+  field. Blocking codes: `LOGO_INTO_DEVICE_SCREEN`,
+  `TRANSPARENT_ASSET_INTO_DEVICE_SCREEN`, `SCREENSHOT_INTO_FLAT_CARD`,
+  `SEVERE_ASPECT_MISMATCH`, `ROLE_UNDECLARED`, `ASSET_DIMENSIONS_UNKNOWN`.
+- `assessFit({ slot, asset, mode })` - scale per axis, slot coverage, cropped
+  percent, unused area, distortion, and the flags `EXCESSIVE_CROP`,
+  `LARGE_UNUSED_AREA`, `DISTORTED`, `DIMENSIONS_UNKNOWN`.
+- `selectEvidenceFrameSeconds(facts)` - the midpoint of the visible window, or
+  null when the slot never presents a provable visible moment.
+- `slotReviewRecordSchema` - `{ decision, classification, decidedBy, decidedAt,
+  evidenceDigest, evidenceFrameStorageKey }`.
+
+`packages/schemas/src/slot-readiness.ts` - the gate both the API and the
+dashboard run, so they can never disagree: `SLOT_BLOCKER_KINDS`
+(`SLOT_SEMANTICS_MISSING`, `SLOT_SEMANTICS_STALE_MODEL`,
+`SLOT_CLASSIFICATION_UNCERTAIN`, `ASSET_SLOT_CONFLICT`, `UNSAFE_FIT`),
+`assessMappingSlot`, `findSlotBlockers`, `slotEvidenceDigest`, `fitModeForRole`
+and `describeSlotBlockers`. Each blocker carries `requiresEvidenceFrame`,
+`evidenceFrameAtSeconds` and `evidenceFrameWindowSeconds`.
+
+Manifest and plan carry these as OPTIONAL fields - `slotFacts`,
+`slotSemantics`, `slotFingerprint`, `slotMutationFingerprint` on a placeholder,
+`slotReview` on a mapping - so everything written before Stage 4 still parses.
+A manifest with no slot facts for a visual slot blocks and names re-inspection
+as the fix.
+
+`assetDtoSchema` gains optional `hasAlpha` (measured from the uploaded bytes;
+null = never measured), and `sceneEvidencePreviewDtoSchema` gains optional
+`capturedAtSeconds` and `storageKey` - the two facts that make a captured frame
+usable as evidence for a specific slot.

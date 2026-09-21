@@ -1,9 +1,13 @@
+import { classifySlotSemantics, computeSlotFingerprint, computeSlotMutationFingerprint, type SlotFingerprint, type SlotSemanticsResult, type SlotStructuralFacts } from "@dyo/schemas";
+import { buildSlotStructuralFacts } from "./build-slot-facts.js";
+import type { ScannedSlotLayer } from "./build-slot-facts.js";
 import {
   SCHEMA_VERSION,
   type Composition,
   type InspectionSummary,
   type NestedTargetStep,
   type Placeholder,
+  type PlaceholderType,
   type Scene,
   type TemplateManifest
 } from "@dyo/schemas";
@@ -73,6 +77,19 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
             reason: classification.evidence.reason
           });
         }
+        // A slot in the scene's OWN composition is classified exactly like a
+        // nested one: from its layer's own matte, 3D state and parent chain.
+        const slot = isSlotPlaceholderType(classification.placeholderType)
+          ? buildSlotEvidence({
+              composition,
+              layer,
+              chainToParent: [],
+              depth: 0,
+              allCompositions: facts.compositions,
+              layerFactsByCompositionAndIndex: facts.layerFactsByCompositionAndIndex,
+              slotIsWholeComposition: false
+            })
+          : undefined;
         return buildPlaceholder({
           placeholderId: deterministicId([composition.compositionId, ...layer.layerPath, String(layer.index)]),
           compositionId: composition.compositionId,
@@ -80,11 +97,22 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
           layerPath: [...layer.layerPath],
           nestedTarget: null,
           classification,
-          sourceProjectSha256: facts.projectSha256
+          sourceProjectSha256: facts.projectSha256,
+          ...(slot ? { slot } : {})
         });
       });
 
-      placeholders.push(...collectNestedPlaceholders(composition, compositionById, maskedCompositionIds, unknownItems, facts.projectSha256));
+      placeholders.push(
+        ...collectNestedPlaceholders(
+          composition,
+          compositionById,
+          maskedCompositionIds,
+          unknownItems,
+          facts.projectSha256,
+          facts.compositions,
+          facts.layerFactsByCompositionAndIndex
+        )
+      );
 
       return {
         sceneId: deterministicId([composition.compositionId, String(originalOrderIndex)]),
@@ -259,6 +287,71 @@ function findScreenCardSlot(composition: CompositionFact, maskedCompositionIds: 
   return solids.reduce((bottom, candidate) => (candidate.index > bottom.index ? candidate : bottom));
 }
 
+/** The placeholder kinds that occupy a visual SLOT - the only ones a structural verdict is meaningful for. A text line or a colour swatch is not a window into anything. */
+const SLOT_PLACEHOLDER_TYPES: ReadonlySet<PlaceholderType> = new Set(["image", "video", "logo", "phone_screen"]);
+function isSlotPlaceholderType(placeholderType: PlaceholderType): boolean {
+  return SLOT_PLACEHOLDER_TYPES.has(placeholderType);
+}
+
+/**
+ * STAGE 4: one slot's structural verdict and fingerprints.
+ *
+ * Built from the composition graph and the project-wide scan - never a name.
+ * The verdict blocks approval when it is not confident; the mutation
+ * fingerprint is re-checked against the live project immediately before any
+ * edit, so a template changed since inspection fails closed.
+ */
+function buildSlotEvidence(args: {
+  composition: CompositionFact;
+  layer: LayerFact;
+  /** The precomp hops above this layer - empty for a layer in the scene's own composition. */
+  chainToParent: readonly NestedTargetStep[];
+  depth: number;
+  allCompositions: readonly CompositionFact[];
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer> | undefined;
+  /** A screen card IS its composition, placed by its hosts; every other footage slot is a layer carrying its own matte, 3D state and parent. */
+  slotIsWholeComposition: boolean;
+}): { facts: SlotStructuralFacts; semantics: SlotSemanticsResult; fingerprint: SlotFingerprint; mutationFingerprint: SlotFingerprint } {
+  const { composition, layer, layerFactsByCompositionAndIndex } = args;
+  const facts = buildSlotStructuralFacts({
+    slotComposition: composition,
+    slotLayerIndex: layer.index,
+    slotLayerName: layer.name,
+    compositions: args.allCompositions,
+    layerFactsByCompositionAndIndex,
+    hostDepth: args.depth,
+    slotIsWholeComposition: args.slotIsWholeComposition
+  });
+  // The chain this slot will actually be edited through - each hop read from
+  // the same scan, so the live re-check before mutation compares like with
+  // like.
+  const chainSteps = [...args.chainToParent, { compositionId: composition.compositionId, layerIndex: layer.index }];
+  const chain = chainSteps.map((step) => {
+    const scanned = layerFactsByCompositionAndIndex?.get(`${step.compositionId}:${step.layerIndex}`);
+    return {
+      compositionId: step.compositionId,
+      layerIndex: step.layerIndex,
+      threeDLayer: scanned?.detail?.threeDLayer ?? null,
+      hasTrackMatte: scanned?.detail?.hasTrackMatte ?? null,
+      trackMatteType: scanned?.detail?.trackMatteType ?? null,
+      parentLayerIndex: scanned?.detail?.parentLayerIndex ?? null,
+      scalePercent: scanned?.detail?.scalePercent ?? null,
+      rotationDegrees: scanned?.detail?.rotationDegrees ?? null
+    };
+  });
+  return {
+    facts,
+    semantics: classifySlotSemantics(facts),
+    fingerprint: computeSlotFingerprint(facts),
+    mutationFingerprint: computeSlotMutationFingerprint({
+      chain,
+      targetLayerIndex: layer.index,
+      targetWidthPx: facts.widthPx,
+      targetHeightPx: facts.heightPx
+    })
+  };
+}
+
 const SCREEN_CARD_CLASSIFICATION: Classification = {
   placeholderType: "image",
   editable: true,
@@ -326,7 +419,11 @@ function collectNestedPlaceholders(
   compositionById: ReadonlyMap<string, CompositionFact>,
   maskedCompositionIds: ReadonlySet<string>,
   unknownItems: TemplateManifest["unknownItems"],
-  sourceProjectSha256: string
+  sourceProjectSha256: string,
+  /** Every composition, so a slot's HOSTS can be found wherever in the graph they live (Stage 4). */
+  allCompositions: readonly CompositionFact[],
+  /** The project-wide scan, for the geometry/matte/animation facts a slot verdict is built from. */
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer> | undefined
 ): Placeholder[] {
   const placeholders: Placeholder[] = [];
   const seenLayers = new Set<string>();
@@ -386,6 +483,22 @@ function collectNestedPlaceholders(
         unknownItems.push({ context: [scene.name, ...layerPath, layer.name].join(" / "), reason: decision.reason });
         continue;
       }
+      // STAGE 4: an image slot carries its own structural verdict. Built from
+      // the composition graph and the project-wide scan (never a name), it
+      // blocks approval when it is not confident, and its fingerprint is
+      // re-checked against the live project immediately before any mutation.
+      const slot = !isSlotPlaceholderType(decision.classification.placeholderType)
+        ? undefined
+        : buildSlotEvidence({
+            composition,
+            layer,
+            chainToParent,
+            depth,
+            allCompositions,
+            layerFactsByCompositionAndIndex,
+            slotIsWholeComposition: layer === screenCard
+          });
+
       placeholders.push(
         buildPlaceholder({
           placeholderId: deterministicId(["nested", scene.compositionId, composition.compositionId, String(layer.index)]),
@@ -394,7 +507,8 @@ function collectNestedPlaceholders(
           layerPath: [...layerPath],
           nestedTarget: [...chainToParent, { compositionId: composition.compositionId, layerIndex: layer.index }],
           classification: decision.classification,
-          sourceProjectSha256
+          sourceProjectSha256,
+          ...(slot ? { slot } : {})
         })
       );
     }
@@ -466,6 +580,8 @@ function buildPlaceholder(args: {
   classification: Classification;
   /** The immutable source .aep's own sha256 at inspection time - captured template-text evidence is tied to the exact source it was read from. */
   sourceProjectSha256: string;
+  /** Stage 4: the structural facts, verdict and fingerprint for an image slot. Absent for any other placeholder kind. */
+  slot?: { facts: SlotStructuralFacts; semantics: SlotSemanticsResult; fingerprint: SlotFingerprint; mutationFingerprint: SlotFingerprint } | undefined;
 }): Placeholder {
   const { layer, classification } = args;
   return {
@@ -499,6 +615,14 @@ function buildPlaceholder(args: {
       : {}),
     ...(layer.sourceTextVerification ? { originalTextVerification: { ...layer.sourceTextVerification, sourceProjectSha256: args.sourceProjectSha256 } } : {}),
     ...(layer.sourceTextCaptureStatus ? { originalTextCaptureStatus: layer.sourceTextCaptureStatus } : {}),
+    ...(args.slot
+      ? {
+          slotFacts: args.slot.facts,
+          slotSemantics: args.slot.semantics,
+          slotFingerprint: args.slot.fingerprint,
+          slotMutationFingerprint: args.slot.mutationFingerprint
+        }
+      : {}),
     ...(typeof layer.sourceTextCodeUnitLength === "number" ? { originalTextCodeUnitLength: layer.sourceTextCodeUnitLength } : {}),
     dimensions:
       layer.footage && layer.footage.widthPx !== null && layer.footage.heightPx !== null

@@ -413,6 +413,20 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
         );
       }
 
+      // The source was hashed once BEFORE the disposable copy was taken; this
+      // is the same file hashed again after every read finished. A difference
+      // means the original changed underneath this inspection, so the facts
+      // just gathered describe a file that no longer exists - reported as a
+      // raw capture rather than recorded as a manifest (Safety Rule 8).
+      if (hashResult.value.sha256 !== sourceProjectSha256) {
+        return rawCaptureFor(
+          discovery,
+          `The source .aep changed while it was being inspected (was ${sourceProjectSha256}, is now ${hashResult.value.sha256}) - ` +
+            "no manifest was recorded, because the facts gathered describe the earlier file.",
+          openEvidence
+        );
+      }
+
       const healthCall = discovery.find((c) => c.tool === "ae_health");
       const parsedHealth = healthCall?.ok ? parseAeVersionFromHealth(healthCall.content) : null;
       const aeVersion = parsedHealth?.ok ? parsedHealth.value : null;

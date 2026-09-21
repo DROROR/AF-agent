@@ -574,6 +574,7 @@ describe("executeJob - EXECUTE_FRAME", () => {
       // execute-scene-edit-executor.test.ts's own FakeAeEditBridge for why
       // this is necessary (the executor's own WORKING_COPY_UNCHANGED_AFTER_MUTATION
       // safety check would otherwise correctly flag this fake as suspicious).
+      describeChainStructure: vi.fn(async () => ({ ok: true as const, hops: [], targetWidthPx: null, targetHeightPx: null })),
       saveProject: vi.fn().mockImplementation(async () => {
         if (openedPath) {
           appendFileSync(openedPath, "\n// simulated edit");
@@ -598,7 +599,8 @@ describe("executeJob - EXECUTE_FRAME", () => {
       openProject: vi.fn().mockImplementation(async (expectedPath: string) => ({ ok: true, openedPath: expectedPath })),
       resolveCompositionIndex: vi.fn().mockResolvedValue({ ok: true, resolved: false }),
       applyOperation: vi.fn().mockResolvedValue({ ok: false, operationType: "SET_TEXT", failureReason: "layer not found" }),
-      saveProject: vi.fn()
+      saveProject: vi.fn(),
+      describeChainStructure: vi.fn(async () => ({ ok: true as const, hops: [], targetWidthPx: null, targetHeightPx: null }))
     };
     const fakePreview = { capture: vi.fn() };
 

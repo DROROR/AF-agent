@@ -1,4 +1,4 @@
-import { MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, type ScenePlanEntry, type SceneEvidenceRequest, type TemplateManifest } from "@dyo/schemas";
+import { MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, selectEvidenceFrameSeconds, type ScenePlanEntry, type SceneEvidenceRequest, type TemplateManifest } from "@dyo/schemas";
 import { derivePreviewTimingTargets } from "../preview-timing/derive-preview-timing-targets.js";
 
 export interface InspectSceneEvidenceDispatchPlanSnapshot {
@@ -24,6 +24,13 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   previewTimingDescribeCompositionSummary?: boolean;
   /** Real 2026-09-11 nested-content audit (session a7fee3d9) - a THIRD thing previewTimingDiscoverCompositionId can be used for: run the SAME generic discoverLayerDetails scan (buildInspectCompositionLayerDetailsScript, opacity/stretch/timeRemap/sourceText per top-level layer) against an ARBITRARY manifest composition, not only a real scenePlan's own manifestCompositionId. Mutually exclusive with previewTimingDescribeCompositionSummary/previewTimingFindHostLayersChildCompositionId by construction - see the branch below. */
   previewTimingDiscoverLayerDetails?: boolean;
+  /**
+   * STAGE 4 SLOT EVIDENCE: names the MAPPING a reviewer must be shown before
+   * deciding about its slot. The timestamp is resolved here from that slot's
+   * own visible window (selectEvidenceFrameSeconds) - the browser never
+   * supplies a timestamp, exactly like every other addressing fact.
+   */
+  slotEvidenceMappingId?: string;
   /** Real 2026-09-11 nested-content audit (session a7fee3d9) - a FOURTH thing previewTimingDiscoverCompositionId can be used for: run the SAME generic describeLayerTransforms scan (buildInspectLayerTransformScript, position/scale/rotation/anchorPoint/camera-zoom keyframes plus effects per top-level layer) against an ARBITRARY manifest composition. Mutually exclusive with the other three sub-modes by construction - see the branch below. */
   previewTimingDescribeLayerTransforms?: boolean;
 }
@@ -82,7 +89,8 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     previewTimingFindHostLayersChildCompositionId,
     previewTimingDescribeCompositionSummary,
     previewTimingDiscoverLayerDetails,
-    previewTimingDescribeLayerTransforms
+    previewTimingDescribeLayerTransforms,
+    slotEvidenceMappingId
   } = input;
 
   if (!currentPlan) {
@@ -298,6 +306,29 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
   // MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST cap. Keyed on compositionId, not
   // only on nestedTarget, so a manifest whose chain was stripped is still
   // excluded correctly.
+  // STAGE 4: the moment this slot is genuinely on screen. Resolved from the
+  // manifest's own structural facts, never supplied by the caller - and
+  // refused outright when the slot never presents a provable moment, rather
+  // than capturing a frame that shows nothing and calling it evidence.
+  let slotEvidenceSeconds: number | null = null;
+  if (slotEvidenceMappingId !== undefined) {
+    const mapping = scene.mappings.find((candidate) => candidate.id === slotEvidenceMappingId);
+    if (!mapping) {
+      return { ok: false, reason: `Scene "${scenePlanId}" has no mapping "${slotEvidenceMappingId}" to capture slot evidence for` };
+    }
+    const placeholder = (manifestScene?.placeholders ?? []).find((candidate) => candidate.placeholderId === mapping.manifestPlaceholderId);
+    const seconds = placeholder?.slotFacts ? selectEvidenceFrameSeconds(placeholder.slotFacts) : null;
+    if (seconds === null) {
+      return {
+        ok: false,
+        reason:
+          `Mapping "${slotEvidenceMappingId}" has no known moment at which its slot is on screen, so no evidence frame can show it - ` +
+          "re-run template inspection for this project, or fix the layer's timing in the template"
+      };
+    }
+    slotEvidenceSeconds = seconds;
+  }
+
   const layerIndices = [
     ...new Set(
       (manifestScene?.placeholders ?? [])
@@ -327,7 +358,7 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       // whole evidence result (see SceneEvidenceResponse.preview's own
       // doc comment) - the structural layer facts remain useful on
       // their own either way.
-      previewTimestampSeconds: 0,
+      previewTimestampSeconds: slotEvidenceSeconds ?? 0,
       ...(discoverLayerDetails === true ? { discoverLayerDetails: true } : {})
     }
   };

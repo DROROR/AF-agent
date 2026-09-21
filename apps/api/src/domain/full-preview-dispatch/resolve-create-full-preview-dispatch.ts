@@ -2,6 +2,7 @@ import type { CreateFullPreviewRequest, ExecutionSessionStatus, PlanStatus, Rend
 import { TERMINAL_EXECUTION_SESSION_STATUSES } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
+import { describeSlotBlockers, findSlotBlockers } from "@dyo/schemas";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 
 /**
@@ -42,6 +43,8 @@ export interface ResolveCreateFullPreviewDispatchInput {
   currentProjectSourceProjectPath: string | null;
   /** The project's CURRENT manifest, freshly read - the source of the untouched template text the second template-copy gate below compares against. Null only when the project does not exist. */
   currentProjectManifest: TemplateManifest | null;
+  /** The project's own assets, for the Stage 4 slot/fit gate - dimensions decide whether an asset belongs in a slot and whether its fit renders correctly. */
+  projectAssets?: readonly { id: string; width: number | null; height: number | null; hasAlpha?: boolean | null }[] | undefined;
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
@@ -85,7 +88,7 @@ export type ResolveCreateFullPreviewDispatchResult = { ok: true; payload: Create
  * marked READY_FOR_LIVE_ACCEPTANCE, not fabricated here.
  */
 export function resolveCreateFullPreviewDispatch(input: ResolveCreateFullPreviewDispatchInput): ResolveCreateFullPreviewDispatchResult {
-  const { projectId, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, currentProjectManifest, worker, now, staleAfterMs } = input;
+  const { projectId, session, currentPlan, currentProjectSourceProjectSha256, currentProjectSourceProjectPath, currentProjectManifest, projectAssets, worker, now, staleAfterMs } = input;
 
   if (!session) {
     return { ok: false, reason: "No execution session was found for the requested executionSessionId" };
@@ -128,6 +131,19 @@ export function resolveCreateFullPreviewDispatch(input: ResolveCreateFullPreview
       ok: false,
       reason: `Plan still contains unreviewed template copy: ${describeTemplateCopyBlockers(templateCopyBlockers).join(" | ")}`
     };
+  }
+
+  // SLOT SEMANTICS AND FIT (Stage 4) - the same second, independent gate the
+  // template-copy check gets, immediately before a finished video is made.
+  const slotBlockers = currentProjectManifest
+    ? findSlotBlockers(
+        currentPlan.scenePlans,
+        currentProjectManifest,
+        new Map((projectAssets ?? []).map((asset) => [asset.id, { id: asset.id, widthPx: asset.width ?? null, heightPx: asset.height ?? null, hasAlpha: asset.hasAlpha ?? null }]))
+      )
+    : [];
+  if (slotBlockers.length > 0) {
+    return { ok: false, reason: `Plan has unresolved slot findings: ${describeSlotBlockers(slotBlockers).join(" | ")}` };
   }
 
   const config = currentPlan.renderOutputs.LANDSCAPE;

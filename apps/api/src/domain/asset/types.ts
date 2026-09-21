@@ -11,6 +11,8 @@ export interface AssetRecord {
   sha256: string;
   width: number | null;
   height: number | null;
+  /** Measured from the uploaded bytes (probe-image-facts.ts). Null = genuinely not measured, never "opaque". */
+  hasAlpha: boolean | null;
   durationSeconds: number | null;
   label: string | null;
   notes: string | null;
@@ -29,6 +31,7 @@ export interface NewAssetRecord {
   sha256: string;
   width: number | null;
   height: number | null;
+  hasAlpha: boolean | null;
   durationSeconds: number | null;
   label: string | null;
   notes: string | null;

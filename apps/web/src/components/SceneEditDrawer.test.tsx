@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
-import { computeTextVerification } from "@dyo/schemas";
+import { classifySlotSemantics, computeTextVerification, type SlotStructuralFacts } from "@dyo/schemas";
 import {
   PROJECT_ID,
   assetFixture,
@@ -385,5 +385,177 @@ describe("SceneEditDrawer", () => {
       </ProjectWorkspaceProvider>
     );
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
+
+/**
+ * STAGE 4: the slot decision surface. The reviewer is shown what the structure
+ * says and must look at a real captured frame of the moment the slot is on
+ * screen before any decision can be recorded - the same rule the backend gate
+ * enforces, so the dashboard never offers a decision that would be refused.
+ */
+describe("SceneEditDrawer - slot findings", () => {
+  const SLOT_FACTS: SlotStructuralFacts = {
+    slotCompositionId: "c-slot",
+    slotLayerIndex: 1,
+    slotLayerName: null,
+    slotCompositionName: null,
+    widthPx: 1080,
+    heightPx: 2160,
+    hostDepth: 1,
+    hosts: [
+      {
+        compositionId: "c1",
+        layerIndex: 3,
+        layerName: null,
+        threeDLayer: true,
+        hasTrackMatte: true,
+        trackMatteType: "ALPHA",
+        matteSource: "RENDERED_FOOTAGE",
+        parentLayerIndex: 2,
+        parentIsAnimated: true,
+        siblingPreRenderedPass: true,
+        scalePercent: 100,
+        rotationDegrees: 0
+      }
+    ],
+    reusedByHostCount: 1,
+    transformedBounds: null,
+    visibleWindowSeconds: { startSeconds: 1, endSeconds: 3 }
+  };
+
+  /** A device-screen slot holding a transparent logo - a real, blocking conflict. */
+  function conflictingSetup(previewBody: unknown, calls?: RecordedFetchCall[]) {
+    const screenPlaceholder = placeholderFixture({
+      placeholderId: "ph-img",
+      layerName: "SCREEN",
+      placeholderType: "image",
+      sourceType: "AVLayer",
+      originalText: undefined,
+      slotFacts: SLOT_FACTS,
+      slotSemantics: classifySlotSemantics(SLOT_FACTS)
+    });
+    const mapping = mappingFixture({
+      id: "mapping-img",
+      manifestPlaceholderId: "ph-img",
+      placeholderName: "SCREEN",
+      placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] },
+      selectedAssetId: "asset-1",
+      selectedAssetType: "logo"
+    });
+    stubFetchByUrl(
+      {
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/s1/preview-status`]: previewBody as never,
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+          status: 200,
+          body: { plan: planFixture({ revision: 1 }, [sceneFixture({ id: "s1", mappings: [mapping] })]), sceneTable: [] }
+        },
+        [`/api/projects/${PROJECT_ID}/assets`]: {
+          status: 200,
+          body: { assets: [assetFixture({ mediaKind: "LOGO", width: 800, height: 800, hasAlpha: true })] }
+        },
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture([screenPlaceholder]) } },
+        "/api/dashboard/status": { status: 200, body: { workers: [], jobs: [], summary: {} } }
+      },
+      calls
+    );
+  }
+
+  it("shows the blocking finding and keeps every decision unavailable until a frame of the slot exists", async () => {
+    conflictingSetup({ status: 200, body: { preview: null } });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("This slot needs a decision");
+    expect(screen.getByText(/transparent background/)).toBeTruthy();
+    await screen.findByText(/No evidence frame has been captured/);
+    expect((screen.getByRole("button", { name: "Accept - I looked, this is right" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "It is a flat card" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("refuses a frame captured at a moment the slot is not on screen", async () => {
+    conflictingSetup({
+      status: 200,
+      body: {
+        preview: {
+          id: "00000000-0000-4000-8000-000000000001",
+          projectId: PROJECT_ID,
+          manifestCompositionId: "c1",
+          sourceProjectSha256: "a".repeat(64),
+          filename: "f.png",
+          mimeType: "image/png",
+          byteSize: 10,
+          storageKey: "evidence/f.png",
+          capturedAt: new Date().toISOString(),
+          capturedAtSeconds: 0,
+          createdAt: new Date().toISOString()
+        }
+      }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText(/does not show the moment this slot is on screen/);
+    expect((screen.getByRole("button", { name: "Accept - I looked, this is right" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("records a decision bound to the exact frame the reviewer was shown", async () => {
+    const calls: RecordedFetchCall[] = [];
+    conflictingSetup(
+      {
+        status: 200,
+        body: {
+          preview: {
+            id: "00000000-0000-4000-8000-000000000002",
+            projectId: PROJECT_ID,
+            manifestCompositionId: "c1",
+            sourceProjectSha256: "a".repeat(64),
+            filename: "f.png",
+            mimeType: "image/png",
+            byteSize: 10,
+            storageKey: "evidence/the-frame.png",
+            capturedAt: new Date().toISOString(),
+            capturedAtSeconds: 2,
+            createdAt: new Date().toISOString()
+          }
+        }
+      },
+      calls
+    );
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("This slot needs a decision");
+    const accept = await waitFor(() => {
+      const button = screen.getByRole("button", { name: "Accept - I looked, this is right" }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      return button;
+    });
+    fireEvent.click(accept);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH");
+      expect(patch).toBeTruthy();
+      expect((patch?.body as { operations: unknown[] }).operations).toContainEqual({
+        type: "SET_SLOT_REVIEW",
+        scenePlanId: "s1",
+        mappingId: "mapping-img",
+        decision: "ACCEPT",
+        evidenceFrameStorageKey: "evidence/the-frame.png"
+      });
+    });
   });
 });

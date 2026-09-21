@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { templateTextDecisionSchema } from "./template-copy.js";
+import { slotClassificationSchema, slotReviewDecisionSchema } from "./slot-semantics.js";
 import { placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
 import { nestedTargetStepSchema } from "./template-manifest.js";
@@ -161,6 +162,32 @@ const clearTemplateTextDecisionSchema = z
   })
   .strict();
 
+/**
+ * The reviewer's decision about a slot's classification, the asset in it and
+ * the fit (Stage 4). The API stamps who decided, when, and a digest of the
+ * findings on screen - a caller can never supply those, so a decision can
+ * never be backdated or attached to findings the reviewer never saw.
+ */
+const setSlotReviewSchema = z
+  .object({
+    type: z.literal("SET_SLOT_REVIEW"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    decision: slotReviewDecisionSchema,
+    /** Required for OVERRIDE_CLASSIFICATION - what the reviewer says the slot actually is. */
+    classification: slotClassificationSchema.optional(),
+    /** The evidence frame the reviewer was shown, when one was required. */
+    evidenceFrameStorageKey: z.string().min(1).optional()
+  })
+  .strict();
+const clearSlotReviewSchema = z
+  .object({
+    type: z.literal("CLEAR_SLOT_REVIEW"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
 const setAssetTimestampSchema = z
   .object({
     type: z.literal("SET_ASSET_TIMESTAMP"),
@@ -295,6 +322,8 @@ export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   clearTextSchema,
   setTemplateTextDecisionSchema,
   clearTemplateTextDecisionSchema,
+  setSlotReviewSchema,
+  clearSlotReviewSchema,
   setAssetTimestampSchema,
   clearAssetTimestampSchema,
   setFinalDurationSchema,

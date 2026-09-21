@@ -4,11 +4,9 @@ import { copyFile } from "node:fs/promises";
 import path from "node:path";
 import type pino from "pino";
 import type {
-  CleanupOutcome,
   DisposableInspectionEvidence,
   DisposableInspectionFailureCode,
-  PriorAeProjectState,
-  RestorationOutcome
+  PriorAeProjectState
 } from "@dyo/schemas";
 import {
   buildCloseDisposableProjectScript,

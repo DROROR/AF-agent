@@ -218,6 +218,7 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       currentProjectSourceProjectSha256: project.sourceProjectSha256,
       currentProjectSourceProjectPath: project.manifest.sourceProject.path,
       currentProjectManifest: project.manifest,
+      projectAssets: await deps.assetRepository.listByProjectId(request.projectId),
       worker,
       now,
       staleAfterMs: deps.staleAfterMs
@@ -279,7 +280,8 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
         : {}),
       ...(request.previewTimingDescribeLayerTransforms !== undefined
         ? { previewTimingDescribeLayerTransforms: request.previewTimingDescribeLayerTransforms }
-        : {})
+        : {}),
+      ...(request.slotEvidenceMappingId !== undefined ? { slotEvidenceMappingId: request.slotEvidenceMappingId } : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);

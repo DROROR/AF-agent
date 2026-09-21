@@ -12,6 +12,7 @@ export function toAssetDto(record: AssetRecord): AssetDto {
     byteSize: record.byteSize,
     sha256: record.sha256,
     width: record.width,
+    hasAlpha: record.hasAlpha,
     height: record.height,
     durationSeconds: record.durationSeconds,
     label: record.label,

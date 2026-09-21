@@ -117,7 +117,7 @@ async function setup(manifestValue: TemplateManifest) {
   const edit = (operations: Parameters<typeof updateExecutionPlan>[2]["operations"], baseRevision: number, editedBy: string | undefined = USER_ID) =>
     updateExecutionPlan({ executionPlanRepository, assetRepository, now: fixedNow }, project.projectId, { baseRevision, operations }, editedBy);
   const approve = (baseRevision: number) =>
-    approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: NO_BRAND_RULES }, project.projectId, USER_ID, {
+    approveExecutionPlan({ executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: NO_BRAND_RULES }, project.projectId, USER_ID, {
       baseRevision
     });
   return { projectRepository, executionPlanRepository, assetRepository, project, scenes, edit, approve };

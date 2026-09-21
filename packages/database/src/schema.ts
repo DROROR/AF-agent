@@ -461,6 +461,14 @@ export const assets = pgTable(
     sha256: text("sha256").notNull(),
     width: integer("width"),
     height: integer("height"),
+    /**
+     * Whether this asset's own encoding carries transparency, measured from
+     * the uploaded bytes (probe-image-facts.ts) - never from its filename or
+     * its declared MIME type. NULL means genuinely not measured (a video, or
+     * an upload that predates measurement), which the slot gate reports as
+     * unknown rather than treating as opaque.
+     */
+    hasAlpha: boolean("has_alpha"),
     durationSeconds: doublePrecision("duration_seconds"),
     label: text("label"),
     notes: text("notes"),
@@ -782,6 +790,13 @@ export const sceneEvidencePreviews = pgTable(
     storageKey: text("storage_key").notNull(),
     sha256: text("sha256").notNull(),
     capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    /**
+     * WHERE in the composition's own timeline this frame was captured, from
+     * the job's own INSPECT_SCENE_EVIDENCE request. NULL means the capture
+     * predates this column - a reviewer's slot decision cannot be bound to
+     * such a frame, because nothing proves what moment it shows.
+     */
+    capturedAtSeconds: doublePrecision("captured_at_seconds"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [

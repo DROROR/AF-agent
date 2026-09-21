@@ -28,3 +28,5 @@ export * from "./text-direction.js";
 export * from "./text-digest.js";
 export * from "./template-copy.js";
 export * from "./disposable-inspection.js";
+export * from "./slot-semantics.js";
+export * from "./slot-readiness.js";

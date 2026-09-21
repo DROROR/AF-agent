@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCHEMA_VERSION, type PlaceholderMapping, type ScenePlanEntry, type TemplateManifest } from "@dyo/schemas";
+import { assessMappingSlot, classifySlotSemantics, SCHEMA_VERSION, slotEvidenceDigest, SLOT_FINGERPRINT_VERSION, type PlaceholderMapping, type ScenePlanEntry, type SlotStructuralFacts, type TemplateManifest } from "@dyo/schemas";
 import { resolveExecuteFrameDispatch, type ExecuteFrameDispatchPlanSnapshot, type ExecuteFrameDispatchSessionSnapshot } from "../resolve-execute-frame-dispatch.js";
 import type { SceneEditWorkerSnapshot } from "../../execute-scene-edit/validate-scene-edit-preconditions.js";
 import type { AssetRecord } from "../../asset/types.js";
@@ -11,6 +11,47 @@ const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
 const ASSET_ID = "33333333-3333-3333-3333-333333333333";
 const WORKER_ID = "44444444-4444-4444-4444-444444444444";
 const SESSION_ID = "55555555-5555-5555-5555-555555555555";
+
+/**
+ * A confidently-classified FLAT CARD slot: a designer's rectangle, cut by a
+ * drawn mask, sitting still in 2D. Present on every image placeholder in these
+ * fixtures because Stage 4's slot gate refuses to dispatch an image mapping
+ * whose slot was never structurally inspected - that refusal has its own tests
+ * below, and is not what the rest of this file is about.
+ */
+function cardSlotFacts(overrides: Partial<SlotStructuralFacts> = {}): SlotStructuralFacts {
+  return {
+    slotCompositionId: "slot-comp",
+    slotLayerIndex: 1,
+    slotLayerName: null,
+    slotCompositionName: null,
+    widthPx: 800,
+    heightPx: 600,
+    hostDepth: 1,
+    hosts: [
+      {
+        compositionId: "host-comp",
+        layerIndex: 3,
+        layerName: null,
+        threeDLayer: false,
+        hasTrackMatte: true,
+        trackMatteType: "ALPHA",
+        matteSource: "DRAWN_MASK_OR_SOLID",
+        parentLayerIndex: null,
+        parentIsAnimated: false,
+        siblingPreRenderedPass: false,
+        scalePercent: 100,
+        rotationDegrees: 0
+      }
+    ],
+    reusedByHostCount: 1,
+    transformedBounds: null,
+    visibleWindowSeconds: { startSeconds: 0, endSeconds: 5 },
+    ...overrides
+  };
+}
+
+const CARD_SLOT = { slotFacts: cardSlotFacts(), slotSemantics: classifySlotSemantics(cardSlotFacts()) };
 
 function validManifest(overrides: Partial<TemplateManifest> = {}): TemplateManifest {
   return {
@@ -62,6 +103,7 @@ function validManifest(overrides: Partial<TemplateManifest> = {}): TemplateManif
             placeholderType: "image",
             editable: true,
             sourceType: "AVLayer",
+            ...CARD_SLOT,
             dimensions: { width: 800, height: 600 },
             startTimeSeconds: 0,
             durationSeconds: 5,
@@ -169,6 +211,7 @@ function validAsset(overrides: Partial<AssetRecord> = {}): AssetRecord {
     sha256: "b".repeat(64),
     width: 800,
     height: 600,
+    hasAlpha: null,
     durationSeconds: null,
     label: null,
     notes: null,
@@ -274,6 +317,153 @@ describe("resolveExecuteFrameDispatch - leftover template copy blocks EXECUTION,
     );
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.reason).toMatch(/re-run template inspection/);
+  });
+});
+
+describe("resolveExecuteFrameDispatch - slot semantics and fit block EXECUTION, not only approval", () => {
+  /** Replaces the scene's image placeholder with one carrying the given structure (or none at all). */
+  function manifestWithSlot(facts: SlotStructuralFacts | null): TemplateManifest {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const placeholders = scene.placeholders.map((placeholder) => {
+      if (placeholder.placeholderId !== "ph-2") {
+        return placeholder;
+      }
+      const { slotFacts: _dropped, slotSemantics: _alsoDropped, ...bare } = placeholder;
+      return facts === null ? bare : { ...bare, slotFacts: facts, slotSemantics: classifySlotSemantics(facts) };
+    });
+    return { ...base, scenes: [{ ...scene, placeholders }] };
+  }
+
+  const withImageMapping = (manifest: TemplateManifest, assets = [validAsset()]) =>
+    resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifest,
+        projectAssets: assets,
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] })
+      })
+    );
+
+  it("refuses to dispatch an image mapping whose slot was never structurally inspected", () => {
+    const result = withImageMapping(manifestWithSlot(null));
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/re-run template inspection/);
+  });
+
+  it("refuses to dispatch while a slot's classification is uncertain", () => {
+    const conflicting = cardSlotFacts({
+      hosts: [{ ...cardSlotFacts().hosts[0]!, threeDLayer: true, parentLayerIndex: 4, parentIsAnimated: true }]
+    });
+    const result = withImageMapping(manifestWithSlot(conflicting));
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/SLOT_CLASSIFICATION_UNCERTAIN/);
+  });
+
+  it("refuses to dispatch an asset that does not belong in the slot it is mapped to", () => {
+    const screenFacts = cardSlotFacts({
+      widthPx: 1080,
+      heightPx: 2160,
+      hosts: [
+        {
+          ...cardSlotFacts().hosts[0]!,
+          threeDLayer: true,
+          matteSource: "RENDERED_FOOTAGE",
+          parentLayerIndex: 2,
+          parentIsAnimated: true,
+          siblingPreRenderedPass: true
+        }
+      ]
+    });
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifestWithSlot(screenFacts),
+        projectAssets: [validAsset({ width: 1080, height: 2160, hasAlpha: true })],
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping({ selectedAssetType: "logo" })] })] })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/ASSET_SLOT_CONFLICT/);
+  });
+
+  it("refuses to dispatch a fit that would cut most of the asset away", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifestWithSlot(cardSlotFacts({ widthPx: 400, heightPx: 2000 })),
+        projectAssets: [validAsset({ width: 4000, height: 400 })],
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/UNSAFE_FIT/);
+  });
+
+  it("dispatches once the reviewer explicitly decided about those exact findings", () => {
+    const manifest = manifestWithSlot(cardSlotFacts({ widthPx: 400, heightPx: 2000 }));
+    const asset = validAsset({ width: 4000, height: 400 });
+    const blocked = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifest,
+        projectAssets: [asset],
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] })
+      })
+    );
+    expect(blocked.ok).toBe(false);
+
+    const scene = validScene({ mappings: [imageMapping()] });
+    const digest = slotEvidenceDigest(
+      assessMappingSlot({
+        scene,
+        mapping: scene.mappings[0]!,
+        manifest,
+        asset: { id: asset.id, widthPx: asset.width, heightPx: asset.height, hasAlpha: asset.hasAlpha }
+      })
+    );
+    const decided = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifest,
+        projectAssets: [asset],
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [
+                imageMapping({
+                  slotReview: {
+                    decision: "ACCEPT",
+                    classification: null,
+                    decidedBy: "user-1",
+                    decidedAt: NOW.toISOString(),
+                    evidenceDigest: digest,
+                    evidenceFrameStorageKey: "evidence/frame.png"
+                  }
+                })
+              ]
+            })
+          ]
+        })
+      })
+    );
+    expect(decided.ok).toBe(true);
+  });
+
+  it("carries the slot's mutation fingerprint to the worker so the structure is re-proved before the edit", () => {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const fingerprint = { version: SLOT_FINGERPRINT_VERSION, digest: "f".repeat(64) };
+    const manifest: TemplateManifest = {
+      ...base,
+      scenes: [
+        {
+          ...scene,
+          placeholders: scene.placeholders.map((placeholder) =>
+            placeholder.placeholderId === "ph-2" ? { ...placeholder, slotMutationFingerprint: fingerprint } : placeholder
+          )
+        }
+      ]
+    };
+    const result = withImageMapping(manifest);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations[0]).toMatchObject({ type: "MAP_FOOTAGE", expectedSlotFingerprint: fingerprint });
   });
 });
 
@@ -1243,7 +1433,8 @@ describe("resolveExecuteFrameDispatch - nested manifest placeholders", () => {
       layerPath: ["Child"],
       nestedTarget: [{ compositionId: "comp-child", layerIndex: 3 }],
       placeholderType: "image",
-      sourceType: "AVLayer"
+      sourceType: "AVLayer",
+      ...CARD_SLOT
     });
     const result = dispatchWith(nestedManifest([image]), [imageMapping({ id: "m-img", manifestPlaceholderId: "ph-nested-image" })]);
 

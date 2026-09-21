@@ -825,3 +825,104 @@ describe("resolveInspectSceneEvidenceDispatch - nested manifest placeholders", (
     expect(indicesFor(withExtraPlaceholders([nested({ nestedTarget: undefined })]))).toEqual(baseline);
   });
 });
+
+/**
+ * STAGE 4: the evidence frame a reviewer must see before deciding about a
+ * slot. The caller names the MAPPING; the moment comes from that slot's own
+ * structural facts, exactly like every other addressing fact here.
+ */
+describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
+  const slotFacts = {
+    slotCompositionId: "comp-slot",
+    slotLayerIndex: 1,
+    slotLayerName: null,
+    slotCompositionName: null,
+    widthPx: 1080,
+    heightPx: 2160,
+    hostDepth: 1,
+    hosts: [],
+    reusedByHostCount: 0,
+    transformedBounds: null,
+    visibleWindowSeconds: { startSeconds: 3, endSeconds: 9 }
+  };
+
+  function manifestWithSlotFacts(facts: typeof slotFacts | null): TemplateManifest {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    return {
+      ...base,
+      scenes: [
+        {
+          ...scene,
+          placeholders: scene.placeholders.map((placeholder) =>
+            placeholder.placeholderId === "ph-2" ? { ...placeholder, ...(facts === null ? {} : { slotFacts: facts }) } : placeholder
+          )
+        }
+      ]
+    };
+  }
+
+  const mapping: PlaceholderMapping = {
+    id: "mapping-1",
+    manifestPlaceholderId: "ph-2",
+    placeholderName: "Photo",
+    placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] },
+    selectedAssetId: "asset-1",
+    selectedAssetType: "image",
+    text: null,
+    assetTimestamp: null,
+    colorHex: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
+    mappingSource: "HUMAN",
+    confidence: null,
+    createdAt: NOW_ISO,
+    updatedAt: NOW_ISO
+  };
+
+  it("captures the middle of the slot's own visible window - not the start of the composition", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
+      currentProjectManifest: manifestWithSlotFacts(slotFacts),
+      slotEvidenceMappingId: "mapping-1"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.previewTimestampSeconds).toBe(6);
+  });
+
+  it("still captures the composition's start when no slot evidence was asked for", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
+      currentProjectManifest: manifestWithSlotFacts(slotFacts)
+    });
+    expect(result.ok && result.payload.previewTimestampSeconds).toBe(0);
+  });
+
+  it("refuses rather than capturing a frame that proves nothing, when the slot has no known visible moment", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
+      currentProjectManifest: manifestWithSlotFacts(null),
+      slotEvidenceMappingId: "mapping-1"
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/no known moment at which its slot is on screen/);
+  });
+
+  it("refuses a mapping that does not belong to this scene", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
+      currentProjectManifest: manifestWithSlotFacts(slotFacts),
+      slotEvidenceMappingId: "some-other-mapping"
+    });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toMatch(/has no mapping/);
+  });
+});

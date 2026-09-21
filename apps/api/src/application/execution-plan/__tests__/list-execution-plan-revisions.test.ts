@@ -124,7 +124,7 @@ describe("listExecutionPlanRevisions", () => {
       operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
     });
     await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: withDecision.plan.revision }

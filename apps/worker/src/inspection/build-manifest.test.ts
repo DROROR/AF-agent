@@ -271,3 +271,87 @@ describe("buildTemplateManifest - template text capture (leftover-template-copy 
     expect(placeholder?.originalTextTruncated).toBe(true);
   });
 });
+
+/**
+ * STAGE 4: every slot a client asset can land in carries a structural verdict.
+ * These use synthetic shapes only - a layer cut by a rendered matte, a plain
+ * un-matted image, a text line - never a real template's hierarchy.
+ */
+describe("buildTemplateManifest - slot semantics", () => {
+  const scan = (detail: Record<string, unknown>, footage?: Record<string, unknown>) => ({
+    kind: "AVLayer",
+    footage: footage ?? null,
+    detail
+  });
+
+  it("gives a top-level image layer a real verdict, fingerprints and a visible window", () => {
+    const scene = composition({
+      compositionId: "comp-1",
+      layers: [layer({ index: 1, name: "an image", layerKind: "AVLayer", footage: { hasVideo: false, hasAudio: false, isStill: true, isMissing: false, widthPx: 1600, heightPx: 900 }, enabled: true })]
+    });
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        compositions: [scene],
+        layerFactsByCompositionAndIndex: new Map([["comp-1:1", scan({ hasTrackMatte: false, threeDLayer: false, parentLayerIndex: null, inPointSeconds: 0, outPointSeconds: 4 })]])
+      }),
+      fixedNow
+    );
+
+    const placeholder = manifest.scenes[0]!.placeholders[0]!;
+    expect(placeholder.placeholderType).toBe("image");
+    expect(placeholder.slotSemantics?.classification).toBe("flat_card");
+    expect(placeholder.slotSemantics?.requiresHumanDecision).toBe(false);
+    expect(placeholder.slotFacts?.visibleWindowSeconds).toEqual({ startSeconds: 0, endSeconds: 4 });
+    expect(placeholder.slotFingerprint?.digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(placeholder.slotMutationFingerprint?.digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("classifies an image layer cut by a rendered matte and animated in 3D as a device screen", () => {
+    const scene = composition({
+      compositionId: "comp-1",
+      layers: [
+        layer({ index: 1, name: "screen", layerKind: "AVLayer", footage: { hasVideo: false, hasAudio: false, isStill: true, isMissing: false, widthPx: 1080, heightPx: 2160 }, enabled: true }),
+        layer({ index: 2, name: "hardware", layerKind: "AVLayer", footage: { hasVideo: true, hasAudio: false, isStill: false, isMissing: false, widthPx: 1080, heightPx: 2160 }, enabled: true })
+      ]
+    });
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        compositions: [scene],
+        layerFactsByCompositionAndIndex: new Map([
+          ["comp-1:1", scan({ hasTrackMatte: true, trackMatteLayerIndex: 2, threeDLayer: true, parentLayerIndex: 3, inPointSeconds: 0, outPointSeconds: 5 })],
+          ["comp-1:2", scan({ hasTrackMatte: true, trackMatteLayerIndex: 4 }, { hasVideo: true, isStill: false, isSolid: false })],
+          ["comp-1:3", scan({ hasTransformKeyframes: true })],
+          ["comp-1:4", scan({}, { hasVideo: true, isStill: false, isSolid: false })]
+        ])
+      }),
+      fixedNow
+    );
+
+    const screen = manifest.scenes[0]!.placeholders.find((placeholder) => placeholder.layerIndex === 1)!;
+    expect(screen.slotSemantics?.classification).toBe("device_screen");
+    expect(screen.slotFacts?.hosts[0]?.matteSource).toBe("RENDERED_FOOTAGE");
+  });
+
+  it("gives a text placeholder no slot verdict at all - a text line is not a window into anything", () => {
+    const scene = composition({
+      compositionId: "comp-1",
+      layers: [layer({ index: 1, name: "a headline", layerKind: "TextLayer", sourceText: "wording", enabled: true })]
+    });
+    const manifest = buildTemplateManifest(baseFacts({ compositions: [scene], layerFactsByCompositionAndIndex: new Map() }), fixedNow);
+    const placeholder = manifest.scenes[0]!.placeholders[0]!;
+    expect(placeholder.placeholderType).toBe("text");
+    expect(placeholder.slotFacts).toBeUndefined();
+    expect(placeholder.slotSemantics).toBeUndefined();
+  });
+
+  it("lowers confidence to a human decision when this worker build captured no scan at all", () => {
+    const scene = composition({
+      compositionId: "comp-1",
+      layers: [layer({ index: 1, name: "an image", layerKind: "AVLayer", footage: { hasVideo: false, hasAudio: false, isStill: true, isMissing: false, widthPx: 800, heightPx: 800 }, enabled: true })]
+    });
+    const manifest = buildTemplateManifest(baseFacts({ compositions: [scene] }), fixedNow);
+    const placeholder = manifest.scenes[0]!.placeholders[0]!;
+    expect(placeholder.slotSemantics?.requiresHumanDecision).toBe(true);
+    expect(placeholder.slotFacts?.hosts[0]?.matteSource).toBe("UNKNOWN");
+  });
+});

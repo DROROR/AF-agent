@@ -236,7 +236,7 @@ describe("execution plan lifecycle", () => {
     });
 
     const approved = await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: withDecision.plan.revision }
@@ -248,14 +248,14 @@ describe("execution plan lifecycle", () => {
   });
 
   it("refuses to approve when the plan's sourceProjectSha256 no longer matches the project's current manifest", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, project, assetRepository } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     // The client re-ran INSPECT_TEMPLATE and the project's manifest was replaced with a different source revision.
     await projectRepository.updateManifest(project.projectId, manifest("b".repeat(64)), NOW);
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
     ).rejects.toThrow(SourceShaMismatchError);
   });
 
@@ -269,7 +269,7 @@ describe("execution plan lifecycle", () => {
       operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
     });
     await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: withDecision.plan.revision }
@@ -299,11 +299,11 @@ describe("execution plan lifecycle", () => {
   });
 
   it("stale revision is rejected for approve/reject/reopen too, not just update", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, project, assetRepository } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 })
     ).rejects.toThrow(StaleExecutionPlanRevisionError);
     await expect(
       rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 2 })
@@ -314,11 +314,11 @@ describe("execution plan lifecycle", () => {
   });
 
   it("refuses to approve a plan with an unresolved scene marked for use - real backend enforcement, not just a UI restriction", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup(unresolvedManifest());
+    const { projectRepository, executionPlanRepository, assetRepository, project } = await setup(unresolvedManifest());
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
 
     const attempt = approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 1 }
@@ -345,7 +345,7 @@ describe("execution plan lifecycle", () => {
     expect(updated.plan.revision).toBe(2);
 
     const approved = await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: 2 }
@@ -363,7 +363,7 @@ describe("execution plan lifecycle", () => {
       operations: [{ type: "SET_TEXT", scenePlanId: sceneId, mappingId, text: "Real headline" }]
     });
     await approveExecutionPlan(
-      { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+      { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
       project.projectId,
       USER_ID,
       { baseRevision: withDecision.plan.revision }
@@ -371,7 +371,7 @@ describe("execution plan lifecycle", () => {
 
     await expect(
       approveExecutionPlan(
-        { executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
+        { executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES },
         project.projectId,
         USER_ID,
         { baseRevision: withDecision.plan.revision }
@@ -380,12 +380,12 @@ describe("execution plan lifecycle", () => {
   });
 
   it("refuses to approve a REJECTED plan - must be reopened to DRAFT first", async () => {
-    const { projectRepository, executionPlanRepository, project } = await setup();
+    const { projectRepository, executionPlanRepository, project, assetRepository } = await setup();
     await createExecutionPlan({ projectRepository, executionPlanRepository, now: fixedNow }, project.projectId);
     await rejectExecutionPlan({ executionPlanRepository, now: fixedNow }, project.projectId, { baseRevision: 1 });
 
     await expect(
-      approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
+      approveExecutionPlan({ executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 1 })
     ).rejects.toThrow(PreconditionNotMetError);
   });
 
@@ -406,7 +406,7 @@ describe("execution plan lifecycle", () => {
       ]
     });
 
-    await approveExecutionPlan({ executionPlanRepository, projectRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 });
+    await approveExecutionPlan({ executionPlanRepository, projectRepository, assetRepository, now: fixedNow, brandRulesConfig: PERMISSIVE_BRAND_RULES }, project.projectId, USER_ID, { baseRevision: 2 });
 
     const revisions = await executionPlanRepository.findAllByProjectId(project.projectId);
     const revisionOne = revisions.find((r) => r.revision === 1);
@@ -432,6 +432,7 @@ describe("execution plan lifecycle", () => {
         sha256: "a".repeat(64),
         width: null,
         height: null,
+        hasAlpha: null,
         durationSeconds: null,
         label: null,
         notes: null
@@ -463,6 +464,7 @@ describe("execution plan lifecycle", () => {
         sha256: "a".repeat(64),
         width: null,
         height: null,
+        hasAlpha: null,
         durationSeconds: null,
         label: null,
         notes: null

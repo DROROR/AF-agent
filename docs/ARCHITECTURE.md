@@ -372,3 +372,94 @@ that is when an operator most needs to know how things were left.
 | `INSPECT_RENDER_CAPABILITIES` | yes - and it now names the project to inspect; a request without one fails closed rather than reading whatever is open |
 | `VERIFY_RENDER_COMPOSITION` (RENDER / CREATE_PREVIEW pre-check) | yes - verifies a hash-identical copy, so the artifact aerender renders is never opened |
 | `RUN_DIAGNOSTIC`, `CHECK_HEALTH` | not applicable - they read logs, processes and health only, and open no project |
+
+## Slot semantics and fit (Stage 4)
+
+A template's image slots are not interchangeable. Some are DEVICE SCREENS - a
+window cut into a rendered phone/laptop pass, usually animated in 3D - and some
+are FLAT CARDS, decorative rectangles a designer drew. Dropping a logo into a
+phone screen, or a full app screenshot into a small decorative card, produces a
+video that renders perfectly and is completely wrong.
+
+Three questions are asked of every mapping that places an asset, by the same
+pure functions on both sides of the wire (`packages/schemas/src/slot-semantics.ts`
+and `slot-readiness.ts`):
+
+1. **What is this slot?** Classified from STRUCTURE only: nesting and host
+   depth, track-matte presence AND what the matte is made of, 3D state, whether
+   the host hangs off an animated parent, whether a pre-rendered beauty pass
+   covers the same region, dimensions, aspect ratio and transformed bounds.
+2. **Does this asset belong in it?** Judged from the declared role and measured
+   facts - never a filename. `AssetFacts` has no filename field by construction.
+3. **Will it actually look right?** The chosen fit (`contain` for a logo,
+   `cover` otherwise - the same rule dispatch executes) is simulated: scale,
+   coverage, crop, unused area and distortion.
+
+### Names never decide
+
+A layer called "Phone Screen" is weak supporting evidence and nothing more. The
+winning side and the confidence are computed from `structuralDevice`/
+`structuralFlat` - sums that contain no name-derived term. Name evidence is
+collected separately, shown to a human, and never added to those sums. A test
+flips every name in a fixture and asserts the classification and confidence are
+unchanged.
+
+### Confidence, and what happens when it is low
+
+`confidence = margin x mass`, versioned by `SLOT_SEMANTICS_MODEL_VERSION`.
+Evidence on BOTH sides above `CONFLICT_EVIDENCE_THRESHOLD` makes the verdict
+`conflicting`, which caps confidence below the threshold. Below
+`SLOT_CONFIDENCE_THRESHOLD`, unknown, or conflicting, the verdict
+`requiresHumanDecision` - and that BLOCKS plan approval, execution dispatch and
+the complete-preview gate. It is never a warning.
+
+### Which placeholders are judged
+
+Only visual slots: `image`, `video`, `logo`, `phone_screen`. A text line or a
+colour swatch is not a window into anything, so an asset attached to one is not
+judged here. `build-manifest.ts` and the readiness gate use the same rule, so a
+placeholder that gets no slot facts is never blocked waiting for a verdict that
+could not exist.
+
+### The evidence frame is mandatory
+
+Every low-confidence classification, compatibility conflict and unsafe fit
+requires a real captured frame before a decision can be recorded. The moment is
+the midpoint of the slot's own visible window (`selectEvidenceFrameSeconds`) -
+never the first frame of a layer, which is routinely mid-transition, and never a
+timestamp the browser chose: the dashboard names the MAPPING
+(`slotEvidenceMappingId`) and the server resolves the moment from that slot's
+structural facts, the same way every other addressing fact is server-resolved.
+Capture runs through the Stage 3 disposable-project wrapper like every other
+inspection.
+
+The API verifies the frame rather than trusting it: it must be this scene's most
+recent captured frame, from the source the plan is bound to, with a recorded
+capture moment inside the slot's visible window. A slot that never presents a
+provable visible moment cannot be decided at all - that is reported plainly
+instead of capturing a frame that shows nothing.
+
+### Decisions go stale
+
+A recorded decision carries a digest of exactly what was blocking
+(`slotEvidenceDigest`). A new, removed or changed finding produces a different
+digest, which makes the old decision stale rather than letting it silently cover
+something the reviewer never saw - the same rule as the leftover-template-copy
+gate, for the same reason.
+
+### Fingerprints fail closed at mutation time
+
+Each slot carries a versioned structural fingerprint and a narrower mutation
+fingerprint over the exact chain an edit traverses plus the slot's own geometry.
+Immediately before any `MAP_FOOTAGE`, the worker re-reads the live chain
+(`describeChainStructure`) and recomputes that digest. A layer inserted, a host
+reparented, a matte changed, a slot resized - anything that moves the structure -
+fails the operation closed. A slot in the scene's own composition is checked as a
+one-hop chain, not skipped.
+
+### Assets are measured, never assumed
+
+Dimensions and transparency come from the uploaded bytes
+(`apps/api/src/domain/asset/probe-image-facts.ts`: PNG including palette `tRNS`,
+JPEG, and all three WebP container shapes). What cannot be honestly measured -
+video, audio, documents - stays null, and null blocks rather than passing.

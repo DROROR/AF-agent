@@ -44,3 +44,27 @@ Worker log events (structured, with the disposable path):
 
 These three are the only states that leave a file behind, and each names the
 exact path an operator must deal with. Nothing is ever deleted by pattern.
+
+## Slot decisions (Stage 4)
+
+Every recorded slot decision is auditable on the plan revision itself
+(`mapping.slotReview`):
+
+- `decision` (`ACCEPT` / `OVERRIDE_CLASSIFICATION`) and, for an override, the
+  `classification` the reviewer asserts
+- `decidedBy` and `decidedAt` - an unattributable decision is refused, never
+  recorded anonymously
+- `evidenceDigest` - the exact findings the decision was made about, so a later
+  change makes it stale instead of silently carrying over
+- `evidenceFrameStorageKey` - the frame the reviewer was shown, verified against
+  the scene's real captured frame, its source sha256 and its capture moment
+
+The manifest carries the reasoning behind each verdict: `slotSemantics`
+(classification, confidence, conflicting, positive and negative evidence, and a
+plain-words reason when it requires a decision) and `slotFacts` (the structure
+it was derived from). Nothing is re-derived at read time, so an old plan can
+always be explained with the facts it was actually judged on.
+
+Captured evidence frames record `capturedAtSeconds` - WHERE in the composition's
+own timeline they show. A frame without it cannot back a slot decision, because
+nothing proves what it shows.

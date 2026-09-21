@@ -73,7 +73,7 @@ export async function uploadSceneEvidencePreview(
   if (!parsedPayload.success) {
     throw new JobConflictError(`Job ${jobId}'s own INSPECT_SCENE_EVIDENCE request payload could not be read - cannot attribute this preview to any scene`);
   }
-  const { manifestCompositionId, sourceProjectSha256, compositionName } = parsedPayload.data;
+  const { manifestCompositionId, sourceProjectSha256, compositionName, previewTimestampSeconds } = parsedPayload.data;
 
   if (input.buffer.length > deps.maxUploadBytes) {
     throw new PayloadTooLargeError(deps.maxUploadBytes);
@@ -98,7 +98,11 @@ export async function uploadSceneEvidencePreview(
         byteSize: stored.byteSize,
         storageKey: stored.storageKey,
         sha256: stored.sha256,
-        capturedAt: deps.now()
+        capturedAt: deps.now(),
+        // The moment this frame actually shows, taken from the job's own
+        // request - a reviewer's slot decision is bound to it, so it can
+        // never be a guess.
+        capturedAtSeconds: previewTimestampSeconds ?? null
       },
       deps.now()
     );

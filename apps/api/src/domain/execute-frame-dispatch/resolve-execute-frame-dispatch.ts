@@ -1,4 +1,5 @@
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
+import { describeSlotBlockers, findSlotBlockers } from "@dyo/schemas";
 import type {
   ExecuteSceneEditRequest,
   ExecutionSessionStatus,
@@ -268,6 +269,29 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     return { ok: false, reason: `Scene "${scenePlanId}" still contains unreviewed template copy: ${describeTemplateCopyBlockers(templateCopyBlockers).join(" | ")}` };
   }
 
+  // SLOT SEMANTICS AND FIT (Stage 4) block execution for the same reason: a
+  // plan approved before this gate existed must not quietly drop a logo into
+  // a phone screen or stretch a screenshot across a card.
+  const slotAssetFacts = new Map(
+    (projectAssets ?? []).map((asset) => [asset.id, { id: asset.id, widthPx: asset.width ?? null, heightPx: asset.height ?? null, hasAlpha: asset.hasAlpha ?? null }])
+  );
+  // An asset that has been DELETED is reported as deleted. The slot gate would
+  // otherwise describe it as "dimensions unknown" - true, but it sends a
+  // reviewer looking for a measurement problem instead of a missing file. The
+  // same refusal is repeated per operation below, for mappings this scene-wide
+  // check cannot see.
+  if (projectAssets !== undefined) {
+    const deleted = scene.mappings.find((mapping) => mapping.selectedAssetId !== null && !slotAssetFacts.has(mapping.selectedAssetId));
+    if (deleted) {
+      return { ok: false, reason: `Mapping "${deleted.id}"'s selected asset "${deleted.selectedAssetId}" no longer exists in this project's Asset Catalog` };
+    }
+  }
+
+  const slotBlockers = findSlotBlockers([scene], currentProjectManifest, slotAssetFacts);
+  if (slotBlockers.length > 0) {
+    return { ok: false, reason: `Scene "${scenePlanId}" has unresolved slot findings: ${describeSlotBlockers(slotBlockers).join(" | ")}` };
+  }
+
   const composition = currentProjectManifest.compositions.find((c) => c.compositionId === scene.manifestCompositionId);
   if (!composition) {
     return { ok: false, reason: `manifestCompositionId "${scene.manifestCompositionId}" does not match any composition in the current manifest` };
@@ -525,6 +549,9 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         assetId: asset.id,
         expectedSha256: asset.sha256,
         mimeType: asset.mimeType,
+        // Stage 4: the structure this slot had when the plan was approved. The
+        // worker re-reads it live and refuses to mutate if it has changed.
+        ...(placeholder.slotMutationFingerprint ? { expectedSlotFingerprint: placeholder.slotMutationFingerprint } : {}),
         ...logoFit(mapping)
       });
       approvedMappingIds.push(mapping.id);

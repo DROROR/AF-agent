@@ -8,14 +8,18 @@ import {
 } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
+import type { AssetRepository } from "../../domain/asset/types.js";
 import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
 import { validateBrandRules, type BrandRulesConfig } from "../../domain/brand-rules/validate-brand-rules.js";
 import { loadBrandRulesConfig } from "../../domain/brand-rules/brand-rules-config.js";
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../../domain/execution-plan/evaluate-template-copy.js";
+import { describeSlotBlockers, findSlotBlockers } from "@dyo/schemas";
 
 export interface ApproveExecutionPlanDeps {
   executionPlanRepository: ExecutionPlanRepository;
   projectRepository: ProjectRepository;
+  /** Stage 4: asset dimensions are part of judging whether an asset belongs in a slot and whether its fit renders correctly. */
+  assetRepository: AssetRepository;
   now: () => Date;
   /** Injectable for tests - defaults to reading the real dyo-brand-rules.yaml. */
   brandRulesConfig?: BrandRulesConfig;
@@ -86,6 +90,20 @@ export async function approveExecutionPlan(
     throw new PreconditionNotMetError(
       `Plan still contains unreviewed template copy: ${describeTemplateCopyBlockers(templateCopyBlockers).join(" | ")}`
     );
+  }
+
+  // SLOT SEMANTICS AND FIT (Stage 4): an image slot whose structural
+  // classification is uncertain, an asset that does not belong in the slot it
+  // is mapped to, or a fit that would stretch/over-crop/letterbox the result
+  // all block approval until a human records an explicit decision bound to
+  // those exact findings. Backend enforcement, so a direct API call cannot
+  // bypass the dashboard's own warnings.
+  const slotAssets = new Map(
+    (await deps.assetRepository.listByProjectId(projectId)).map((asset) => [asset.id, { id: asset.id, widthPx: asset.width, heightPx: asset.height, hasAlpha: asset.hasAlpha ?? null }])
+  );
+  const slotBlockers = findSlotBlockers(current.scenePlans, project.manifest, slotAssets);
+  if (slotBlockers.length > 0) {
+    throw new PreconditionNotMetError(`Plan has unresolved slot findings: ${describeSlotBlockers(slotBlockers).join(" | ")}`);
   }
 
   // Permanent DYO brand rules (CLAUDE.md) - a hard gate, not merely a

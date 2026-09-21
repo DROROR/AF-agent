@@ -2527,6 +2527,29 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
             // text itself was bounded above. This is what tells the worker a
             // slice-read is needed, and it is verified against the reassembled
             // text before any digest is trusted.
+            // Stage 4 slot semantics: geometry and animation facts. A host's
+            // own scale/rotation and whether its PARENT is animated are what
+            // distinguish a device screen driven by an animation helper from a
+            // static decorative card - structure, never a name.
+            scalePercent: __readNumberFact(function () {
+              var __scale = __layer.property("ADBE Transform Group").property("ADBE Scale").value;
+              return __scale && __scale.length >= 2 ? __scale[0] : null;
+            }),
+            scalePercentY: __readNumberFact(function () {
+              var __scale = __layer.property("ADBE Transform Group").property("ADBE Scale").value;
+              return __scale && __scale.length >= 2 ? __scale[1] : null;
+            }),
+            rotationDegrees: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Rotate Z").value; }),
+            hasTransformKeyframes: __readBooleanFact(function () {
+              var __group = __layer.property("ADBE Transform Group");
+              var __names = ["ADBE Position", "ADBE Scale", "ADBE Rotate Z", "ADBE Anchor Point"];
+              for (var __k = 0; __k < __names.length; __k++) {
+                var __prop = null;
+                try { __prop = __group.property(__names[__k]); } catch (__propError) { __prop = null; }
+                if (__prop && __prop.numKeys > 0) { return true; }
+              }
+              return false;
+            }),
             sourceTextCodeUnitLength: __readNumberFact(function () {
               if (!(__layer instanceof TextLayer)) { return null; }
               var __fullText = __layer.sourceText.value.text;
@@ -2989,6 +3012,77 @@ export function buildDescribeMissingFootageScript(): FixedJsxScript {
     __result = JSON.stringify({ ok: true, resultingValue: { footageItemsChecked: __checked, missing: __missing } });
   } catch (__unexpectedError) {
     __result = JSON.stringify({ ok: false, failureReason: "could not check footage resolution: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
+ * READ-ONLY: the live structural facts of one nested chain, immediately before
+ * an edit traverses it (Stage 4 fingerprint re-check).
+ *
+ * For each hop it reports the layer's 3D state, track-matte wiring, parent and
+ * transform - exactly the facts the stored mutation fingerprint was built
+ * from - plus the final target layer's own source size. The caller recomputes
+ * the digest from these and refuses to mutate when it differs, so an approved
+ * edit can never land on a layer whose structure has since changed.
+ *
+ * Reads only: layer properties and `source`. No setValue, no save, no undo
+ * group - it never enters one.
+ */
+export function buildDescribeChainStructureScript(steps: readonly ResolvedNestedTargetStep[]): FixedJsxScript {
+  const stepsLiteral = JSON.stringify(steps.map((step) => ({ compositionId: step.compositionId, aeProjectItemIndex: step.aeProjectItemIndex, layerIndex: step.layerIndex })));
+  const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
+  try {
+    var __steps = ${stepsLiteral};
+    var __hops = [];
+    var __targetWidth = null;
+    var __targetHeight = null;
+    var __comp = null;
+    for (var __s = 0; __s < __steps.length; __s++) {
+      var __step = __steps[__s];
+      if (__comp === null) {
+        var __item = app.project.item(__step.aeProjectItemIndex);
+        __comp = __item instanceof CompItem ? __item : null;
+      }
+      if (__comp === null) {
+        __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + " did not resolve to a composition" });
+        break;
+      }
+      var __layer = null;
+      try { __layer = __comp.layer(__step.layerIndex); } catch (__layerError) { __layer = null; }
+      if (__layer === null) {
+        __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + " has no layer at index " + __step.layerIndex });
+        break;
+      }
+      var __read = function (__fn) { try { var __v = __fn(); return __v === undefined ? null : __v; } catch (__readError) { return null; } };
+      var __scale = __read(function () { var __v = __layer.property("ADBE Transform Group").property("ADBE Scale").value; return __v && __v.length >= 1 ? __v[0] : null; });
+      __hops.push({
+        compositionId: __step.compositionId,
+        layerIndex: __step.layerIndex,
+        threeDLayer: __read(function () { return __layer.threeDLayer === true; }),
+        hasTrackMatte: __read(function () { return __layer.hasTrackMatte === true; }),
+        trackMatteType: __read(function () { return __layer.trackMatteType === undefined || __layer.trackMatteType === null ? null : String(__layer.trackMatteType); }),
+        parentLayerIndex: __read(function () { return __layer.parent ? __layer.parent.index : null; }),
+        scalePercent: __scale,
+        rotationDegrees: __read(function () { return __layer.property("ADBE Transform Group").property("ADBE Rotate Z").value; })
+      });
+      if (__s === __steps.length - 1) {
+        __targetWidth = __read(function () { return __layer.source ? __layer.source.width : null; });
+        __targetHeight = __read(function () { return __layer.source ? __layer.source.height : null; });
+      } else {
+        __comp = __read(function () { return __layer.source instanceof CompItem ? __layer.source : null; });
+        if (__comp === null) {
+          __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + " does not reference a composition" });
+          break;
+        }
+      }
+    }
+    if (__result === null) {
+      __result = JSON.stringify({ ok: true, resultingValue: { hops: __hops, targetWidthPx: __targetWidth, targetHeightPx: __targetHeight } });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "could not read the chain's live structure: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
   }
   return __result;`;
   return script as FixedJsxScript;

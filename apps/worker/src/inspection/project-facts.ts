@@ -1,3 +1,4 @@
+import type { ScannedSlotLayer } from "./build-slot-facts.js";
 import type { TextCaptureStatus, TextVerification } from "@dyo/schemas";
 /**
  * Structural facts about an AE project, as they would be extracted by a
@@ -148,4 +149,11 @@ export interface ProjectFacts {
   footageReferenced: readonly string[];
   missingFootage: readonly MissingFootageFact[];
   pluginReferences: readonly string[];
+  /**
+   * The project-wide scan this was built from, keyed `comp-<id>:<layerIndex>`
+   * (Stage 4). Carried through so slot semantics can read the geometry, matte
+   * and animation facts of layers OTHER than the slot itself - its hosts, its
+   * mattes and its siblings. Absent when no scan completed.
+   */
+  layerFactsByCompositionAndIndex?: ReadonlyMap<string, ScannedSlotLayer> | undefined;
 }

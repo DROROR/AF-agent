@@ -5,6 +5,7 @@ import type { AssetRepository } from "../../domain/asset/types.js";
 import type { AssetStorage } from "../../domain/asset-storage/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
 import { extensionForMime, resolveMediaKindForUpload } from "../../domain/asset/mime-allowlist.js";
+import { probeImageFacts } from "../../domain/asset/probe-image-facts.js";
 import { toAssetDto } from "./asset-dto-mapper.js";
 
 export interface UploadAssetDeps {
@@ -51,6 +52,12 @@ export async function uploadAsset(deps: UploadAssetDeps, projectId: string, inpu
     throw new UnsupportedMediaTypeError(`Unsupported file type: ${input.mimeType}`);
   }
 
+  // Measured from the bytes that were actually uploaded, before anything is
+  // stored - the slot gate refuses to judge fit or compatibility from a
+  // filename, so these are the only dimensions/transparency facts this system
+  // ever has. A format this host cannot honestly measure stays null.
+  const measured = probeImageFacts(input.buffer, input.mimeType);
+
   const stored = await deps.assetStorage.store({ projectId, buffer: input.buffer, extension });
 
   try {
@@ -64,8 +71,9 @@ export async function uploadAsset(deps: UploadAssetDeps, projectId: string, inpu
         mimeType: input.mimeType,
         byteSize: stored.byteSize,
         sha256: stored.sha256,
-        width: null,
-        height: null,
+        width: measured?.widthPx ?? null,
+        height: measured?.heightPx ?? null,
+        hasAlpha: measured?.hasAlpha ?? null,
         durationSeconds: null,
         label: null,
         notes: null
