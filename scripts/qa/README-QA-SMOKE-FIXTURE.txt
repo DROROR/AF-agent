@@ -33,22 +33,22 @@ Run in PowerShell on the worker machine. Extract it into EXACTLY this folder -
 the script refuses to run from anywhere else, so the footage can never end up
 somewhere other than beside the project:
 
-  scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-8f3568a.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
+  scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-75bcd90.zip "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip"
   $e="<SHA-256 from the release notes>"
   $a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" -Algorithm SHA256).Hash.ToLower()
   if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
-   New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-8f3568a" | Out-Null
-   Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-8f3568a" -Force
-   Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-8f3568a" | Select-Object FullName, Length
+   New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-75bcd90" | Out-Null
+   Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-Fixture.zip" "C:\DYO-Agent\qa\smoke-75bcd90" -Force
+   Get-ChildItem -Recurse "C:\DYO-Agent\qa\smoke-75bcd90" | Select-Object FullName, Length
   }
 
 Expected afterwards:
-  C:\DYO-Agent\qa\smoke-8f3568a\build-qa-smoke-project.jsx
-  C:\DYO-Agent\qa\smoke-8f3568a\README-QA-SMOKE-FIXTURE.txt
-  C:\DYO-Agent\qa\smoke-8f3568a\footage\hardware-pass.png
-  C:\DYO-Agent\qa\smoke-8f3568a\footage\screenshot.png
-  C:\DYO-Agent\qa\smoke-8f3568a\footage\logo.png
-  C:\DYO-Agent\qa\smoke-8f3568a\footage\hardware-pass-sequence\hardware-pass_0000.png
+  C:\DYO-Agent\qa\smoke-75bcd90\build-qa-smoke-project.jsx
+  C:\DYO-Agent\qa\smoke-75bcd90\README-QA-SMOKE-FIXTURE.txt
+  C:\DYO-Agent\qa\smoke-75bcd90\footage\hardware-pass.png
+  C:\DYO-Agent\qa\smoke-75bcd90\footage\screenshot.png
+  C:\DYO-Agent\qa\smoke-75bcd90\footage\logo.png
+  C:\DYO-Agent\qa\smoke-75bcd90\footage\hardware-pass-sequence\hardware-pass_0000.png
   ... through hardware-pass_0011.png (12 frames)
 
 
@@ -58,29 +58,29 @@ STEP 2 - BUILD THE QA PROJECT IN AFTER EFFECTS
    empty project panel. If a project is open, close it yourself first
    (File > Close Project). The script will not close, save or discard anything.
 2. File > Scripts > Run Script File...
-3. Choose  C:\DYO-Agent\qa\smoke-8f3568a\build-qa-smoke-project.jsx
-4. It creates C:\DYO-Agent\qa\smoke-8f3568a\QA-Smoke.aep, saves it, closes it,
+3. Choose  C:\DYO-Agent\qa\smoke-75bcd90\build-qa-smoke-project.jsx
+4. It creates C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep, saves it, closes it,
    and leaves After Effects blank again. It tells you so in a dialog.
 
 If it refuses, it says exactly why and changes nothing. The refusals are:
   - a saved project is open;
   - there are unsaved changes;
   - the untitled project is not empty;
-  - the script is not running from C:\DYO-Agent\qa\smoke-8f3568a;
+  - the script is not running from C:\DYO-Agent\qa\smoke-75bcd90;
   - QA-Smoke.aep already exists there;
   - a footage file or the hardware-pass-sequence folder is missing;
   - After Effects imported the sequence as a still (the matte-source check
     below would then be meaningless, so it stops rather than build it).
 
 Do not re-run it over an existing QA-Smoke.aep. To start again, delete the whole
-C:\DYO-Agent\qa\smoke-8f3568a folder and extract the ZIP again.
+C:\DYO-Agent\qa\smoke-75bcd90 folder and extract the ZIP again.
 
 
 STEP 3 - RECORD THE FIXTURE HASH, THEN RUN THE SMOKE TEST
 ----------------------------------------------------------
 Before any job touches it:
 
-  Get-FileHash "C:\DYO-Agent\qa\smoke-8f3568a\QA-Smoke.aep" -Algorithm SHA256
+  Get-FileHash "C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep" -Algorithm SHA256
 
 Keep that value. The whole point of the first smoke-test step is that the hash
 is IDENTICAL afterwards - inspections work on a disposable copy, never on the

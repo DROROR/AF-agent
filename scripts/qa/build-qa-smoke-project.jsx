@@ -10,7 +10,7 @@
  *     project panel. If anything is open it STOPS and changes nothing - it
  *     never closes, saves or discards someone else's project, and it never
  *     answers a "Save changes?" prompt.
- *   - It creates exactly one file: C:\DYO-Agent\qa\smoke-8f3568a\QA-Smoke.aep.
+ *   - It creates exactly one file: C:\DYO-Agent\qa\smoke-75bcd90\QA-Smoke.aep.
  *     It refuses if that file already exists.
  *   - It imports ONLY the footage shipped beside this script, by relative
  *     position, so the project and its footage live in the same folder - which
@@ -23,7 +23,7 @@
  */
 (function () {
   // The one folder this script is allowed to touch. Not a parameter.
-  var QA_ROOT = "C:\\DYO-Agent\\qa\\smoke-8f3568a";
+  var QA_ROOT = "C:\\DYO-Agent\\qa\\smoke-75bcd90";
   var PROJECT_PATH = QA_ROOT + "\\QA-Smoke.aep";
   var FOOTAGE_NAMES = ["hardware-pass.png", "screenshot.png", "logo.png"];
   // The MOVING hardware pass: a numbered PNG sequence. After Effects imports
@@ -92,7 +92,7 @@
     stop(
       "QA-Smoke.aep already exists:\n  " +
         existing.fsName +
-        "\n\nThis script never overwrites it. Delete the whole smoke-8f3568a folder, extract the fixture again, and re-run - so the test never reuses an earlier run's state."
+        "\n\nThis script never overwrites it. Delete the whole smoke-75bcd90 folder, extract the fixture again, and re-run - so the test never reuses an earlier run's state."
     );
   }
 

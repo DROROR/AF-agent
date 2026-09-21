@@ -2,6 +2,15 @@
 
 Build commit: `8f3568a104a6dfb5c14a0497710058249ea9256f` (branch `main`).
 
+> **Superseded in part by the 2026-09-21 matte-source correction
+> (`75bcd90`).** After Effects reports `hasVideo` for a still image as well as
+> a movie, so a still matte was read as a rendered hardware pass. The rule now
+> checks `isStill` first, and the classifier's model version moved to
+> `slot-semantics-v2`. That changes the worker AND the shared schemas, so the
+> API and dashboard must be redeployed at `75bcd90` and the worker must be
+> updated from the replacement package below. The worker ZIP and QA fixture
+> published for `8f3568a` are superseded - do not install or use them.
+
 Everything below was produced from that exact commit. Server components are
 deployed; the Windows worker is packaged and published but **deliberately not
 installed** - the operator installs it.
@@ -125,6 +134,4 @@ previous API build runs unchanged against the current schema.
   Revision 5 exists.
 - The first real AE smoke test uses a purpose-built disposable QA project -
   see `AE-SMOKE-TEST-8f3568a.md`. Its fixture is published alongside the worker
-  package: `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-8f3568a.zip`
-  (43,935 bytes, sha256
-  `7be65d6ae3ef4567d09c0fdec87f0737341d26acba2f0c6adeba2617a99f2a78`).
+  package - see the corrected artifacts in `RELEASE-75bcd90.md`.
