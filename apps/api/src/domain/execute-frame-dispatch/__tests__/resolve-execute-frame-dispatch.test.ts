@@ -211,7 +211,12 @@ function validAsset(overrides: Partial<AssetRecord> = {}): AssetRecord {
     sha256: "b".repeat(64),
     width: 800,
     height: 600,
-    hasAlpha: null,
+    hasAlphaChannel: null,
+    pixelAnalysis: null,
+    hasTransparentPixels: null,
+    transparentPixelRatio: null,
+    visibleCoverageRatio: null,
+    visibleContentBounds: null,
     durationSeconds: null,
     label: null,
     notes: null,
@@ -377,7 +382,7 @@ describe("resolveExecuteFrameDispatch - slot semantics and fit block EXECUTION, 
     const result = resolveExecuteFrameDispatch(
       baseInput({
         currentProjectManifest: manifestWithSlot(screenFacts),
-        projectAssets: [validAsset({ width: 1080, height: 2160, hasAlpha: true })],
+        projectAssets: [validAsset({ width: 1080, height: 2160, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7 })],
         currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping({ selectedAssetType: "logo" })] })] })
       })
     );
@@ -415,7 +420,16 @@ describe("resolveExecuteFrameDispatch - slot semantics and fit block EXECUTION, 
         scene,
         mapping: scene.mappings[0]!,
         manifest,
-        asset: { id: asset.id, widthPx: asset.width, heightPx: asset.height, hasAlpha: asset.hasAlpha }
+        asset: {
+          id: asset.id,
+          widthPx: asset.width,
+          heightPx: asset.height,
+          hasAlphaChannel: asset.hasAlphaChannel,
+          hasTransparentPixels: asset.hasTransparentPixels,
+          transparentPixelRatio: asset.transparentPixelRatio,
+          visibleCoverageRatio: asset.visibleCoverageRatio,
+          visibleContentBounds: asset.visibleContentBounds
+        }
       })
     );
     const decided = resolveExecuteFrameDispatch(

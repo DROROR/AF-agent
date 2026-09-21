@@ -8,7 +8,9 @@ import type { CompositionFact } from "./project-facts.js";
  */
 export interface ScannedSlotLayer {
   kind?: string | undefined;
-  footage?: { hasVideo?: boolean; isStill?: boolean; isSolid?: boolean } | null | undefined;
+  /** AE's own switch for this layer. False means nothing it contains renders at all. */
+  enabled?: boolean | undefined;
+  footage?: { hasVideo?: boolean; isStill?: boolean; isSolid?: boolean; widthPx?: number | null; heightPx?: number | null } | null | undefined;
   detail?:
     | {
         hasTrackMatte?: boolean | null | undefined;
@@ -20,7 +22,15 @@ export interface ScannedSlotLayer {
         inPointSeconds?: number | null | undefined;
         outPointSeconds?: number | null | undefined;
         scalePercent?: number | null | undefined;
+        scalePercentY?: number | null | undefined;
         rotationDegrees?: number | null | undefined;
+        /** Effective-visibility facts (2026-09-21). Unread stays undefined - unknown, never false. */
+        opacityAtInPoint?: number | null | undefined;
+        opacityKeyframes?: readonly { timeSeconds: number; valuePercent: number }[] | null | undefined;
+        positionX?: number | null | undefined;
+        positionY?: number | null | undefined;
+        anchorX?: number | null | undefined;
+        anchorY?: number | null | undefined;
       }
     | null
     | undefined;
@@ -142,7 +152,70 @@ function hasSiblingPreRenderedPass(input: SlotFactsInput, compositionId: string,
   return sawAnyScannedSibling ? false : null;
 }
 
-/** Assembles the full structural picture of one slot, including every host that pulls it in. */
+/**
+ * Whether a host's rendered rectangle reaches its composition's frame at all.
+ *
+ * A slot parked far outside the frame is not on screen no matter what its
+ * in/out points say, and an evidence frame taken then shows an empty canvas.
+ * Computed from position, anchor and scale against the composition's own size;
+ * null - unknown, never false - the moment any of those is unread, and for a 3D
+ * layer, whose on-screen position depends on a camera this scan does not read.
+ */
+function computeInFrame(
+  detail: NonNullable<ScannedSlotLayer["detail"]>,
+  composition: CompositionFact | undefined,
+  contentWidthPx: number | null,
+  contentHeightPx: number | null
+): boolean | null {
+  if (!composition || composition.widthPx === null || composition.heightPx === null || detail.threeDLayer === true) {
+    return null;
+  }
+  const { positionX, positionY, anchorX, anchorY, scalePercent } = detail;
+  const scaleY = detail.scalePercentY ?? scalePercent;
+  if (
+    typeof positionX !== "number" ||
+    typeof positionY !== "number" ||
+    typeof anchorX !== "number" ||
+    typeof anchorY !== "number" ||
+    typeof scalePercent !== "number" ||
+    typeof scaleY !== "number" ||
+    contentWidthPx === null ||
+    contentHeightPx === null
+  ) {
+    return null;
+  }
+  const renderedWidth = (contentWidthPx * scalePercent) / 100;
+  const renderedHeight = (contentHeightPx * scaleY) / 100;
+  const left = positionX - (anchorX * scalePercent) / 100;
+  const top = positionY - (anchorY * scaleY) / 100;
+  return left < composition.widthPx && top < composition.heightPx && left + renderedWidth > 0 && top + renderedHeight > 0;
+}
+
+/**
+ * The facts that decide whether a host is EFFECTIVELY visible, and when: its
+ * own switch, its in/out window, its opacity over time, and whether its
+ * rectangle reaches the frame. Every one is null when the scan did not read it,
+ * so an older worker build lowers certainty instead of hiding a slot.
+ */
+function visibilityFacts(
+  scanned: ScannedSlotLayer | undefined,
+  detail: ScannedSlotLayer["detail"],
+  composition: CompositionFact | undefined,
+  contentWidthPx: number | null,
+  contentHeightPx: number | null
+): Pick<SlotHostFacts, "enabled" | "windowSeconds" | "opacityPercentAtInPoint" | "opacityKeyframes" | "inFrame"> {
+  const start = detail?.inPointSeconds;
+  const end = detail?.outPointSeconds;
+  return {
+    enabled: typeof scanned?.enabled === "boolean" ? scanned.enabled : null,
+    windowSeconds: typeof start === "number" && typeof end === "number" && end > start ? { startSeconds: start, endSeconds: end } : null,
+    opacityPercentAtInPoint: detail?.opacityAtInPoint ?? null,
+    opacityKeyframes: detail?.opacityKeyframes ? detail.opacityKeyframes.map((keyframe) => ({ ...keyframe })) : null,
+    inFrame: detail ? computeInFrame(detail, composition, contentWidthPx, contentHeightPx) : null
+  };
+}
+
+/** Assembles the full structural picture of one slot, including every host that pulls it in. *//** Assembles the full structural picture of one slot, including every host that pulls it in. *//** Assembles the full structural picture of one slot, including every host that pulls it in. */
 export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralFacts {
   const compositionById = new Map(input.compositions.map((composition) => [composition.compositionId, composition]));
   const slotLayer = input.slotComposition.layers.find((layer) => layer.index === input.slotLayerIndex);
@@ -173,7 +246,8 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
       parentIsAnimated: selfParentIndex === null ? null : (selfParentScanned?.detail?.hasTransformKeyframes ?? null),
       siblingPreRenderedPass: hasSiblingPreRenderedPass(input, input.slotComposition.compositionId, input.slotLayerIndex, input.slotComposition),
       scalePercent: selfDetail?.scalePercent ?? null,
-      rotationDegrees: selfDetail?.rotationDegrees ?? null
+      rotationDegrees: selfDetail?.rotationDegrees ?? null,
+      ...visibilityFacts(scannedSelf, selfDetail, input.slotComposition, slotLayer?.footage?.widthPx ?? input.slotComposition.widthPx, slotLayer?.footage?.heightPx ?? input.slotComposition.heightPx)
     });
   }
 
@@ -205,7 +279,10 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
         parentIsAnimated: parentLayerIndex === null ? null : (parentScanned?.detail?.hasTransformKeyframes ?? null),
         siblingPreRenderedPass: hasSiblingPreRenderedPass(input, composition.compositionId, child.layerIndex, compositionById.get(composition.compositionId)),
         scalePercent: detail?.scalePercent ?? null,
-        rotationDegrees: detail?.rotationDegrees ?? null
+        rotationDegrees: detail?.rotationDegrees ?? null,
+        // A host places the WHOLE slot composition, so its rendered size is
+        // that composition's own size.
+        ...visibilityFacts(scanned, detail, composition, input.slotComposition.widthPx, input.slotComposition.heightPx)
       });
     }
   }
@@ -230,14 +307,18 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
     }
   }
 
-  // WHEN this slot is on screen, for the evidence frame a human must see. The
-  // first host that reports usable in/out points defines it; an unreadable
-  // window stays null rather than becoming a guessed timestamp.
+  // The raw window, kept only so a consumer that predates host-level
+  // visibility facts still has something to read. The moment an evidence frame
+  // is actually taken at comes from computeEffectiveVisibility, which reads the
+  // per-host switches, opacity and in-frame bounds recorded above - timing
+  // alone never decides it.
   let visibleWindowSeconds: SlotStructuralFacts["visibleWindowSeconds"] = null;
   for (const host of hosts) {
-    const scanned = scannedLayer(input, host.compositionId, host.layerIndex);
-    const start = scanned?.detail?.inPointSeconds;
-    const end = scanned?.detail?.outPointSeconds;
+    if (host.enabled === false || host.inFrame === false) {
+      continue;
+    }
+    const start = host.windowSeconds?.startSeconds;
+    const end = host.windowSeconds?.endSeconds;
     if (typeof start === "number" && typeof end === "number" && end > start) {
       visibleWindowSeconds = { startSeconds: start, endSeconds: end };
       break;

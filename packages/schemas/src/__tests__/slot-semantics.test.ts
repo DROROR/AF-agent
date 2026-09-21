@@ -6,9 +6,11 @@ import {
   assessAssetSlotCompatibility,
   assessFit,
   classifySlotSemantics,
+  computeEffectiveVisibility,
   computeSlotFingerprint,
   selectEvidenceFrameSeconds,
   slotFingerprintsMatch,
+  type AssetFacts,
   type SlotHostFacts,
   type SlotStructuralFacts
 } from "../slot-semantics.js";
@@ -280,66 +282,83 @@ describe("computeSlotFingerprint", () => {
   });
 });
 
+/**
+ * Asset facts with the transparency facts kept apart the way the real probe
+ * reports them: `hasAlphaChannel` is what the FILE can carry, and
+ * `hasTransparentPixels`/`transparentPixelRatio` are what its PIXELS actually
+ * contain. `undefined` for the pixel facts models "could not be decoded".
+ */
+function asset(overrides: Partial<AssetFacts> & { declaredRole: string | null; widthPx: number | null; heightPx: number | null }): AssetFacts {
+  return {
+    hasAlphaChannel: false,
+    hasTransparentPixels: false,
+    transparentPixelRatio: 0,
+    visibleCoverageRatio: 1,
+    visibleContentBounds: null,
+    ...overrides
+  };
+}
+
 describe("assessAssetSlotCompatibility", () => {
   const deviceSlot = { classification: "device_screen" as const, widthPx: 1200, heightPx: 2600 };
   const cardSlot = { classification: "flat_card" as const, widthPx: 1600, heightPx: 900 };
 
   it("accepts a screenshot-shaped image in a device screen", () => {
-    const result = assessAssetSlotCompatibility(deviceSlot, { declaredRole: "image", widthPx: 1170, heightPx: 2532, hasAlpha: false });
+    const result = assessAssetSlotCompatibility(deviceSlot, asset({ declaredRole: "image", widthPx: 1170, heightPx: 2532 }));
     expect(result.status).toBe("COMPATIBLE");
     expect(result.requiresHumanDecision).toBe(false);
   });
 
   it("blocks a logo mapped into a device screen", () => {
-    const result = assessAssetSlotCompatibility(deviceSlot, { declaredRole: "logo", widthPx: 800, heightPx: 800, hasAlpha: true });
+    const result = assessAssetSlotCompatibility(deviceSlot, asset({ declaredRole: "logo", widthPx: 800, heightPx: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7, visibleCoverageRatio: 0.3 }));
     expect(result.status).toBe("CONFLICT");
     expect(result.findings.map((finding) => finding.code)).toContain("LOGO_INTO_DEVICE_SCREEN");
     expect(result.requiresHumanDecision).toBe(true);
   });
 
   it("blocks a transparent asset in a device screen, whatever its declared role", () => {
-    const result = assessAssetSlotCompatibility(deviceSlot, { declaredRole: "image", widthPx: 1170, heightPx: 2532, hasAlpha: true });
+    const result = assessAssetSlotCompatibility(deviceSlot, asset({ declaredRole: "image", widthPx: 1170, heightPx: 2532, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.4, visibleCoverageRatio: 0.6 }));
     expect(result.findings.map((finding) => finding.code)).toContain("TRANSPARENT_ASSET_INTO_DEVICE_SCREEN");
     expect(result.requiresHumanDecision).toBe(true);
   });
 
   it("blocks a full-bleed screenshot dropped into a decorative card", () => {
-    const result = assessAssetSlotCompatibility(cardSlot, { declaredRole: "image", widthPx: 1170, heightPx: 2532, hasAlpha: false });
+    const result = assessAssetSlotCompatibility(cardSlot, asset({ declaredRole: "image", widthPx: 1170, heightPx: 2532 }));
     expect(result.findings.map((finding) => finding.code)).toContain("SCREENSHOT_INTO_FLAT_CARD");
     expect(result.requiresHumanDecision).toBe(true);
   });
 
   it("accepts a logo with transparency in a flat card", () => {
-    const result = assessAssetSlotCompatibility(cardSlot, { declaredRole: "logo", widthPx: 1400, heightPx: 800, hasAlpha: true });
+    const result = assessAssetSlotCompatibility(cardSlot, asset({ declaredRole: "logo", widthPx: 1400, heightPx: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.5, visibleCoverageRatio: 0.5 }));
     expect(result.status).toBe("COMPATIBLE");
   });
 
   it("reports a notable aspect mismatch without blocking, and a severe one by blocking", () => {
-    const notable = assessAssetSlotCompatibility(cardSlot, { declaredRole: "logo", widthPx: 1200, heightPx: 900, hasAlpha: true });
+    const notable = assessAssetSlotCompatibility(cardSlot, asset({ declaredRole: "logo", widthPx: 1200, heightPx: 900, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.5, visibleCoverageRatio: 0.5 }));
     expect(notable.findings.some((finding) => finding.code === "ASPECT_MISMATCH")).toBe(true);
     expect(notable.status).toBe("COMPATIBLE");
 
-    const severe = assessAssetSlotCompatibility(cardSlot, { declaredRole: "logo", widthPx: 400, heightPx: 2000, hasAlpha: true });
+    const severe = assessAssetSlotCompatibility(cardSlot, asset({ declaredRole: "logo", widthPx: 400, heightPx: 2000, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.5, visibleCoverageRatio: 0.5 }));
     expect(severe.findings.some((finding) => finding.code === "SEVERE_ASPECT_MISMATCH")).toBe(true);
     expect(severe.status).toBe("CONFLICT");
   });
 
   it("is UNVERIFIABLE - and blocking - when the role or the dimensions are unknown", () => {
-    expect(assessAssetSlotCompatibility(deviceSlot, { declaredRole: null, widthPx: 100, heightPx: 100, hasAlpha: false }).status).toBe("UNVERIFIABLE");
-    expect(assessAssetSlotCompatibility(deviceSlot, { declaredRole: "image", widthPx: null, heightPx: null, hasAlpha: false }).status).toBe("UNVERIFIABLE");
-    expect(assessAssetSlotCompatibility(deviceSlot, { declaredRole: "image", widthPx: null, heightPx: null, hasAlpha: false }).requiresHumanDecision).toBe(true);
+    expect(assessAssetSlotCompatibility(deviceSlot, asset({ declaredRole: null, widthPx: 100, heightPx: 100 })).status).toBe("UNVERIFIABLE");
+    expect(assessAssetSlotCompatibility(deviceSlot, asset({ declaredRole: "image", widthPx: null, heightPx: null })).status).toBe("UNVERIFIABLE");
+    expect(assessAssetSlotCompatibility(deviceSlot, asset({ declaredRole: "image", widthPx: null, heightPx: null })).requiresHumanDecision).toBe(true);
   });
 
   it("cannot be influenced by a filename - it never receives one", () => {
     // Structural guarantee: AssetFacts has no filename field at all, so a
     // caller cannot pass one even by accident.
-    const facts = { declaredRole: "logo", widthPx: 800, heightPx: 800, hasAlpha: true } as const;
+    const facts = asset({ declaredRole: "logo", widthPx: 800, heightPx: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7, visibleCoverageRatio: 0.3 });
     expect(Object.keys(facts)).not.toContain("filename");
     expect(assessAssetSlotCompatibility(deviceSlot, facts).status).toBe("CONFLICT");
   });
 
   it("does not judge an unknown slot by guessing - it reports only what it can measure", () => {
-    const result = assessAssetSlotCompatibility({ classification: "unknown", widthPx: 1000, heightPx: 1000 }, { declaredRole: "logo", widthPx: 900, heightPx: 900, hasAlpha: true });
+    const result = assessAssetSlotCompatibility({ classification: "unknown", widthPx: 1000, heightPx: 1000 }, asset({ declaredRole: "logo", widthPx: 900, heightPx: 900, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.5 }));
     expect(result.status).toBe("COMPATIBLE");
     expect(result.findings.some((finding) => finding.code === "LOGO_INTO_DEVICE_SCREEN")).toBe(false);
   });
@@ -420,5 +439,201 @@ describe("selectEvidenceFrameSeconds", () => {
 
   it("refuses a window with no duration - a slot on screen for zero seconds shows nothing", () => {
     expect(selectEvidenceFrameSeconds(slot({ visibleWindowSeconds: { startSeconds: 3, endSeconds: 3 } }))).toBeNull();
+  });
+});
+
+/**
+ * 2026-09-21 CORRECTION: transparency is a fact about PIXELS, never about the
+ * container. An alpha channel is a capability; a screenshot exported as RGBA is
+ * opaque, and a palette image can declare a transparent colour it never uses.
+ */
+describe("assessAssetSlotCompatibility - alpha capability never stands in for transparency", () => {
+  const deviceSlot = { classification: "device_screen" as const, widthPx: 1200, heightPx: 2600 };
+  const cardSlot = { classification: "flat_card" as const, widthPx: 1600, heightPx: 900 };
+
+  const opaqueRgba = {
+    declaredRole: "image",
+    widthPx: 1170,
+    heightPx: 2532,
+    hasAlphaChannel: true,
+    hasTransparentPixels: false,
+    transparentPixelRatio: 0,
+    visibleCoverageRatio: 1,
+    visibleContentBounds: null
+  } as const;
+
+  it("accepts a fully opaque RGBA screenshot in a device screen - the alpha channel alone proves nothing", () => {
+    const result = assessAssetSlotCompatibility(deviceSlot, opaqueRgba);
+    expect(result.findings.map((finding) => finding.code)).not.toContain("TRANSPARENT_ASSET_INTO_DEVICE_SCREEN");
+    expect(result.requiresHumanDecision).toBe(false);
+    expect(result.status).toBe("COMPATIBLE");
+  });
+
+  it("reports the unused alpha channel as evidence, without blocking on it", () => {
+    const finding = assessAssetSlotCompatibility(deviceSlot, opaqueRgba).findings.find((candidate) => candidate.code === "ALPHA_CHANNEL_UNUSED");
+    expect(finding?.blocking).toBe(false);
+  });
+
+  it("treats a fully opaque RGBA screenshot as a screenshot in a decorative card, exactly like a JPEG", () => {
+    const codes = assessAssetSlotCompatibility(cardSlot, { ...opaqueRgba, widthPx: 1600, heightPx: 900 }).findings.map((finding) => finding.code);
+    expect(codes).toContain("SCREENSHOT_INTO_FLAT_CARD");
+  });
+
+  it("ignores incidental transparency - a few antialiased edge pixels are not a see-through background", () => {
+    const roundedCorners = { ...opaqueRgba, hasTransparentPixels: true, transparentPixelRatio: 0.004, visibleCoverageRatio: 0.996 };
+    const result = assessAssetSlotCompatibility(deviceSlot, roundedCorners);
+    expect(result.findings.map((finding) => finding.code)).not.toContain("TRANSPARENT_ASSET_INTO_DEVICE_SCREEN");
+    expect(result.requiresHumanDecision).toBe(false);
+  });
+
+  it("still blocks a genuinely see-through asset in a device screen, and says how much of it is see-through", () => {
+    const logo = { ...opaqueRgba, declaredRole: "logo", hasTransparentPixels: true, transparentPixelRatio: 0.82, visibleCoverageRatio: 0.18 };
+    const finding = assessAssetSlotCompatibility(deviceSlot, logo).findings.find((candidate) => candidate.code === "TRANSPARENT_ASSET_INTO_DEVICE_SCREEN");
+    expect(finding?.blocking).toBe(true);
+    expect(finding?.detail).toContain("82%");
+  });
+
+  it("refuses to guess when the pixels could not be decoded - unknown is neither opaque nor transparent", () => {
+    const undecoded = { ...opaqueRgba, hasTransparentPixels: null, transparentPixelRatio: null, visibleCoverageRatio: null };
+    const result = assessAssetSlotCompatibility(deviceSlot, undecoded);
+    expect(result.status).toBe("UNVERIFIABLE");
+    expect(result.requiresHumanDecision).toBe(true);
+    const codes = result.findings.map((finding) => finding.code);
+    expect(codes).toContain("ASSET_TRANSPARENCY_UNKNOWN");
+    // It does not silently take either side while doing so.
+    expect(codes).not.toContain("TRANSPARENT_ASSET_INTO_DEVICE_SCREEN");
+    expect(codes).not.toContain("SCREENSHOT_INTO_FLAT_CARD");
+  });
+
+  it("does not demand a transparency answer where transparency could not change anything", () => {
+    // A decorative card looks intentional with or without transparency, so an
+    // asset whose pixels could not be decoded - a video frame, a format this
+    // host cannot read - is not held up over it.
+    const undecoded = { ...opaqueRgba, hasTransparentPixels: null, transparentPixelRatio: null, visibleCoverageRatio: null };
+    for (const declaredRole of ["logo", "image"]) {
+      const result = assessAssetSlotCompatibility(cardSlot, { ...undecoded, declaredRole, widthPx: 1400, heightPx: 800 });
+      expect(result.findings.map((finding) => finding.code)).not.toContain("ASSET_TRANSPARENCY_UNKNOWN");
+      expect(result.status).toBe("COMPATIBLE");
+    }
+  });
+});
+
+describe("assessFit - coverage follows the visible content, not the file's box", () => {
+  const slot = { widthPx: 1000, heightPx: 1000 };
+
+  it("flags a logo that fills the slot on paper but is mostly transparent padding", () => {
+    const fit = assessFit({
+      slot,
+      // The file is slot-shaped, but only a small block in the middle of it is
+      // actually drawn.
+      asset: { widthPx: 1000, heightPx: 1000, visibleContentBounds: { xPx: 400, yPx: 400, widthPx: 200, heightPx: 200 } },
+      mode: "cover"
+    });
+    expect(fit.slotCoveragePercent).toBeCloseTo(100, 6);
+    expect(fit.visibleContentCoveragePercent).toBeCloseTo(4, 6);
+    expect(fit.flags).toContain("LARGE_TRANSPARENT_PADDING");
+    expect(fit.flags).toContain("LARGE_UNUSED_AREA");
+    expect(fit.safe).toBe(false);
+    expect(fit.reason).toContain("only 4%");
+  });
+
+  it("does not punish cropping that only cuts transparent padding away", () => {
+    const fit = assessFit({
+      slot: { widthPx: 1000, heightPx: 1000 },
+      // Twice as tall as the slot: half the FILE is cut away, but its drawn
+      // content sits in the band that survives a cover fit, so nothing a
+      // viewer would see is lost.
+      asset: { widthPx: 1000, heightPx: 2000, visibleContentBounds: { xPx: 0, yPx: 550, widthPx: 1000, heightPx: 900 } },
+      mode: "cover"
+    });
+    expect(fit.assetCroppedPercent).toBeCloseTo(50, 6);
+    expect(fit.visibleContentCroppedPercent).toBeCloseTo(0, 6);
+    expect(fit.visibleContentCoveragePercent).toBeCloseTo(90, 6);
+    expect(fit.flags).not.toContain("EXCESSIVE_CROP");
+    expect(fit.flags).not.toContain("LARGE_UNUSED_AREA");
+    expect(fit.safe).toBe(true);
+  });
+
+  it("still reports a slot left half empty by the asset's own drawn content", () => {
+    const fit = assessFit({
+      slot: { widthPx: 1000, heightPx: 1000 },
+      asset: { widthPx: 1000, heightPx: 2000, visibleContentBounds: { xPx: 0, yPx: 750, widthPx: 1000, heightPx: 500 } },
+      mode: "cover"
+    });
+    expect(fit.visibleContentCoveragePercent).toBeCloseTo(50, 6);
+    expect(fit.flags).toContain("LARGE_UNUSED_AREA");
+    expect(fit.flags).not.toContain("EXCESSIVE_CROP");
+  });
+
+  it("still measures the file's own box when the content bounds were never measured", () => {
+    const fit = assessFit({ slot, asset: { widthPx: 1000, heightPx: 1000 }, mode: "cover" });
+    expect(fit.visibleContentCoveragePercent).toBeNull();
+    expect(fit.visibleContentCroppedPercent).toBeNull();
+    expect(fit.safe).toBe(true);
+  });
+});
+
+/**
+ * Evidence-frame selection is about EFFECTIVE visibility: a layer inside its
+ * in/out points can still be switched off, held at zero opacity, or sitting
+ * entirely outside the frame.
+ */
+describe("computeEffectiveVisibility / selectEvidenceFrameSeconds", () => {
+  const visibleHost = (overrides: Partial<SlotHostFacts> = {}): SlotHostFacts =>
+    host({ enabled: true, inFrame: true, windowSeconds: { startSeconds: 2, endSeconds: 6 }, opacityPercentAtInPoint: 100, ...overrides });
+
+  it("picks the middle of the window a host is genuinely visible in", () => {
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [visibleHost()] }))).toBe(4);
+  });
+
+  it("ignores a host that is switched off, and one whose rectangle never reaches the frame", () => {
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [visibleHost({ enabled: false })] }))).toBeNull();
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [visibleHost({ inFrame: false })] }))).toBeNull();
+  });
+
+  it("refuses a host held at zero opacity for its whole window", () => {
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [visibleHost({ opacityPercentAtInPoint: 0 })] }))).toBeNull();
+  });
+
+  it("skips a fade and lands in the part that is actually opaque", () => {
+    const faded = visibleHost({
+      windowSeconds: { startSeconds: 0, endSeconds: 10 },
+      opacityPercentAtInPoint: 0,
+      opacityKeyframes: [
+        { timeSeconds: 0, valuePercent: 0 },
+        { timeSeconds: 2, valuePercent: 100 },
+        { timeSeconds: 8, valuePercent: 100 },
+        { timeSeconds: 10, valuePercent: 0 }
+      ]
+    });
+    const window = computeEffectiveVisibility(slot({ hosts: [faded] }));
+    // Visible from the moment it crosses the threshold on the way up to the
+    // moment it crosses it on the way down - never the midpoint of 0..10 alone.
+    expect(window!.startSeconds).toBeGreaterThan(0);
+    expect(window!.endSeconds).toBeLessThan(10);
+    const at = selectEvidenceFrameSeconds(slot({ hosts: [faded] }))!;
+    expect(at).toBeGreaterThan(2);
+    expect(at).toBeLessThan(8);
+  });
+
+  it("prefers the longest genuinely-visible window when a slot has several hosts", () => {
+    const brief = visibleHost({ compositionId: "comp-brief", windowSeconds: { startSeconds: 0, endSeconds: 1 } });
+    const long = visibleHost({ compositionId: "comp-long", windowSeconds: { startSeconds: 10, endSeconds: 20 } });
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [brief, long] }))).toBe(15);
+  });
+
+  it("treats unread visibility facts as unknown rather than as invisible", () => {
+    const unread = host({ windowSeconds: { startSeconds: 4, endSeconds: 8 } });
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [unread] }))).toBe(6);
+  });
+
+  it("falls back to a manifest written before host visibility facts existed", () => {
+    const legacy = slot({ hosts: [host({})], visibleWindowSeconds: { startSeconds: 1, endSeconds: 3 } });
+    expect(selectEvidenceFrameSeconds(legacy)).toBe(2);
+  });
+
+  it("reports no provable moment when nothing offers one", () => {
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [], visibleWindowSeconds: null }))).toBeNull();
+    expect(selectEvidenceFrameSeconds(slot({ hosts: [visibleHost({ windowSeconds: { startSeconds: 3, endSeconds: 3 } })] }))).toBeNull();
   });
 });

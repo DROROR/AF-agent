@@ -73,7 +73,12 @@ export async function uploadAsset(deps: UploadAssetDeps, projectId: string, inpu
         sha256: stored.sha256,
         width: measured?.widthPx ?? null,
         height: measured?.heightPx ?? null,
-        hasAlpha: measured?.hasAlpha ?? null,
+        hasAlphaChannel: measured?.hasAlphaChannel ?? null,
+        pixelAnalysis: measured?.pixelAnalysis ?? null,
+        hasTransparentPixels: measured?.hasTransparentPixels ?? null,
+        transparentPixelRatio: measured?.transparentPixelRatio ?? null,
+        visibleCoverageRatio: measured?.visibleCoverageRatio ?? null,
+        visibleContentBounds: measured?.visibleContentBounds ?? null,
         durationSeconds: null,
         label: null,
         notes: null

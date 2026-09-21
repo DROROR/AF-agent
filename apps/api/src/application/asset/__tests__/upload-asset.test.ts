@@ -54,7 +54,7 @@ describe("uploadAsset", () => {
 
   it("measures real dimensions and transparency from the uploaded bytes", async () => {
     const { projectRepository, assetRepository, assetStorage, project } = await setup();
-    const buffer = realImageBytes("pngRgba");
+    const buffer = realImageBytes("pngTransparentLogo");
     const asset = await uploadAsset(
       { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
       project.projectId,
@@ -63,9 +63,41 @@ describe("uploadAsset", () => {
       { originalFilename: "1920x1080-opaque-banner.png", mimeType: "image/png", buffer, requestedMediaKind: null }
     );
 
-    expect(asset.width).toBe(9);
-    expect(asset.height).toBe(18);
-    expect(asset.hasAlpha).toBe(true);
+    expect(asset.width).toBe(20);
+    expect(asset.height).toBe(20);
+    // The file CAN carry transparency, and its pixels actually use it - two
+    // separate facts, both recorded.
+    expect(asset.hasAlphaChannel).toBe(true);
+    expect(asset.hasTransparentPixels).toBe(true);
+    expect(asset.transparentPixelRatio).toBeCloseTo(1 - 64 / 400, 6);
+    expect(asset.visibleContentBounds).toEqual({ xPx: 6, yPx: 6, widthPx: 8, heightPx: 8 });
+  });
+
+  it("records an opaque RGBA screenshot as opaque, although its file carries an alpha channel", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const asset = await uploadAsset(
+      { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
+      project.projectId,
+      { originalFilename: "screenshot.png", mimeType: "image/png", buffer: realImageBytes("pngOpaqueRgba"), requestedMediaKind: null }
+    );
+
+    expect(asset.hasAlphaChannel).toBe(true);
+    expect(asset.hasTransparentPixels).toBe(false);
+    expect(asset.transparentPixelRatio).toBe(0);
+    expect(asset.visibleCoverageRatio).toBe(1);
+  });
+
+  it("records a WebP that declares alpha as UNKNOWN, since its pixels cannot be decoded here", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const asset = await uploadAsset(
+      { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
+      project.projectId,
+      { originalFilename: "logo.webp", mimeType: "image/webp", buffer: realImageBytes("webpOpaqueWithAlphaCapability"), requestedMediaKind: null }
+    );
+
+    expect(asset.hasAlphaChannel).toBe(true);
+    expect(asset.hasTransparentPixels).toBeNull();
+    expect(asset.transparentPixelRatio).toBeNull();
   });
 
   it("records an opaque JPEG as measured and opaque, not as unmeasured", async () => {
@@ -73,12 +105,13 @@ describe("uploadAsset", () => {
     const asset = await uploadAsset(
       { assetRepository, assetStorage, projectRepository, maxUploadBytes: 10_000, now: fixedNow },
       project.projectId,
-      { originalFilename: "photo.jpg", mimeType: "image/jpeg", buffer: realImageBytes("jpeg"), requestedMediaKind: null }
+      { originalFilename: "photo.jpg", mimeType: "image/jpeg", buffer: realImageBytes("jpegOpaque"), requestedMediaKind: null }
     );
 
-    expect(asset.width).toBe(8);
-    expect(asset.height).toBe(8);
-    expect(asset.hasAlpha).toBe(false);
+    expect(asset.width).toBe(9);
+    expect(asset.height).toBe(7);
+    expect(asset.hasAlphaChannel).toBe(false);
+    expect(asset.hasTransparentPixels).toBe(false);
   });
 
   it("leaves dimensions unmeasured rather than guessing when the bytes cannot be read", async () => {
@@ -93,7 +126,8 @@ describe("uploadAsset", () => {
 
     expect(asset.width).toBeNull();
     expect(asset.height).toBeNull();
-    expect(asset.hasAlpha).toBeNull();
+    expect(asset.hasAlphaChannel).toBeNull();
+    expect(asset.hasTransparentPixels).toBeNull();
   });
 
   it("never derives a storage path/name from the client's original filename - two uploads with the IDENTICAL filename never collide or overwrite", async () => {

@@ -324,7 +324,16 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
       asset:
         selectedAsset === null
           ? null
-          : { id: selectedAsset.id, widthPx: selectedAsset.width, heightPx: selectedAsset.height, hasAlpha: selectedAsset.hasAlpha ?? null }
+          : {
+              id: selectedAsset.id,
+              widthPx: selectedAsset.width,
+              heightPx: selectedAsset.height,
+              hasAlphaChannel: selectedAsset.hasAlphaChannel ?? null,
+              hasTransparentPixels: selectedAsset.hasTransparentPixels ?? null,
+              transparentPixelRatio: selectedAsset.transparentPixelRatio ?? null,
+              visibleCoverageRatio: selectedAsset.visibleCoverageRatio ?? null,
+              visibleContentBounds: selectedAsset.visibleContentBounds ?? null
+            }
     });
   }
 
@@ -504,9 +513,13 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                   decisionIsStale={recorded !== null && recorded.evidenceDigest !== currentDigest}
                   choice={mapping.slotDecision}
                   onChoose={(choice) => {
-                    const next = [...mappings];
-                    next[index] = { ...mapping, slotDecision: choice };
-                    setMappings(next);
+                    // A functional update that touches only this field: the
+                    // panel reports its evidence frame asynchronously, and
+                    // writing back a copy captured at render time would drop
+                    // that frame - leaving a decision the API then refuses.
+                    setMappings((current) =>
+                      current.map((entry) => (entry.mappingId === mapping.mappingId ? { ...entry, slotDecision: choice } : entry))
+                    );
                   }}
                   onEvidenceFrame={(storageKey) => {
                     // Returns the SAME array when nothing changed: a new array

@@ -221,14 +221,28 @@ belongs in it, and whether the fit will render correctly:
   `computeSlotMutationFingerprint` - names excluded; a rename is not a
   structural change and must not fail an approved plan.
 - `assessAssetSlotCompatibility(slot, asset)` - `AssetFacts` has NO filename
-  field. Blocking codes: `LOGO_INTO_DEVICE_SCREEN`,
-  `TRANSPARENT_ASSET_INTO_DEVICE_SCREEN`, `SCREENSHOT_INTO_FLAT_CARD`,
+  field, and keeps `hasAlphaChannel` (capability) apart from
+  `hasTransparentPixels` / `transparentPixelRatio` (measured pixels) and
+  `visibleCoverageRatio` / `visibleContentBounds` (where the content is).
+  Blocking codes: `LOGO_INTO_DEVICE_SCREEN`,
+  `TRANSPARENT_ASSET_INTO_DEVICE_SCREEN` (only above
+  `SIGNIFICANT_TRANSPARENCY_RATIO`), `ASSET_TRANSPARENCY_UNKNOWN` (pixels could
+  not be decoded and the slot is a device screen), `SCREENSHOT_INTO_FLAT_CARD`,
   `SEVERE_ASPECT_MISMATCH`, `ROLE_UNDECLARED`, `ASSET_DIMENSIONS_UNKNOWN`.
+  `ALPHA_CHANNEL_UNUSED` is reported non-blocking, as evidence.
 - `assessFit({ slot, asset, mode })` - scale per axis, slot coverage, cropped
-  percent, unused area, distortion, and the flags `EXCESSIVE_CROP`,
-  `LARGE_UNUSED_AREA`, `DISTORTED`, `DIMENSIONS_UNKNOWN`.
-- `selectEvidenceFrameSeconds(facts)` - the midpoint of the visible window, or
-  null when the slot never presents a provable visible moment.
+  percent, unused area, distortion, plus `visibleContentCoveragePercent` and
+  `visibleContentCroppedPercent` measured from the asset's own visible content
+  when it is known. Flags: `EXCESSIVE_CROP`, `LARGE_UNUSED_AREA`, `DISTORTED`,
+  `LARGE_TRANSPARENT_PADDING`, `DIMENSIONS_UNKNOWN`. Crop and coverage are
+  judged on the visible content, so cropping transparent padding is not a
+  finding and a mostly-padding asset is.
+- `computeEffectiveVisibility(facts)` / `selectEvidenceFrameSeconds(facts)` -
+  the window a slot is genuinely on screen (host enabled, rectangle in frame,
+  opacity above `MIN_VISIBLE_OPACITY_PERCENT`) and its midpoint, or null when no
+  host presents a provable visible moment. `slotHostFactsSchema` carries the
+  facts this reads: `enabled`, `windowSeconds`, `opacityPercentAtInPoint`,
+  `opacityKeyframes` and `inFrame`, each null when unread.
 - `slotReviewRecordSchema` - `{ decision, classification, decidedBy, decidedAt,
   evidenceDigest, evidenceFrameStorageKey }`.
 
@@ -246,7 +260,9 @@ Manifest and plan carry these as OPTIONAL fields - `slotFacts`,
 A manifest with no slot facts for a visual slot blocks and names re-inspection
 as the fix.
 
-`assetDtoSchema` gains optional `hasAlpha` (measured from the uploaded bytes;
-null = never measured), and `sceneEvidencePreviewDtoSchema` gains optional
+`assetDtoSchema` gains optional `hasAlphaChannel`, `hasTransparentPixels`,
+`transparentPixelRatio`, `visibleCoverageRatio` and `visibleContentBounds`
+(measured from the uploaded bytes; a null pixel fact means "could not be
+decoded", never "opaque"), and `sceneEvidencePreviewDtoSchema` gains optional
 `capturedAtSeconds` and `storageKey` - the two facts that make a captured frame
 usable as evidence for a specific slot.

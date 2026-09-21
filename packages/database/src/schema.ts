@@ -462,13 +462,24 @@ export const assets = pgTable(
     width: integer("width"),
     height: integer("height"),
     /**
-     * Whether this asset's own encoding carries transparency, measured from
-     * the uploaded bytes (probe-image-facts.ts) - never from its filename or
-     * its declared MIME type. NULL means genuinely not measured (a video, or
-     * an upload that predates measurement), which the slot gate reports as
-     * unknown rather than treating as opaque.
+     * MEASURED IMAGE FACTS (probe-image-facts.ts) - never read from a filename
+     * or a declared MIME type, and never from each other.
+     *
+     * `hasAlphaChannel` is what the FILE can carry; `hasTransparentPixels` and
+     * `transparentPixelRatio` are what its PIXELS actually contain, and are
+     * NULL when the pixels could not be decoded (a WebP that declares alpha, a
+     * video, an upload predating measurement). The slot gate treats that null
+     * as "unknown - a human must confirm", never as opaque and never as
+     * transparent. `visibleCoverageRatio`/`visibleContentBounds` say where the
+     * non-transparent content actually sits, so transparent padding is never
+     * mistaken for content.
      */
-    hasAlpha: boolean("has_alpha"),
+    hasAlphaChannel: boolean("has_alpha_channel"),
+    pixelAnalysis: text("pixel_analysis"),
+    hasTransparentPixels: boolean("has_transparent_pixels"),
+    transparentPixelRatio: doublePrecision("transparent_pixel_ratio"),
+    visibleCoverageRatio: doublePrecision("visible_coverage_ratio"),
+    visibleContentBounds: jsonb("visible_content_bounds").$type<{ xPx: number; yPx: number; widthPx: number; heightPx: number }>(),
     durationSeconds: doublePrecision("duration_seconds"),
     label: text("label"),
     notes: text("notes"),

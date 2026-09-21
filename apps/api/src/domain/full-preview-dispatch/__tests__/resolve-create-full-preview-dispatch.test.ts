@@ -175,7 +175,7 @@ describe("resolveCreateFullPreviewDispatch - second leftover-template-copy gate"
 });
 
 describe("resolveCreateFullPreviewDispatch - second slot-semantics and fit gate", () => {
-  const SCREEN_ASSET = { id: "asset-1", width: 1080, height: 2160, hasAlpha: false };
+  const SCREEN_ASSET = { id: "asset-1", width: 1080, height: 2160, hasAlphaChannel: false, hasTransparentPixels: false, transparentPixelRatio: 0, visibleCoverageRatio: 1 };
 
   function manifestWithSlot(facts: NonNullable<Parameters<typeof imagePlaceholderFixture>[0]["slotFacts"]>) {
     const base = manifestFixture([]);
@@ -205,7 +205,7 @@ describe("resolveCreateFullPreviewDispatch - second slot-semantics and fit gate"
     const result = resolveCreateFullPreviewDispatch(
       baseInput({
         currentProjectManifest: manifestWithSlot(deviceScreenSlotFacts()),
-        projectAssets: [{ id: "asset-logo", width: 800, height: 800, hasAlpha: true }],
+        projectAssets: [{ id: "asset-logo", width: 800, height: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7, visibleCoverageRatio: 0.3 }],
         currentPlan: validPlan({ scenePlans: [sceneWith({ id: "ph-1", selectedAssetId: "asset-logo", selectedAssetType: "logo" })] })
       })
     );

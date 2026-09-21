@@ -452,7 +452,21 @@ describe("SceneEditDrawer - slot findings", () => {
         },
         [`/api/projects/${PROJECT_ID}/assets`]: {
           status: 200,
-          body: { assets: [assetFixture({ mediaKind: "LOGO", width: 800, height: 800, hasAlpha: true })] }
+          body: {
+            assets: [
+              assetFixture({
+                mediaKind: "LOGO",
+                width: 800,
+                height: 800,
+                // Measured facts: the file carries an alpha channel AND its
+                // pixels actually use it - a genuine see-through logo.
+                hasAlphaChannel: true,
+                hasTransparentPixels: true,
+                transparentPixelRatio: 0.74,
+                visibleCoverageRatio: 0.26
+              })
+            ]
+          }
         },
         [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture([screenPlaceholder]) } },
         "/api/dashboard/status": { status: 200, body: { workers: [], jobs: [], summary: {} } }
@@ -471,7 +485,7 @@ describe("SceneEditDrawer - slot findings", () => {
     );
 
     await screen.findByText("This slot needs a decision");
-    expect(screen.getByText(/transparent background/)).toBeTruthy();
+    expect(screen.getByText(/74% of this asset is see-through/)).toBeTruthy();
     await screen.findByText(/No evidence frame has been captured/);
     expect((screen.getByRole("button", { name: "Accept - I looked, this is right" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "It is a flat card" }) as HTMLButtonElement).disabled).toBe(true);

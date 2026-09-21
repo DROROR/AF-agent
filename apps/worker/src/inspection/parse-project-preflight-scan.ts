@@ -83,7 +83,13 @@ const layerDetailSchema = z
     scalePercent: z.number().nullable().optional(),
     scalePercentY: z.number().nullable().optional(),
     rotationDegrees: z.number().nullable().optional(),
-    hasTransformKeyframes: z.boolean().nullable().optional()
+    hasTransformKeyframes: z.boolean().nullable().optional(),
+    /** Stage 4 follow-up: effective-visibility facts. Optional in the same way - an older worker build simply does not report them, and they are then unknown rather than false. */
+    positionX: z.number().nullable().optional(),
+    positionY: z.number().nullable().optional(),
+    anchorX: z.number().nullable().optional(),
+    anchorY: z.number().nullable().optional(),
+    opacityKeyframes: z.array(z.object({ timeSeconds: z.number(), valuePercent: z.number() }).strict()).nullable().optional()
   })
   .strict();
 

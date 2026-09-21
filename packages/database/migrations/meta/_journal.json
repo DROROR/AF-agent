@@ -176,6 +176,20 @@
       "when": 1789969012966,
       "tag": "0024_clumsy_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789974579360,
+      "tag": "0025_cynical_proudstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789974585759,
+      "tag": "0026_glossy_toro",
+      "breakpoints": true
     }
   ]
 }

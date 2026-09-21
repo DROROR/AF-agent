@@ -103,7 +103,16 @@ export async function updateExecutionPlan(
     }
     slotManifest = project.manifest;
     slotAssets = new Map(
-      (await deps.assetRepository.listByProjectId(projectId)).map((asset) => [asset.id, { id: asset.id, widthPx: asset.width, heightPx: asset.height, hasAlpha: asset.hasAlpha ?? null }])
+      (await deps.assetRepository.listByProjectId(projectId)).map((asset) => [asset.id, {
+        id: asset.id,
+        widthPx: asset.width,
+        heightPx: asset.height,
+        hasAlphaChannel: asset.hasAlphaChannel ?? null,
+        hasTransparentPixels: asset.hasTransparentPixels ?? null,
+        transparentPixelRatio: asset.transparentPixelRatio ?? null,
+        visibleCoverageRatio: asset.visibleCoverageRatio ?? null,
+        visibleContentBounds: asset.visibleContentBounds ?? null
+      }])
     );
   }
 

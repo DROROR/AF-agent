@@ -1,4 +1,4 @@
-import { assessAssetSlotCompatibility, assessFit, selectEvidenceFrameSeconds, SLOT_SEMANTICS_MODEL_VERSION, type AssetSlotCompatibility, type FitAssessment, type FitMode, type SlotSemanticsResult } from "./slot-semantics.js";
+import { assessAssetSlotCompatibility, assessFit, computeEffectiveVisibility, selectEvidenceFrameSeconds, SLOT_SEMANTICS_MODEL_VERSION, type AssetSlotCompatibility, type FitAssessment, type FitMode, type SlotSemanticsResult } from "./slot-semantics.js";
 import { sha256Hex } from "./text-digest.js";
 import type { Placeholder, TemplateManifest } from "./template-manifest.js";
 import type { PlaceholderMapping, ScenePlanEntry } from "./execution-plan.js";
@@ -63,8 +63,13 @@ export interface SlotAssetFacts {
   id: string;
   widthPx: number | null;
   heightPx: number | null;
-  /** Measured, not inferred. Null when nothing has measured it - alpha-dependent checks then simply do not fire. */
-  hasAlpha: boolean | null;
+  /** What the FILE can carry. Evidence only - it never decides anything on its own. */
+  hasAlphaChannel: boolean | null;
+  /** What the PIXELS actually contain. Null means unmeasured, which blocks for a human to confirm rather than defaulting either way. */
+  hasTransparentPixels: boolean | null;
+  transparentPixelRatio: number | null;
+  visibleCoverageRatio: number | null;
+  visibleContentBounds: { xPx: number; yPx: number; widthPx: number; heightPx: number } | null;
 }
 
 /**
@@ -189,7 +194,10 @@ export function assessMappingSlot(params: {
   // never presents a provable visible moment, which the reasons below say
   // plainly rather than capturing an arbitrary frame.
   const evidenceFrameAtSeconds = slotFacts === null ? null : selectEvidenceFrameSeconds(slotFacts);
-  const evidenceFrameWindowSeconds = evidenceFrameAtSeconds === null ? null : (slotFacts?.visibleWindowSeconds ?? null);
+  // The window a captured frame must fall inside to prove anything: the one the
+  // slot is EFFECTIVELY visible in (enabled, on screen, at a visible opacity),
+  // not merely its in/out points.
+  const evidenceFrameWindowSeconds = slotFacts === null ? null : computeEffectiveVisibility(slotFacts);
 
   if (semantics.requiresHumanDecision) {
     blockers.push({
@@ -208,7 +216,16 @@ export function assessMappingSlot(params: {
   const slotSize = { widthPx: slotFacts?.widthPx ?? null, heightPx: slotFacts?.heightPx ?? null };
   const compatibility = assessAssetSlotCompatibility(
     { classification: semantics.classification, ...slotSize },
-    { declaredRole: mapping.selectedAssetType, widthPx: asset?.widthPx ?? null, heightPx: asset?.heightPx ?? null, hasAlpha: asset?.hasAlpha ?? null }
+    {
+      declaredRole: mapping.selectedAssetType,
+      widthPx: asset?.widthPx ?? null,
+      heightPx: asset?.heightPx ?? null,
+      hasAlphaChannel: asset?.hasAlphaChannel ?? null,
+      hasTransparentPixels: asset?.hasTransparentPixels ?? null,
+      transparentPixelRatio: asset?.transparentPixelRatio ?? null,
+      visibleCoverageRatio: asset?.visibleCoverageRatio ?? null,
+      visibleContentBounds: asset?.visibleContentBounds ?? null
+    }
   );
   if (compatibility.requiresHumanDecision) {
     blockers.push({
@@ -224,7 +241,11 @@ export function assessMappingSlot(params: {
     });
   }
 
-  const fit = assessFit({ slot: slotSize, asset: { widthPx: asset?.widthPx ?? null, heightPx: asset?.heightPx ?? null }, mode: fitModeForRole(mapping.selectedAssetType) });
+  const fit = assessFit({
+    slot: slotSize,
+    asset: { widthPx: asset?.widthPx ?? null, heightPx: asset?.heightPx ?? null, visibleContentBounds: asset?.visibleContentBounds ?? null },
+    mode: fitModeForRole(mapping.selectedAssetType)
+  });
   if (!fit.safe) {
     blockers.push({
       ...base,

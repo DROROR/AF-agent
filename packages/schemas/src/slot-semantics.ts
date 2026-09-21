@@ -72,7 +72,23 @@ export const slotHostFactsSchema = z
     siblingPreRenderedPass: z.boolean().nullable(),
     /** Uniform scale percent applied to the slot by this host, when readable. */
     scalePercent: z.number().nullable(),
-    rotationDegrees: z.number().nullable()
+    rotationDegrees: z.number().nullable(),
+    /**
+     * EFFECTIVE VISIBILITY (2026-09-21 correction). A layer being inside its
+     * in/out points does not mean anything of it is on screen: it can be
+     * switched off, held at zero opacity, or positioned entirely outside the
+     * frame. These are what an evidence frame's moment is actually chosen
+     * from. Every one is null when unread - never assumed.
+     */
+    enabled: z.boolean().nullable().optional(),
+    /** This host's own in/out points, in its composition's timeline. */
+    windowSeconds: z.object({ startSeconds: z.number(), endSeconds: z.number() }).nullable().optional(),
+    /** Opacity at the host's in point, 0..100. */
+    opacityPercentAtInPoint: z.number().nullable().optional(),
+    /** Opacity keyframes, bounded - what tells a zero-opacity hold apart from a visible one. */
+    opacityKeyframes: z.array(z.object({ timeSeconds: z.number(), valuePercent: z.number() }).strict()).nullable().optional(),
+    /** Whether this host's rendered rectangle intersects its composition's frame at all. False means nothing of the slot is on screen through this host. */
+    inFrame: z.boolean().nullable().optional()
   })
   .strict();
 export type SlotHostFacts = z.infer<typeof slotHostFactsSchema>;
@@ -96,10 +112,9 @@ export const slotStructuralFactsSchema = z
     /** The slot's rendered size in the top-level composition after every host transform, when computable. */
     transformedBounds: z.object({ widthPx: z.number().positive(), heightPx: z.number().positive() }).nullable(),
     /**
-     * When this slot is genuinely on screen, in the scene's own timeline.
-     * Null when no host reported usable in/out points - an evidence frame then
-     * cannot be produced at a moment that proves anything, which is itself
-     * reported rather than papered over with a guessed timestamp.
+     * A host's raw in/out window, kept for manifests written before host-level
+     * visibility facts existed. `computeEffectiveVisibility` prefers the
+     * per-host facts above and only falls back to this.
      */
     visibleWindowSeconds: z.object({ startSeconds: z.number().nonnegative(), endSeconds: z.number().nonnegative() }).nullable().optional()
   })
@@ -358,8 +373,28 @@ export const assetFactsSchema = z
     declaredRole: z.string().nullable(),
     widthPx: z.number().positive().nullable(),
     heightPx: z.number().positive().nullable(),
-    /** Whether the file genuinely carries an alpha channel, measured - null when unread. */
-    hasAlpha: z.boolean().nullable()
+    /**
+     * Whether the file's ENCODING can carry transparency. Evidence only - it
+     * never decides anything, because an opaque screenshot exported as RGBA
+     * and a palette image declaring a colour it never uses both set this.
+     */
+    hasAlphaChannel: z.boolean().nullable(),
+    /**
+     * Whether the picture ACTUALLY contains non-opaque pixels, measured by
+     * decoding them. Null means the pixels could not be decoded - which is
+     * neither "opaque" nor "transparent", and is resolved by a human rather
+     * than by an assumption.
+     */
+    hasTransparentPixels: z.boolean().nullable(),
+    /** The fraction of pixels that are not fully opaque, 0..1. Null when not measured. */
+    transparentPixelRatio: z.number().min(0).max(1).nullable(),
+    /** The fraction of the image that is visibly present, 0..1. Null when not measured. */
+    visibleCoverageRatio: z.number().min(0).max(1).nullable(),
+    /** Where the visible content actually sits inside the image, so transparent padding is not mistaken for content. Null when not measured. */
+    visibleContentBounds: z
+      .object({ xPx: z.number().nonnegative(), yPx: z.number().nonnegative(), widthPx: z.number().positive(), heightPx: z.number().positive() })
+      .strict()
+      .nullable()
   })
   .strict();
 export type AssetFacts = z.infer<typeof assetFactsSchema>;
@@ -383,6 +418,13 @@ export type AssetSlotCompatibility = z.infer<typeof assetSlotCompatibilitySchema
 
 /** Beyond this, the asset and the slot are shaped so differently that any fit does something drastic. */
 const SEVERE_ASPECT_MISMATCH = 0.6;
+/**
+ * Below this share of see-through pixels, transparency is incidental - the
+ * antialiased edge of a rounded screenshot corner, a stray soft edge - and is
+ * not a transparent BACKGROUND. Above it, a device screen would genuinely show
+ * through.
+ */
+export const SIGNIFICANT_TRANSPARENCY_RATIO = 0.02;
 const NOTABLE_ASPECT_MISMATCH = 0.25;
 
 /**
@@ -410,18 +452,51 @@ export function assessAssetSlotCompatibility(
       blocking: true
     });
   }
-  if (asset.hasAlpha === true && slot.classification === "device_screen") {
+  // TRANSPARENCY IS JUDGED FROM PIXELS, NEVER FROM THE CONTAINER. An alpha
+  // channel is a capability; what matters to a screen is whether the picture
+  // actually has see-through areas, and how much of it they are. A few
+  // antialiased edge pixels on a screenshot are not a transparent background.
+  // Where transparency CHANGES WHAT A VIEWER SEES: a see-through picture on a
+  // device screen shows the background through the phone, which is always
+  // wrong. A decorative card is a different matter - an asset with or without
+  // transparency both look intentional there, so an unmeasurable asset (a
+  // video frame, a format this host cannot decode) is not held up over it.
+  const transparencyMatters = slot.classification === "device_screen";
+  const significantlyTransparent =
+    asset.hasTransparentPixels === true && (asset.transparentPixelRatio === null || asset.transparentPixelRatio >= SIGNIFICANT_TRANSPARENCY_RATIO);
+
+  if (transparencyMatters && asset.hasTransparentPixels === null) {
     findings.push({
-      code: "TRANSPARENT_ASSET_INTO_DEVICE_SCREEN",
-      detail: "this asset has a transparent background, which on a device screen shows whatever is behind the phone through the screen",
+      code: "ASSET_TRANSPARENCY_UNKNOWN",
+      detail:
+        asset.hasAlphaChannel === true
+          ? "this asset's file can carry transparency but its pixels could not be read here, so whether it has a see-through background is unknown - look at it before deciding"
+          : "whether this asset has any see-through areas could not be measured, so it cannot be checked against this slot",
       blocking: true
     });
   }
-  if ((role === "image" || role === "phone_screen") && asset.hasAlpha === false && slot.classification === "flat_card") {
+  if (significantlyTransparent && slot.classification === "device_screen") {
+    findings.push({
+      code: "TRANSPARENT_ASSET_INTO_DEVICE_SCREEN",
+      detail:
+        asset.transparentPixelRatio === null
+          ? "this asset has see-through areas, which on a device screen show whatever is behind the phone through the screen"
+          : `${Math.round(asset.transparentPixelRatio * 100)}% of this asset is see-through, which on a device screen shows whatever is behind the phone through the screen`,
+      blocking: true
+    });
+  }
+  if ((role === "image" || role === "phone_screen") && asset.hasTransparentPixels === false && slot.classification === "flat_card") {
     findings.push({
       code: "SCREENSHOT_INTO_FLAT_CARD",
-      detail: "a full-bleed image (no transparency) is mapped into a decorative card - confirm this is meant to be a card and not the device screen",
+      detail: "a full-bleed image (no see-through areas) is mapped into a decorative card - confirm this is meant to be a card and not the device screen",
       blocking: true
+    });
+  }
+  if (asset.hasAlphaChannel === true && asset.hasTransparentPixels === false) {
+    findings.push({
+      code: "ALPHA_CHANNEL_UNUSED",
+      detail: "this asset's file carries an alpha channel, but every pixel in it is opaque - it behaves as a solid image",
+      blocking: false
     });
   }
 
@@ -445,7 +520,9 @@ export function assessAssetSlotCompatibility(
   }
 
   const blocking = findings.filter((finding) => finding.blocking);
-  const unverifiable = blocking.some((finding) => finding.code === "ROLE_UNDECLARED" || finding.code === "ASSET_DIMENSIONS_UNKNOWN");
+  const unverifiable = blocking.some(
+    (finding) => finding.code === "ROLE_UNDECLARED" || finding.code === "ASSET_DIMENSIONS_UNKNOWN" || finding.code === "ASSET_TRANSPARENCY_UNKNOWN"
+  );
   const status: CompatibilityStatus = blocking.length === 0 ? "COMPATIBLE" : unverifiable ? "UNVERIFIABLE" : "CONFLICT";
   return {
     status,
@@ -478,6 +555,15 @@ export const fitAssessmentSchema = z
     unusedSlotAreaPercent: z.number().nullable(),
     /** How far the asset's shape is distorted, 0..100 - non-zero only for a stretch fit. */
     distortionPercent: z.number().nullable(),
+    /**
+     * How much of the slot the asset's VISIBLE CONTENT covers, 0..100 - the
+     * number that decides whether a slot looks filled. Differs from
+     * `slotCoveragePercent` exactly when the asset carries transparent
+     * padding. Null when the asset's content bounds were never measured.
+     */
+    visibleContentCoveragePercent: z.number().nullable(),
+    /** How much of the asset's VISIBLE CONTENT is cut off by the slot's edges, 0..100 - cropping empty padding costs nothing. Null when unmeasured. */
+    visibleContentCroppedPercent: z.number().nullable(),
     flags: z.array(z.string()),
     /** False when this fit needs a human to look at it before approval. */
     safe: z.boolean(),
@@ -487,7 +573,7 @@ export const fitAssessmentSchema = z
 export type FitAssessment = z.infer<typeof fitAssessmentSchema>;
 
 /** Beyond these, a fit is reported as unsafe and needs a look - chosen to catch the real failures (a stretched screenshot, a heavily cropped one, a card showing mostly background). */
-export const FIT_LIMITS = { maxCroppedPercent: 35, maxUnusedAreaPercent: 25, maxDistortionPercent: 2 } as const;
+export const FIT_LIMITS = { maxCroppedPercent: 35, maxUnusedAreaPercent: 25, maxDistortionPercent: 2, maxTransparentPaddingPercent: 30 } as const;
 
 /**
  * Works out what a fit mode will actually DO to an asset in a slot: its scale
@@ -500,7 +586,12 @@ export const FIT_LIMITS = { maxCroppedPercent: 35, maxUnusedAreaPercent: 25, max
  */
 export function assessFit(params: {
   slot: { widthPx: number | null; heightPx: number | null };
-  asset: { widthPx: number | null; heightPx: number | null };
+  asset: {
+    widthPx: number | null;
+    heightPx: number | null;
+    /** Where the asset's visible content actually sits, when its pixels were measured. Transparent padding around it is not content. */
+    visibleContentBounds?: { xPx: number; yPx: number; widthPx: number; heightPx: number } | null;
+  };
   mode: FitMode;
 }): FitAssessment {
   const { slot, asset, mode } = params;
@@ -514,6 +605,8 @@ export function assessFit(params: {
       assetCroppedPercent: null,
       unusedSlotAreaPercent: null,
       distortionPercent: null,
+      visibleContentCoveragePercent: null,
+      visibleContentCroppedPercent: null,
       flags: ["DIMENSIONS_UNKNOWN"],
       safe: false,
       reason: "the slot's or the asset's real pixel dimensions are not known, so what this fit would do cannot be checked"
@@ -539,12 +632,43 @@ export function assessFit(params: {
   const unusedSlotAreaPercent = 100 - slotCoveragePercent;
   const distortionPercent = Math.abs(scaleX - scaleY) / Math.max(scaleX, scaleY) * 100;
 
+  // WHAT A VIEWER ACTUALLY SEES. When the asset's pixels were measured, its
+  // visible content - not its file box - is what fills the slot and what gets
+  // cropped: a logo padded with transparency "covers" the slot on paper while
+  // leaving it visually empty, and cropping that padding costs nothing.
+  const bounds = asset.visibleContentBounds ?? null;
+  let visibleContentCoveragePercent: number | null = null;
+  let visibleContentCroppedPercent: number | null = null;
+  if (bounds !== null) {
+    // The content's rectangle, scaled and centred exactly as the asset is.
+    const offsetX = (slot.widthPx - renderedWidth) / 2;
+    const offsetY = (slot.heightPx - renderedHeight) / 2;
+    const contentLeft = offsetX + bounds.xPx * scaleX;
+    const contentTop = offsetY + bounds.yPx * scaleY;
+    const contentWidth = bounds.widthPx * scaleX;
+    const contentHeight = bounds.heightPx * scaleY;
+    const shownWidth = Math.max(0, Math.min(contentLeft + contentWidth, slot.widthPx) - Math.max(contentLeft, 0));
+    const shownHeight = Math.max(0, Math.min(contentTop + contentHeight, slot.heightPx) - Math.max(contentTop, 0));
+    const contentArea = contentWidth * contentHeight;
+    const shownArea = shownWidth * shownHeight;
+    visibleContentCoveragePercent = (shownArea / slotArea) * 100;
+    visibleContentCroppedPercent = contentArea === 0 ? 0 : ((contentArea - shownArea) / contentArea) * 100;
+  }
+
+  // Measured content wins over the file's own box wherever it is known.
+  const effectiveCoveragePercent = visibleContentCoveragePercent ?? slotCoveragePercent;
+  const effectiveCroppedPercent = visibleContentCroppedPercent ?? assetCroppedPercent;
+  const effectiveUnusedPercent = 100 - effectiveCoveragePercent;
+
   const flags: string[] = [];
-  if (assetCroppedPercent > FIT_LIMITS.maxCroppedPercent) {
+  if (effectiveCroppedPercent > FIT_LIMITS.maxCroppedPercent) {
     flags.push("EXCESSIVE_CROP");
   }
-  if (unusedSlotAreaPercent > FIT_LIMITS.maxUnusedAreaPercent) {
+  if (effectiveUnusedPercent > FIT_LIMITS.maxUnusedAreaPercent) {
     flags.push("LARGE_UNUSED_AREA");
+  }
+  if (visibleContentCoveragePercent !== null && slotCoveragePercent - visibleContentCoveragePercent > FIT_LIMITS.maxTransparentPaddingPercent) {
+    flags.push("LARGE_TRANSPARENT_PADDING");
   }
   if (distortionPercent > FIT_LIMITS.maxDistortionPercent) {
     flags.push("DISTORTED");
@@ -556,10 +680,17 @@ export function assessFit(params: {
     reasons.push(`this fit stretches the asset out of shape by ${Math.round(distortionPercent)}%`);
   }
   if (flags.includes("EXCESSIVE_CROP")) {
-    reasons.push(`this fit cuts away ${Math.round(assetCroppedPercent)}% of the asset`);
+    reasons.push(`this fit cuts away ${Math.round(effectiveCroppedPercent)}% of what the asset actually shows`);
   }
   if (flags.includes("LARGE_UNUSED_AREA")) {
-    reasons.push(`this fit leaves ${Math.round(unusedSlotAreaPercent)}% of the slot empty, so the slot's own background shows as a plain rectangle`);
+    reasons.push(`this fit leaves ${Math.round(effectiveUnusedPercent)}% of the slot empty, so the slot's own background shows as a plain rectangle`);
+  }
+  if (flags.includes("LARGE_TRANSPARENT_PADDING")) {
+    reasons.push(
+      `this asset is mostly transparent padding - it fills ${Math.round(slotCoveragePercent)}% of the slot as a file, but only ${Math.round(
+        visibleContentCoveragePercent ?? 0
+      )}% of it actually shows anything`
+    );
   }
 
   return {
@@ -571,6 +702,8 @@ export function assessFit(params: {
     assetCroppedPercent,
     unusedSlotAreaPercent,
     distortionPercent,
+    visibleContentCoveragePercent,
+    visibleContentCroppedPercent,
     flags,
     safe,
     reason: safe ? null : reasons.join("; ")
@@ -582,18 +715,136 @@ export function assessFit(params: {
  * ------------------------------------------------------------------ */
 
 /**
+ * Below this, a layer is on screen in name only - a held-at-zero or
+ * nearly-faded-out frame proves nothing about what a slot contains.
+ */
+export const MIN_VISIBLE_OPACITY_PERCENT = 10;
+
+/** Opacity at a moment, interpolated linearly between keyframes exactly as After Effects' own default easing would, and held flat outside them. */
+function opacityAt(host: SlotHostFacts, timeSeconds: number): number | null {
+  const keyframes = host.opacityKeyframes ?? null;
+  if (keyframes === null || keyframes.length === 0) {
+    return host.opacityPercentAtInPoint ?? null;
+  }
+  const sorted = [...keyframes].sort((a, b) => a.timeSeconds - b.timeSeconds);
+  const first = sorted[0]!;
+  const last = sorted[sorted.length - 1]!;
+  if (timeSeconds <= first.timeSeconds) {
+    return first.valuePercent;
+  }
+  if (timeSeconds >= last.timeSeconds) {
+    return last.valuePercent;
+  }
+  for (let index = 1; index < sorted.length; index += 1) {
+    const previous = sorted[index - 1]!;
+    const next = sorted[index]!;
+    if (timeSeconds <= next.timeSeconds) {
+      const span = next.timeSeconds - previous.timeSeconds;
+      if (span <= 0) {
+        return next.valuePercent;
+      }
+      const ratio = (timeSeconds - previous.timeSeconds) / span;
+      return previous.valuePercent + (next.valuePercent - previous.valuePercent) * ratio;
+    }
+  }
+  return last.valuePercent;
+}
+
+/** The sub-window of a host's own window during which it is at a genuinely visible opacity. Null when there is none. */
+function visibleOpacityWindow(host: SlotHostFacts, window: { startSeconds: number; endSeconds: number }): { startSeconds: number; endSeconds: number } | null {
+  const keyframes = host.opacityKeyframes ?? null;
+  if (keyframes === null || keyframes.length === 0) {
+    // No animation: one constant opacity decides the whole window. An unread
+    // opacity leaves the window as it is rather than inventing a fade.
+    const constant = host.opacityPercentAtInPoint ?? null;
+    return constant !== null && constant < MIN_VISIBLE_OPACITY_PERCENT ? null : window;
+  }
+  // Sample at the window's edges and at every keyframe inside it, then keep the
+  // longest run that stays visible. Linear between keyframes means no visible
+  // stretch can hide between two samples.
+  const times = [window.startSeconds, window.endSeconds, ...keyframes.map((keyframe) => keyframe.timeSeconds)]
+    .filter((time) => time >= window.startSeconds && time <= window.endSeconds)
+    .sort((a, b) => a - b);
+  let best: { startSeconds: number; endSeconds: number } | null = null;
+  let runStart: number | null = null;
+  for (let index = 0; index < times.length; index += 1) {
+    const time = times[index]!;
+    const value = opacityAt(host, time);
+    const visible = value === null || value >= MIN_VISIBLE_OPACITY_PERCENT;
+    if (visible && runStart === null) {
+      runStart = time;
+    }
+    const isLast = index === times.length - 1;
+    if ((!visible || isLast) && runStart !== null) {
+      const runEnd = visible ? time : times[index - 1] ?? runStart;
+      if (best === null || runEnd - runStart > best.endSeconds - best.startSeconds) {
+        best = { startSeconds: runStart, endSeconds: runEnd };
+      }
+      runStart = null;
+    }
+  }
+  return best !== null && best.endSeconds > best.startSeconds ? best : null;
+}
+
+/**
+ * WHEN THIS SLOT IS ACTUALLY ON SCREEN.
+ *
+ * Not "between its in and out points" - a layer can be switched off, held at
+ * zero opacity, or transformed entirely outside the frame while its timing says
+ * it is live. Each host contributes a window only if it is enabled, its
+ * rendered rectangle reaches the frame at all, and its opacity stays visible;
+ * the longest such window wins. Unread facts never disqualify a host (they are
+ * unknown, not false), but a fact that is KNOWN to hide it does.
+ *
+ * Returns null when no host offers a provably visible window - which the gate
+ * reports as "no visible moment" rather than capturing an arbitrary timestamp
+ * and calling it evidence.
+ */
+export function computeEffectiveVisibility(
+  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">
+): { startSeconds: number; endSeconds: number } | null {
+  let best: { startSeconds: number; endSeconds: number } | null = null;
+  for (const host of facts.hosts ?? []) {
+    if (host.enabled === false || host.inFrame === false) {
+      continue;
+    }
+    const window = host.windowSeconds ?? null;
+    if (window === null || !(window.endSeconds > window.startSeconds)) {
+      continue;
+    }
+    const visible = visibleOpacityWindow(host, window);
+    if (visible !== null && (best === null || visible.endSeconds - visible.startSeconds > best.endSeconds - best.startSeconds)) {
+      best = visible;
+    }
+  }
+  if (best !== null) {
+    return best;
+  }
+  // A manifest written before host-level visibility facts existed carries only
+  // the raw window. It is used as-is rather than refusing every older project,
+  // and it is the only path that still relies on timing alone - so it applies
+  // ONLY when no host reported a window of its own. A host that was examined
+  // and found switched off, off-frame or held invisible is a real answer, and
+  // this must not talk it back into visibility.
+  const examined = (facts.hosts ?? []).some((host) => (host.windowSeconds ?? null) !== null);
+  if (examined) {
+    return null;
+  }
+  const fallback = facts.visibleWindowSeconds ?? null;
+  return fallback !== null && fallback.endSeconds > fallback.startSeconds ? fallback : null;
+}
+
+/**
  * A moment at which this slot is genuinely on screen, for the evidence frame
  * a human must see before deciding about it.
  *
- * The MIDDLE of the visible window, not its start: the first frame of a layer
- * is routinely mid-transition - faded out, sliding in, or behind an animation
- * - and a frame showing nothing proves nothing. Returns null when no usable
- * window is known, which the gate reports as "no visible moment" rather than
- * capturing an arbitrary timestamp and calling it evidence.
+ * The MIDDLE of the effectively-visible window, not of its in/out points: the
+ * first frame of a layer is routinely mid-transition - faded out, sliding in,
+ * or behind an animation - and a frame showing nothing proves nothing.
  */
-export function selectEvidenceFrameSeconds(facts: Pick<SlotStructuralFacts, "visibleWindowSeconds">): number | null {
-  const window = facts.visibleWindowSeconds ?? null;
-  if (window === null || !(window.endSeconds > window.startSeconds)) {
+export function selectEvidenceFrameSeconds(facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">): number | null {
+  const window = computeEffectiveVisibility(facts);
+  if (window === null) {
     return null;
   }
   return window.startSeconds + (window.endSeconds - window.startSeconds) / 2;

@@ -68,3 +68,18 @@ always be explained with the facts it was actually judged on.
 Captured evidence frames record `capturedAtSeconds` - WHERE in the composition's
 own timeline they show. A frame without it cannot back a slot decision, because
 nothing proves what it shows.
+
+## Measured asset facts (Stage 4 follow-up)
+
+Each asset row records HOW its transparency was established, not just the
+answer: `pixel_analysis` is `DECODED` (pixels were read and counted),
+`NO_ALPHA_CHANNEL` (the format cannot encode transparency, so opacity is
+certain without decoding) or `NOT_DECODED` (unknown - never an assumption).
+Alongside it, `has_alpha_channel` records the container's capability separately
+from `has_transparent_pixels` / `transparent_pixel_ratio`, and
+`visible_coverage_ratio` / `visible_content_bounds` record where the visible
+content actually sits.
+
+Reading a blocked mapping back therefore always answers "why was this blocked,
+and on what evidence" - including the case where the honest answer is that the
+pixels could not be read.

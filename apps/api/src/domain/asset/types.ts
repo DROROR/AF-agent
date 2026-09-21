@@ -11,8 +11,15 @@ export interface AssetRecord {
   sha256: string;
   width: number | null;
   height: number | null;
-  /** Measured from the uploaded bytes (probe-image-facts.ts). Null = genuinely not measured, never "opaque". */
-  hasAlpha: boolean | null;
+  /** What the FILE can carry, measured from its bytes. Evidence only - never proof that any pixel is transparent. */
+  hasAlphaChannel: boolean | null;
+  /** How the transparency facts were obtained: DECODED, NO_ALPHA_CHANNEL, NOT_DECODED. Null = never analysed. */
+  pixelAnalysis: string | null;
+  /** What the PIXELS actually contain. Null = could not be decoded, which is "unknown", never "opaque". */
+  hasTransparentPixels: boolean | null;
+  transparentPixelRatio: number | null;
+  visibleCoverageRatio: number | null;
+  visibleContentBounds: { xPx: number; yPx: number; widthPx: number; heightPx: number } | null;
   durationSeconds: number | null;
   label: string | null;
   notes: string | null;
@@ -31,7 +38,12 @@ export interface NewAssetRecord {
   sha256: string;
   width: number | null;
   height: number | null;
-  hasAlpha: boolean | null;
+  hasAlphaChannel: boolean | null;
+  pixelAnalysis: string | null;
+  hasTransparentPixels: boolean | null;
+  transparentPixelRatio: number | null;
+  visibleCoverageRatio: number | null;
+  visibleContentBounds: { xPx: number; yPx: number; widthPx: number; heightPx: number } | null;
   durationSeconds: number | null;
   label: string | null;
   notes: string | null;

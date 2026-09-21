@@ -1180,8 +1180,10 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     // truncation marker and the complete text's own code-unit length
     // (leftover-template-copy gate), plus the four geometry/animation facts
     // the slot-semantics gate reads (scale on both axes, rotation, and
-    // whether the transform is keyframed at all).
-    expect(Object.keys(plain.detail)).toHaveLength(26);
+    // whether the transform is keyframed at all), plus the five
+    // effective-visibility facts an evidence frame's moment comes from
+    // (position and anchor on both axes, and the opacity keyframes).
+    expect(Object.keys(plain.detail)).toHaveLength(31);
     const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
     expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
   });

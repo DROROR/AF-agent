@@ -27,9 +27,9 @@ function manifestWith(placeholders: readonly Placeholder[]): TemplateManifest {
   return { ...manifest, scenes: [{ ...(manifest.scenes[0] as TemplateManifest["scenes"][number]), placeholders: [...placeholders] }] };
 }
 
-const SCREENSHOT: SlotAssetFacts = { id: "asset-screenshot", widthPx: 1080, heightPx: 2160, hasAlpha: false };
-const LOGO: SlotAssetFacts = { id: "asset-logo", widthPx: 800, heightPx: 800, hasAlpha: true };
-const WIDE: SlotAssetFacts = { id: "asset-wide", widthPx: 1600, heightPx: 900, hasAlpha: false };
+const SCREENSHOT: SlotAssetFacts = { id: "asset-screenshot", widthPx: 1080, heightPx: 2160, hasAlphaChannel: false, hasTransparentPixels: false, transparentPixelRatio: 0, visibleCoverageRatio: 1, visibleContentBounds: null };
+const LOGO: SlotAssetFacts = { id: "asset-logo", widthPx: 800, heightPx: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7, visibleCoverageRatio: 0.3, visibleContentBounds: null };
+const WIDE: SlotAssetFacts = { id: "asset-wide", widthPx: 1600, heightPx: 900, hasAlphaChannel: false, hasTransparentPixels: false, transparentPixelRatio: 0, visibleCoverageRatio: 1, visibleContentBounds: null };
 
 function planFor(spec: { placeholderId: string; assetId: string | null; assetType: PlaceholderMapping["selectedAssetType"] }) {
   return scenePlanFixture({
@@ -126,7 +126,7 @@ describe("assessMappingSlot", () => {
   it("refuses a full opaque screenshot dropped into a decorative card", () => {
     // Same aspect as the card, so nothing about the FIT objects - only the
     // slot's purpose does.
-    const cardShapedScreenshot: SlotAssetFacts = { id: "asset-card-shaped", widthPx: 1600, heightPx: 900, hasAlpha: false };
+    const cardShapedScreenshot: SlotAssetFacts = { id: "asset-card-shaped", widthPx: 1600, heightPx: 900, hasAlphaChannel: false, hasTransparentPixels: false, transparentPixelRatio: 0, visibleCoverageRatio: 1, visibleContentBounds: null };
     const manifest = manifestWith([imagePlaceholderFixture({ placeholderId: "p1", slotFacts: flatCardSlotFacts() })]);
     const scene = planFor({ placeholderId: "p1", assetId: cardShapedScreenshot.id, assetType: "image" });
     const blockers = assessMappingSlot({ scene, mapping: scene.mappings[0]!, manifest, asset: cardShapedScreenshot }).blockers;
@@ -147,7 +147,7 @@ describe("assessMappingSlot", () => {
 
   it("refuses a transparent asset in a device screen - the phone would show what is behind it", () => {
     const manifest = manifestWith([imagePlaceholderFixture({ placeholderId: "p1", slotFacts: deviceScreenSlotFacts() })]);
-    const transparent: SlotAssetFacts = { id: "asset-transparent", widthPx: 1080, heightPx: 2160, hasAlpha: true };
+    const transparent: SlotAssetFacts = { id: "asset-transparent", widthPx: 1080, heightPx: 2160, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7, visibleCoverageRatio: 0.3, visibleContentBounds: null };
     const scene = planFor({ placeholderId: "p1", assetId: transparent.id, assetType: "image" });
     const conflict = assessMappingSlot({ scene, mapping: scene.mappings[0]!, manifest, asset: transparent }).blockers.find((b) => b.kind === "ASSET_SLOT_CONFLICT");
     expect(conflict?.compatibility?.findings.map((f) => f.code)).toContain("TRANSPARENT_ASSET_INTO_DEVICE_SCREEN");
@@ -177,7 +177,7 @@ describe("assessMappingSlot", () => {
       scene,
       mapping: scene.mappings[0]!,
       manifest,
-      asset: { id: "asset-unmeasured", widthPx: null, heightPx: null, hasAlpha: null }
+      asset: { id: "asset-unmeasured", widthPx: null, heightPx: null, hasAlphaChannel: null, hasTransparentPixels: null, transparentPixelRatio: null, visibleCoverageRatio: null, visibleContentBounds: null }
     }).blockers;
     expect(blockers.map((b) => b.kind)).toContain("ASSET_SLOT_CONFLICT");
     expect(blockers.some((b) => b.kind === "UNSAFE_FIT" && b.fit?.flags.includes("DIMENSIONS_UNKNOWN"))).toBe(true);

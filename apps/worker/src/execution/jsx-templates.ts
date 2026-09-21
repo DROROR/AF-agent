@@ -2352,6 +2352,9 @@ const LAYER_TEXT_PREVIEW_MAX_LENGTH = 120;
  * correction: a truncated capture must stay verifiable, because "re-run
  * template inspection" could never resolve a text that is simply long.
  */
+/** Bound on the opacity keyframes read per layer: enough to see every hold and fade a real template uses, and never an unbounded read on a hand-animated property. */
+export const MAX_OPACITY_KEYFRAMES_SCANNED = 32;
+
 const LAYER_SOURCE_TEXT_MAX_LENGTH = 10_000;
 
 /** Code units read per slice when fetching one long layer text in pieces. Bounded for the same payload reason as the scan itself; slices are concatenated in order before anything is hashed, so a surrogate pair split across a boundary is reassembled exactly. */
@@ -2540,6 +2543,38 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
               return __scale && __scale.length >= 2 ? __scale[1] : null;
             }),
             rotationDegrees: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Rotate Z").value; }),
+            // EFFECTIVE VISIBILITY (2026-09-21). Timing alone does not say
+            // whether a slot is on screen: position and anchor decide whether
+            // it is inside the frame at all, and opacity keyframes decide
+            // whether it is held invisible while its in/out points say it is
+            // live. All read-only, all null when unreadable.
+            positionX: __readNumberFact(function () {
+              var __p = __layer.property("ADBE Transform Group").property("ADBE Position").value;
+              return __p && __p.length >= 2 ? __p[0] : null;
+            }),
+            positionY: __readNumberFact(function () {
+              var __p = __layer.property("ADBE Transform Group").property("ADBE Position").value;
+              return __p && __p.length >= 2 ? __p[1] : null;
+            }),
+            anchorX: __readNumberFact(function () {
+              var __a = __layer.property("ADBE Transform Group").property("ADBE Anchor Point").value;
+              return __a && __a.length >= 2 ? __a[0] : null;
+            }),
+            anchorY: __readNumberFact(function () {
+              var __a = __layer.property("ADBE Transform Group").property("ADBE Anchor Point").value;
+              return __a && __a.length >= 2 ? __a[1] : null;
+            }),
+            opacityKeyframes: __readFact(function () {
+              var __opacity = __layer.property("ADBE Transform Group").property("ADBE Opacity");
+              var __count = __opacity.numKeys;
+              if (!__count) { return null; }
+              var __keys = [];
+              var __limit = __count < ${MAX_OPACITY_KEYFRAMES_SCANNED} ? __count : ${MAX_OPACITY_KEYFRAMES_SCANNED};
+              for (var __ki = 1; __ki <= __limit; __ki++) {
+                __keys.push({ timeSeconds: __opacity.keyTime(__ki), valuePercent: __opacity.keyValue(__ki) });
+              }
+              return __keys;
+            }),
             hasTransformKeyframes: __readBooleanFact(function () {
               var __group = __layer.property("ADBE Transform Group");
               var __names = ["ADBE Position", "ADBE Scale", "ADBE Rotate Z", "ADBE Anchor Point"];

@@ -24,8 +24,23 @@ export const assetDtoSchema = z.object({
   sha256: z.string().length(64),
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
-  /** Whether the asset's own encoding carries transparency, measured from its bytes at upload. Null = never measured (video, or an upload from before measurement existed) - never silently "opaque". Absent in payloads produced before this field existed. */
-  hasAlpha: z.boolean().nullable().optional(),
+  /**
+   * MEASURED IMAGE FACTS, kept apart on purpose: `hasAlphaChannel` is what the
+   * FILE can carry, `hasTransparentPixels`/`transparentPixelRatio` are what its
+   * PIXELS contain, and `visibleCoverageRatio`/`visibleContentBounds` say where
+   * that content actually is. A null pixel fact means "could not be decoded",
+   * which is neither opaque nor transparent. All optional, so payloads produced
+   * before they existed still parse.
+   */
+  hasAlphaChannel: z.boolean().nullable().optional(),
+  hasTransparentPixels: z.boolean().nullable().optional(),
+  transparentPixelRatio: z.number().min(0).max(1).nullable().optional(),
+  visibleCoverageRatio: z.number().min(0).max(1).nullable().optional(),
+  visibleContentBounds: z
+    .object({ xPx: z.number().nonnegative(), yPx: z.number().nonnegative(), widthPx: z.number().positive(), heightPx: z.number().positive() })
+    .strict()
+    .nullable()
+    .optional(),
   durationSeconds: z.number().nonnegative().nullable(),
   label: z.string().nullable(),
   notes: z.string().nullable(),

@@ -273,7 +273,16 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   // plan approved before this gate existed must not quietly drop a logo into
   // a phone screen or stretch a screenshot across a card.
   const slotAssetFacts = new Map(
-    (projectAssets ?? []).map((asset) => [asset.id, { id: asset.id, widthPx: asset.width ?? null, heightPx: asset.height ?? null, hasAlpha: asset.hasAlpha ?? null }])
+    (projectAssets ?? []).map((asset) => [asset.id, {
+        id: asset.id,
+        widthPx: asset.width ?? null,
+        heightPx: asset.height ?? null,
+        hasAlphaChannel: asset.hasAlphaChannel ?? null,
+        hasTransparentPixels: asset.hasTransparentPixels ?? null,
+        transparentPixelRatio: asset.transparentPixelRatio ?? null,
+        visibleCoverageRatio: asset.visibleCoverageRatio ?? null,
+        visibleContentBounds: asset.visibleContentBounds ?? null
+      }])
   );
   // An asset that has been DELETED is reported as deleted. The slot gate would
   // otherwise describe it as "dimensions unknown" - true, but it sends a

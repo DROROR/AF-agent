@@ -92,7 +92,9 @@ interface AssetSpec {
   id: string;
   width: number | null;
   height: number | null;
-  hasAlpha: boolean | null;
+  hasAlphaChannel: boolean | null;
+  hasTransparentPixels: boolean | null;
+  transparentPixelRatio: number | null;
 }
 
 let captureCount = 0;
@@ -116,7 +118,12 @@ async function setup(manifestValue: TemplateManifest, assets: readonly AssetSpec
         sha256: "c".repeat(64),
         width: asset.width,
         height: asset.height,
-        hasAlpha: asset.hasAlpha,
+        hasAlphaChannel: asset.hasAlphaChannel,
+        pixelAnalysis: asset.hasTransparentPixels === null ? "NOT_DECODED" : "DECODED",
+        hasTransparentPixels: asset.hasTransparentPixels,
+        transparentPixelRatio: asset.transparentPixelRatio,
+        visibleCoverageRatio: asset.transparentPixelRatio === null ? null : 1 - asset.transparentPixelRatio,
+        visibleContentBounds: null,
         durationSeconds: null,
         label: null,
         notes: null
@@ -167,9 +174,9 @@ async function setup(manifestValue: TemplateManifest, assets: readonly AssetSpec
   return { project, projectRepository, executionPlanRepository, assetRepository, sceneEvidencePreviewRepository, captureEvidenceFrame, sceneId: scene.id, mappingIdFor, edit, approve };
 }
 
-const SCREENSHOT: AssetSpec = { id: "asset-screenshot", width: 1080, height: 2160, hasAlpha: false };
-const LOGO: AssetSpec = { id: "asset-logo", width: 800, height: 800, hasAlpha: true };
-const UNMEASURED: AssetSpec = { id: "asset-unmeasured", width: null, height: null, hasAlpha: null };
+const SCREENSHOT: AssetSpec = { id: "asset-screenshot", width: 1080, height: 2160, hasAlphaChannel: false, hasTransparentPixels: false, transparentPixelRatio: 0 };
+const LOGO: AssetSpec = { id: "asset-logo", width: 800, height: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.7 };
+const UNMEASURED: AssetSpec = { id: "asset-unmeasured", width: null, height: null, hasAlphaChannel: null, hasTransparentPixels: null, transparentPixelRatio: null };
 
 describe("approveExecutionPlan - slot semantics and fit (real backend gate)", () => {
   it("approves a confident screen slot holding a matching screenshot", async () => {

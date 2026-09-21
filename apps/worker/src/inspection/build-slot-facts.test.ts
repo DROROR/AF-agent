@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifySlotSemantics, computeSlotFingerprint } from "@dyo/schemas";
+import { classifySlotSemantics, computeSlotFingerprint, selectEvidenceFrameSeconds } from "@dyo/schemas";
 import { buildSlotStructuralFacts, type ScannedSlotLayer } from "./build-slot-facts.js";
 import type { CompositionFact, LayerFact } from "./project-facts.js";
 
@@ -379,5 +379,103 @@ describe("buildSlotStructuralFacts - order independence", () => {
     expect(backwards).toEqual(forwards);
     expect(computeSlotFingerprint(backwards)).toEqual(computeSlotFingerprint(forwards));
     expect(forwards.hosts.map((host) => `${host.compositionId}:${host.layerIndex}`)).toEqual(["comp-a:2", "comp-a:5", "comp-b:3"]);
+  });
+});
+
+/**
+ * EFFECTIVE VISIBILITY (2026-09-21 correction). Timing alone never decides when
+ * a slot is on screen: a host can be switched off, held at zero opacity, or
+ * transformed entirely outside the frame while its in/out points say it is live.
+ */
+describe("buildSlotStructuralFacts - effective visibility facts", () => {
+  const slotComposition = composition({ compositionId: "comp-slot", widthPx: 400, heightPx: 400, layers: [layer({ index: 1 })] });
+  const hostComposition = composition({
+    compositionId: "comp-host",
+    widthPx: 1920,
+    heightPx: 1080,
+    precompChildren: [{ layerIndex: 3, layerName: "host", sourceCompositionId: "comp-slot", enabled: true }]
+  });
+
+  const build = (hostScan: ScannedSlotLayer) =>
+    buildSlotStructuralFacts({
+      slotComposition,
+      slotLayerIndex: 1,
+      slotLayerName: null,
+      compositions: [slotComposition, hostComposition],
+      layerFactsByCompositionAndIndex: new Map([["comp-host:3", hostScan]]),
+      hostDepth: 1,
+      slotIsWholeComposition: true
+    });
+
+  it("carries the host's own switch, window, opacity and in-frame state", () => {
+    const facts = build({
+      kind: "AVLayer",
+      enabled: true,
+      footage: null,
+      detail: {
+        inPointSeconds: 2,
+        outPointSeconds: 7,
+        opacityAtInPoint: 100,
+        opacityKeyframes: [
+          { timeSeconds: 2, valuePercent: 0 },
+          { timeSeconds: 3, valuePercent: 100 }
+        ],
+        positionX: 960,
+        positionY: 540,
+        anchorX: 200,
+        anchorY: 200,
+        scalePercent: 100
+      }
+    });
+
+    expect(facts.hosts[0]).toMatchObject({
+      enabled: true,
+      windowSeconds: { startSeconds: 2, endSeconds: 7 },
+      opacityPercentAtInPoint: 100,
+      inFrame: true
+    });
+    expect(facts.hosts[0]?.opacityKeyframes).toEqual([
+      { timeSeconds: 2, valuePercent: 0 },
+      { timeSeconds: 3, valuePercent: 100 }
+    ]);
+    // The evidence frame lands after the fade completes, not at the midpoint
+    // of the raw 2s..7s window (4.5s would be fine here, but the window itself
+    // is now the OPAQUE part).
+    expect(selectEvidenceFrameSeconds(facts)).toBeGreaterThan(3);
+  });
+
+  it("reports a host parked outside its composition's frame as not on screen", () => {
+    const facts = build({
+      kind: "AVLayer",
+      enabled: true,
+      footage: null,
+      detail: { inPointSeconds: 0, outPointSeconds: 5, positionX: -5000, positionY: 540, anchorX: 200, anchorY: 200, scalePercent: 100 }
+    });
+    expect(facts.hosts[0]?.inFrame).toBe(false);
+    expect(selectEvidenceFrameSeconds(facts)).toBeNull();
+  });
+
+  it("leaves in-frame unknown for a 3D host, whose position on screen depends on a camera", () => {
+    const facts = build({
+      kind: "AVLayer",
+      enabled: true,
+      footage: null,
+      detail: { threeDLayer: true, inPointSeconds: 0, outPointSeconds: 5, positionX: -5000, positionY: 540, anchorX: 200, anchorY: 200, scalePercent: 100 }
+    });
+    expect(facts.hosts[0]?.inFrame).toBeNull();
+    expect(selectEvidenceFrameSeconds(facts)).toBe(2.5);
+  });
+
+  it("leaves every visibility fact null when this worker build did not read them", () => {
+    const facts = build({ kind: "AVLayer", footage: null, detail: { inPointSeconds: 1, outPointSeconds: 4 } });
+    expect(facts.hosts[0]).toMatchObject({ enabled: null, opacityPercentAtInPoint: null, opacityKeyframes: null, inFrame: null });
+    // Unknown never hides a slot: the window still yields a moment.
+    expect(selectEvidenceFrameSeconds(facts)).toBe(2.5);
+  });
+
+  it("refuses a moment for a host that is switched off", () => {
+    const facts = build({ kind: "AVLayer", enabled: false, footage: null, detail: { inPointSeconds: 0, outPointSeconds: 5 } });
+    expect(facts.hosts[0]?.enabled).toBe(false);
+    expect(selectEvidenceFrameSeconds(facts)).toBeNull();
   });
 });

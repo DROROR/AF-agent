@@ -121,7 +121,12 @@ describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, n
         sha256: "b".repeat(64),
         width: 512,
         height: 512,
-        hasAlpha: null,
+        hasAlphaChannel: null,
+        pixelAnalysis: null,
+        hasTransparentPixels: null,
+        transparentPixelRatio: null,
+        visibleCoverageRatio: null,
+        visibleContentBounds: null,
         durationSeconds: null,
         label: null,
         notes: null

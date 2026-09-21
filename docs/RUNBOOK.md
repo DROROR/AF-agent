@@ -280,7 +280,7 @@ that places an asset has an unanswered question about the SLOT it lands in.
 | `SLOT_SEMANTICS_MISSING` | this project's manifest predates slot discovery, so the slot was never structurally inspected | re-run template inspection for the project |
 | `SLOT_SEMANTICS_STALE_MODEL` | the stored verdict came from an older classifier and is never reinterpreted | re-run template inspection for the project |
 | `SLOT_CLASSIFICATION_UNCERTAIN` | the structure is not confident enough, or argues both ways at once | open the scene editor, capture the evidence frame, and record an explicit decision |
-| `ASSET_SLOT_CONFLICT` | the asset does not belong in this slot (a logo in a phone screen, a transparent image in a screen, a full screenshot in a decorative card), or it was never measured | map a suitable asset, or decide explicitly after looking at the frame |
+| `ASSET_SLOT_CONFLICT` | the asset does not belong in this slot (a logo in a phone screen, a genuinely see-through image in a screen, a full screenshot in a decorative card), it was never measured, or its transparency could not be read | map a suitable asset, or decide explicitly after looking at the frame |
 | `UNSAFE_FIT` | the chosen fit would stretch, over-crop or mostly-empty the slot | use a better-shaped asset, or decide explicitly after looking at the frame |
 
 ### Deciding about a slot
@@ -314,3 +314,16 @@ retry the job.
 An asset uploaded before Stage 4, or in a format this API cannot measure (video,
 audio, PDF), has no dimensions and blocks every slot it is mapped to. Re-upload
 the image, or record an explicit decision about it.
+
+### "whether it has a see-through background is unknown"
+
+Transparency is measured by decoding pixels. PNG and JPEG are decided outright;
+a WebP that DECLARES an alpha channel cannot be decoded on the API host, so its
+transparency is unknown. That only blocks a DEVICE SCREEN, where a see-through
+picture would show the background through the phone - a decorative card is not
+held up over it.
+
+Fixes, in order of preference: re-export the asset as PNG (measured exactly), or
+look at the captured evidence frame and record an explicit decision. Do not
+assume from the file's alpha channel: an opaque screenshot exported as RGBA, and
+a palette image declaring a colour it never uses, both carry one.

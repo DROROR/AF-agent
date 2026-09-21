@@ -424,10 +424,16 @@ could not exist.
 ### The evidence frame is mandatory
 
 Every low-confidence classification, compatibility conflict and unsafe fit
-requires a real captured frame before a decision can be recorded. The moment is
-the midpoint of the slot's own visible window (`selectEvidenceFrameSeconds`) -
-never the first frame of a layer, which is routinely mid-transition, and never a
-timestamp the browser chose: the dashboard names the MAPPING
+requires a real captured frame before a decision can be recorded. The moment
+comes from EFFECTIVE visibility (`computeEffectiveVisibility`), not from timing:
+a host is considered only when it is enabled, its rendered rectangle reaches its
+composition's frame, and its opacity stays above `MIN_VISIBLE_OPACITY_PERCENT`
+across the window; the longest such window wins and the frame is taken at its
+midpoint. A fact that is unread never disqualifies a host - unknown is not
+false - but a fact that is KNOWN to hide it does, and a slot that no host
+presents visibly has no provable moment at all. It is never the first frame of a
+layer, which is routinely mid-transition, and never a timestamp the browser
+chose: the dashboard names the MAPPING
 (`slotEvidenceMappingId`) and the server resolves the moment from that slot's
 structural facts, the same way every other addressing fact is server-resolved.
 Capture runs through the Stage 3 disposable-project wrapper like every other
@@ -457,9 +463,31 @@ reparented, a matte changed, a slot resized - anything that moves the structure 
 fails the operation closed. A slot in the scene's own composition is checked as a
 one-hop chain, not skipped.
 
-### Assets are measured, never assumed
+### Assets are measured, never assumed - and an alpha channel is not transparency
 
-Dimensions and transparency come from the uploaded bytes
-(`apps/api/src/domain/asset/probe-image-facts.ts`: PNG including palette `tRNS`,
-JPEG, and all three WebP container shapes). What cannot be honestly measured -
-video, audio, documents - stays null, and null blocks rather than passing.
+Dimensions, transparency and visible content come from the uploaded bytes
+(`apps/api/src/domain/asset/probe-image-facts.ts`). PNG is genuinely DECODED -
+every non-interlaced colour type and bit depth, including palette transparency -
+so the facts are about pixels, not about the container:
+
+- `hasAlphaChannel` - what the file CAN carry. Evidence, never a verdict. A
+  screenshot exported as RGBA sets it; so does a palette image declaring a
+  transparent colour it never uses.
+- `hasTransparentPixels` / `transparentPixelRatio` - what the picture actually
+  contains. NULL means the pixels could not be decoded (a WebP declaring alpha,
+  a video, an upload predating measurement), which the gate treats as UNKNOWN -
+  a human confirms it, and it is never read as either opaque or transparent.
+- `visibleContentBounds` / `visibleCoverageRatio` - where the non-transparent
+  content actually sits, so a logo with wide transparent padding is not mistaken
+  for an image that fills its slot.
+
+Transparency below `SIGNIFICANT_TRANSPARENCY_RATIO` is incidental - an
+antialiased corner is not a see-through background - and does not block. The fit
+check uses the measured content too: coverage and crop are computed from the
+visible content when it is known, so cropping empty padding costs nothing and a
+mostly-padding asset is flagged (`LARGE_TRANSPARENT_PADDING`) even though its
+file fills the slot.
+
+JPEG and plain lossy WebP cannot encode transparency at all, so their opacity is
+a fact of the format rather than a decode. Video, audio and documents stay
+unmeasured, and unmeasured dimensions block.

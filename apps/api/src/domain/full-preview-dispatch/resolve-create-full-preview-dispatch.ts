@@ -44,7 +44,18 @@ export interface ResolveCreateFullPreviewDispatchInput {
   /** The project's CURRENT manifest, freshly read - the source of the untouched template text the second template-copy gate below compares against. Null only when the project does not exist. */
   currentProjectManifest: TemplateManifest | null;
   /** The project's own assets, for the Stage 4 slot/fit gate - dimensions decide whether an asset belongs in a slot and whether its fit renders correctly. */
-  projectAssets?: readonly { id: string; width: number | null; height: number | null; hasAlpha?: boolean | null }[] | undefined;
+  projectAssets?:
+    | readonly {
+        id: string;
+        width: number | null;
+        height: number | null;
+        hasAlphaChannel?: boolean | null;
+        hasTransparentPixels?: boolean | null;
+        transparentPixelRatio?: number | null;
+        visibleCoverageRatio?: number | null;
+        visibleContentBounds?: { xPx: number; yPx: number; widthPx: number; heightPx: number } | null;
+      }[]
+    | undefined;
   worker: SceneEditWorkerSnapshot | null;
   now: Date;
   staleAfterMs: number;
@@ -139,7 +150,16 @@ export function resolveCreateFullPreviewDispatch(input: ResolveCreateFullPreview
     ? findSlotBlockers(
         currentPlan.scenePlans,
         currentProjectManifest,
-        new Map((projectAssets ?? []).map((asset) => [asset.id, { id: asset.id, widthPx: asset.width ?? null, heightPx: asset.height ?? null, hasAlpha: asset.hasAlpha ?? null }]))
+        new Map((projectAssets ?? []).map((asset) => [asset.id, {
+        id: asset.id,
+        widthPx: asset.width ?? null,
+        heightPx: asset.height ?? null,
+        hasAlphaChannel: asset.hasAlphaChannel ?? null,
+        hasTransparentPixels: asset.hasTransparentPixels ?? null,
+        transparentPixelRatio: asset.transparentPixelRatio ?? null,
+        visibleCoverageRatio: asset.visibleCoverageRatio ?? null,
+        visibleContentBounds: asset.visibleContentBounds ?? null
+      }]))
       )
     : [];
   if (slotBlockers.length > 0) {
