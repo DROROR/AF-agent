@@ -3130,6 +3130,12 @@ describe("SET_TEXT bidirectional handling (generic, Unicode-derived)", () => {
  * touched. Both scripts must encode the same fact the same way.
  */
 describe("buildDescribeChainStructureScript speaks the same enum vocabulary as the project scan", () => {
+  /**
+   * A project whose ITEM ORDER does not match the stored hints: the QA
+   * composition (AE id 48) sits at project item 7, while item 5 - the index
+   * the plan recorded at approval time - now holds an imported footage item,
+   * exactly what an earlier MAP_FOOTAGE in the same job leaves behind.
+   */
   const CHAIN_SETUP = `
     function CompItem() {}
     var TrackMatteType = { NO_TRACK_MATTE: 6012, ALPHA: 6013, ALPHA_INVERTED: 6014, LUMA: 6015, LUMA_INVERTED: 6016 };
@@ -3158,7 +3164,17 @@ describe("buildDescribeChainStructureScript speaks the same enum vocabulary as t
     var theComp = new CompItem();
     theComp.id = 48;
     theComp.layer = function (index) { return index === 3 ? theLayer : null; };
-    var app = { project: { item: function () { return theComp; } } };
+    var importedFootage = { name: "screenshot.png", width: 1080, height: 2160 };
+    var otherComp = new CompItem();
+    otherComp.id = 99;
+    otherComp.layer = function () { return null; };
+    var __items = [importedFootage, importedFootage, importedFootage, otherComp, importedFootage, theComp];
+    var app = {
+      project: {
+        numItems: __items.length,
+        item: function (i) { return __items[i - 1] || null; }
+      }
+    };
   `;
 
   it("reports a bound matte by its KEY NAME, exactly as the scan does - never a raw enum value", () => {
@@ -3190,5 +3206,132 @@ describe("buildDescribeChainStructureScript speaks the same enum vocabulary as t
     const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
     expect(parsed.ok).toBe(true);
     expect(parsed.resultingValue.hops[0].trackMatteType).toBe("NO_TRACK_MATTE");
+  });
+});
+
+/**
+ * REAL 2026-09-22 SMOKE-TEST FAILURE, reproduced. The first MAP_FOOTAGE of a
+ * scene imports an asset, which renumbers `app.project.item(n)`; the next
+ * nested slot's live re-check then looked up its composition by the index the
+ * plan recorded at approval time, found a footage item (or a neighbouring
+ * composition) there, and refused the edit with "chain step 0 did not resolve
+ * to a composition" on a project nobody had touched. The mutation path
+ * (wrapNestedScript) already resolves by the stable `CompItem.id`; this
+ * read-only re-check must identify a composition exactly the same way.
+ */
+describe("buildDescribeChainStructureScript resolves compositions by their stable AE id, not by a project-item index", () => {
+  const PROJECT_SETUP = `
+    function CompItem() {}
+    var TrackMatteType = { NO_TRACK_MATTE: 6012, ALPHA: 6013, ALPHA_INVERTED: 6014, LUMA: 6015, LUMA_INVERTED: 6016 };
+    function makeTransform() {
+      return { property: function (name) { return name === "ADBE Scale" ? { value: [100, 100] } : { value: 0 }; } };
+    }
+    function makeLayer(spec) {
+      return {
+        index: spec.index,
+        threeDLayer: false,
+        hasTrackMatte: false,
+        trackMatteType: TrackMatteType.NO_TRACK_MATTE,
+        parent: null,
+        source: spec.source || null,
+        property: function (name) { return name === "ADBE Transform Group" ? makeTransform() : { value: null }; }
+      };
+    }
+    function makeComp(id) {
+      var comp = new CompItem();
+      comp.id = id;
+      comp.layers = {};
+      comp.layer = function (index) { return comp.layers[index] || null; };
+      return comp;
+    }
+    var importedFootage = { name: "screenshot.png", width: 1080, height: 2160 };
+  `;
+
+  it("finds the composition even though the stored project-item index now holds imported footage", () => {
+    const setup = `${PROJECT_SETUP}
+      var slotComp = makeComp(34);
+      slotComp.layers[1] = makeLayer({ index: 1, source: { width: 800, height: 800 } });
+      // The plan recorded item index 4; an earlier MAP_FOOTAGE has since
+      // imported an asset and the composition has moved to index 6.
+      var __items = [importedFootage, importedFootage, importedFootage, importedFootage, importedFootage, slotComp];
+      var app = { project: { numItems: __items.length, item: function (i) { return __items[i - 1] || null; } } };
+    `;
+    const script = buildDescribeChainStructureScript([{ compositionId: "comp-34", aeProjectItemIndex: 4, layerIndex: 1 }]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.resultingValue.hops[0].compositionId).toBe("comp-34");
+    expect(parsed.resultingValue.targetWidthPx).toBe(800);
+  });
+
+  it("refuses, naming the stored index only as a hint, when no composition carries that id", () => {
+    const setup = `${PROJECT_SETUP}
+      var strangerComp = makeComp(77);
+      var __items = [importedFootage, importedFootage, importedFootage, strangerComp];
+      var app = { project: { numItems: __items.length, item: function (i) { return __items[i - 1] || null; } } };
+    `;
+    const script = buildDescribeChainStructureScript([{ compositionId: "comp-34", aeProjectItemIndex: 4, layerIndex: 1 }]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.failureReason).toContain("no composition with id 34");
+    expect(parsed.failureReason).toContain('"comp-34"');
+    expect(parsed.failureReason).toContain("stored project item index hint 4");
+    expect(parsed.failureReason).toContain("refusing to guess");
+  });
+
+  it("refuses rather than guessing when two compositions share the id", () => {
+    const setup = `${PROJECT_SETUP}
+      var first = makeComp(34);
+      first.layers[1] = makeLayer({ index: 1, source: { width: 800, height: 800 } });
+      var second = makeComp(34);
+      second.layers[1] = makeLayer({ index: 1, source: { width: 10, height: 10 } });
+      var __items = [first, importedFootage, second];
+      var app = { project: { numItems: __items.length, item: function (i) { return __items[i - 1] || null; } } };
+    `;
+    const script = buildDescribeChainStructureScript([{ compositionId: "comp-34", aeProjectItemIndex: 1, layerIndex: 1 }]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.failureReason).toContain("2 compositions share id 34");
+    expect(parsed.failureReason).toContain("ambiguous nested path");
+  });
+
+  it("descends a multi-step chain by id, and each hop must genuinely lead to the next step", () => {
+    const setup = `${PROJECT_SETUP}
+      var inner = makeComp(20);
+      inner.layers[1] = makeLayer({ index: 1, source: { width: 1080, height: 2160 } });
+      var outer = makeComp(48);
+      outer.layers[2] = makeLayer({ index: 2, source: inner });
+      var __items = [importedFootage, inner, importedFootage, outer];
+      var app = { project: { numItems: __items.length, item: function (i) { return __items[i - 1] || null; } } };
+    `;
+    const script = buildDescribeChainStructureScript([
+      { compositionId: "comp-48", aeProjectItemIndex: 1, layerIndex: 2 },
+      { compositionId: "comp-20", aeProjectItemIndex: 2, layerIndex: 1 }
+    ]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.resultingValue.hops.map((hop: { compositionId: string }) => hop.compositionId)).toEqual(["comp-48", "comp-20"]);
+    expect(parsed.resultingValue.targetWidthPx).toBe(1080);
+  });
+
+  it("refuses when a hop's layer no longer references the composition the next step names", () => {
+    const setup = `${PROJECT_SETUP}
+      var inner = makeComp(20);
+      inner.layers[1] = makeLayer({ index: 1, source: { width: 1080, height: 2160 } });
+      var somewhereElse = makeComp(21);
+      somewhereElse.layers[1] = makeLayer({ index: 1, source: { width: 4, height: 4 } });
+      var outer = makeComp(48);
+      // The hop now leads into a DIFFERENT composition than the plan approved.
+      outer.layers[2] = makeLayer({ index: 2, source: somewhereElse });
+      var __items = [outer, inner, somewhereElse];
+      var app = { project: { numItems: __items.length, item: function (i) { return __items[i - 1] || null; } } };
+    `;
+    const script = buildDescribeChainStructureScript([
+      { compositionId: "comp-48", aeProjectItemIndex: 1, layerIndex: 2 },
+      { compositionId: "comp-20", aeProjectItemIndex: 2, layerIndex: 1 }
+    ]);
+    const parsed = JSON.parse(runFixedScriptWithoutNativeJson(script, setup));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.failureReason).toContain("does not match the expected next step id 20");
+    expect(parsed.failureReason).toContain("refusing to guess");
   });
 });

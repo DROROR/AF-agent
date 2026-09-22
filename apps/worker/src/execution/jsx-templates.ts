@@ -3066,7 +3066,19 @@ export function buildDescribeMissingFootageScript(): FixedJsxScript {
  * group - it never enters one.
  */
 export function buildDescribeChainStructureScript(steps: readonly ResolvedNestedTargetStep[]): FixedJsxScript {
-  const stepsLiteral = JSON.stringify(steps.map((step) => ({ compositionId: step.compositionId, aeProjectItemIndex: step.aeProjectItemIndex, layerIndex: step.layerIndex })));
+  // `numericId` is carried alongside the stored index because the index is
+  // only a HINT here - see the resolution comment in the generated script
+  // below. parseCompositionNumericId throws at build time on anything that is
+  // not the "comp-<digits>" convention, so the embedded value is always a
+  // plain number.
+  const stepsLiteral = JSON.stringify(
+    steps.map((step) => ({
+      compositionId: step.compositionId,
+      numericId: parseCompositionNumericId(step.compositionId),
+      aeProjectItemIndex: step.aeProjectItemIndex,
+      layerIndex: step.layerIndex
+    }))
+  );
   const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
   try {
     // THE SAME ENUM VOCABULARY THE PROJECT SCAN USES (2026-09-21). The stored
@@ -3094,14 +3106,38 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
     var __comp = null;
     for (var __s = 0; __s < __steps.length; __s++) {
       var __step = __steps[__s];
-      if (__comp === null) {
-        var __item = app.project.item(__step.aeProjectItemIndex);
-        __comp = __item instanceof CompItem ? __item : null;
+      // RESOLVE BY THE STABLE CompItem.id, NEVER BY THE STORED PROJECT-ITEM
+      // INDEX (2026-09-22 smoke-test finding). A project-item index is not
+      // stable within a single job: an earlier MAP_FOOTAGE in the same run
+      // imports footage and renumbers app.project.item(n). wrapNestedScript
+      // already learned this on 2026-09-14 and resolves each step by scanning
+      // for the composition's own AE id; this read-only re-check, written
+      // later, still trusted the index - so on any scene whose first operation
+      // imports footage, every LATER nested slot was refused with "did not
+      // resolve to a composition" on a project nobody had touched. Both paths
+      // must identify a composition the same way. Exactly one match is
+      // required: zero or several fail closed.
+      var __stepComp = null;
+      var __stepMatches = 0;
+      var __stepItemCount = 0;
+      try { __stepItemCount = app.project.numItems; } catch (__stepCountError) { __stepItemCount = 0; }
+      for (var __stepItemIndex = 1; __stepItemIndex <= __stepItemCount; __stepItemIndex++) {
+        var __stepCandidate = null;
+        try { __stepCandidate = app.project.item(__stepItemIndex); } catch (__stepLookupError) { __stepCandidate = null; }
+        if (__stepCandidate instanceof CompItem && __stepCandidate.id === __step.numericId) {
+          __stepMatches++;
+          __stepComp = __stepCandidate;
+        }
       }
-      if (__comp === null) {
-        __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + " did not resolve to a composition" });
+      if (__stepMatches === 0) {
+        __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + ": no composition with id " + __step.numericId + " (\\"" + __step.compositionId + "\\") exists in this project (stored project item index hint " + __step.aeProjectItemIndex + ") - stale or broken nested path, refusing to guess" });
         break;
       }
+      if (__stepMatches > 1) {
+        __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + ": " + __stepMatches + " compositions share id " + __step.numericId + " (\\"" + __step.compositionId + "\\") - ambiguous nested path, refusing to guess" });
+        break;
+      }
+      __comp = __stepComp;
       var __layer = null;
       try { __layer = __comp.layer(__step.layerIndex); } catch (__layerError) { __layer = null; }
       if (__layer === null) {
@@ -3124,9 +3160,17 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
         __targetWidth = __read(function () { return __layer.source ? __layer.source.width : null; });
         __targetHeight = __read(function () { return __layer.source ? __layer.source.height : null; });
       } else {
-        __comp = __read(function () { return __layer.source instanceof CompItem ? __layer.source : null; });
-        if (__comp === null) {
+        // The descent is now a VERIFICATION, not the way the next composition
+        // is found: the next step is resolved by its own id above, exactly as
+        // wrapNestedScript does, and this hop must genuinely lead to it.
+        var __hopSource = __read(function () { return __layer.source instanceof CompItem ? __layer.source : null; });
+        if (__hopSource === null) {
           __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + " does not reference a composition" });
+          break;
+        }
+        var __nextStep = __steps[__s + 1];
+        if (__hopSource.id !== __nextStep.numericId) {
+          __result = JSON.stringify({ ok: false, failureReason: "chain step " + __s + ": layer index " + __step.layerIndex + "'s source composition id (" + __hopSource.id + ") does not match the expected next step id " + __nextStep.numericId + " - stale or broken nested path, refusing to guess" });
           break;
         }
       }
