@@ -5,7 +5,9 @@
   DYO-Worker-SlotSemantics-Update.bat instead of running this file directly.
 
 .DESCRIPTION
-  Ships the worker side of build 8f3568a.
+  Ships the worker side of the build recorded in the accompanying
+  worker-app/BUILD_INFO.json (which this script reports back after
+  installing - never a commit hard-coded in this file).
 
   1. INSPECTIONS NEVER OPEN THE REAL PROJECT ANY MORE.
      Every inspection that opens an After Effects project now works on a
@@ -481,7 +483,25 @@ Write-Host ""
 Write-Host "================================================"
 Write-Host "  Update complete"
 Write-Host "================================================"
-Write-Host "DYO Worker is running build 8f3568a, using the same DYO"
+# REPORT THE BUILD THAT WAS ACTUALLY INSTALLED, never a tag hard-coded into
+# this script (2026-09-22): this line read "build 8f3568a" while the
+# BUILD_INFO.json beside it read a completely different commit, so the one
+# sentence an operator reads to confirm an install was the one sentence that
+# could not be trusted. BUILD_INFO.json is written by the packaging step from
+# the real commit, so it is the only honest source here.
+# $buildInfoPath is the same path the install step above already resolved.
+$installedCommit = "unknown"
+if (Test-Path $buildInfoPath) {
+  try {
+    $commitValue = (Get-Content -Path $buildInfoPath -Raw | ConvertFrom-Json).commit
+    if ($commitValue) { $installedCommit = $commitValue }
+  } catch {
+    $installedCommit = "unreadable (BUILD_INFO.json could not be parsed)"
+  }
+} else {
+  $installedCommit = "unknown (no BUILD_INFO.json was installed)"
+}
+Write-Host "DYO Worker is running build $installedCommit, using the same DYO"
 Write-Host "Worker identity this computer already had - no new registration was created."
 Write-Host "No After Effects project was opened, changed, or run against by this"
 Write-Host "update itself."

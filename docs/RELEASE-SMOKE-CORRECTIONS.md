@@ -73,6 +73,66 @@ including the shared-slot collapse as a regression.
 **Nothing in the product changed for this**, so the worker package built from
 `e78dbf4` stays correct and is not rebuilt.
 
+## 3. The live fingerprint check spoke a different enum vocabulary (product, third smoke run)
+
+The first real frame execution was refused before it touched anything:
+
+> operation 0 (MAP_FOOTAGE) refused: this slot's structure has changed since
+> the plan was approved (approved `4e01d1de4315`, now `6a712b80a57b`)
+
+Nobody had touched the project. The stored fingerprint comes from the project
+SCAN, which records a track matte by its documented KEY NAME (`"LUMA"`,
+`"NO_TRACK_MATTE"`). The live re-check in `buildDescribeChainStructureScript`
+stringified After Effects' enum object instead, producing its raw numeric form
+(`"6015"`). The same fact, encoded two ways, so the two digests could never be
+equal - **every footage edit, on every slot, in every project, was refused**.
+Fail-closed, so nothing was ever edited wrongly; nothing could be edited at
+all either.
+
+No unit test could catch it: each side was only ever tested against itself.
+
+**The fix.** The chain script embeds the scan's own enum helper and the same
+documented key list (`TRACK_MATTE_TYPE_KEYS`), so both sides encode the fact
+identically. Three regression tests run the real generated script: a bound
+matte must read `LUMA`, an unmatted layer `NO_TRACK_MATTE`, and never a
+numeric string.
+
+## 4. The live fingerprint check found compositions by an unstable index (product, fourth smoke run)
+
+With defect 3 fixed, operations 0 and 1 applied for the first time - and
+operation 2 was refused:
+
+> operation 2 (MAP_FOOTAGE) refused: the slot's live structure could not be
+> read, so it could not be proven unchanged since approval (chain step 0 did
+> not resolve to a composition)
+
+A project-item index is **not stable within a single job**. Operation 0 is a
+`MAP_FOOTAGE`; importing its asset renumbers `app.project.item(n)`. By the time
+the next nested slot's re-check looked up its composition by the index the plan
+recorded at approval time, that index held imported footage.
+
+The mutation path already knew this. `wrapNestedScript` learned it on
+2026-09-14 and resolves every step by the stable `CompItem.id`;
+`buildDescribeChainStructureScript`, written later for the Stage 4 re-check,
+still trusted the index. So on any scene whose first operation imports
+footage - which is nearly every scene - every LATER nested slot was refused.
+
+**The fix.** Both paths now identify a composition the same way: scan for its
+own AE id, require exactly one match, and treat the stored index only as a hint
+in the failure message. Descending through a hop becomes a VERIFICATION - the
+hop's source composition must be the one the next step names - rather than the
+way the next composition is found, matching `wrapNestedScript` exactly. Five
+regression tests run the real generated script against a project whose item
+order does not match the stored hints.
+
+### 4b. The installer reported a hard-coded build (installer)
+
+The `06df85a` install printed "DYO Worker is running build 8f3568a" while the
+`BUILD_INFO.json` beside it correctly read `06df85a…` - the one sentence an
+operator reads to confirm an install was the one sentence that could not be
+trusted. The installer now reads the commit out of the installed
+`BUILD_INFO.json` and reports that, and says so plainly when it cannot.
+
 ## Model version: kept at `slot-semantics-v2`
 
 Queried before deciding. Only the QA project carries v2 verdicts:
@@ -96,40 +156,36 @@ from the corrected fixture. It has NOT been deleted here.
 
 Neither is deployed or installed here.
 
-Built from `e78dbf41ecd2c761fe9378e012dae5feb60a8068`.
+Worker built from `6dace9ec46ba76710cb058fec77f37af95d73a4e`; QA fixture v4
+unchanged since `e78dbf4`.
 
 | | Worker | QA fixture |
 |---|---|---|
-| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-e78dbf4.zip` | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip` |
-| SHA-256 | `384e2e406aa5598fe72c374c156b7176c502899cbfe16fd9faac5bdffbc78385` | `441f38109612c2b37f91075542fd82ce45343a283b93b724d1bdecadbd911721` |
-| Size | 860,797 bytes | 96,381 bytes |
+| File | `/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-6dace9e.zip` | `/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip` |
+| SHA-256 | `c82e51086f51124c85d33adfee32b42f53f14d275d8fa9e2253dfd25afaa5cc5` | `441f38109612c2b37f91075542fd82ce45343a283b93b724d1bdecadbd911721` |
+| Size | 862,476 bytes | 96,381 bytes |
 
-The worker is unchanged since `e78dbf4` - if it is already installed, only the
-fixture below needs replacing.
+Superseded worker packages - do not install: `e78dbf4`, `06df85a`.
 
 ```powershell
 # Worker
-scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-e78dbf4.zip "$env:USERPROFILE\Downloads\DYO-SS3.zip"
-$e="384e2e406aa5598fe72c374c156b7176c502899cbfe16fd9faac5bdffbc78385"
-$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-SS3.zip" -Algorithm SHA256).Hash.ToLower()
+scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Worker-SlotSemantics-6dace9e.zip "$env:USERPROFILE\Downloads\DYO-SS5.zip"
+$e="c82e51086f51124c85d33adfee32b42f53f14d275d8fa9e2253dfd25afaa5cc5"
+$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-SS5.zip" -Algorithm SHA256).Hash.ToLower()
 if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
- Expand-Archive "$env:USERPROFILE\Downloads\DYO-SS3.zip" "$env:USERPROFILE\Downloads\DYO-SS3" -Force
- cd "$env:USERPROFILE\Downloads\DYO-SS3"
+ Expand-Archive "$env:USERPROFILE\Downloads\DYO-SS5.zip" "$env:USERPROFILE\Downloads\DYO-SS5" -Force
+ cd "$env:USERPROFILE\Downloads\DYO-SS5"
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\DYO-Worker-SlotSemantics-Update.ps1"
  Write-Host ("build commit: " + (Get-Content "C:\DYO-Agent\app\BUILD_INFO.json" -Raw))
 }
-
-# QA fixture (new folder - the broken one is never reused)
-scp fahad@169.58.48.14:/home/fahad/windows-worker-releases/DYO-QA-Smoke-Fixture-v4.zip "$env:USERPROFILE\Downloads\DYO-QA-v3.zip"
-$e="441f38109612c2b37f91075542fd82ce45343a283b93b724d1bdecadbd911721"
-$a=(Get-FileHash "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" -Algorithm SHA256).Hash.ToLower()
-if($a -ne $e){Write-Host "MISMATCH - STOP. $a"}else{
- New-Item -ItemType Directory -Force -Path "C:\DYO-Agent\qa\smoke-fixture-v4" | Out-Null
- Expand-Archive "$env:USERPROFILE\Downloads\DYO-QA-v3.zip" "C:\DYO-Agent\qa\smoke-fixture-v4" -Force
-}
 ```
 
-`BUILD_INFO.json` must read `e78dbf4…` after the worker install.
+`BUILD_INFO.json` must read `6dace9e…` after the worker install, and the
+installer's own closing line must now name that same commit.
+
+The QA fixture is unchanged: if `C:\DYO-Agent\qa\smoke-fixture-v4\QA-Smoke.aep`
+already exists (sha256 `c1e1e4ea5663975cea9066501a885d96fd10bbdd4eee2dffe9cf3b895222bd51`),
+nothing needs re-extracting.
 
 ### Rollback
 
@@ -146,15 +202,16 @@ if (Test-Path "$($b.FullName).BUILD_INFO.json") { Copy-Item "$($b.FullName).BUIL
 Start-ScheduledTask -TaskName "DYO Video Worker"
 ```
 
-Rolling the worker back to the previous package returns it to the build whose
-verdicts are all `unknown` - fail-closed, so nothing can be approved on a bad
-verdict, but nothing can be approved at all either.
+Rolling back returns the worker to a build that refuses every footage edit
+(defect 3) or every nested slot after the first import (defect 4) - fail-closed
+in both cases, so nothing can be approved on a bad verdict, but nothing can be
+executed either.
 
-**Server.** No server change is required by these corrections: the classifier
-lives in the worker, and the model version is unchanged at v2. The currently
-deployed build (`dc14516`) stays as it is. If it is ever rolled back, use the
-previous release directory that is still on disk, exactly as
-`RELEASE-8f3568a.md` describes.
+**Server.** No server change is required by any of these corrections: the
+classifier and both re-check scripts live in the worker, and the model version
+is unchanged at v2. The currently deployed build (`dc14516`) stays as it is. If
+it is ever rolled back, use the previous release directory that is still on
+disk, exactly as `RELEASE-8f3568a.md` describes.
 
 **Fixture.** Delete `C:\DYO-Agent\qa\smoke-fixture-v4` and extract the ZIP
 again; the builder refuses to overwrite an existing QA project, so a clean
