@@ -622,3 +622,26 @@ Both product defects failed CLOSED - nothing was ever edited wrongly, the workin
 - **Results after corrections 3 and 4: 317 test files, 4090 tests, 0 failures. `npm run typecheck` clean, `npm run lint` clean.**
 - **The installer reported a hard-coded build tag** ("running build 8f3568a") regardless of what it actually installed, while the `BUILD_INFO.json` beside it was correct. It now reads and reports the installed commit.
 - **No migration, no server change.** The classifier and both re-check scripts live in the worker; the deployed API/dashboard build (`dc14516`) is unaffected and was not redeployed.
+
+#### Smoke-test results, 2026-09-22 (steps 2-7 on real After Effects)
+
+Run end to end on the disposable QA fixture only. The client's template, project `65e24d16…`, session `e0483ad6…` and Revision 4 were never opened, dispatched against or modified, and nothing was rendered.
+
+| Step | What it proves | Result |
+|---|---|---|
+| 2 | Inspection never touches the source | **PASS** - `sourceSha256Before` == `sourceSha256After`, disposable copy `DELETED` |
+| 3 | Structural classification from real facts | **PASS** - after defect 1 was fixed, every slot carries a real verdict |
+| 4 | The gates block the wrong asset | **PASS** - transparent logo into a device screen refused, screenshot into a flat card refused |
+| 5 | Evidence frames show a real moment | **PASS** - captured inside the slot's visible window, never t=0 |
+| 6 | One frame executes correctly | **PASS** after defects 3, 4 and 5 - 5/5 operations, source hash unchanged, working copy mutated, Hebrew verified by code units (12/12) |
+| 7 | A changed template is refused | **PASS** - see below |
+
+**Step 6, the preview itself.** The first "successful" execution produced a preview that was **fully transparent** - one colour, 0% non-transparent pixels - because EXECUTE_FRAME captured t=0 unconditionally (defect 5). After the fix the same scene resolved to t=5s and produced a real frame: 491 distinct colours, 19.2% non-transparent, showing the mapped screenshot, the logo in its card and the Hebrew branding line. The first preview was then approved by a human in the dashboard (`firstPreviewApproved: true`), never by this agent.
+
+**Step 7, fail-closed.** One layer was added to `QA_Screen` in After Effects and the project saved, changing the source from `c1e1e4ea…` to `81b03f8c…`. Re-inspection confirmed the new hash and all four compositions. Executing the same approved scene against it was then **refused before anything was touched**:
+
+> working copy could not be prepared (SOURCE_SHA_MISMATCH): source .aep sha256 (`81b03f8c…`) does not match the expected sha256 (`c1e1e4ea…`) - the source project has changed since this job was created; refusing to proceed
+
+`operationsCompleted: []`, `workingProjectSha256: null` - no working copy was even created. The refusal came from the OUTER chain-of-custody gate, which fires before the Stage 4 slot fingerprint gate can be reached; that is the correct layering, and worth recording precisely because the smoke-test plan anticipated the inner gate. The inner gate's own live behaviour was demonstrated separately and for real during this same run: job `3c51e867` refused a `MAP_FOOTAGE` with "this slot's structure has changed since the plan was approved (approved `4e01d1de4315`, now `6a712b80a57b`)" and applied nothing, which is how defect 3 was found.
+
+**What remains before MVP acceptance** (CLAUDE.md): three different plugin-free templates end to end, landscape output, native 1080x1920 Reels output, and an interrupted-job recovery test. None of those were attempted here - this smoke test covers inspection, classification, the gates, one frame and fail-closed refusal only.
