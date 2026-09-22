@@ -1,5 +1,5 @@
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
-import { describeSlotBlockers, findSlotBlockers } from "@dyo/schemas";
+import { computeEffectiveVisibility, describeSlotBlockers, findSlotBlockers, selectScenePreviewFrameSeconds } from "@dyo/schemas";
 import type {
   ExecuteSceneEditRequest,
   ExecutionSessionStatus,
@@ -682,6 +682,35 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     return { ok: false, reason: "Worker already has a job in progress (currentJobId is not empty)" };
   }
 
+  // THE PREVIEW MUST SHOW WHAT WAS JUST EDITED (2026-09-22 smoke-test
+  // finding). This dispatch used to leave previewTimestampSeconds unset, and
+  // the worker then captured t=0 unconditionally. A scene's layers routinely
+  // do not start at t=0, so the frame a human is asked to approve at the
+  // "first designed frame" gate was frequently blank - the QA fixture's frame
+  // came back fully transparent, with every check around it passing.
+  //
+  // The moment is resolved SERVER-side from the manifest's own Stage 4
+  // structural facts, exactly as a slot evidence frame already is, and never
+  // supplied by the browser: take each edited slot's effectively-visible
+  // window (enabled, in frame, opacity above the visible threshold) and pick
+  // the moment the most of them overlap. Slots with no provable window
+  // contribute nothing rather than dragging the answer towards a moment that
+  // shows nothing.
+  //
+  // Text and colour placeholders carry no slot facts by design (Stage 4 never
+  // judges them), so they simply do not vote here.
+  //
+  // When NOTHING is measurable - a manifest written before slot facts existed,
+  // or a scene whose hosts were all unreadable - previewTimestampSeconds is
+  // left unset and the worker's own long-standing t=0 default applies
+  // unchanged, so no existing project's behaviour shifts silently.
+  const editedSlotWindows = approvedMappingIds.map((mappingId) => {
+    const mapping = scene.mappings.find((candidate) => candidate.id === mappingId);
+    const placeholder = mapping?.manifestPlaceholderId ? manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId) : undefined;
+    return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts) : null;
+  });
+  const previewTimestampSeconds = selectScenePreviewFrameSeconds(editedSlotWindows);
+
   return {
     ok: true,
     payload: {
@@ -697,7 +726,8 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       aeProjectItemIndex: composition.aeProjectItemIndex,
       compositionName: composition.name,
       approvedMappingIds,
-      operations
+      operations,
+      ...(previewTimestampSeconds !== null ? { previewTimestampSeconds } : {})
     }
   };
 }

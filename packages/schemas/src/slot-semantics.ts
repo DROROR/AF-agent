@@ -859,6 +859,61 @@ export function selectEvidenceFrameSeconds(facts: Pick<SlotStructuralFacts, "hos
   return window.startSeconds + (window.endSeconds - window.startSeconds) / 2;
 }
 
+/**
+ * A moment at which the GREATEST NUMBER of a scene's edited slots are on
+ * screen at once, for the single preview frame a human approves the scene by
+ * (CLAUDE.md approval gate "first designed frame").
+ *
+ * WHY THIS EXISTS (2026-09-22 smoke-test finding). EXECUTE_FRAME captured its
+ * preview at t=0 unconditionally. A scene's layers routinely do not start at
+ * t=0 - they are staggered, they fade in, they slide in - so the frame a
+ * reviewer was asked to approve was frequently blank, or mid-transition.
+ * Stage 4 had already established what "genuinely on screen" means for ONE
+ * slot (`selectEvidenceFrameSeconds`); this is the same rule for the SET of
+ * slots an execution actually touched.
+ *
+ * The rule, and why it is this rule: sweep the windows and take the interval
+ * covered by the most of them - the moment showing the most of what was just
+ * edited. Among equally-covered intervals the LONGEST wins (the steadiest
+ * moment, furthest from any transition), and an exact tie is broken by taking
+ * the earliest, so the answer is deterministic for a given set of windows.
+ * The returned time is that interval's midpoint, for the same reason a single
+ * slot's evidence frame is its window's midpoint rather than its start.
+ *
+ * Returns null when NO slot has a provable visible window - the caller then
+ * keeps whatever default it had, rather than this function inventing a moment
+ * out of nothing.
+ */
+export function selectScenePreviewFrameSeconds(
+  windows: readonly ({ startSeconds: number; endSeconds: number } | null)[]
+): number | null {
+  const real = windows.filter((window): window is { startSeconds: number; endSeconds: number } => window !== null && window.endSeconds > window.startSeconds);
+  if (real.length === 0) {
+    return null;
+  }
+  const boundaries = [...new Set(real.flatMap((window) => [window.startSeconds, window.endSeconds]))].sort((a, b) => a - b);
+  let best: { coverage: number; length: number; midpoint: number } | null = null;
+  for (let index = 0; index < boundaries.length - 1; index++) {
+    const start = boundaries[index] as number;
+    const end = boundaries[index + 1] as number;
+    if (!(end > start)) {
+      continue;
+    }
+    const midpoint = start + (end - start) / 2;
+    const coverage = real.filter((window) => window.startSeconds <= midpoint && midpoint < window.endSeconds).length;
+    if (coverage === 0) {
+      continue;
+    }
+    const length = end - start;
+    // Strictly greater on both keys, so the earliest interval wins an exact
+    // tie - the sweep visits them in ascending time order.
+    if (best === null || coverage > best.coverage || (coverage === best.coverage && length > best.length)) {
+      best = { coverage, length, midpoint };
+    }
+  }
+  return best === null ? null : best.midpoint;
+}
+
 /* ------------------------------------------------------------------ *
  * The mutation-time fingerprint.
  * ------------------------------------------------------------------ */

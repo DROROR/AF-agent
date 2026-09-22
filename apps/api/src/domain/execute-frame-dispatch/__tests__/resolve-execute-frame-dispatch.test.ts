@@ -1677,3 +1677,87 @@ describe("resolveExecuteFrameDispatch - conflicting writes to one layer WITHIN a
     expect(result.ok).toBe(true);
   });
 });
+
+/**
+ * REAL 2026-09-22 SMOKE-TEST FAILURE. The first successful frame execution
+ * produced a preview that was FULLY TRANSPARENT - 1920x1080 of nothing - and
+ * every check around it reported success, because the dispatch never named a
+ * moment and the worker fell back to t=0. The QA scene's layers all start
+ * later, as real scenes routinely do.
+ */
+describe("resolveExecuteFrameDispatch - the approval preview must show what was edited", () => {
+  /** The scene's image placeholder, given hosts that are genuinely on screen for a known window. */
+  function manifestWithVisibleWindow(startSeconds: number, endSeconds: number): TemplateManifest {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const facts = cardSlotFacts({
+      hosts: [
+        {
+          ...cardSlotFacts().hosts[0]!,
+          enabled: true,
+          inFrame: true,
+          windowSeconds: { startSeconds, endSeconds }
+        }
+      ],
+      visibleWindowSeconds: { startSeconds, endSeconds }
+    });
+    const placeholders = scene.placeholders.map((placeholder) =>
+      placeholder.placeholderId === "ph-2" ? { ...placeholder, slotFacts: facts, slotSemantics: classifySlotSemantics(facts) } : placeholder
+    );
+    return { ...base, scenes: [{ ...scene, placeholders }] };
+  }
+
+  const dispatchWithImageMapping = (manifest: TemplateManifest) =>
+    resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifest,
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] })
+      })
+    );
+
+  it("names the midpoint of the edited slot's visible window - never t=0", () => {
+    const result = dispatchWithImageMapping(manifestWithVisibleWindow(3, 9));
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(6);
+  });
+
+  it("would have captured a blank frame before this: the moment is inside the window, not before it", () => {
+    const result = dispatchWithImageMapping(manifestWithVisibleWindow(4, 10));
+    expect(result.ok).toBe(true);
+    const seconds = result.ok === true ? (result.payload.previewTimestampSeconds as number) : -1;
+    expect(seconds).not.toBe(0);
+    expect(seconds).toBeGreaterThanOrEqual(4);
+    expect(seconds).toBeLessThanOrEqual(10);
+  });
+
+  it("leaves the moment unset when nothing is measurable, so the worker's own default is unchanged", () => {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const placeholders = scene.placeholders.map((placeholder) => {
+      if (placeholder.placeholderId !== "ph-2") {
+        return placeholder;
+      }
+      const { slotFacts: _dropped, slotSemantics: _alsoDropped, ...bare } = placeholder;
+      return bare;
+    });
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: { ...base, scenes: [{ ...scene, placeholders }] },
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: "Reviewed wording" })] })] })
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
+  });
+
+  it("a text-only scene does not vote a moment into existence - text carries no slot facts by design", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifestWithVisibleWindow(3, 9),
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: "Reviewed wording" })] })] })
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
+  });
+});

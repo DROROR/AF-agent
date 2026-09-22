@@ -9,6 +9,7 @@ import {
   computeEffectiveVisibility,
   computeSlotFingerprint,
   selectEvidenceFrameSeconds,
+  selectScenePreviewFrameSeconds,
   slotFingerprintsMatch,
   type AssetFacts,
   type SlotHostFacts,
@@ -635,5 +636,80 @@ describe("computeEffectiveVisibility / selectEvidenceFrameSeconds", () => {
   it("reports no provable moment when nothing offers one", () => {
     expect(selectEvidenceFrameSeconds(slot({ hosts: [], visibleWindowSeconds: null }))).toBeNull();
     expect(selectEvidenceFrameSeconds(slot({ hosts: [visibleHost({ windowSeconds: { startSeconds: 3, endSeconds: 3 } })] }))).toBeNull();
+  });
+});
+
+/**
+ * REAL 2026-09-22 SMOKE-TEST FAILURE. EXECUTE_FRAME captured its approval
+ * preview at t=0 unconditionally; the QA scene's layers all start later, so
+ * the frame a human was asked to approve came back FULLY TRANSPARENT while
+ * every check around it reported success. These pin the rule that replaces
+ * that constant.
+ */
+describe("selectScenePreviewFrameSeconds - the moment that shows the most of what was edited", () => {
+  it("picks the midpoint of the interval the most slots overlap in", () => {
+    // 2..6 is covered by all three; its midpoint is 4.
+    const seconds = selectScenePreviewFrameSeconds([
+      { startSeconds: 0, endSeconds: 6 },
+      { startSeconds: 2, endSeconds: 8 },
+      { startSeconds: 2, endSeconds: 6 }
+    ]);
+    expect(seconds).toBe(4);
+  });
+
+  it("never returns a moment before the slots exist - the defect that made the frame blank", () => {
+    const seconds = selectScenePreviewFrameSeconds([
+      { startSeconds: 3, endSeconds: 7 },
+      { startSeconds: 4, endSeconds: 9 }
+    ]);
+    expect(seconds).not.toBe(0);
+    expect(seconds as number).toBeGreaterThanOrEqual(4);
+    expect(seconds as number).toBeLessThanOrEqual(7);
+  });
+
+  it("ignores slots with no provable window rather than being dragged towards them", () => {
+    expect(selectScenePreviewFrameSeconds([null, { startSeconds: 4, endSeconds: 8 }, null])).toBe(6);
+  });
+
+  it("returns null when nothing is measurable, so the caller keeps its own default", () => {
+    expect(selectScenePreviewFrameSeconds([])).toBeNull();
+    expect(selectScenePreviewFrameSeconds([null, null])).toBeNull();
+    expect(selectScenePreviewFrameSeconds([{ startSeconds: 5, endSeconds: 5 }])).toBeNull();
+  });
+
+  it("prefers the steadiest moment when two intervals are covered equally", () => {
+    // Both 1..2 and 4..8 are covered by two windows; the longer one wins.
+    const seconds = selectScenePreviewFrameSeconds([
+      { startSeconds: 0, endSeconds: 2 },
+      { startSeconds: 1, endSeconds: 8 },
+      { startSeconds: 4, endSeconds: 9 }
+    ]);
+    expect(seconds).toBe(6);
+  });
+
+  it("is deterministic: the same windows in any order give the same moment", () => {
+    const windows = [
+      { startSeconds: 2, endSeconds: 6 },
+      { startSeconds: 0, endSeconds: 6 },
+      { startSeconds: 2, endSeconds: 8 }
+    ];
+    const forward = selectScenePreviewFrameSeconds(windows);
+    const reversed = selectScenePreviewFrameSeconds([...windows].reverse());
+    expect(forward).toBe(reversed);
+  });
+
+  it("handles a single slot exactly as that slot's own evidence frame would", () => {
+    const window = { startSeconds: 3, endSeconds: 11 };
+    expect(selectScenePreviewFrameSeconds([window])).toBe(window.startSeconds + (window.endSeconds - window.startSeconds) / 2);
+  });
+
+  it("falls back to a moment only SOME slots share when none is shared by all", () => {
+    // Disjoint windows: no moment shows both, so one of them must still win -
+    // never a moment that shows neither.
+    const seconds = selectScenePreviewFrameSeconds([
+      { startSeconds: 0, endSeconds: 2 },
+      { startSeconds: 8, endSeconds: 10 }
+    ]) as number;
+    expect([1, 9]).toContain(seconds);
   });
 });
