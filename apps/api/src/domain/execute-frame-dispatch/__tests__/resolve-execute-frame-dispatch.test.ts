@@ -1761,3 +1761,52 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
     expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
   });
 });
+
+describe("resolveExecuteFrameDispatch - regenerating a preview must not reproduce the blank frame", () => {
+  function manifestWithVisibleWindow(startSeconds: number, endSeconds: number): TemplateManifest {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const facts = cardSlotFacts({
+      hosts: [{ ...cardSlotFacts().hosts[0]!, enabled: true, inFrame: true, windowSeconds: { startSeconds, endSeconds } }],
+      visibleWindowSeconds: { startSeconds, endSeconds }
+    });
+    const placeholders = scene.placeholders.map((placeholder) =>
+      placeholder.placeholderId === "ph-2" ? { ...placeholder, slotFacts: facts, slotSemantics: classifySlotSemantics(facts) } : placeholder
+    );
+    return { ...base, scenes: [{ ...scene, placeholders }] };
+  }
+
+  const regenerate = (overrides: Record<string, unknown> = {}) =>
+    resolveExecuteFrameDispatch(
+      baseInput({
+        regeneratePreviewOnly: true,
+        currentProjectManifest: manifestWithVisibleWindow(3, 9),
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] }),
+        session: validSession({
+          status: "AWAITING_PREVIEW_APPROVAL",
+          latestWorkingProjectSha256: "a".repeat(64),
+          latestPreviewScenePlanId: "scene-1",
+          completedScenePlanIds: ["scene-1"]
+        }),
+        ...overrides
+      })
+    );
+
+  it("falls back to the same server-resolved moment when the reviewer names none", () => {
+    const result = regenerate();
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(6);
+  });
+
+  it("still honours a moment the reviewer explicitly asked for", () => {
+    const result = regenerate({ previewTimestampSeconds: 7.5 });
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(7.5);
+  });
+
+  it("honours an explicit t=0 - a reviewer asking for the first frame gets the first frame", () => {
+    const result = regenerate({ previewTimestampSeconds: 0 });
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(0);
+  });
+});

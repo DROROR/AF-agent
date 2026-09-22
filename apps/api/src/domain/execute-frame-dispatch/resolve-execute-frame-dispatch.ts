@@ -709,6 +709,9 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     const placeholder = mapping?.manifestPlaceholderId ? manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId) : undefined;
     return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts) : null;
   });
+  // Only the slots this dispatch is actually editing vote here; the
+  // regeneration path has no approved-mapping list of its own and falls back
+  // to every manifest-linked slot in the scene (scenePreviewFrameSeconds).
   const previewTimestampSeconds = selectScenePreviewFrameSeconds(editedSlotWindows);
 
   return {
@@ -846,9 +849,32 @@ function resolveRegeneratePreviewOnly(
       approvedMappingIds: [],
       operations: [],
       previewOnly: true,
-      previewTimestampSeconds: input.previewTimestampSeconds
+      // A reviewer who asked for a SPECIFIC moment gets that moment - that is
+      // what this regeneration path exists for. Otherwise it falls back to the
+      // same server-resolved moment the original dispatch now uses (see the
+      // comment on the normal path above), rather than to t=0. Before
+      // 2026-09-22 an unspecified regeneration reproduced the blank frame it
+      // was asked to replace.
+      previewTimestampSeconds: input.previewTimestampSeconds ?? scenePreviewFrameSeconds(scene, currentProjectManifest) ?? undefined
     }
   };
+}
+
+/**
+ * The moment at which the most of a scene's manifest-linked slots are
+ * genuinely on screen, or null when none of them can be measured. Shared by
+ * the normal dispatch and the regeneration path so both name the same frame.
+ */
+function scenePreviewFrameSeconds(
+  scene: { mappings: readonly { manifestPlaceholderId: string | null }[]; manifestCompositionId: string },
+  manifest: TemplateManifest
+): number | null {
+  const manifestScene = manifest.scenes.find((candidate) => candidate.compositionId === scene.manifestCompositionId);
+  const windows = scene.mappings.map((mapping) => {
+    const placeholder = mapping.manifestPlaceholderId ? manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId) : undefined;
+    return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts) : null;
+  });
+  return selectScenePreviewFrameSeconds(windows);
 }
 
 /**
