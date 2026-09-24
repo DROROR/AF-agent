@@ -645,3 +645,33 @@ Run end to end on the disposable QA fixture only. The client's template, project
 `operationsCompleted: []`, `workingProjectSha256: null` - no working copy was even created. The refusal came from the OUTER chain-of-custody gate, which fires before the Stage 4 slot fingerprint gate can be reached; that is the correct layering, and worth recording precisely because the smoke-test plan anticipated the inner gate. The inner gate's own live behaviour was demonstrated separately and for real during this same run: job `3c51e867` refused a `MAP_FOOTAGE` with "this slot's structure has changed since the plan was approved (approved `4e01d1de4315`, now `6a712b80a57b`)" and applied nothing, which is how defect 3 was found.
 
 **What remains before MVP acceptance** (CLAUDE.md): three different plugin-free templates end to end, landscape output, native 1080x1920 Reels output, and an interrupted-job recovery test. None of those were attempted here - this smoke test covers inspection, classification, the gates, one frame and fail-closed refusal only.
+
+### 2026-09-24 - the render pipeline ran end to end for the first time
+
+Before today the database showed **zero** RENDER jobs, zero landscape compositions built and zero Reels compositions built, across 200 recorded jobs. The pipeline existed in code and tests but had never produced a video. It has now.
+
+Run on QA project `2247ad6a-1279-4b5a-804e-63bfbdefdb8c` ("QA-Render-Test"), built from the modified QA fixture (sha `81b03f8c…`) created for the step-7 fail-closed test. The client template, project `65e24d16…`, session `e0483ad6…` and Revision 4 were not touched.
+
+| Stage | Result |
+|---|---|
+| Asset upload with real pixel measurement | **PASS** - logo measured 69.47% transparent, 30.8% visible coverage; screenshot fully opaque |
+| Mappings + Hebrew (built from code points) | **PASS** |
+| Three slot decisions with mandatory evidence frames | **PASS** - each refused until its own frame existed |
+| Plan approval | **PASS** - revision 7 APPROVED |
+| EXECUTE_FRAME | **PASS** - 5/5 operations, preview resolved to t=5s (not t=0), Hebrew verified by code units (12/12) |
+| First preview, human approved | **PASS** |
+| BUILD_HORIZONTAL_COMPOSITION | **REFUSED** - see below |
+| CREATE_PREVIEW (complete preview) | **PASS** - real 1920x1080 H.264 MP4, 10s, 250 frames |
+| Final preview, human approved | **PASS** |
+| **RENDER (aerender, LANDSCAPE)** | **PASS** - `output.mp4`, 314,606 bytes, 1920x1080 H.264, 10s/250 frames, sha256 `0c80d1d1562c1967…` |
+
+**`BUILD_HORIZONTAL_COMPOSITION` refused, by design.** The landscape adapter is a deterministic 2D geometry rule and documents three refusals: a layer with keyframed position/scale, a 3D layer, and a parented layer. The QA scene's hosts are deliberately 3D, so it refused with "layer 6 (QA_StillMattedHost) is a 3D layer - cannot be safely adapted by 2D geometry rules", removed the half-built duplicate and left the working copy hash unchanged. That is correct fail-closed behaviour and not a defect. **It is, however, a real product limitation worth stating plainly: most real After Effects templates use 3D layers, parented layers and animated transforms, so this adapter will refuse on most of them.** It was not needed here because the scene composition is already 1920x1080 and was configured directly as the LANDSCAPE master - which is the normal path whenever the template is already landscape.
+
+**Two UX defects found, blocking in practice, not yet fixed.**
+
+1. **The scene drawer reports a decision as "Recorded" before anything is saved.** Clicking a slot decision writes "Recorded: accepted after looking at the frame" immediately, but nothing persists until `Save changes` is pressed. Reopening the drawer silently discards every decision. Verified against the database: after three such clicks, all three mappings still held `slotReview: null`.
+2. **A scene with several slots cannot be decided in one pass.** `update-execution-plan.ts` verifies a decision against `findLatestForComposition` - the single most recent evidence frame for the whole composition - so a capture for slot B invalidates a pending decision for slot A. The only sequence that works is capture → save → capture → save, one slot at a time. The drawer presents all slots together and gives no hint of this, so a multi-slot scene fails by construction. Working around it here required three separate capture-then-record round trips driven through the API.
+
+**Unrelated interruptions, both recovered:** the failed landscape build left After Effects holding unsaved changes and `CREATE_PREVIEW` correctly refused (`AE_PROJECT_NOT_SAFE_TO_REPLACE`); closing the project then dropped the ae-mcp bridge (`AE_NOT_CONNECTED`), which a full After Effects restart fixed. Both gates refused rather than guessing, and neither damaged anything.
+
+**Still not done, and not attempted here:** native 1080x1920 Reels output (no dashboard screen exists for `SET_REELS_LAYOUT`, so the feature is unreachable from the UI despite worker, API and database support being complete), audio/soundtrack handling (not a feature at all - audio files can be uploaded and nothing consumes them), the three-template MVP requirement, and the interrupted-job recovery test.
