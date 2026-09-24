@@ -173,7 +173,28 @@ export const sceneEvidenceRequestSchema = z
      * checked. Project-wide, read-only font report
      * (buildDescribeProjectFontsScript).
      */
-    describeFonts: z.boolean().optional()
+    describeFonts: z.boolean().optional(),
+    /**
+     * WHICH SLOT this capture is evidence FOR (real 2026-09-24 defect, see
+     * docs/ACCEPTANCE.md). The worker never reads this: it is a pure
+     * attribution fact, resolved server-side from the dispatch intent
+     * (resolve-inspect-scene-evidence-dispatch.ts) and carried through the
+     * job's own persisted payload so the upload callback can record WHICH
+     * mapping's moment the frame shows.
+     *
+     * It exists because a scene's slots each have their OWN visible moment
+     * (`selectEvidenceFrameSeconds`), so a composition has many simultaneously
+     * valid evidence frames - one per slot - and "the latest frame for this
+     * composition" cannot tell them apart. A multi-slot scene was therefore
+     * impossible to review in one pass: capturing slot B's frame silently
+     * invalidated a not-yet-saved decision for slot A.
+     *
+     * Absent on every capture taken before this existed, and on every capture
+     * that is not slot evidence at all (the plain representative frame a scene
+     * drawer shows) - both are recorded as an untagged frame, which still
+     * works exactly as it always did.
+     */
+    slotEvidenceMappingId: z.string().min(1).optional()
   })
   .strict();
 export type SceneEvidenceRequest = z.infer<typeof sceneEvidenceRequestSchema>;
