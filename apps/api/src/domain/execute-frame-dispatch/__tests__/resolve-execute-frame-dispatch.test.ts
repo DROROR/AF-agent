@@ -1880,6 +1880,43 @@ describe("resolveExecuteFrameDispatch - a structural placeholder is not content 
     expect(result.ok === true && result.payload.approvedMappingIds).not.toContain("map-structural");
   });
 
+  it("dispatches a scene whose colour placeholder the operator explicitly left unchanged", () => {
+    const base = validManifest();
+    const sceneManifest = base.scenes[0]!;
+    const solid = {
+      ...sceneManifest.placeholders[1]!,
+      placeholderId: "ph-solid",
+      layerName: "White Solid 2",
+      layerIndex: 12,
+      placeholderType: "color" as const,
+      dimensions: null
+    };
+    delete (solid as { slotFacts?: unknown }).slotFacts;
+    delete (solid as { slotSemantics?: unknown }).slotSemantics;
+    delete (solid as { originalText?: unknown }).originalText;
+    const colourMapping = {
+      ...structuralMapping("White Solid 2"),
+      id: "map-structural",
+      manifestPlaceholderId: "ph-solid",
+      placeholderClassification: { value: "color" as const, source: "MANIFEST" as const, evidence: [] }
+    };
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: { ...base, scenes: [{ ...sceneManifest, placeholders: [...sceneManifest.placeholders, solid] }] },
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              instructions: "Background solids are part of the template design - leave them unchanged.",
+              mappings: [textMapping({ text: "Reviewed wording" }), colourMapping] as never
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.payload.operations.length).toBe(1);
+  });
+
   it("still refuses a mapping that genuinely needs content and has none", () => {
     const { manifest } = withStructuralPlaceholder("Hero Headline");
     const result = resolveExecuteFrameDispatch(

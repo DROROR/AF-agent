@@ -531,6 +531,28 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     }
 
     const classification = mapping.placeholderClassification.value;
+
+    // NOTHING TO DERIVE IS NOT AN ERROR WHEN READINESS ALREADY SAID SO (real
+    // 2026-09-25 finding, on the first third-party template this system
+    // executed). The inspector surfaces cameras, shape layers, masks, CONTROL
+    // layers and background solids as placeholders, and the operator can also
+    // say explicitly - in the scene's own instructions - to leave one as the
+    // designer built it. `isMappingResolved` is the SAME predicate the
+    // readiness computation uses to decide a scene is approvable; before this,
+    // the two disagreed, so a scene could be approved and then fail dispatch
+    // with "cannot derive an operation" or "classified as color but has no
+    // colorHex set". A template containing a camera, which is most templates
+    // with any 3D work, could never be executed at all.
+    //
+    // Checked ahead of the classification switch so every classification
+    // behaves the same way, and gated on the mapping carrying NO content
+    // decision of its own: a mapping that genuinely needs content and has
+    // none still fails below, exactly as before. Never a second, competing
+    // notion of "structural" that could drift from the readiness one.
+    if (!mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
+      continue;
+    }
+
     if (classification === "text") {
       if (mapping.text === null) {
         return { ok: false, reason: `Mapping "${mapping.id}" is classified as text but has no text set` };
@@ -608,9 +630,6 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       // could drift from it, and only when the mapping carries no content
       // decision of its own: a mapping that genuinely needs content and
       // has none still fails below, exactly as before.
-      if (!mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
-        continue;
-      }
       return {
         ok: false,
         reason: `Mapping "${mapping.id}" has no resolved classification (${String(classification)}) - cannot derive an operation from it`
