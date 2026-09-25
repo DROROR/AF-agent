@@ -16,6 +16,7 @@ import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 import type { AssetRecord } from "../asset/types.js";
 import { verifyNestedTargetPath } from "../execution-plan/verify-nested-target-path.js";
+import { isMappingResolved, mappingHasContentDecision } from "../execution-plan/compute-scene-unresolved-reasons.js";
 import { isRecoverableForPreviewRegeneration } from "../execution-session/is-session-active.js";
 
 /**
@@ -591,8 +592,25 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       });
       approvedMappingIds.push(mapping.id);
     } else if (layerVisible === null && freezeAtSeconds === null && layerDurationSeconds === null) {
-      // No resolvable primary classification AND no independent override
-      // either - genuinely nothing to derive an operation from.
+      // A STRUCTURAL placeholder carries no content decision and never
+      // needed one, so there is nothing to derive and nothing wrong (real
+      // 2026-09-25 finding, on the first real third-party template this
+      // system executed). The inspector surfaces cameras, shape layers,
+      // masks and CONTROL layers as placeholders; readiness already
+      // recognises them as structural and resolves the scene, but this
+      // branch then failed the WHOLE scene over them. The two sides
+      // disagreed, so a template containing a camera - which is most
+      // templates with any 3D work - could be approved and then never
+      // executed.
+      //
+      // Skipping is decided by the SAME shared predicate readiness uses
+      // (isMappingResolved), never a second notion of "structural" that
+      // could drift from it, and only when the mapping carries no content
+      // decision of its own: a mapping that genuinely needs content and
+      // has none still fails below, exactly as before.
+      if (!mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
+        continue;
+      }
       return {
         ok: false,
         reason: `Mapping "${mapping.id}" has no resolved classification (${String(classification)}) - cannot derive an operation from it`

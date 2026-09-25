@@ -27,6 +27,8 @@ export default [
       "scripts/windows-worker-validate-env.mjs",
       // Production-web-build guard, plain JS, outside every tsconfig's rootDir - same convention as the other scripts/*.mjs entries above.
       "scripts/guard-production-web-build.mjs",
+      // QA acceptance check, plain JS run by hand against a rendered file - same convention as the other scripts/*.mjs entries above.
+      "scripts/qa/verify-render-timing.mjs",
       // Regenerated build artifact - see deploy/windows-worker/worker-app/ in .gitignore.
       "deploy/windows-worker/worker-app/**"
     ]

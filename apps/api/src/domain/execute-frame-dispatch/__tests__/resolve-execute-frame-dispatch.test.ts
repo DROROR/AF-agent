@@ -1810,3 +1810,93 @@ describe("resolveExecuteFrameDispatch - regenerating a preview must not reproduc
     expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(0);
   });
 });
+
+/**
+ * REAL 2026-09-25 FINDING, on the first third-party template this system ever
+ * executed. The inspector surfaces cameras, shape layers, masks and CONTROL
+ * layers as placeholders with no classification. Readiness already recognises
+ * those as structural and resolves the scene - but the dispatcher then failed
+ * the WHOLE scene over them, so a template containing a camera (which is most
+ * templates with any 3D work) could be approved and then never executed.
+ */
+describe("resolveExecuteFrameDispatch - a structural placeholder is not content to be derived", () => {
+  /** Adds a placeholder with no classification and no content, exactly as a camera layer arrives from inspection. */
+  function withStructuralPlaceholder(name: string): { manifest: TemplateManifest; mappingId: string } {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const structural = {
+      ...scene.placeholders[1]!,
+      placeholderId: "ph-structural",
+      layerName: name,
+      layerIndex: 9,
+      placeholderType: "unknown" as const,
+      dimensions: null
+    };
+    delete (structural as { slotFacts?: unknown }).slotFacts;
+    delete (structural as { slotSemantics?: unknown }).slotSemantics;
+    delete (structural as { originalText?: unknown }).originalText;
+    return {
+      manifest: { ...base, scenes: [{ ...scene, placeholders: [...scene.placeholders, structural] }] },
+      mappingId: "map-structural"
+    };
+  }
+
+  const structuralMapping = (name: string) => ({
+    id: "map-structural",
+    manifestPlaceholderId: "ph-structural",
+    placeholderName: name,
+    placeholderClassification: { value: null, source: "MANIFEST" as const, evidence: [] },
+    selectedAssetId: null,
+    selectedAssetType: null,
+    text: null,
+    colorHex: null,
+    assetTimestamp: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
+    keepTemplateText: null,
+    slotReview: null,
+    confidence: null,
+    mappingSource: "MANIFEST" as const,
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString()
+  });
+
+  it("dispatches a scene that also contains a camera layer, instead of failing the whole scene", () => {
+    const { manifest } = withStructuralPlaceholder("Camera 1");
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifest,
+        currentPlan: validPlan({
+          scenePlans: [validScene({ mappings: [textMapping({ text: "Reviewed wording" }), structuralMapping("Camera 1")] as never })]
+        })
+      })
+    );
+    expect(result.ok).toBe(true);
+    // The camera contributes no operation - it was never content.
+    expect(result.ok === true && result.payload.operations.length).toBe(1);
+    expect(result.ok === true && result.payload.approvedMappingIds).not.toContain("map-structural");
+  });
+
+  it("still refuses a mapping that genuinely needs content and has none", () => {
+    const { manifest } = withStructuralPlaceholder("Hero Headline");
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: manifest,
+        currentPlan: validPlan({
+          scenePlans: [
+            validScene({
+              mappings: [
+                textMapping({ text: "Reviewed wording" }),
+                { ...structuralMapping("Hero Headline"), placeholderClassification: { value: "text", source: "MANIFEST" as const, evidence: [] } }
+              ] as never
+            })
+          ]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+  });
+});
