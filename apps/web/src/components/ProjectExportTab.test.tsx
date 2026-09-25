@@ -206,3 +206,94 @@ describe("ProjectExportTab - locked before a plan exists (live QA fix)", () => {
     await screen.findByText("No execution plan yet");
   });
 });
+
+/**
+ * REAL 2026-09-25 INCIDENT: the daily operator could not tell why the
+ * Render button was greyed out. This tab's four disabling conditions are
+ * genuinely different problems with genuinely different fixes - and the
+ * most common one is fixable only on a tab Simple Mode does not even show -
+ * so each must state itself ON the control, attached to it, not merely
+ * somewhere else on the page.
+ */
+describe("ProjectExportTab - a disabled Render button always says why (REAL 2026-09-25 wayfinding incident)", () => {
+  function renderButton(): HTMLButtonElement {
+    return screen.getAllByRole("button", { name: /^Render / })[0] as HTMLButtonElement;
+  }
+
+  it("names the missing master composition AND the tab that fixes it, wired to the button itself", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+    renderTab();
+    await screen.findAllByText("Not set up yet");
+
+    const button = renderButton();
+    expect(button.disabled).toBe(true);
+    const reason = screen.getAllByText("No master composition is saved for this output yet. Choose one in Render Settings (Advanced view).")[0]!;
+    expect(button.getAttribute("aria-describedby")).toBe(reason.getAttribute("id"));
+  });
+
+  it("switches to the final-preview reason once a master IS configured but no session is ready to render - never repeats the configuration reason", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+    renderTab();
+    await screen.findByText("Not ready yet");
+
+    // The LANDSCAPE card is configured; its own button must give the
+    // session reason, while REELS (still unconfigured) keeps its own.
+    screen.getByText("The complete preview has to be approved on the Preview tab before rendering.");
+    screen.getByText("No master composition is saved for this output yet. Choose one in Render Settings (Advanced view).");
+  });
+
+  it("reports a STALE master as a re-selection problem, never as 'not configured' - they need different fixes", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: {
+          plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig({ sourceProjectSha256: "e".repeat(64) }), REELS: null } }),
+          sceneTable: []
+        }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+    renderTab();
+    await screen.findAllByText("Not set up yet");
+
+    screen.getByText("The template changed since this master composition was chosen. Re-select it in Render Settings.");
+  });
+
+  it("an ENABLED Render button carries no reason at all - the explanation only ever appears when it is actually blocked", async () => {
+    const worker = workerWithCapabilities(["RENDER"]);
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(worker.workerId) } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+    renderTab();
+
+    await waitFor(() => expect((screen.getAllByRole("button", { name: "Render Landscape" })[0] as HTMLButtonElement).disabled).toBe(false));
+    const button = screen.getAllByRole("button", { name: "Render Landscape" })[0]!;
+    expect(button.getAttribute("aria-describedby")).toBeNull();
+    expect(button.getAttribute("title")).toBeNull();
+  });
+});

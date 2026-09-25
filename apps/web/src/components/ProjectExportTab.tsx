@@ -129,6 +129,25 @@ function SimpleExportVariantCard({
   const canRender = currentConfig !== null && !isStale && renderReady && renderWorkerOnline;
   const isKnownWorkerOffline = renderWorker !== null && renderWorker.status !== "ONLINE";
   const variantLabel = t.renders.variantLabel[variant];
+  // REAL 2026-09-25 INCIDENT: this render button has four independent
+  // disabling conditions, and the most common one by far - no master
+  // composition saved for this output - can only be cleared on the Render
+  // Settings tab, which Simple Mode does not even show. The reason text
+  // therefore has to name that tab, not just state the fact. Same order as
+  // `canRender`'s own conjunction, so the stated reason is the real one.
+  const renderDisabledReason = isDispatching
+    ? t.projectWorkspace.disabledReason.working
+    : currentConfig === null
+      ? t.projectWorkspace.disabledReason.renderNotConfigured
+      : isStale
+        ? t.projectWorkspace.disabledReason.renderConfigStale
+        : !renderReady
+          ? t.projectWorkspace.disabledReason.renderNotReady
+          : !renderWorkerOnline
+            ? isKnownWorkerOffline
+              ? t.projectWorkspace.disabledReason.workerOffline
+              : t.projectWorkspace.disabledReason.noWorker
+            : undefined;
 
   async function handleRender(): Promise<void> {
     if (!renderWorker || !session) {
@@ -171,7 +190,7 @@ function SimpleExportVariantCard({
       {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
 
       <div className="overview-actions">
-        <Button variant="primary" disabled={!canRender || isDispatching} onClick={() => void handleRender()}>
+        <Button variant="primary" disabled={!canRender || isDispatching} disabledReason={renderDisabledReason} onClick={() => void handleRender()}>
           {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.export.renderAction(variantLabel)}
         </Button>
       </div>

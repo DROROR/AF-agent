@@ -352,7 +352,7 @@ export function ReelsLayoutCard(): ReactElement | null {
               </ul>
               <p>{t.projectWorkspace.renderSettings.reelsLayout.savedNote}</p>
               <div className="overview-actions">
-                <Button variant="secondary" disabled={isSaving} onClick={() => void handleClear()}>
+                <Button variant="secondary" disabled={isSaving} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void handleClear()}>
                   {t.projectWorkspace.renderSettings.reelsLayout.clearAction}
                 </Button>
               </div>
@@ -365,7 +365,12 @@ export function ReelsLayoutCard(): ReactElement | null {
               {!worker ? <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} /> : null}
               {readError ? <ErrorState title={t.projectWorkspace.renderSettings.reelsLayout.readFailedTitle} description={readError} /> : null}
               <div className="overview-actions">
-                <Button variant="secondary" disabled={!worker || isReadingLayers} onClick={() => void handleReadLayers()}>
+                <Button
+                  variant="secondary"
+                  disabled={!worker || isReadingLayers}
+                  disabledReason={isReadingLayers ? t.projectWorkspace.disabledReason.working : t.projectWorkspace.disabledReason.noWorker}
+                  onClick={() => void handleReadLayers()}
+                >
                   {isReadingLayers
                     ? t.projectWorkspace.renderSettings.reelsLayout.readingLayers
                     : t.projectWorkspace.renderSettings.reelsLayout.readLayersAction}
@@ -497,7 +502,18 @@ export function ReelsLayoutCard(): ReactElement | null {
               </Field>
               {saveError ? <ErrorState title={t.projectWorkspace.renderSettings.reelsLayout.saveFailedTitle} description={saveError} /> : null}
               <div className="overview-actions">
-                <Button variant="primary" disabled={!canSave} onClick={() => void handleSave()}>
+                <Button
+                  variant="primary"
+                  disabled={!canSave}
+                  disabledReason={
+                    isSaving
+                      ? t.projectWorkspace.disabledReason.working
+                      : selectedScene === null
+                        ? t.projectWorkspace.disabledReason.noSceneChosen
+                        : t.projectWorkspace.disabledReason.noLayoutChanges
+                  }
+                  onClick={() => void handleSave()}
+                >
                   {isSaving ? t.projectWorkspace.savingLabel : t.projectWorkspace.renderSettings.reelsLayout.saveAction}
                 </Button>
               </div>

@@ -2,6 +2,7 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkflowStepper } from "./ProjectWorkflowStepper";
+import { ProjectGuidanceProvider } from "./ProjectGuidanceProvider";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import { PROJECT_ID, manifestFixture, planFixture, projectDtoFixture, renderArtifactFixture, sceneFixture, stubFetchByUrl, workMapEntryFixture, workMapFixture } from "../test-utils/execution-plan-fixtures";
@@ -48,7 +49,9 @@ function stubWorkspace(overrides: Record<string, Parameters<typeof stubFetchByUr
 function renderStepper(): void {
   renderWithLocale(
     <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-      <ProjectWorkflowStepper />
+      <ProjectGuidanceProvider projectId={PROJECT_ID}>
+        <ProjectWorkflowStepper />
+      </ProjectGuidanceProvider>
     </ProjectWorkspaceProvider>
   );
 }

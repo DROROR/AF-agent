@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type ReactElement, type ReactNode } from "react";
-import { Trash2 } from "lucide-react";
+import { useId, useState, type ReactElement, type ReactNode } from "react";
+import { Lock, Trash2 } from "lucide-react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useProjectGuidance } from "./ProjectGuidanceProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { ProjectWorkflowStepper } from "./ProjectWorkflowStepper";
+import { ProjectNextActionBanner } from "./ProjectNextActionBanner";
 import { PlanStatusBadge } from "./PlanStatusBadge";
 import { ErrorState } from "./ErrorState";
 import { Card } from "./ui/Card";
@@ -72,7 +74,9 @@ export function ProjectWorkspaceShell({
   const pathname = usePathname();
   const router = useRouter();
   const { project, plan, isLoading, error } = useProjectWorkspaceContext();
+  const { nextAction, tabLocks, stateUnknown } = useProjectGuidance();
   const { mode, setMode } = useWorkspaceMode();
+  const hintIdPrefix = useId();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -197,17 +201,64 @@ export function ProjectWorkspaceShell({
         </div>
       </Dialog>
       <ProjectWorkflowStepper />
+      <ProjectNextActionBanner projectId={projectId} />
+      {/*
+        REAL 2026-09-25 INCIDENT: the operator could not tell which tab to
+        open next, and a tab they were not allowed to use yet looked exactly
+        like one they were. Two markers fix that, both from the SAME shared
+        derivation the stepper and banner use (ProjectGuidanceProvider), so
+        the nav can never point somewhere the banner disagrees with:
+
+          - data-next: the one tab holding the current next action.
+          - data-locked + a real, visible hint: tabs whose page would only
+            show LockedStepNotice right now. `tabLockedHint` had been sitting
+            unused in every locale dictionary since it was written - nothing
+            rendered it - so "locked until X" was a promise the UI never
+            actually kept. Locked tabs stay clickable on purpose: the page
+            behind them already explains itself, and silently swallowing a
+            click is its own unexplained dead end.
+
+        While the real state is unknown, neither marker is drawn at all -
+        marking the wrong tab is worse than marking none.
+      */}
       <nav className="workspace-tabs" aria-label={t.projectWorkspace.tabs.overview}>
-        {tabs.map((tab) => (
-          <Link
-            key={tab.href}
-            href={tab.href}
-            className="workspace-tab"
-            data-active={pathname === tab.href}
-          >
-            {t.projectWorkspace.tabs[tab.labelKey]}
-          </Link>
-        ))}
+        {tabs.map((tab) => {
+          const isLocked = !stateUnknown && (tab.labelKey === "preview" ? tabLocks.preview : tab.labelKey === "export" ? tabLocks.export : false);
+          const isNext = !stateUnknown && nextAction.tab === tab.labelKey;
+          const lockHint = isLocked ? (tab.labelKey === "preview" ? t.projectWorkspace.tabLockedHint.preview : t.projectWorkspace.tabLockedHint.export) : null;
+          const hintId = `${hintIdPrefix}-${tab.labelKey}`;
+          const label = t.projectWorkspace.tabs[tab.labelKey];
+          return (
+            <span key={tab.href} className="workspace-tab-slot">
+              <Link
+                href={tab.href}
+                className="workspace-tab"
+                data-active={pathname === tab.href}
+                data-next={isNext ? "true" : undefined}
+                data-locked={isLocked ? "true" : undefined}
+                aria-label={isLocked ? `${label} ${t.projectWorkspace.tabLockedAriaSuffix}` : isNext ? `${label} ${t.projectWorkspace.tabNextAriaSuffix}` : undefined}
+                {...(lockHint ? { "aria-describedby": hintId } : {})}
+              >
+                {label}
+                {isLocked ? <Lock aria-hidden="true" size={12} className="workspace-tab__lock" /> : null}
+              </Link>
+              {/* Outside the <a> on purpose: the badge is decoration, and
+                  folding "Next" into the link's own text content would change
+                  every tab's accessible name and its textContent. Assistive
+                  tech gets the same fact from the link's aria-label instead. */}
+              {isNext ? (
+                <span className="workspace-tab__next" aria-hidden="true">
+                  {t.projectWorkspace.tabNextBadge}
+                </span>
+              ) : null}
+              {lockHint ? (
+                <span id={hintId} role="tooltip" className="workspace-tab__hint">
+                  {lockHint}
+                </span>
+              ) : null}
+            </span>
+          );
+        })}
       </nav>
       {children}
     </>

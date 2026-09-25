@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkspaceShell } from "./ProjectWorkspaceShell";
+import { ProjectGuidanceProvider } from "./ProjectGuidanceProvider";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
@@ -24,9 +25,11 @@ function renderShell(): void {
   renderWithLocale(
     <WorkspaceModeProvider>
       <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-        <ProjectWorkspaceShell projectId={PROJECT_ID}>
-          <div>tab content</div>
-        </ProjectWorkspaceShell>
+        <ProjectGuidanceProvider projectId={PROJECT_ID}>
+          <ProjectWorkspaceShell projectId={PROJECT_ID}>
+            <div>tab content</div>
+          </ProjectWorkspaceShell>
+        </ProjectGuidanceProvider>
       </ProjectWorkspaceProvider>
     </WorkspaceModeProvider>
   );
@@ -35,6 +38,9 @@ function renderShell(): void {
 function stubWorkspace(): void {
   stubFetchByUrl({
     [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+    [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
+    [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+    [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
     [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
   });
 }
@@ -86,6 +92,13 @@ describe("ProjectWorkspaceShell - Delete Project", () => {
   it("confirming delete calls the real DELETE endpoint and navigates back to the Projects list on success", async () => {
     stubFetchByUrl({
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      // Stubbed explicitly (even though these tests do not assert on them):
+      // ProjectGuidanceProvider fetches them, and without their own entries
+      // they fall through to the sequenced `/api/projects/:id` stub below
+      // and consume the DELETE response meant for the delete request.
+      [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
       [`/api/projects/${PROJECT_ID}`]: [
         { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
         { status: 204, body: null }
@@ -106,6 +119,13 @@ describe("ProjectWorkspaceShell - Delete Project", () => {
   it("shows a typed, actionable error and never navigates away when the API refuses (e.g. an active job)", async () => {
     stubFetchByUrl({
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      // Stubbed explicitly (even though these tests do not assert on them):
+      // ProjectGuidanceProvider fetches them, and without their own entries
+      // they fall through to the sequenced `/api/projects/:id` stub below
+      // and consume the DELETE response meant for the delete request.
+      [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
       [`/api/projects/${PROJECT_ID}`]: [
         { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
         { status: 409, body: { error: { code: "PROJECT_HAS_ACTIVE_JOB", message: "Project has a job still in progress - wait for it to finish before deleting", requestId: "r1" } } }

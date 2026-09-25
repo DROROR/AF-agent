@@ -453,6 +453,99 @@ export const en = {
       preview: "Locked until mappings are approved",
       export: "Locked until Final Preview is approved"
     },
+    /** The tab nav's own marker for the tab holding the current next action - the answer to "which tab do I open?" without reading anything else. */
+    tabNextBadge: "Next",
+    tabNextAriaSuffix: "- your next step is here",
+    tabLockedAriaSuffix: "- locked",
+    /**
+     * REAL 2026-09-25 INCIDENT: the daily operator could not tell which step
+     * a project was on, which tab to open, or why a button was disabled, and
+     * had to be talked through every click. This block is the one plain
+     * sentence shown on EVERY tab naming the real next action AND where it
+     * lives. Copy rules: name the tab, name the button exactly as it is
+     * labelled elsewhere in this dictionary, and never describe a state the
+     * UI has not actually confirmed (see `unknown`/`loadFailed`).
+     */
+    nextAction: {
+      heading: "What to do next",
+      goToAction: (tab: string): string => `Go to ${tab}`,
+      hereBadge: "You are on the right tab",
+      unknownTitle: "Checking where this project is…",
+      unknownDescription: "Reading this project's real status. Nothing is guessed - this will say what to do next in a moment.",
+      loadFailedTitle: "We cannot tell which step this project is on",
+      loadFailedDescription:
+        "Part of this project's status could not be loaded, so no next step is being guessed here. Reload the page - if it keeps failing, the server or your editing computer may be unreachable.",
+      actions: {
+        createPlan: {
+          title: "Create the video plan",
+          description: "Open the Scenes tab and press \"Create Execution Plan\". Nothing can be reviewed, previewed or rendered until this plan exists."
+        },
+        reviewScenes: {
+          title: "Review each scene",
+          description: "Open the Scenes tab and settle every scene marked \"Needs your choice\". \"Approve Scenes\" stays disabled until every included scene is reviewed and at least one scene is included."
+        },
+        approveScenes: {
+          title: "Approve the scenes",
+          description: "Every scene is reviewed. Press \"Approve Scenes\" at the top of the Scenes tab - this unlocks the Preview tab."
+        },
+        startFirstPreview: {
+          title: "Create the first preview",
+          description: "Open the Preview tab and press \"Start execution\". After Effects builds one designed frame for you to check before the rest of the video is built."
+        },
+        approveFirstPreview: {
+          title: "Approve the first preview",
+          description: "Your first designed frame is waiting on the Preview tab. Press \"Approve preview\" to let the remaining scenes be built, or \"Reject preview\" to stop here."
+        },
+        executeRemainingScenes: {
+          title: "Build the remaining scenes",
+          description: "Open the Preview tab and press \"Continue execution\" until every approved scene has been built."
+        },
+        configureRenderOutput: {
+          title: "Choose the Landscape master",
+          description:
+            "Open Render Settings, pick the master composition for Landscape and save it. Export stays disabled without it. Render Settings only appears in the tab bar in Advanced view - use the Simple/Advanced toggle above this page."
+        },
+        reviewFinalPreview: {
+          title: "Review the complete video",
+          description: "Open the Preview tab, press \"Create Complete Preview\", watch the result, then press \"Approve Final Preview\". Export unlocks only after that approval."
+        },
+        render: {
+          title: "Render the final video",
+          description: "Open the Export tab and press Render for each output you need. This runs After Effects on your editing computer and takes a while."
+        },
+        done: {
+          title: "Everything is done",
+          description: "Your rendered videos are on the Export tab, ready to play or download."
+        }
+      }
+    },
+    /**
+     * Why a control is disabled, shown next to the control itself. The
+     * 2026-09-25 incident named a silently-disabled button with no
+     * explanation as the single worst thing in this UI - so every one of
+     * these says both the blocking fact AND what would clear it.
+     */
+    disabledReason: {
+      working: "Working on this right now - it will free up on its own.",
+      workerOffline: "Your editing computer is offline. Turn it on and this becomes available again.",
+      noWorker: "No editing computer is connected right now. It becomes available as soon as one comes online.",
+      staleRevision: "This plan changed somewhere else. Reload the page to get the latest version first.",
+      scenesNotReviewed: "Some scenes still need your choice. Settle every scene below first.",
+      previewsUpdating: "Scene previews are still updating after your last change. This clears by itself in a moment.",
+      scenesAlreadyApproved: "Already approved - the next step is on the Preview tab.",
+      planNotReady: "Some scenes are not ready for approval yet. The reasons are listed above.",
+      planNotDraft: "This plan is no longer a draft. Reopen it for editing to change the decision.",
+      noExecutableScene: "No approved scene can be executed yet. Approve the scenes on the Scenes tab first.",
+      allScenesExecuted: "Every approved scene is already built - continue with the complete preview below.",
+      scenesNotExecuted: "The approved scene has to finish building on the Preview tab first.",
+      finalPreviewAlreadyApproved: "Already approved. Use \"Regenerate Complete Preview\" if the video needs rebuilding.",
+      renderNotConfigured: "No master composition is saved for this output yet. Choose one in Render Settings (Advanced view).",
+      renderConfigStale: "The template changed since this master composition was chosen. Re-select it in Render Settings.",
+      renderNotReady: "The complete preview has to be approved on the Preview tab before rendering.",
+      noCompositionChosen: "Choose a master composition above first.",
+      noSceneChosen: "Choose a scene above first.",
+      noLayoutChanges: "Nothing has changed yet - adjust a value above to enable saving."
+    },
     header: {
       sourceProject: "Source project",
       sourceSha: "Source SHA",

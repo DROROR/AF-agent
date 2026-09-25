@@ -4,8 +4,8 @@ import Link from "next/link";
 import { Check, Lock } from "lucide-react";
 import type { ReactElement } from "react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
-import { useProjectStepperStatus } from "../lib/use-project-stepper-status";
-import { computeWorkflowSteps, currentStepIndex, WORKFLOW_STEP_IDS, type WorkflowStepId, type WorkflowStepState } from "../lib/project-workflow-steps";
+import { useProjectGuidance } from "./ProjectGuidanceProvider";
+import { WORKFLOW_STEP_IDS, type WorkflowStepId, type WorkflowStepState } from "../lib/project-workflow-steps";
 import { useLocale } from "./LocaleProvider";
 import { HelpTooltip } from "./ui/HelpTooltip";
 
@@ -36,38 +36,31 @@ function stepHref(projectId: string, id: WorkflowStepId): string {
  */
 export function ProjectWorkflowStepper(): ReactElement | null {
   const { t } = useLocale();
-  const { project, plan } = useProjectWorkspaceContext();
+  const { project } = useProjectWorkspaceContext();
+  const { steps, currentStepIndex, stateUnknown } = useProjectGuidance();
   const projectId = project?.project.projectId ?? "";
-  const { workMap, session, renderArtifacts, isLoading } = useProjectStepperStatus(projectId);
 
   if (!project) {
     return null;
   }
 
-  // Same "required scenes" / "all complete" definition ProjectOverviewTab.tsx
-  // already uses for its own Execute/Render button logic - never a second,
-  // independently-invented rule that could disagree with what actually
-  // gates those real actions.
-  const activeSession = session && session.status !== "FAILED" ? session : null;
-  const requiredScenePlanIds =
-    plan && plan.plan.status === "APPROVED"
-      ? plan.plan.scenePlans.filter((scene) => scene.use && scene.approvalState === "APPROVED" && scene.unresolvedReasons.length === 0).map((s) => s.id)
-      : [];
-  const allScenesComplete =
-    activeSession !== null && requiredScenePlanIds.length > 0 && requiredScenePlanIds.every((id) => activeSession.completedScenePlanIds.includes(id));
+  // REAL 2026-09-25 INCIDENT, "never invent state": this used to render a
+  // confident "Step 2 of 7 - AI Plan" computed from not-yet-loaded (or
+  // failed) fetches, because an absent work map/session/render list and a
+  // failed request both arrived here as `null`. A freshly reloaded page on
+  // a half-finished project therefore announced the wrong step, and a
+  // request failure announced it permanently.
+  //
+  // A progress bar that cannot state real progress has nothing honest to
+  // draw, so it draws nothing: ProjectNextActionBanner renders directly
+  // below and says, in words, whether we are still checking or genuinely
+  // could not read the state. Saying it once, there, is why this returns
+  // null rather than repeating the same sentence in two stacked blocks.
+  if (stateUnknown) {
+    return null;
+  }
 
-  const steps = computeWorkflowSteps({
-    hasProject: true,
-    workMapEntryCount: workMap?.entries.length ?? 0,
-    hasPlan: plan !== null,
-    planApproved: plan?.plan.status === "APPROVED",
-    hasExecutableScene: requiredScenePlanIds.length > 0,
-    firstPreviewApproved: activeSession?.firstPreviewApproved ?? false,
-    allScenesComplete,
-    fullPreviewApproved: activeSession?.fullPreviewApproved ?? false,
-    hasRenderArtifact: (renderArtifacts?.length ?? 0) > 0
-  });
-  const currentIndex = currentStepIndex(steps);
+  const currentIndex = currentStepIndex;
   const currentStep = steps[currentIndex]!;
 
   const stepTitle = t.projectWorkspace.stepper.steps[currentStep.id].title;
@@ -79,7 +72,7 @@ export function ProjectWorkflowStepper(): ReactElement | null {
         {t.projectWorkspace.stepper.stepOfTotal(currentIndex + 1, WORKFLOW_STEP_IDS.length, stepTitle)}
       </p>
       <p className="workflow-stepper__hint">{stepDescription}</p>
-      <ol className="workflow-stepper__list" data-loading={isLoading ? "true" : undefined}>
+      <ol className="workflow-stepper__list">
         {steps.map((step, index) => {
           const label = t.projectWorkspace.stepper.steps[step.id].title;
           const statusLabel = statusLabelFor(t, step.state);

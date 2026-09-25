@@ -293,6 +293,22 @@ export function ProjectPreviewTab(): ReactElement | null {
   // the generic no-worker-available one.
   const isKnownWorkerOffline = sessionPinnedToWorker !== null && candidateWorker !== null && candidateWorker.status !== "ONLINE";
 
+  // REAL 2026-09-25 INCIDENT: every button on this tab could be greyed out
+  // for a worker reason (offline / never connected / already busy) that was
+  // only ever stated in a card-level EmptyState which is not rendered in
+  // every branch - so "Regenerate First Preview" and "Analyze Preview
+  // Timing" in particular could sit disabled with nothing on screen
+  // explaining them at all. One derived reason, reused by each control that
+  // genuinely depends on the worker, so they can never disagree.
+  const workerDisabledReason = workerReady ? undefined : isKnownWorkerOffline ? t.projectWorkspace.disabledReason.workerOffline : t.projectWorkspace.disabledReason.noWorker;
+  const executeDisabledReason = isDispatching
+    ? t.projectWorkspace.disabledReason.working
+    : requiredScenePlanIds.length === 0
+      ? t.projectWorkspace.disabledReason.noExecutableScene
+      : nextScenePlanId === null
+        ? t.projectWorkspace.disabledReason.allScenesExecuted
+        : workerDisabledReason;
+
   async function handleExecuteNextScene(): Promise<void> {
     if (!nextScenePlanId || !candidateWorker) {
       return;
@@ -579,7 +595,12 @@ export function ProjectPreviewTab(): ReactElement | null {
                 onChange={(event) => setPreviewTimestampInput(event.target.value)}
               />
             </label>
-            <Button variant="secondary" disabled={!workerReady || isDispatching} onClick={() => void handleRegeneratePreview()}>
+            <Button
+              variant="secondary"
+              disabled={!workerReady || isDispatching}
+              disabledReason={isDispatching ? t.projectWorkspace.disabledReason.working : workerDisabledReason}
+              onClick={() => void handleRegeneratePreview()}
+            >
               {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.regenerateFirstPreviewAction}
             </Button>
           </div>
@@ -587,7 +608,12 @@ export function ProjectPreviewTab(): ReactElement | null {
 
         {canRegeneratePreview && previewTimingHumanTargets.length > 0 ? (
           <div className="overview-actions">
-            <Button variant="secondary" disabled={!workerReady || timingPhase === "running"} onClick={() => void handleAnalyzePreviewTiming()}>
+            <Button
+              variant="secondary"
+              disabled={!workerReady || timingPhase === "running"}
+              disabledReason={timingPhase === "running" ? t.projectWorkspace.disabledReason.working : workerDisabledReason}
+              onClick={() => void handleAnalyzePreviewTiming()}
+            >
               {timingPhase === "running" ? t.jobDispatch.previewTimingAnalyzing : t.projectWorkspace.overview.previewTiming.action}
             </Button>
           </div>
@@ -625,15 +651,15 @@ export function ProjectPreviewTab(): ReactElement | null {
         <div className="overview-actions">
           {activeSession?.status === "AWAITING_PREVIEW_APPROVAL" ? (
             <>
-              <Button variant="primary" disabled={isDispatching} onClick={() => void handleApprovePreview()}>
+              <Button variant="primary" disabled={isDispatching} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void handleApprovePreview()}>
                 {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.approvePreviewAction}
               </Button>
-              <Button variant="secondary" disabled={isDispatching} onClick={() => void handleRejectPreview()}>
+              <Button variant="secondary" disabled={isDispatching} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void handleRejectPreview()}>
                 {t.projectWorkspace.overview.rejectPreviewAction}
               </Button>
             </>
           ) : !allScenesComplete && !canRegeneratePreview ? (
-            <Button variant="primary" disabled={!canExecute || isDispatching} onClick={() => void handleExecuteNextScene()}>
+            <Button variant="primary" disabled={!canExecute || isDispatching} disabledReason={executeDisabledReason} onClick={() => void handleExecuteNextScene()}>
               {isDispatching
                 ? t.jobDispatch.dispatching
                 : activeSession
@@ -748,7 +774,7 @@ function FinalPreviewCard({ projectId, session }: { projectId: string; session: 
           <EmptyState title={t.projectWorkspace.overview.finalPreview.notReadyTitle} description={t.projectWorkspace.overview.finalPreview.notReadyDescription} />
           {dispatchMessage ? <p className={dispatchMessage.isError ? "final-preview-card__error" : "field__hint"}>{dispatchMessage.text}</p> : null}
           <div className="overview-actions">
-            <Button variant="primary" disabled={isDispatching} onClick={() => void handleCreatePreview()}>
+            <Button variant="primary" disabled={isDispatching} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void handleCreatePreview()}>
               {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.finalPreview.createAction}
             </Button>
             <Button variant="secondary" size="sm" onClick={() => setRefreshKey((k) => k + 1)}>
@@ -778,13 +804,23 @@ function FinalPreviewCard({ projectId, session }: { projectId: string; session: 
               approval (Request Changes/Approve stay the separate, only
               actions that change fullPreviewApproved).
             */}
-            <Button variant="secondary" disabled={isDispatching} onClick={() => void handleCreatePreview()}>
+            <Button variant="secondary" disabled={isDispatching} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void handleCreatePreview()}>
               {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.overview.finalPreview.regenerateAction}
             </Button>
-            <Button variant="secondary" disabled={currentSession.fullPreviewApproved} onClick={() => void handleRequestChanges()}>
+            <Button
+              variant="secondary"
+              disabled={currentSession.fullPreviewApproved}
+              disabledReason={t.projectWorkspace.disabledReason.finalPreviewAlreadyApproved}
+              onClick={() => void handleRequestChanges()}
+            >
               {t.projectWorkspace.overview.finalPreview.requestChangesAction}
             </Button>
-            <Button variant="primary" disabled={currentSession.fullPreviewApproved} onClick={() => void handleApprove()}>
+            <Button
+              variant="primary"
+              disabled={currentSession.fullPreviewApproved}
+              disabledReason={t.projectWorkspace.disabledReason.finalPreviewAlreadyApproved}
+              onClick={() => void handleApprove()}
+            >
               {currentSession.fullPreviewApproved ? t.projectWorkspace.overview.finalPreview.approvedBadge : t.projectWorkspace.overview.finalPreview.approveAction}
             </Button>
           </div>

@@ -168,6 +168,18 @@ export function SimpleScenesView(): ReactElement {
   const usedScenes = plan.plan.scenePlans.filter((scene) => scene.use);
   const scenesApproved = plan.plan.status === "APPROVED" && usedScenes.length > 0 && usedScenes.every((scene) => scene.approvalState === "APPROVED");
 
+  // REAL 2026-09-25 INCIDENT: "Approve Scenes" is disabled for FIVE
+  // genuinely different reasons and looked identical in all of them. Three
+  // of those five were already explained by the status line rendered
+  // directly above the button (approved / not reviewed / previews
+  // updating) - those keep that existing wording, which real regression
+  // tests pin to specific incidents. The two that were NEVER explained
+  // anywhere - a revision saved elsewhere, and an approval already in
+  // flight - now state themselves on the control itself. Evaluated in the
+  // same order as the `disabled` expression below, so the stated reason is
+  // always the one really holding the button.
+  const approveDisabledReason = scenesApproved || !allReady ? undefined : isStale ? t.projectWorkspace.disabledReason.staleRevision : isApproving ? t.projectWorkspace.disabledReason.working : undefined;
+
   async function handleAccept(suggestion: MappingSuggestion): Promise<void> {
     setBusySuggestionId(suggestion.id);
     setActionError(null);
@@ -218,7 +230,12 @@ export function SimpleScenesView(): ReactElement {
                 ? t.simpleScenes.scenesNotReadyHint
                 : t.simpleScenes.previewsUpdatingHint}
         </p>
-        <Button variant="primary" disabled={scenesApproved || !allReady || isApproving || isStale} onClick={() => void handleApprove()}>
+        <Button
+          variant="primary"
+          disabled={scenesApproved || !allReady || isApproving || isStale}
+          disabledReason={approveDisabledReason}
+          onClick={() => void handleApprove()}
+        >
           {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
         </Button>
       </Card>

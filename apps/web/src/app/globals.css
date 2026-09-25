@@ -2085,11 +2085,193 @@ a.workflow-stepper__step:hover {
   font-weight: 600;
 }
 
+/* ==========================================================================
+   Wayfinding (REAL 2026-09-25 incident: the daily operator could not tell
+   which step to do when, which tab to open, or why a button was disabled)
+   ========================================================================== */
+
+/* The one "what to do next" line, on every tab of a project. Loud on
+   purpose - this is the thing that should be impossible to miss. */
+.next-action {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--brand-primary);
+  border-inline-start-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-info-bg);
+}
+
+.next-action > svg {
+  flex-shrink: 0;
+  margin-block-start: 2px;
+  color: var(--brand-primary);
+}
+
+/* The logical-property border above already flips for RTL; the arrow glyph
+   itself does not, so mirror it when the document direction is RTL. */
+[dir="rtl"] .next-action > svg {
+  transform: scaleX(-1);
+}
+
+.next-action--unknown {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-sunken);
+}
+
+.next-action--unknown > svg {
+  color: var(--color-text-muted);
+}
+
+.next-action__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.next-action__heading {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.next-action__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.next-action__description {
+  margin: 2px 0 0;
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+}
+
+.next-action__link {
+  flex-shrink: 0;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.next-action__here {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--brand-primary);
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .next-action {
+    flex-wrap: wrap;
+  }
+
+  .next-action__link,
+  .next-action__here {
+    align-self: flex-start;
+  }
+}
+
+/* Why a control is disabled, printed next to the control itself - never a
+   greyed-out button with nothing explaining it. */
+/* Transparent to layout until it actually has a reason to show, so a button
+   sits in its parent's flex/grid row exactly as it did before this wrapper
+   existed. See Button.tsx for why the wrapper is always rendered. */
+.btn-with-reason {
+  display: contents;
+}
+
+.btn-with-reason[data-has-reason="true"] {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.btn-disabled-reason {
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  max-width: 24rem;
+}
+
 .workspace-tabs {
   display: flex;
   gap: var(--space-1);
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
+}
+
+/* Each tab is wrapped so its locked hint can be positioned against it - the
+   nav itself keeps the exact same flex row it always had. */
+.workspace-tab-slot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.workspace-tab__lock {
+  margin-inline-start: 6px;
+}
+
+/* A sibling of the <a>, not a child of it - see ProjectWorkspaceShell for
+   why the badge must stay out of the link's own text content. */
+.workspace-tab__next {
+  display: inline-block;
+  margin-inline-start: -4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--brand-primary);
+  color: var(--brand-primary-contrast);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+
+.workspace-tab[data-next="true"] {
+  color: var(--color-text);
+}
+
+.workspace-tab[data-locked="true"] {
+  color: var(--color-text-faint);
+}
+
+/* `tabLockedHint` existed in every locale dictionary but nothing rendered
+   it, so "locked until X" was a promise the UI never kept. It is always in
+   the DOM now (wired to the tab with aria-describedby, so assistive tech
+   always announces it) and revealed visually on hover/focus. */
+.workspace-tab__hint {
+  position: absolute;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 16rem;
+  margin-block-start: 4px;
+  padding: 6px var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 500;
+  box-shadow: var(--shadow-md, 0 4px 12px rgb(0 0 0 / 0.14));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.workspace-tab-slot:hover .workspace-tab__hint,
+.workspace-tab-slot:focus-within .workspace-tab__hint {
+  opacity: 1;
 }
 
 .workspace-tab {

@@ -9,6 +9,17 @@ export interface ProjectStepperStatus {
   session: ExecutionSessionDto | null;
   renderArtifacts: RenderArtifactDto[] | null;
   isLoading: boolean;
+  /**
+   * REAL 2026-09-25 INCIDENT follow-up ("never invent state"): a failed
+   * fetch used to be flattened into the same `null` a genuinely absent
+   * work map / session / render list produces, so a transient API failure
+   * silently rendered as "this project has not started yet" - and the
+   * guidance built on top would then confidently name the WRONG next
+   * action. Loading and "could not load" are now distinguishable from
+   * "really is absent"; callers that make claims about where a project is
+   * must treat this as "we cannot tell" and say so.
+   */
+  hasError: boolean;
 }
 
 /**
@@ -17,15 +28,15 @@ export interface ProjectStepperStatus {
  * (which only fetches project + execution plan) - a separate, on-demand
  * fetch rather than widening that shared hook, so every other project
  * page's own load stays exactly as fast/minimal as it already is. A
- * failed fetch here degrades to null (never blocks the page or shows an
- * error banner) - the stepper simply treats that signal as "not yet
- * known", same as a project with no work map/session/renders at all.
+ * failed fetch here never blocks the page or shows an error banner, but it
+ * is NOT silently equivalent to "there is none yet" - see `hasError`.
  */
 export function useProjectStepperStatus(projectId: string): ProjectStepperStatus {
   const [workMap, setWorkMap] = useState<WorkMap | null>(null);
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
   const [renderArtifacts, setRenderArtifacts] = useState<RenderArtifactDto[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +53,9 @@ export function useProjectStepperStatus(projectId: string): ProjectStepperStatus
       setWorkMap(workMapResult.ok ? workMapResult.data : null);
       setSession(sessionResult.ok ? sessionResult.data : null);
       setRenderArtifacts(artifactsResult.ok ? artifactsResult.data : null);
+      // A 200 carrying `null`/`[]` is a real answer ("there is none yet").
+      // Only a genuine transport/contract failure is unknown-ness.
+      setHasError(!workMapResult.ok || !sessionResult.ok || !artifactsResult.ok);
       setIsLoading(false);
     }
 
@@ -53,5 +67,5 @@ export function useProjectStepperStatus(projectId: string): ProjectStepperStatus
     };
   }, [projectId]);
 
-  return { workMap, session, renderArtifacts, isLoading };
+  return { workMap, session, renderArtifacts, isLoading, hasError };
 }

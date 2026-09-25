@@ -194,7 +194,12 @@ function InspectRenderCapabilitiesCard({ projectId }: { projectId: string }): Re
       {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
       {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
       <div className="overview-actions">
-        <Button variant="secondary" disabled={!worker || isDispatching} onClick={() => void handleInspect()}>
+        <Button
+          variant="secondary"
+          disabled={!worker || isDispatching}
+          disabledReason={isDispatching ? t.projectWorkspace.disabledReason.working : t.projectWorkspace.disabledReason.noWorker}
+          onClick={() => void handleInspect()}
+        >
           {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.inspectCapabilitiesAction}
         </Button>
       </div>
@@ -267,7 +272,18 @@ function BuildHorizontalCompositionCard({ projectId, session }: { projectId: str
       {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
       {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
       <div className="overview-actions">
-        <Button variant="secondary" disabled={!ready || !worker || isDispatching} onClick={() => void handleBuild()}>
+        <Button
+          variant="secondary"
+          disabled={!ready || !worker || isDispatching}
+          disabledReason={
+            isDispatching
+              ? t.projectWorkspace.disabledReason.working
+              : !ready
+                ? t.projectWorkspace.disabledReason.scenesNotExecuted
+                : t.projectWorkspace.disabledReason.noWorker
+          }
+          onClick={() => void handleBuild()}
+        >
           {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.buildHorizontalAction}
         </Button>
       </div>
@@ -379,6 +395,13 @@ function DescribeCompositionTimelineCard({
             key={variant}
             variant="secondary"
             disabled={!worker || isDispatching !== null || !plan.plan.renderOutputs[variant]}
+            disabledReason={
+              isDispatching !== null
+                ? t.projectWorkspace.disabledReason.working
+                : !plan.plan.renderOutputs[variant]
+                  ? t.projectWorkspace.disabledReason.renderNotConfigured
+                  : t.projectWorkspace.disabledReason.noWorker
+            }
             onClick={() => void handleDescribe(variant)}
           >
             {isDispatching === variant ? t.jobDispatch.dispatching : `Describe ${variant} timeline`}
@@ -766,10 +789,38 @@ function VariantConfigCard({
           {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
 
           <div className="overview-actions">
-            <Button variant="primary" disabled={!canSave || isSaving} onClick={() => void handleSave()}>
+            <Button
+              variant="primary"
+              disabled={!canSave || isSaving}
+              disabledReason={isSaving ? t.projectWorkspace.disabledReason.working : t.projectWorkspace.disabledReason.noCompositionChosen}
+              onClick={() => void handleSave()}
+            >
               {isSaving ? t.projectWorkspace.renderSettings.savingLabel : t.projectWorkspace.renderSettings.saveAction}
             </Button>
-            <Button variant="secondary" disabled={!canRender || isDispatching} onClick={() => void handleRender()}>
+            {/*
+              Same four-condition ladder ProjectExportTab's own render button
+              states, in `canRender`'s own evaluation order - the two tabs
+              can dispatch the same RENDER, so they must never give a client
+              two different explanations for the same refusal.
+            */}
+            <Button
+              variant="secondary"
+              disabled={!canRender || isDispatching}
+              disabledReason={
+                isDispatching
+                  ? t.projectWorkspace.disabledReason.working
+                  : currentConfig === null
+                    ? t.projectWorkspace.disabledReason.renderNotConfigured
+                    : isStale
+                      ? t.projectWorkspace.disabledReason.renderConfigStale
+                      : !renderReady
+                        ? t.projectWorkspace.disabledReason.renderNotReady
+                        : isKnownWorkerOffline
+                          ? t.projectWorkspace.disabledReason.workerOffline
+                          : t.projectWorkspace.disabledReason.noWorker
+              }
+              onClick={() => void handleRender()}
+            >
               {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.renderAction}
             </Button>
           </div>

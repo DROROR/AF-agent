@@ -53,6 +53,18 @@ export function ProjectOverviewTab(): ReactElement | null {
   const readiness = getExecutionPlanReadiness(plan.plan.scenePlans);
   const mappingCount = plan.plan.scenePlans.reduce((sum, scene) => sum + scene.mappings.length, 0);
   const isReady = readiness.ready && plan.plan.status === "DRAFT";
+  // The blocked reasons are already listed above this button; this states
+  // the same truth ON the control, so a screen reader announces it with the
+  // button and a hover says it too (REAL 2026-09-25 incident: a disabled
+  // button with no explanation attached to it was the worst thing in this
+  // UI, even when an explanation existed somewhere else on the page).
+  const approveDisabledReason = isSubmitting
+    ? t.projectWorkspace.disabledReason.working
+    : plan.plan.status !== "DRAFT"
+      ? t.projectWorkspace.disabledReason.planNotDraft
+      : !readiness.ready
+        ? t.projectWorkspace.disabledReason.planNotReady
+        : undefined;
 
   async function runAction(action: () => Promise<{ ok: boolean; message?: string }>): Promise<void> {
     setIsSubmitting(true);
@@ -142,17 +154,17 @@ export function ProjectOverviewTab(): ReactElement | null {
 
         <div className="overview-actions">
           {plan.plan.status === "DRAFT" ? (
-            <Button variant="primary" disabled={!isReady || isSubmitting} onClick={() => void runAction(approve)}>
+            <Button variant="primary" disabled={!isReady || isSubmitting} disabledReason={approveDisabledReason} onClick={() => void runAction(approve)}>
               {t.projectWorkspace.overview.approveAction}
             </Button>
           ) : null}
           {plan.plan.status === "DRAFT" ? (
-            <Button variant="secondary" disabled={isSubmitting} onClick={() => void runAction(reject)}>
+            <Button variant="secondary" disabled={isSubmitting} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void runAction(reject)}>
               {t.projectWorkspace.overview.rejectAction}
             </Button>
           ) : null}
           {plan.plan.status !== "DRAFT" ? (
-            <Button variant="secondary" disabled={isSubmitting} onClick={() => void runAction(reopen)}>
+            <Button variant="secondary" disabled={isSubmitting} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void runAction(reopen)}>
               {t.projectWorkspace.overview.reopenAction}
             </Button>
           ) : null}
