@@ -21,6 +21,7 @@ import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { Skeleton } from "./ui/Skeleton";
 import { VideoArtifactPlayer } from "./ui/VideoArtifactPlayer";
+import { ReelsLayoutCard } from "./ReelsLayoutCard";
 import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { HelpTooltip } from "./ui/HelpTooltip";
@@ -83,6 +84,7 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
     <div className="overview-grid">
       <InspectRenderCapabilitiesCard projectId={projectId} />
       <BuildHorizontalCompositionCard projectId={projectId} session={session} />
+      <ReelsLayoutCard />
       <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
       <DescribeAnyCompositionCard projectId={projectId} session={session} />
       {RENDER_OUTPUT_VARIANTS.map((variant) => (

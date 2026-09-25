@@ -136,7 +136,9 @@ describe("SceneEditDrawer", () => {
 
     await screen.findByText("APP PROMO");
     fireEvent.click(screen.getByRole("button", { name: "Keep template text" }));
-    await screen.findByText("Recorded: keeping the template's wording");
+    // Clicked, not recorded - the label only says "Recorded" once the plan
+    // itself holds the decision (see the unsaved-decision tests below).
+    await screen.findByText(/Chosen, not saved: keeping the template's wording/);
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
@@ -425,7 +427,7 @@ describe("SceneEditDrawer - slot findings", () => {
   };
 
   /** A device-screen slot holding a transparent logo - a real, blocking conflict. */
-  function conflictingSetup(previewBody: unknown, calls?: RecordedFetchCall[]) {
+  function conflictingSetup(previewBody: unknown, calls?: RecordedFetchCall[], mappingOverrides: Record<string, unknown> = {}) {
     const screenPlaceholder = placeholderFixture({
       placeholderId: "ph-img",
       layerName: "SCREEN",
@@ -441,7 +443,8 @@ describe("SceneEditDrawer - slot findings", () => {
       placeholderName: "SCREEN",
       placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] },
       selectedAssetId: "asset-1",
-      selectedAssetType: "logo"
+      selectedAssetType: "logo",
+      ...mappingOverrides
     });
     stubFetchByUrl(
       {
@@ -571,5 +574,257 @@ describe("SceneEditDrawer - slot findings", () => {
         evidenceFrameStorageKey: "evidence/the-frame.png"
       });
     });
+  });
+});
+
+/**
+ * REAL 2026-09-24 END-TO-END RUN (docs/ACCEPTANCE.md): a reviewer clicked three
+ * slot decisions, read "Recorded: accepted after looking at the frame" three
+ * times, closed the drawer - and all three mappings still held
+ * `slotReview: null` in the database, because nothing in this drawer is
+ * persisted until "Save changes" succeeds. The drawer now distinguishes a
+ * decision it has only been TOLD about from one the plan actually HOLDS, and
+ * never lets the first one leave silently.
+ */
+describe("SceneEditDrawer - a decision is only 'recorded' once the plan holds it", () => {
+  const SLOT_FACTS: SlotStructuralFacts = {
+    slotCompositionId: "c-slot",
+    slotLayerIndex: 1,
+    slotLayerName: null,
+    slotCompositionName: null,
+    widthPx: 1080,
+    heightPx: 2160,
+    hostDepth: 1,
+    hosts: [
+      {
+        compositionId: "c1",
+        layerIndex: 3,
+        layerName: null,
+        threeDLayer: true,
+        hasTrackMatte: true,
+        trackMatteType: "ALPHA",
+        matteSource: "RENDERED_FOOTAGE",
+        parentLayerIndex: 2,
+        parentIsAnimated: true,
+        siblingPreRenderedPass: true,
+        scalePercent: 100,
+        rotationDegrees: 0
+      }
+    ],
+    reusedByHostCount: 1,
+    transformedBounds: null,
+    visibleWindowSeconds: { startSeconds: 1, endSeconds: 3 }
+  };
+
+  /** A capture taken inside the slot's own visible window - the only kind a decision may be made against. */
+  function usablePreviewBody() {
+    return {
+      status: 200,
+      body: {
+        preview: {
+          id: "00000000-0000-4000-8000-000000000003",
+          projectId: PROJECT_ID,
+          manifestCompositionId: "c1",
+          sourceProjectSha256: "a".repeat(64),
+          filename: "f.png",
+          mimeType: "image/png",
+          byteSize: 10,
+          storageKey: "evidence/the-frame.png",
+          capturedAt: new Date().toISOString(),
+          capturedAtSeconds: 2,
+          createdAt: new Date().toISOString()
+        }
+      }
+    };
+  }
+
+  function slotSetup(mappingOverrides: Record<string, unknown> = {}, calls?: RecordedFetchCall[]) {
+    const screenPlaceholder = placeholderFixture({
+      placeholderId: "ph-img",
+      layerName: "SCREEN",
+      placeholderType: "image",
+      sourceType: "AVLayer",
+      originalText: undefined,
+      slotFacts: SLOT_FACTS,
+      slotSemantics: classifySlotSemantics(SLOT_FACTS)
+    });
+    const mapping = mappingFixture({
+      id: "mapping-img",
+      manifestPlaceholderId: "ph-img",
+      placeholderName: "SCREEN",
+      placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] },
+      selectedAssetId: "asset-1",
+      selectedAssetType: "logo",
+      ...mappingOverrides
+    });
+    stubFetchByUrl(
+      {
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/s1/preview-status`]: usablePreviewBody() as never,
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+          status: 200,
+          body: { plan: planFixture({ revision: 1 }, [sceneFixture({ id: "s1", mappings: [mapping] })]), sceneTable: [] }
+        },
+        [`/api/projects/${PROJECT_ID}/assets`]: {
+          status: 200,
+          body: {
+            assets: [
+              assetFixture({ mediaKind: "LOGO", width: 800, height: 800, hasAlphaChannel: true, hasTransparentPixels: true, transparentPixelRatio: 0.74, visibleCoverageRatio: 0.26 })
+            ]
+          }
+        },
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture([screenPlaceholder]) } },
+        "/api/dashboard/status": { status: 200, body: { workers: [], jobs: [], summary: {} } }
+      },
+      calls
+    );
+  }
+
+  /** The exact record the API writes once a decision is genuinely saved. */
+  function savedAcceptReview() {
+    return {
+      decision: "ACCEPT",
+      classification: null,
+      decidedBy: "reviewer@example.test",
+      decidedAt: new Date().toISOString(),
+      evidenceDigest: "0".repeat(64),
+      evidenceFrameStorageKey: "evidence/the-frame.png"
+    };
+  }
+
+  it("reads a just-clicked slot decision as unsaved, never as recorded", async () => {
+    slotSetup();
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("This slot needs a decision");
+    const accept = await waitFor(() => {
+      const button = screen.getByRole("button", { name: "Accept - I looked, this is right" }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      return button;
+    });
+    fireEvent.click(accept);
+
+    // The decision exists only in this browser, and the drawer says exactly that.
+    await screen.findByText(/Chosen, not saved: accepted after looking at the frame/);
+    expect(screen.queryByText("Recorded: accepted after looking at the frame")).toBeNull();
+    expect(screen.getByText(/Unsaved changes on this scene/)).toBeTruthy();
+  });
+
+  it("asks for THIS slot's own evidence frame, never whichever frame the scene captured last", async () => {
+    // A scene with several slots is reviewed in one pass: the composition's
+    // newest capture belongs to whichever slot was captured last, so naming it
+    // in another slot's decision is exactly what the API refuses.
+    const calls: RecordedFetchCall[] = [];
+    slotSetup({}, calls);
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("This slot needs a decision");
+    await waitFor(() => {
+      expect(calls.some((call) => call.url.includes("/preview-status?mappingId=mapping-img"))).toBe(true);
+    });
+  });
+
+  it("reads a slot decision the plan already holds as recorded, with nothing pending", async () => {
+    slotSetup({ slotReview: savedAcceptReview() });
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("Recorded: accepted after looking at the frame");
+    expect(screen.queryByText(/Chosen, not saved/)).toBeNull();
+    expect(screen.queryByText(/Unsaved changes on this scene/)).toBeNull();
+  });
+
+  it("reads a template-copy decision the plan already holds as recorded, and a re-clicked different one as unsaved", async () => {
+    const decided = mappingFixture({
+      text: "The template's own wording",
+      keepTemplateText: {
+        decision: "KEEP_TEMPLATE_TEXT",
+        decidedBy: "reviewer@example.test",
+        decidedAt: new Date().toISOString(),
+        textAtDecision: "The template's own wording"
+      }
+    });
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, [sceneFixture({ id: "s1", mappings: [decided] })]), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("Recorded: keeping the template's wording");
+    expect(screen.queryByText(/Unsaved changes on this scene/)).toBeNull();
+
+    // Switching to the other decision is a new, unsaved choice - the plan still
+    // holds the old one.
+    fireEvent.click(screen.getByRole("button", { name: "I replaced it" }));
+    await screen.findByText(/Chosen, not saved: replaced deliberately/);
+    expect(screen.queryByText("Recorded: keeping the template's wording")).toBeNull();
+  });
+
+  it("asks before throwing an unsaved decision away, and closes only once the reviewer confirms", async () => {
+    const onClose = vi.fn();
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ revision: 1 }, [sceneFixture({ id: "s1", mappings: [mappingFixture({ text: "The template's own wording" })] })]), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    fireEvent.click(screen.getByRole("button", { name: "Keep template text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Nothing closed, and the reviewer is told what is at stake.
+    await screen.findByText("Discard the unsaved changes?");
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.queryByText("Discard the unsaved changes?")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await screen.findByText("Discard the unsaved changes?");
+    fireEvent.click(screen.getByRole("button", { name: "Discard and close" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("closes straight away when nothing is pending - the confirmation is never in the way", async () => {
+    const onClose = vi.fn();
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, [sceneFixture({ id: "s1", mappings: [mappingFixture()] })]), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Discard the unsaved changes?")).toBeNull();
+    expect(onClose).toHaveBeenCalled();
   });
 });

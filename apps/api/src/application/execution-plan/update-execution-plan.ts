@@ -157,10 +157,25 @@ export async function updateExecutionPlan(
           if (!deps.sceneEvidencePreviewRepository) {
             throw new Error("SET_SLOT_REVIEW requires UpdateExecutionPlanDeps.sceneEvidencePreviewRepository, which was not supplied");
           }
-          const captured = await deps.sceneEvidencePreviewRepository.findLatestForComposition(projectId, scene.manifestCompositionId);
+          // PER SLOT, not per composition (real 2026-09-24 defect - see the
+          // 2026-09-24 section of docs/ACCEPTANCE.md). This used to ask for
+          // the composition's single most recent frame, which quietly made a
+          // multi-slot scene impossible to review in one pass: every slot has
+          // its OWN visible moment (selectEvidenceFrameSeconds), so capturing
+          // slot B's frame superseded the frame slot A's pending decision
+          // named, and the only sequence that worked was capture-save-
+          // capture-save, one slot at a time. A scene with three slots
+          // needing decisions could not be completed through the dashboard at
+          // all. Asking per slot lets each slot hold its own current frame at
+          // the same time, and supersession still applies WITHIN a slot: a
+          // fresher capture for THIS mapping still invalidates the one this
+          // decision names. See findLatestForSlot's own contract for why a
+          // frame belonging to another mapping is never accepted here, and
+          // why a capture taken before slot attribution existed still is.
+          const captured = await deps.sceneEvidencePreviewRepository.findLatestForSlot(projectId, scene.manifestCompositionId, operation.mappingId);
           if (!captured || captured.storageKey !== operation.evidenceFrameStorageKey) {
             throw new ExecutionPlanEditError(
-              "the evidence frame this decision names is not this scene's most recent captured frame - capture the slot's own moment again and decide about what it shows"
+              "the evidence frame this decision names is not this slot's most recent captured frame - capture the slot's own moment again and decide about what it shows"
             );
           }
           if (captured.sourceProjectSha256 !== current.sourceProjectSha256) {

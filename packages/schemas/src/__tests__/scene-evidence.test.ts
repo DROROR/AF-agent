@@ -3,6 +3,7 @@ import {
   hostLayerRecordSchema,
   layerDetailFactSchema,
   layerEvidenceSchema,
+  sceneEvidencePreviewDtoSchema,
   sceneEvidenceRequestSchema,
   sceneEvidenceResponseSchema,
   type LayerEvidence,
@@ -543,5 +544,36 @@ describe("layerTransformFactSchema / sceneEvidenceResponseSchema - layerTransfor
     if (!parsedFailed.success) return;
     expect(parsedFailed.data.layerTransformFacts).toBeNull();
     expect(parsedFailed.data.layerTransformFactsFailureReason).toContain("timed out");
+  });
+});
+
+describe("slot evidence attribution (real 2026-09-24: a multi-slot scene could not be reviewed in one pass)", () => {
+  it("accepts the mapping a capture is evidence for, and rejects an empty one", () => {
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ previewTimestampSeconds: 4, slotEvidenceMappingId: "mapping-b" }))).not.toThrow();
+    expect(() => sceneEvidenceRequestSchema.parse(validRequest({ slotEvidenceMappingId: "" }))).toThrow();
+  });
+
+  it("stays optional - a request from before it existed, and a plain representative frame, both still parse", () => {
+    const parsed = sceneEvidenceRequestSchema.parse(validRequest());
+    expect(parsed.slotEvidenceMappingId).toBeUndefined();
+  });
+
+  it("the preview DTO carries the slot a frame belongs to, including none at all and none reported", () => {
+    const dto = {
+      id: "11111111-1111-4111-8111-111111111111",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      manifestCompositionId: "comp-1",
+      sourceProjectSha256: "a".repeat(64),
+      filename: "scene-preview.png",
+      mimeType: "image/png",
+      byteSize: 128,
+      capturedAt: "2026-09-24T00:00:00.000Z",
+      createdAt: "2026-09-24T00:00:00.000Z"
+    };
+    expect(sceneEvidencePreviewDtoSchema.parse({ ...dto, slotMappingId: "mapping-a" }).slotMappingId).toBe("mapping-a");
+    // Null is a plain representative scene frame; absent is a payload from
+    // before slot attribution existed. Neither is an error.
+    expect(sceneEvidencePreviewDtoSchema.parse({ ...dto, slotMappingId: null }).slotMappingId).toBeNull();
+    expect(sceneEvidencePreviewDtoSchema.parse(dto).slotMappingId).toBeUndefined();
   });
 });

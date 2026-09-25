@@ -1,0 +1,1 @@
+ALTER TABLE "scene_evidence_previews" ADD COLUMN "slot_mapping_id" text;

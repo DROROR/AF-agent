@@ -73,7 +73,7 @@ export async function uploadSceneEvidencePreview(
   if (!parsedPayload.success) {
     throw new JobConflictError(`Job ${jobId}'s own INSPECT_SCENE_EVIDENCE request payload could not be read - cannot attribute this preview to any scene`);
   }
-  const { manifestCompositionId, sourceProjectSha256, compositionName, previewTimestampSeconds } = parsedPayload.data;
+  const { manifestCompositionId, sourceProjectSha256, compositionName, previewTimestampSeconds, slotEvidenceMappingId } = parsedPayload.data;
 
   if (input.buffer.length > deps.maxUploadBytes) {
     throw new PayloadTooLargeError(deps.maxUploadBytes);
@@ -102,7 +102,14 @@ export async function uploadSceneEvidencePreview(
         // The moment this frame actually shows, taken from the job's own
         // request - a reviewer's slot decision is bound to it, so it can
         // never be a guess.
-        capturedAtSeconds: previewTimestampSeconds ?? null
+        capturedAtSeconds: previewTimestampSeconds ?? null,
+        // WHICH SLOT this frame is evidence for, from the same trusted
+        // source: the server-resolved request this job was dispatched with
+        // (never anything the worker sends up alongside the bytes). Null for
+        // a plain representative scene frame, which is attributed to no slot
+        // and stays exactly as usable as it ever was - see findLatestForSlot
+        // in domain/scene-evidence-preview/types.ts.
+        slotMappingId: slotEvidenceMappingId ?? null
       },
       deps.now()
     );

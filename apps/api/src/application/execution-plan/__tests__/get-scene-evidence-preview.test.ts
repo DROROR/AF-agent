@@ -101,7 +101,8 @@ describe("getSceneEvidencePreviewMetadata", () => {
         storageKey: "key-1",
         sha256: "b".repeat(64),
         capturedAt: NOW,
-        capturedAtSeconds: null
+        capturedAtSeconds: null,
+        slotMappingId: null
       },
       NOW
     );
@@ -109,6 +110,39 @@ describe("getSceneEvidencePreviewMetadata", () => {
     const result = await getSceneEvidencePreviewMetadata({ executionPlanRepository, sceneEvidencePreviewRepository }, projectId, scenePlanId);
     expect(result?.manifestCompositionId).toBe("comp-1");
     expect(result?.filename).toBe("scene-preview-Scene_A.png");
+  });
+
+  it("returns THAT SLOT's own current frame when a mapping is named, not the scene's latest", async () => {
+    const { executionPlanRepository, sceneEvidencePreviewRepository, projectId, scenePlanId } = await setup();
+    const frame = async (slotMappingId: string | null, storageKey: string, createdAt: Date) =>
+      sceneEvidencePreviewRepository.record(
+        {
+          id: randomUUID(),
+          projectId,
+          jobId: randomUUID(),
+          manifestCompositionId: "comp-1",
+          sourceProjectSha256: SHA,
+          filename: "scene-preview-Scene_A.png",
+          mimeType: "image/png",
+          byteSize: 42,
+          storageKey,
+          sha256: "b".repeat(64),
+          capturedAt: createdAt,
+          capturedAtSeconds: null,
+          slotMappingId
+        },
+        createdAt
+      );
+    await frame("mapping-a", "key-a", NOW);
+    await frame("mapping-b", "key-b", new Date(NOW.getTime() + 1000));
+
+    // A reviewer deciding about slot A must be shown - and must name - the
+    // frame captured for slot A. With several slots reviewed in one pass the
+    // scene's newest frame belongs to whichever was captured last, and is the
+    // wrong answer for every other slot (real 2026-09-24 defect).
+    expect((await getSceneEvidencePreviewMetadata({ executionPlanRepository, sceneEvidencePreviewRepository }, projectId, scenePlanId))?.storageKey).toBe("key-b");
+    expect((await getSceneEvidencePreviewMetadata({ executionPlanRepository, sceneEvidencePreviewRepository }, projectId, scenePlanId, "mapping-a"))?.storageKey).toBe("key-a");
+    expect((await getSceneEvidencePreviewMetadata({ executionPlanRepository, sceneEvidencePreviewRepository }, projectId, scenePlanId, "mapping-a"))?.slotMappingId).toBe("mapping-a");
   });
 });
 
@@ -135,7 +169,8 @@ describe("getSceneEvidencePreviewFile", () => {
         storageKey: stored.storageKey,
         sha256: stored.sha256,
         capturedAt: NOW,
-        capturedAtSeconds: null
+        capturedAtSeconds: null,
+        slotMappingId: null
       },
       NOW
     );

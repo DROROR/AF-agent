@@ -1,4 +1,4 @@
-import { desc, eq, and } from "drizzle-orm";
+import { desc, eq, and, isNull } from "drizzle-orm";
 import { sceneEvidencePreviews, type Database, type SceneEvidencePreviewRow } from "@dyo/database";
 import type {
   SceneEvidencePreviewRecord,
@@ -20,6 +20,7 @@ function toDomain(row: SceneEvidencePreviewRow): SceneEvidencePreviewRecord {
     sha256: row.sha256,
     capturedAt: row.capturedAt,
     capturedAtSeconds: row.capturedAtSeconds,
+    slotMappingId: row.slotMappingId,
     createdAt: row.createdAt
   };
 }
@@ -47,6 +48,7 @@ export class DrizzleSceneEvidencePreviewRepository implements SceneEvidencePrevi
         sha256: row.sha256,
         capturedAt: row.capturedAt,
         capturedAtSeconds: row.capturedAtSeconds,
+        slotMappingId: row.slotMappingId,
         createdAt: now
       })
       .returning();
@@ -64,6 +66,42 @@ export class DrizzleSceneEvidencePreviewRepository implements SceneEvidencePrevi
       .orderBy(desc(sceneEvidencePreviews.createdAt))
       .limit(1);
     return row ? toDomain(row) : null;
+  }
+
+  async findLatestForSlot(projectId: string, manifestCompositionId: string, slotMappingId: string): Promise<SceneEvidencePreviewRecord | null> {
+    const [attributed] = await this.db
+      .select()
+      .from(sceneEvidencePreviews)
+      .where(
+        and(
+          eq(sceneEvidencePreviews.projectId, projectId),
+          eq(sceneEvidencePreviews.manifestCompositionId, manifestCompositionId),
+          eq(sceneEvidencePreviews.slotMappingId, slotMappingId)
+        )
+      )
+      .orderBy(desc(sceneEvidencePreviews.createdAt))
+      .limit(1);
+    if (attributed) {
+      return toDomain(attributed);
+    }
+    // Only reached when this slot has no frame of its own: a capture taken
+    // before slot attribution existed is unattributed, and that is the only
+    // thing it could ever have been. A frame belonging to ANOTHER mapping is
+    // excluded from both branches - see findLatestForSlot's own contract in
+    // domain/scene-evidence-preview/types.ts.
+    const [unattributed] = await this.db
+      .select()
+      .from(sceneEvidencePreviews)
+      .where(
+        and(
+          eq(sceneEvidencePreviews.projectId, projectId),
+          eq(sceneEvidencePreviews.manifestCompositionId, manifestCompositionId),
+          isNull(sceneEvidencePreviews.slotMappingId)
+        )
+      )
+      .orderBy(desc(sceneEvidencePreviews.createdAt))
+      .limit(1);
+    return unattributed ? toDomain(unattributed) : null;
   }
 
   async findByIdForProject(id: string, projectId: string): Promise<SceneEvidencePreviewRecord | null> {

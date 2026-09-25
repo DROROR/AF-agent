@@ -145,9 +145,13 @@ async function setup(manifestValue: TemplateManifest, assets: readonly AssetSpec
   /**
    * A real captured evidence frame for this scene's composition, exactly as an
    * INSPECT_SCENE_EVIDENCE job's own upload records one - including WHICH
-   * moment it shows, which is what makes it proof of anything.
+   * moment it shows and WHICH SLOT it was captured for, which is what makes it
+   * proof of anything. `slotMappingId: null` is the shape of every frame
+   * captured before slot attribution existed.
    */
-  const captureEvidenceFrame = async (overrides: { storageKey?: string; capturedAtSeconds?: number | null; sourceProjectSha256?: string } = {}) => {
+  const captureEvidenceFrame = async (
+    overrides: { storageKey?: string; capturedAtSeconds?: number | null; sourceProjectSha256?: string; slotMappingId?: string | null } = {}
+  ) => {
     const record = await sceneEvidencePreviewRepository.record(
       {
         id: `00000000-0000-4000-8000-${String(captureCount++).padStart(12, "0")}`,
@@ -161,7 +165,8 @@ async function setup(manifestValue: TemplateManifest, assets: readonly AssetSpec
         storageKey: overrides.storageKey ?? `evidence/frame-${captureCount}.png`,
         sha256: "d".repeat(64),
         capturedAt: NOW,
-        capturedAtSeconds: overrides.capturedAtSeconds === undefined ? 2.5 : overrides.capturedAtSeconds
+        capturedAtSeconds: overrides.capturedAtSeconds === undefined ? 2.5 : overrides.capturedAtSeconds,
+        slotMappingId: overrides.slotMappingId === undefined ? null : overrides.slotMappingId
       },
       new Date(NOW.getTime() + captureCount * 1000)
     );
@@ -363,6 +368,132 @@ describe("approveExecutionPlan - slot semantics and fit (real backend gate)", ()
         undefined
       )
     ).rejects.toThrow(/identity/i);
+  });
+
+  /**
+   * REAL 2026-09-24 DEFECT (docs/ACCEPTANCE.md): every slot has its OWN
+   * visible moment, so one composition legitimately holds several current
+   * evidence frames at once - but the gate verified a decision against the
+   * composition's single most recent frame. Capturing slot B's frame
+   * therefore superseded the frame slot A's not-yet-saved decision named, and
+   * a scene with three slots needing decisions could not be completed through
+   * the dashboard at all; it took three separate capture-then-record round
+   * trips driven through the API.
+   *
+   * The two slots below are on screen at genuinely different moments (0-2s and
+   * 3-5s), so neither one's frame can ever stand in for the other's - which is
+   * exactly why one "latest frame" per composition was never enough.
+   */
+  describe("several slots in one scene, each with its own evidence frame", () => {
+    const twoSlots = () =>
+      manifest([
+        { placeholderId: "ph-early", layerName: "a layer", facts: deviceScreenSlotFacts({ visibleWindowSeconds: { startSeconds: 0, endSeconds: 2 } }) },
+        { placeholderId: "ph-late", layerName: "another layer", facts: deviceScreenSlotFacts({ visibleWindowSeconds: { startSeconds: 3, endSeconds: 5 } }) }
+      ]);
+
+    it("decides both slots in one pass, each naming its own captured frame", async () => {
+      const { sceneId, mappingIdFor, edit, approve, captureEvidenceFrame } = await setup(twoSlots(), [LOGO]);
+      const early = mappingIdFor("ph-early");
+      const late = mappingIdFor("ph-late");
+      await edit(
+        [
+          { type: "MAP_ASSET", scenePlanId: sceneId, mappingId: early, selectedAssetId: LOGO.id, selectedAssetType: "logo" },
+          { type: "MAP_ASSET", scenePlanId: sceneId, mappingId: late, selectedAssetId: LOGO.id, selectedAssetType: "logo" }
+        ],
+        1
+      );
+
+      // Both frames captured BEFORE either decision is saved - the sequence
+      // the dashboard actually produces when a reviewer looks at a scene's
+      // slots together, and the one that was impossible before.
+      const earlyFrame = await captureEvidenceFrame({ slotMappingId: early, capturedAtSeconds: 1 });
+      const lateFrame = await captureEvidenceFrame({ slotMappingId: late, capturedAtSeconds: 4 });
+
+      const decided = await edit(
+        [
+          { type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: early, decision: "ACCEPT", evidenceFrameStorageKey: earlyFrame },
+          { type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: late, decision: "ACCEPT", evidenceFrameStorageKey: lateFrame }
+        ],
+        2
+      );
+
+      const mappings = decided.plan.scenePlans[0]?.mappings ?? [];
+      expect(mappings.find((mapping) => mapping.id === early)?.slotReview?.evidenceFrameStorageKey).toBe(earlyFrame);
+      expect(mappings.find((mapping) => mapping.id === late)?.slotReview?.evidenceFrameStorageKey).toBe(lateFrame);
+      expect((await approve(3)).plan.status).toBe("APPROVED");
+    });
+
+    it("a capture for one slot does not invalidate the frame another slot's decision names", async () => {
+      const { sceneId, mappingIdFor, edit, captureEvidenceFrame } = await setup(twoSlots(), [LOGO]);
+      const early = mappingIdFor("ph-early");
+      const late = mappingIdFor("ph-late");
+      await edit([{ type: "MAP_ASSET", scenePlanId: sceneId, mappingId: early, selectedAssetId: LOGO.id, selectedAssetType: "logo" }], 1);
+
+      const earlyFrame = await captureEvidenceFrame({ slotMappingId: early, capturedAtSeconds: 1 });
+      await captureEvidenceFrame({ slotMappingId: late, capturedAtSeconds: 4 });
+
+      const decided = await edit([{ type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: early, decision: "ACCEPT", evidenceFrameStorageKey: earlyFrame }], 2);
+      expect(decided.plan.scenePlans[0]?.mappings.find((mapping) => mapping.id === early)?.slotReview?.decision).toBe("ACCEPT");
+    });
+
+    it("refuses a frame captured for a DIFFERENT slot - it proves something about that slot, not this one", async () => {
+      const { sceneId, mappingIdFor, edit, captureEvidenceFrame } = await setup(twoSlots(), [LOGO]);
+      const early = mappingIdFor("ph-early");
+      const late = mappingIdFor("ph-late");
+      await edit([{ type: "MAP_ASSET", scenePlanId: sceneId, mappingId: early, selectedAssetId: LOGO.id, selectedAssetType: "logo" }], 1);
+
+      const otherSlotFrame = await captureEvidenceFrame({ slotMappingId: late, capturedAtSeconds: 4 });
+      await expect(
+        edit([{ type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: early, decision: "ACCEPT", evidenceFrameStorageKey: otherSlotFrame }], 2)
+      ).rejects.toThrow(/most recent captured frame/);
+    });
+
+    it("still refuses a frame this slot's own later capture superseded", async () => {
+      const { sceneId, mappingIdFor, edit, captureEvidenceFrame } = await setup(twoSlots(), [LOGO]);
+      const early = mappingIdFor("ph-early");
+      await edit([{ type: "MAP_ASSET", scenePlanId: sceneId, mappingId: early, selectedAssetId: LOGO.id, selectedAssetType: "logo" }], 1);
+
+      const superseded = await captureEvidenceFrame({ slotMappingId: early, capturedAtSeconds: 1 });
+      const current = await captureEvidenceFrame({ slotMappingId: early, capturedAtSeconds: 1 });
+
+      // Staleness WITHIN a slot is exactly as strict as it always was: the
+      // reviewer is looking at the newer frame, so a decision naming the older
+      // one is about a picture nobody is looking at any more.
+      await expect(
+        edit([{ type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: early, decision: "ACCEPT", evidenceFrameStorageKey: superseded }], 2)
+      ).rejects.toThrow(/most recent captured frame/);
+      const decided = await edit([{ type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: early, decision: "ACCEPT", evidenceFrameStorageKey: current }], 2);
+      expect(decided.plan.scenePlans[0]?.mappings.find((mapping) => mapping.id === early)?.slotReview?.decision).toBe("ACCEPT");
+    });
+
+    it("still refuses a frame from this slot's own capture that shows a moment it is not on screen", async () => {
+      const { sceneId, mappingIdFor, edit, captureEvidenceFrame } = await setup(twoSlots(), [LOGO]);
+      const late = mappingIdFor("ph-late");
+      await edit([{ type: "MAP_ASSET", scenePlanId: sceneId, mappingId: late, selectedAssetId: LOGO.id, selectedAssetType: "logo" }], 1);
+
+      // Attributed to the right slot, but showing the OTHER slot's moment -
+      // attribution is a label, and it never replaces the window check.
+      const wrongMoment = await captureEvidenceFrame({ slotMappingId: late, capturedAtSeconds: 1 });
+      await expect(
+        edit([{ type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: late, decision: "ACCEPT", evidenceFrameStorageKey: wrongMoment }], 2)
+      ).rejects.toThrow(/does not show a moment this slot is on screen/);
+    });
+
+    it("still decides a slot from a frame captured before slot attribution existed", async () => {
+      const { sceneId, mappingIdFor, edit, captureEvidenceFrame } = await setup(twoSlots(), [LOGO]);
+      const early = mappingIdFor("ph-early");
+      const late = mappingIdFor("ph-late");
+      await edit([{ type: "MAP_ASSET", scenePlanId: sceneId, mappingId: early, selectedAssetId: LOGO.id, selectedAssetType: "logo" }], 1);
+
+      // An older project's frames carry no slot at all. They stay usable for a
+      // slot that has no attributed frame of its own - and a NEWER attributed
+      // frame belonging to a different slot does not take that away.
+      const legacyFrame = await captureEvidenceFrame({ slotMappingId: null, capturedAtSeconds: 1 });
+      await captureEvidenceFrame({ slotMappingId: late, capturedAtSeconds: 4 });
+
+      const decided = await edit([{ type: "SET_SLOT_REVIEW", scenePlanId: sceneId, mappingId: early, decision: "ACCEPT", evidenceFrameStorageKey: legacyFrame }], 2);
+      expect(decided.plan.scenePlans[0]?.mappings.find((mapping) => mapping.id === early)?.slotReview?.evidenceFrameStorageKey).toBe(legacyFrame);
+    });
   });
 
   it("does not block a scene the plan excludes from the output", async () => {

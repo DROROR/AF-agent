@@ -34,6 +34,16 @@ export interface SlotReviewPanelProps {
   /** True when the plan already carries a decision that no longer matches these findings. */
   decisionIsStale: boolean;
   choice: SlotReviewChoice | null;
+  /**
+   * True only when `choice` is the decision the PLAN ITSELF already holds -
+   * never merely the one clicked in this form session. Real 2026-09-24
+   * end-to-end run: a reviewer clicked three slot decisions, read "Recorded"
+   * three times, closed the drawer, and all three mappings still held
+   * `slotReview: null` in the database, because nothing is persisted until
+   * "Save changes" is pressed. A clicked decision and a recorded one are
+   * different states and never share a label.
+   */
+  choiceIsSaved: boolean;
   onChoose: (choice: SlotReviewChoice | null) => void;
   /** Reports the evidence frame the decision must be recorded against, or null when there is none to record. */
   onEvidenceFrame: (storageKey: string | null) => void;
@@ -58,7 +68,16 @@ function showsTheSlot(preview: SceneEvidencePreviewDto | null, window: { startSe
   return preview.capturedAtSeconds >= window.startSeconds && preview.capturedAtSeconds <= window.endSeconds;
 }
 
-export function SlotReviewPanel({ scenePlanId, mappingId, assessment, decisionIsStale, choice, onChoose, onEvidenceFrame }: SlotReviewPanelProps): ReactElement | null {
+export function SlotReviewPanel({
+  scenePlanId,
+  mappingId,
+  assessment,
+  decisionIsStale,
+  choice,
+  choiceIsSaved,
+  onChoose,
+  onEvidenceFrame
+}: SlotReviewPanelProps): ReactElement | null {
   const { t } = useLocale();
   const { project } = useProjectWorkspaceContext();
   const { data: dashboardStatus } = useDashboardStatus();
@@ -77,11 +96,15 @@ export function SlotReviewPanel({ scenePlanId, mappingId, assessment, decisionIs
     if (projectId === null) {
       return;
     }
-    const result = await fetchSceneEvidencePreviewStatus(projectId, scenePlanId);
+    // THIS SLOT's own frame, never the scene's latest: a scene with several
+    // slots is reviewed in one pass, so the newest capture belongs to whichever
+    // slot was captured last and would be the wrong frame to show - and to name
+    // in the decision - for every other one (real 2026-09-24 defect).
+    const result = await fetchSceneEvidencePreviewStatus(projectId, scenePlanId, mappingId);
     if (result.ok && !cancelledRef.current) {
       setPreview(result.data);
     }
-  }, [projectId, scenePlanId]);
+  }, [projectId, scenePlanId, mappingId]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -209,7 +232,7 @@ export function SlotReviewPanel({ scenePlanId, mappingId, assessment, decisionIs
             <>
               <p>{t.projectWorkspace.editDrawer.slotEvidenceFrameHint(evidenceAtSeconds ?? 0)}</p>
               {usable && projectId !== null ? (
-                <img src={sceneEvidencePreviewFileUrl(projectId, scenePlanId)} alt={t.projectWorkspace.editDrawer.slotEvidenceFrameAlt} />
+                <img src={sceneEvidencePreviewFileUrl(projectId, scenePlanId, mappingId)} alt={t.projectWorkspace.editDrawer.slotEvidenceFrameAlt} />
               ) : (
                 <p>
                   {preview === null
@@ -253,11 +276,19 @@ export function SlotReviewPanel({ scenePlanId, mappingId, assessment, decisionIs
               </Button>
             )}
           </div>
-          {choice === null ? null : (
+          {choice === null ? null : choiceIsSaved ? (
             <p>
               {choice.kind === "ACCEPT"
                 ? t.projectWorkspace.editDrawer.slotDecisionRecordedAccept
                 : t.projectWorkspace.editDrawer.slotDecisionRecordedOverride}
+            </p>
+          ) : (
+            // Chosen, not recorded: the plan does not hold this decision yet,
+            // and closing the drawer without saving discards it.
+            <p className="pending-decision">
+              {choice.kind === "ACCEPT"
+                ? t.projectWorkspace.editDrawer.slotDecisionPendingAccept
+                : t.projectWorkspace.editDrawer.slotDecisionPendingOverride}
             </p>
           )}
         </>

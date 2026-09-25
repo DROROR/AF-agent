@@ -808,6 +808,27 @@ export const sceneEvidencePreviews = pgTable(
      * such a frame, because nothing proves what moment it shows.
      */
     capturedAtSeconds: doublePrecision("captured_at_seconds"),
+    /**
+     * WHICH SLOT this frame is evidence FOR - the execution plan's own mapping
+     * id, from the INSPECT_SCENE_EVIDENCE request that captured it. NULL means
+     * the frame is not attributed to any one slot: a plain representative
+     * scene frame, or a capture taken before this column existed.
+     *
+     * Deliberately a plain text column with no foreign key: a mapping id lives
+     * inside an append-only execution plan revision's JSON, not in a table, so
+     * there is nothing to reference. It is never resolved back into a mapping
+     * either - it is only ever compared for equality with the mapping a
+     * decision is being recorded about.
+     *
+     * REAL 2026-09-24 defect (docs/ACCEPTANCE.md): each slot has its OWN
+     * visible moment, so one composition legitimately holds several current
+     * evidence frames at once. Without this column the only way to tell them
+     * apart was "the latest for the composition", which meant capturing slot
+     * B's frame silently invalidated a pending decision for slot A, and a
+     * scene with three slots could not be reviewed through the dashboard at
+     * all.
+     */
+    slotMappingId: text("slot_mapping_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [

@@ -61,6 +61,43 @@ interface MappingFormState {
 }
 
 /**
+ * Whether the template-copy decision currently shown for a mapping is the one
+ * the PLAN already holds - which is exactly the condition buildOperations()
+ * below uses to decide whether that decision still has to be SENT. A decision
+ * whose text has since been edited counts as unsaved too: saving re-records it
+ * against the new text, so what the plan holds is a decision about different
+ * wording.
+ */
+function isTemplateDecisionPersisted(form: MappingFormState, mapping: PlaceholderMapping): boolean {
+  const persisted = mapping.keepTemplateText?.decision ?? null;
+  if (form.templateTextDecision === null || form.templateTextDecision !== persisted) {
+    return false;
+  }
+  const trimmed = form.text.trim();
+  return (trimmed === "" ? null : trimmed) === mapping.text;
+}
+
+/**
+ * Whether the slot decision currently shown for a mapping is the one the PLAN
+ * already holds. Deliberately NOT "buildOperations would emit nothing": that
+ * emits SET_SLOT_REVIEW for every non-null choice, including an unchanged one,
+ * so it can never distinguish a recorded decision from a clicked one - the
+ * exact confusion this predicate exists to end (real 2026-09-24 end-to-end
+ * run: three decisions read as "Recorded" and all three were still
+ * `slotReview: null` in the database afterwards).
+ */
+function isSlotDecisionPersisted(form: MappingFormState, mapping: PlaceholderMapping): boolean {
+  const persisted = mapping.slotReview ?? null;
+  if (form.slotDecision === null || persisted == null) {
+    return false;
+  }
+  if (form.slotDecision.kind === "ACCEPT") {
+    return persisted.decision === "ACCEPT";
+  }
+  return persisted.decision === "OVERRIDE_CLASSIFICATION" && persisted.classification === form.slotDecision.classification;
+}
+
+/**
  * Edits exactly the fields Phase 6's edit contract supports (section 9 of
  * the dashboard-integration task): scene-level finalDuration/instructions,
  * and per-mapping text/assetTimestamp/asset. The asset picker offers only
@@ -79,6 +116,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
   const [mappings, setMappings] = useState<MappingFormState[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isConfirmingDiscard, setIsConfirmingDiscard] = useState(false);
 
   const scene = plan?.plan.scenePlans.find((candidate) => candidate.id === scenePlanId) ?? null;
 
@@ -115,6 +153,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
       }))
     );
     setError(null);
+    setIsConfirmingDiscard(false);
   }, [scene]);
 
   if (!scenePlanId || !scene) {
@@ -298,6 +337,57 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
   }
 
   /**
+   * What the reviewer would actually LOSE by closing the drawer now.
+   *
+   * Deliberately not `buildOperations().length > 0`: that re-sends an
+   * unchanged slot decision on every save (so it can never fall to zero once
+   * a slot has been decided), which would leave this notice permanently on
+   * screen and teach reviewers to ignore it. Every branch below compares the
+   * form against the scene the plan really holds, so the notice appears
+   * exactly when something is genuinely only in the browser.
+   */
+  function hasPendingChanges(): boolean {
+    const currentScene = scene!;
+    const trimmedDuration = finalDuration.trim();
+    const nextDuration = trimmedDuration === "" ? null : Number(trimmedDuration);
+    if (nextDuration !== currentScene.finalDuration) {
+      return true;
+    }
+    const trimmedInstructions = instructions.trim();
+    if ((trimmedInstructions === "" ? null : trimmedInstructions) !== currentScene.instructions) {
+      return true;
+    }
+    return mappings.some((form) => {
+      const originalMapping = currentScene.mappings.find((candidate) => candidate.id === form.mappingId);
+      if (!originalMapping) {
+        return false;
+      }
+      const trimmedText = form.text.trim();
+      if ((trimmedText === "" ? null : trimmedText) !== originalMapping.text) {
+        return true;
+      }
+      const trimmedTimestamp = form.assetTimestamp.trim();
+      if ((trimmedTimestamp === "" ? null : Number(trimmedTimestamp)) !== originalMapping.assetTimestamp) {
+        return true;
+      }
+      if ((form.selectedAssetId === "" ? null : form.selectedAssetId) !== originalMapping.selectedAssetId) {
+        return true;
+      }
+      if (form.templateTextDecision === null) {
+        if ((originalMapping.keepTemplateText?.decision ?? null) !== null) {
+          return true;
+        }
+      } else if (!isTemplateDecisionPersisted(form, originalMapping)) {
+        return true;
+      }
+      if (form.slotDecision === null) {
+        return (originalMapping.slotReview ?? null) !== null;
+      }
+      return !isSlotDecisionPersisted(form, originalMapping);
+    });
+  }
+
+  /**
    * The slot findings for a mapping AS THE FORM CURRENTLY STANDS - including
    * an asset the reviewer has just picked but not yet saved, so the panel
    * shows what the plan would actually be judged on, not what it said before.
@@ -337,6 +427,24 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
     });
   }
 
+  /**
+   * Every way out of this drawer (Cancel, the header's close button, Escape,
+   * a backdrop click) goes through here, because before today every one of
+   * them threw the reviewer's decisions away in silence - see the 2026-09-24
+   * run in docs/ACCEPTANCE.md. With nothing pending it closes exactly as it
+   * always did; with something pending it asks first.
+   */
+  function requestClose(): void {
+    if (isSaving) {
+      return;
+    }
+    if (hasPendingChanges()) {
+      setIsConfirmingDiscard(true);
+      return;
+    }
+    onClose();
+  }
+
   async function handleSave(): Promise<void> {
     const operations = buildOperations();
     if (operations.length === 0) {
@@ -355,9 +463,14 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
   }
 
   return (
-    <Dialog open onClose={onClose} title={t.projectWorkspace.editDrawer.title} variant="drawer">
+    <Dialog open onClose={requestClose} title={t.projectWorkspace.editDrawer.title} variant="drawer">
       <div className="edit-drawer-form">
         {error ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={error} /> : null}
+        {hasPendingChanges() ? (
+          <p className="unsaved-changes-notice" role="status">
+            {t.projectWorkspace.editDrawer.unsavedChangesNotice}
+          </p>
+        ) : null}
         <Field label={t.projectWorkspace.editDrawer.finalDurationLabel} htmlFor="scene-final-duration">
           <Input
             id="scene-final-duration"
@@ -486,13 +599,32 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                           </Button>
                         )}
                       </div>
-                      {mapping.templateTextDecision === null ? null : (
-                        <p>
-                          {mapping.templateTextDecision === "REPLACE"
-                            ? t.projectWorkspace.editDrawer.templateCopyDecidedReplace
-                            : t.projectWorkspace.editDrawer.templateCopyDecidedKeep}
-                        </p>
-                      )}
+                      {(() => {
+                        // Exactly the same rule as the slot decision below: a
+                        // decision the plan holds reads as recorded, a
+                        // decision only clicked here reads as pending.
+                        if (mapping.templateTextDecision === null) {
+                          return null;
+                        }
+                        const original = scene!.mappings.find((candidate) => candidate.id === mapping.mappingId);
+                        const persisted = original !== undefined && isTemplateDecisionPersisted(mapping, original);
+                        if (persisted) {
+                          return (
+                            <p>
+                              {mapping.templateTextDecision === "REPLACE"
+                                ? t.projectWorkspace.editDrawer.templateCopyDecidedReplace
+                                : t.projectWorkspace.editDrawer.templateCopyDecidedKeep}
+                            </p>
+                          );
+                        }
+                        return (
+                          <p className="pending-decision">
+                            {mapping.templateTextDecision === "REPLACE"
+                              ? t.projectWorkspace.editDrawer.templateCopyPendingReplace
+                              : t.projectWorkspace.editDrawer.templateCopyPendingKeep}
+                          </p>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
@@ -503,7 +635,8 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
               if (!slotAssessment || slotAssessment.blockers.length === 0) {
                 return null;
               }
-              const recorded = scene!.mappings.find((candidate) => candidate.id === mapping.mappingId)?.slotReview ?? null;
+              const original = scene!.mappings.find((candidate) => candidate.id === mapping.mappingId);
+              const recorded = original?.slotReview ?? null;
               const currentDigest = slotEvidenceDigest(slotAssessment);
               return (
                 <SlotReviewPanel
@@ -512,6 +645,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                   assessment={slotAssessment}
                   decisionIsStale={recorded !== null && recorded.evidenceDigest !== currentDigest}
                   choice={mapping.slotDecision}
+                  choiceIsSaved={original !== undefined && isSlotDecisionPersisted(mapping, original)}
                   onChoose={(choice) => {
                     // A functional update that touches only this field: the
                     // panel reports its evidence frame asynchronously, and
@@ -555,7 +689,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
           </fieldset>
         ))}
         <div className="edit-drawer-actions">
-          <Button variant="ghost" onClick={onClose} disabled={isSaving}>
+          <Button variant="ghost" onClick={requestClose} disabled={isSaving}>
             {t.projectWorkspace.editDrawer.cancel}
           </Button>
           <Button variant="primary" onClick={() => void handleSave()} disabled={isSaving}>
@@ -563,6 +697,28 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
           </Button>
         </div>
       </div>
+      <Dialog
+        open={isConfirmingDiscard}
+        onClose={() => setIsConfirmingDiscard(false)}
+        title={t.projectWorkspace.editDrawer.discardConfirmTitle}
+        variant="modal"
+      >
+        <p>{t.projectWorkspace.editDrawer.discardConfirmDescription}</p>
+        <div className="edit-drawer-actions">
+          <Button variant="ghost" onClick={() => setIsConfirmingDiscard(false)}>
+            {t.projectWorkspace.editDrawer.discardConfirmKeepEditing}
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              setIsConfirmingDiscard(false);
+              onClose();
+            }}
+          >
+            {t.projectWorkspace.editDrawer.discardConfirmDiscard}
+          </Button>
+        </div>
+      </Dialog>
     </Dialog>
   );
 }

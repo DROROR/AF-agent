@@ -742,10 +742,23 @@ export function fullPreviewFileUrl(projectId: string, sessionId: string): string
  * UX redesign, "M. VISUAL PREVIEWS ARE MANDATORY"). Callers combine this
  * with live job status to distinguish "Analyzing…"/"Preview generating…"
  * from "Ready".
+ *
+ * `mappingId` asks for THAT SLOT's own latest frame rather than the scene's
+ * (see get-scene-evidence-preview.ts's own doc comment): on a scene with
+ * several slots being reviewed in one pass, the scene's newest frame belongs
+ * to whichever slot was captured last, which is the wrong frame to show - and
+ * to name in a decision - for every other slot. Omitted keeps the exact
+ * whole-scene behaviour every scene-level caller already relies on.
  */
-export async function fetchSceneEvidencePreviewStatus(projectId: string, scenePlanId: string): Promise<ApiResult<SceneEvidencePreviewDto | null>> {
+export async function fetchSceneEvidencePreviewStatus(
+  projectId: string,
+  scenePlanId: string,
+  mappingId?: string
+): Promise<ApiResult<SceneEvidencePreviewDto | null>> {
   const { status, json } = await request(
-    `/api/projects/${encodeURIComponent(projectId)}/execution-plan/scenes/${encodeURIComponent(scenePlanId)}/preview-status`
+    `/api/projects/${encodeURIComponent(projectId)}/execution-plan/scenes/${encodeURIComponent(scenePlanId)}/preview-status${
+      mappingId === undefined ? "" : `?mappingId=${encodeURIComponent(mappingId)}`
+    }`
   );
   if (status !== 200) {
     return toErrorResult(status, json);
@@ -757,9 +770,11 @@ export async function fetchSceneEvidencePreviewStatus(projectId: string, scenePl
   return { ok: true, data: parsed.data.preview };
 }
 
-/** Same-origin URL for a scene's latest real, AE-captured evidence preview frame - safe to use directly as an <img> src; never a filesystem path or storage key. */
-export function sceneEvidencePreviewFileUrl(projectId: string, scenePlanId: string): string {
-  return `/api/projects/${encodeURIComponent(projectId)}/execution-plan/scenes/${encodeURIComponent(scenePlanId)}/preview`;
+/** Same-origin URL for a scene's latest real, AE-captured evidence preview frame - safe to use directly as an <img> src; never a filesystem path or storage key. `mappingId` narrows it to that slot's own latest frame, exactly as fetchSceneEvidencePreviewStatus above does. */
+export function sceneEvidencePreviewFileUrl(projectId: string, scenePlanId: string, mappingId?: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/execution-plan/scenes/${encodeURIComponent(scenePlanId)}/preview${
+    mappingId === undefined ? "" : `?mappingId=${encodeURIComponent(mappingId)}`
+  }`;
 }
 
 /** "Approve Final Preview" - the SEPARATE, later human gate before the final Landscape/Reels render can be dispatched (never the same gate as approveFirstPreview). */

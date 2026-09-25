@@ -895,6 +895,20 @@ describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
     expect(result.payload.previewTimestampSeconds).toBe(6);
   });
 
+  it("names WHICH SLOT the capture is evidence for, so the uploaded frame can be attributed to it", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
+      currentProjectManifest: manifestWithSlotFacts(slotFacts),
+      slotEvidenceMappingId: "mapping-1"
+    });
+    // Real 2026-09-24 defect: without this travelling in the job's own
+    // persisted payload, every frame of a composition is interchangeable, and
+    // a scene with more than one slot needing a decision cannot be reviewed in
+    // one pass - see update-execution-plan.ts's own comment.
+    expect(result.ok && result.payload.slotEvidenceMappingId).toBe("mapping-1");
+  });
+
   it("still captures the composition's start when no slot evidence was asked for", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
@@ -902,6 +916,9 @@ describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
       currentProjectManifest: manifestWithSlotFacts(slotFacts)
     });
     expect(result.ok && result.payload.previewTimestampSeconds).toBe(0);
+    // Attributed to no slot at all: a plain representative scene frame, which
+    // is exactly what every capture taken before slot attribution existed was.
+    expect(result.ok && result.payload.slotEvidenceMappingId).toBeUndefined();
   });
 
   it("refuses rather than capturing a frame that proves nothing, when the slot has no known visible moment", () => {

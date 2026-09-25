@@ -144,7 +144,7 @@ async function registerWorker(capabilities: string[] = ["INSPECT_SCENE_EVIDENCE"
   return registerWorkerResponseSchema.parse(response.json());
 }
 
-async function createRunningSceneEvidenceJob(workerId: string, projectId: string) {
+async function createRunningSceneEvidenceJob(workerId: string, projectId: string, payloadOverrides: Record<string, unknown> = {}) {
   return harness.jobRepository.create(
     {
       id: randomUUID(),
@@ -160,8 +160,50 @@ async function createRunningSceneEvidenceJob(workerId: string, projectId: string
         // The exact live QA shape - a zero-placeholder scene still gets a
         // real representative preview frame (live QA Blocker 2 fix).
         layerIndices: [],
-        previewTimestampSeconds: 0
+        previewTimestampSeconds: 0,
+        ...payloadOverrides
       }
+    },
+    new Date("2026-01-01T00:00:00.000Z")
+  );
+}
+
+/**
+ * The one scene the preview-status route resolves by scenePlanId ->
+ * manifestCompositionId (get-scene-evidence-preview.ts) - a real plan with a
+ * matching scene is required for that lookup.
+ */
+async function createPlanWithScene(projectId: string) {
+  await harness.executionPlanRepository.createRevision(
+    {
+      id: randomUUID(),
+      projectId,
+      revision: 1,
+      status: "DRAFT",
+      templateId: "tmpl-1",
+      sourceProjectSha256: SOURCE_SHA,
+      scenePlans: [
+        {
+          id: "scene-1",
+          manifestCompositionId: "comp-210",
+          compositionName: "!Render",
+          use: true,
+          sourcePosition: 0,
+          finalOrder: 0,
+          finalDuration: null,
+          approvalState: "UNREVIEWED",
+          instructions: null,
+          notes: null,
+          unresolvedReasons: [],
+          evidence: [],
+          mappings: [],
+          reelsLayout: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      approvedAt: null,
+      approvedBy: null
     },
     new Date("2026-01-01T00:00:00.000Z")
   );
@@ -256,42 +298,7 @@ describe("POST /api/workers/:workerId/jobs/:jobId/scene-evidence-preview", () =>
     await claim(workerId, workerToken);
     await report(workerId, workerToken, job.id, { status: "RUNNING" });
 
-    // preview-status resolves by scenePlanId -> manifestCompositionId via
-    // the project's current execution plan (get-scene-evidence-preview.ts)
-    // - a real plan with a matching scene is required for that lookup.
-    await harness.executionPlanRepository.createRevision(
-      {
-        id: randomUUID(),
-        projectId,
-        revision: 1,
-        status: "DRAFT",
-        templateId: "tmpl-1",
-        sourceProjectSha256: SOURCE_SHA,
-        scenePlans: [
-          {
-            id: "scene-1",
-            manifestCompositionId: "comp-210",
-            compositionName: "!Render",
-            use: true,
-            sourcePosition: 0,
-            finalOrder: 0,
-            finalDuration: null,
-            approvalState: "UNREVIEWED",
-            instructions: null,
-            notes: null,
-            unresolvedReasons: [],
-            evidence: [],
-            mappings: [],
-            reelsLayout: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z"
-          }
-        ],
-        approvedAt: null,
-        approvedBy: null
-      },
-      new Date("2026-01-01T00:00:00.000Z")
-    );
+    await createPlanWithScene(projectId);
 
     const bytes = Buffer.from("real png bytes");
     const response = await uploadRaw(workerId, workerToken, job.id, bytes);
@@ -312,6 +319,55 @@ describe("POST /api/workers/:workerId/jobs/:jobId/scene-evidence-preview", () =>
     expect(statusResponse.statusCode).toBe(200);
     expect(statusResponse.json().preview).not.toBeNull();
     expect(statusResponse.json().preview.byteSize).toBe(bytes.length);
+  });
+
+  /**
+   * REAL 2026-09-24 DEFECT (docs/ACCEPTANCE.md): one composition legitimately
+   * holds several current evidence frames at once - one per slot, each
+   * captured at that slot's own visible moment - but everything downstream
+   * could only ask for "the latest frame for this composition". A scene with
+   * three slots needing decisions could not be completed through the
+   * dashboard at all. This proves the attribution survives the real round
+   * trip: dispatched request payload -> worker upload -> scene_evidence_previews
+   * row -> per-slot lookup and the preview-status route.
+   */
+  it("keeps each slot's own captured frame retrievable alongside the others", async () => {
+    const projectId = await createProject();
+    const { workerId, workerToken } = await registerWorker();
+    await createPlanWithScene(projectId);
+
+    const forSlotA = await createRunningSceneEvidenceJob(workerId, projectId, { previewTimestampSeconds: 1, slotEvidenceMappingId: "mapping-a" });
+    await claim(workerId, workerToken);
+    await report(workerId, workerToken, forSlotA.id, { status: "RUNNING" });
+    expect((await uploadRaw(workerId, workerToken, forSlotA.id, Buffer.from("slot a frame"))).statusCode).toBe(201);
+
+    const forSlotB = await createRunningSceneEvidenceJob(workerId, projectId, { previewTimestampSeconds: 4, slotEvidenceMappingId: "mapping-b" });
+    await claim(workerId, workerToken);
+    await report(workerId, workerToken, forSlotB.id, { status: "RUNNING" });
+    expect((await uploadRaw(workerId, workerToken, forSlotB.id, Buffer.from("slot b frame"))).statusCode).toBe(201);
+
+    // Slot A's frame is NOT the composition's latest, and is still its own
+    // slot's current one - the whole point.
+    expect((await harness.sceneEvidencePreviewRepository.findLatestForComposition(projectId, "comp-210"))?.jobId).toBe(forSlotB.id);
+    expect((await harness.sceneEvidencePreviewRepository.findLatestForSlot(projectId, "comp-210", "mapping-a"))?.jobId).toBe(forSlotA.id);
+    expect((await harness.sceneEvidencePreviewRepository.findLatestForSlot(projectId, "comp-210", "mapping-b"))?.jobId).toBe(forSlotB.id);
+
+    const statusForSlotA = await harness.app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/execution-plan/scenes/scene-1/preview-status?mappingId=mapping-a`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    expect(statusForSlotA.statusCode).toBe(200);
+    expect(statusForSlotA.json().preview.slotMappingId).toBe("mapping-a");
+    expect(statusForSlotA.json().preview.capturedAtSeconds).toBe(1);
+
+    const bytesForSlotA = await harness.app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/execution-plan/scenes/scene-1/preview?mappingId=mapping-a`,
+      headers: { authorization: `Bearer ${sessionToken}` }
+    });
+    expect(bytesForSlotA.statusCode).toBe(200);
+    expect(bytesForSlotA.rawPayload.toString()).toBe("slot a frame");
   });
 
   it("enforces the configured max upload size - the non-fatal Worker-side contract still applies: this is a real, typed rejection, never a silent drop", async () => {

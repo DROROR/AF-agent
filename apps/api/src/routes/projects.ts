@@ -61,6 +61,8 @@ export interface ProjectsRouteDeps {
 const projectIdParamsSchema = z.object({ projectId: z.string().uuid() });
 const renderOutputParamsSchema = z.object({ projectId: z.string().uuid(), variant: renderOutputVariantSchema });
 const scenePreviewParamsSchema = z.object({ projectId: z.string().uuid(), scenePlanId: z.string().min(1) });
+/** Optional: which SLOT's own current evidence frame is wanted, rather than the scene's latest - see getSceneEvidencePreviewMetadata's own doc comment (real 2026-09-24 multi-slot defect). Omitted keeps the prior whole-scene behavior. */
+const scenePreviewQuerySchema = z.object({ mappingId: z.string().min(1).optional() });
 
 /**
  * Phase 4 (docs/PHASES.md: "Dynamic Approval Table + Execution Plan") -
@@ -238,10 +240,12 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
   app.get("/api/projects/:projectId/execution-plan/scenes/:scenePlanId/preview-status", async (request, reply) => {
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId, scenePlanId } = scenePreviewParamsSchema.parse(request.params);
+    const { mappingId } = scenePreviewQuerySchema.parse(request.query);
     const preview = await getSceneEvidencePreviewMetadata(
       { executionPlanRepository: deps.executionPlanRepository, sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository },
       projectId,
-      scenePlanId
+      scenePlanId,
+      mappingId
     );
     reply.send({ preview });
   });
@@ -250,10 +254,12 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
   app.get("/api/projects/:projectId/execution-plan/scenes/:scenePlanId/preview", async (request, reply) => {
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId, scenePlanId } = scenePreviewParamsSchema.parse(request.params);
+    const { mappingId } = scenePreviewQuerySchema.parse(request.query);
     const file = await getSceneEvidencePreviewFile(
       { executionPlanRepository: deps.executionPlanRepository, sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository, assetStorage: deps.assetStorage },
       projectId,
-      scenePlanId
+      scenePlanId,
+      mappingId
     );
     reply.header("content-type", file.mimeType);
     reply.send(file.buffer);

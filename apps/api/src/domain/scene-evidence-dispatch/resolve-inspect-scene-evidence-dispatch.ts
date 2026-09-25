@@ -359,6 +359,14 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       // doc comment) - the structural layer facts remain useful on
       // their own either way.
       previewTimestampSeconds: slotEvidenceSeconds ?? 0,
+      // WHICH SLOT this frame is evidence for, carried into the job's own
+      // persisted payload so the upload callback can attribute the captured
+      // frame to this mapping (real 2026-09-24 defect: without it, every
+      // frame of a composition was interchangeable, and a scene with more
+      // than one slot needing a decision could not be reviewed in one pass -
+      // see docs/ACCEPTANCE.md). Omitted entirely when this is not a slot
+      // capture, which records an untagged frame exactly as before.
+      ...(slotEvidenceMappingId !== undefined ? { slotEvidenceMappingId } : {}),
       ...(discoverLayerDetails === true ? { discoverLayerDetails: true } : {})
     }
   };

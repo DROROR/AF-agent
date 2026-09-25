@@ -24,6 +24,16 @@ export class InMemorySceneEvidencePreviewRepository implements SceneEvidencePrev
     return candidates.reduce((latest, r) => (r.createdAt > latest.createdAt ? r : latest));
   }
 
+  async findLatestForSlot(projectId: string, manifestCompositionId: string, slotMappingId: string): Promise<SceneEvidencePreviewRecord | null> {
+    const inComposition = this.rows.filter((r) => r.projectId === projectId && r.manifestCompositionId === manifestCompositionId);
+    const attributed = inComposition.filter((r) => r.slotMappingId === slotMappingId);
+    // The unattributed frames are consulted ONLY when this slot has none of
+    // its own; a frame attributed to a different mapping is never considered.
+    const candidates = attributed.length > 0 ? attributed : inComposition.filter((r) => r.slotMappingId === null);
+    if (candidates.length === 0) return null;
+    return candidates.reduce((latest, r) => (r.createdAt > latest.createdAt ? r : latest));
+  }
+
   async findByIdForProject(id: string, projectId: string): Promise<SceneEvidencePreviewRecord | null> {
     return this.rows.find((r) => r.id === id && r.projectId === projectId) ?? null;
   }

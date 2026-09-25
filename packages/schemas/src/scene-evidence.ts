@@ -623,6 +623,8 @@ export const sceneEvidencePreviewDtoSchema = z
     capturedAtSeconds: z.number().nonnegative().nullable().optional(),
     /** The opaque storage identifier a recorded slot decision is bound to - the same identifier SET_SLOT_REVIEW carries. Never a filesystem path. */
     storageKey: z.string().min(1).optional(),
+    /** The mapping this frame was captured as evidence FOR, when it was captured as slot evidence at all. Null for a plain representative scene frame, and for every capture taken before slot attribution existed. Absent in payloads from before this field existed. */
+    slotMappingId: z.string().min(1).nullable().optional(),
     createdAt: z.string().datetime()
   })
   .strict();

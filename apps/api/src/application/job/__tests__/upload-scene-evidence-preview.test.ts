@@ -102,6 +102,37 @@ describe("uploadSceneEvidencePreview", () => {
 
     const latest = await sceneEvidencePreviewRepository.findLatestForComposition(PROJECT_ID, "comp-1");
     expect(latest?.id).toBe(record.id);
+    // A plain representative scene frame is attributed to no slot - exactly
+    // what every capture taken before slot attribution existed was.
+    expect(record.slotMappingId).toBeNull();
+  });
+
+  it("attributes the frame to the slot its own job was dispatched to capture", async () => {
+    const { deps, workerId } = await setup();
+    const slotJob = await deps.jobRepository.create(
+      {
+        id: randomUUID(),
+        workerId,
+        projectId: PROJECT_ID,
+        operation: "INSPECT_SCENE_EVIDENCE",
+        payload: { ...sceneEvidencePayload(), previewTimestampSeconds: 4, slotEvidenceMappingId: "mapping-b" }
+      },
+      NOW
+    );
+    await deps.jobRepository.updateStatus(slotJob.id, workerId, { expectedCurrentStatus: "QUEUED", status: "CLAIMED" }, NOW);
+    await deps.jobRepository.updateStatus(slotJob.id, workerId, { expectedCurrentStatus: "CLAIMED", status: "RUNNING" }, NOW);
+
+    const record = await uploadSceneEvidencePreview(deps, workerId, slotJob.id, WORKER_TOKEN, { mimeType: "image/png", buffer: Buffer.from("slot b bytes") });
+
+    // WHICH slot, from the same trusted source as WHICH MOMENT: the
+    // server-resolved request this job was dispatched with. Without it, a
+    // scene's frames are indistinguishable and a multi-slot scene cannot be
+    // reviewed in one pass (real 2026-09-24 defect, docs/ACCEPTANCE.md).
+    expect(record.slotMappingId).toBe("mapping-b");
+    expect(record.capturedAtSeconds).toBe(4);
+
+    const forSlot = await deps.sceneEvidencePreviewRepository.findLatestForSlot(PROJECT_ID, "comp-1", "mapping-b");
+    expect(forSlot?.id).toBe(record.id);
   });
 
   it("is idempotent by jobId - a duplicate upload for the same job is a no-op returning the existing record", async () => {
