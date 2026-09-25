@@ -1694,6 +1694,7 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
       hosts: [
         {
           ...cardSlotFacts().hosts[0]!,
+          compositionId: "comp-1",
           enabled: true,
           inFrame: true,
           windowSeconds: { startSeconds, endSeconds }
@@ -1716,18 +1717,42 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
     );
 
   it("names the midpoint of the edited slot's visible window - never t=0", () => {
-    const result = dispatchWithImageMapping(manifestWithVisibleWindow(3, 9));
+    const result = dispatchWithImageMapping(manifestWithVisibleWindow(1, 5));
     expect(result.ok).toBe(true);
-    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(6);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(3);
   });
 
   it("would have captured a blank frame before this: the moment is inside the window, not before it", () => {
-    const result = dispatchWithImageMapping(manifestWithVisibleWindow(4, 10));
+    const result = dispatchWithImageMapping(manifestWithVisibleWindow(2, 5));
     expect(result.ok).toBe(true);
     const seconds = result.ok === true ? (result.payload.previewTimestampSeconds as number) : -1;
     expect(seconds).not.toBe(0);
-    expect(seconds).toBeGreaterThanOrEqual(4);
-    expect(seconds).toBeLessThanOrEqual(10);
+    expect(seconds).toBeGreaterThanOrEqual(2);
+    expect(seconds).toBeLessThanOrEqual(5);
+  });
+
+  it("refuses a moment past the end of the composition rather than capturing a blank frame", () => {
+    // REAL 2026-09-25: a host inside a 60s helper composition gave the scene a
+    // preview moment of 30s, five seconds past the end of the 25.04s thing
+    // being rendered. The captured frame was blank.
+    const base = validManifest();
+    const sceneManifest = base.scenes[0]!;
+    const facts = cardSlotFacts({
+      hosts: [{ ...cardSlotFacts().hosts[0]!, compositionId: "comp-helper", enabled: true, inFrame: true, windowSeconds: { startSeconds: 0, endSeconds: 60 } }],
+      visibleWindowSeconds: null
+    });
+    const placeholders = sceneManifest.placeholders.map((placeholder) =>
+      placeholder.placeholderId === "ph-2" ? { ...placeholder, slotFacts: facts, slotSemantics: classifySlotSemantics(facts) } : placeholder
+    );
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: { ...base, scenes: [{ ...sceneManifest, placeholders }] },
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] })
+      })
+    );
+    expect(result.ok).toBe(true);
+    // Better the worker's own honest default than a named moment that renders nothing.
+    expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
   });
 
   it("leaves the moment unset when nothing is measurable, so the worker's own default is unchanged", () => {
@@ -1753,7 +1778,7 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
   it("a text-only scene does not vote a moment into existence - text carries no slot facts by design", () => {
     const result = resolveExecuteFrameDispatch(
       baseInput({
-        currentProjectManifest: manifestWithVisibleWindow(3, 9),
+        currentProjectManifest: manifestWithVisibleWindow(1, 5),
         currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: "Reviewed wording" })] })] })
       })
     );
@@ -1767,7 +1792,7 @@ describe("resolveExecuteFrameDispatch - regenerating a preview must not reproduc
     const base = validManifest();
     const scene = base.scenes[0]!;
     const facts = cardSlotFacts({
-      hosts: [{ ...cardSlotFacts().hosts[0]!, enabled: true, inFrame: true, windowSeconds: { startSeconds, endSeconds } }],
+      hosts: [{ ...cardSlotFacts().hosts[0]!, compositionId: "comp-1", enabled: true, inFrame: true, windowSeconds: { startSeconds, endSeconds } }],
       visibleWindowSeconds: { startSeconds, endSeconds }
     });
     const placeholders = scene.placeholders.map((placeholder) =>
@@ -1780,7 +1805,7 @@ describe("resolveExecuteFrameDispatch - regenerating a preview must not reproduc
     resolveExecuteFrameDispatch(
       baseInput({
         regeneratePreviewOnly: true,
-        currentProjectManifest: manifestWithVisibleWindow(3, 9),
+        currentProjectManifest: manifestWithVisibleWindow(1, 5),
         currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] }),
         session: validSession({
           status: "AWAITING_PREVIEW_APPROVAL",
@@ -1795,7 +1820,7 @@ describe("resolveExecuteFrameDispatch - regenerating a preview must not reproduc
   it("falls back to the same server-resolved moment when the reviewer names none", () => {
     const result = regenerate();
     expect(result.ok).toBe(true);
-    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(6);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(3);
   });
 
   it("still honours a moment the reviewer explicitly asked for", () => {

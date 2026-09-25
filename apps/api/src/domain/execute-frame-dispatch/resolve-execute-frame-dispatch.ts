@@ -744,12 +744,19 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   const editedSlotWindows = approvedMappingIds.map((mappingId) => {
     const mapping = scene.mappings.find((candidate) => candidate.id === mappingId);
     const placeholder = mapping?.manifestPlaceholderId ? manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId) : undefined;
-    return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts) : null;
+    // Scoped to the composition the preview is rendered in. A host inside a
+    // nested helper composition has a window in ITS timeline, not this one -
+    // see selectEvidenceFrameSeconds's doc comment for the blank-frame defect
+    // that caused (2026-09-25). The same mistake reached this path too.
+    return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts, scene.manifestCompositionId) : null;
   });
   // Only the slots this dispatch is actually editing vote here; the
   // regeneration path has no approved-mapping list of its own and falls back
   // to every manifest-linked slot in the scene (scenePreviewFrameSeconds).
-  const previewTimestampSeconds = selectScenePreviewFrameSeconds(editedSlotWindows);
+  const chosenPreviewSeconds = selectScenePreviewFrameSeconds(editedSlotWindows);
+  // Never name a moment past the end of the composition being rendered.
+  const previewTimestampSeconds =
+    chosenPreviewSeconds !== null && chosenPreviewSeconds >= composition.durationSeconds ? null : chosenPreviewSeconds;
 
   return {
     ok: true,
@@ -909,9 +916,13 @@ function scenePreviewFrameSeconds(
   const manifestScene = manifest.scenes.find((candidate) => candidate.compositionId === scene.manifestCompositionId);
   const windows = scene.mappings.map((mapping) => {
     const placeholder = mapping.manifestPlaceholderId ? manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId) : undefined;
-    return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts) : null;
+    // Scoped to the rendered composition, same reason as the normal path.
+    return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts, scene.manifestCompositionId) : null;
   });
-  return selectScenePreviewFrameSeconds(windows);
+  const composition = manifest.compositions.find((candidate) => candidate.compositionId === scene.manifestCompositionId);
+  const chosen = selectScenePreviewFrameSeconds(windows);
+  // Never name a moment past the end of what will be rendered.
+  return chosen !== null && composition !== undefined && chosen >= composition.durationSeconds ? null : chosen;
 }
 
 /**
