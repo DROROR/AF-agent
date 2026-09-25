@@ -883,7 +883,7 @@ describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
     updatedAt: NOW_ISO
   };
 
-  it("captures the middle of the slot's own visible window - not the start of the composition", () => {
+  it("captures the middle of the slot's visible window, bounded by the composition being rendered", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
@@ -892,7 +892,11 @@ describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.payload.previewTimestampSeconds).toBe(6);
+    // The slot's own window is 3s-9s, but this scene's composition is only 5s
+    // long, so the midpoint of what will ACTUALLY be rendered is 4s, not 6s.
+    // 6s used to be returned and is past the end of the composition - the real
+    // 2026-09-25 blank-frame defect (see selectEvidenceFrameSeconds).
+    expect(result.payload.previewTimestampSeconds).toBe(4);
   });
 
   it("names WHICH SLOT the capture is evidence for, so the uploaded frame can be attributed to it", () => {

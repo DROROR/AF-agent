@@ -713,3 +713,67 @@ describe("selectScenePreviewFrameSeconds - the moment that shows the most of wha
     expect([1, 9]).toContain(seconds);
   });
 });
+
+/**
+ * REAL 2026-09-25 DEFECT, on a real third-party template. A slot placed by
+ * hosts in DIFFERENT compositions had its evidence moment chosen from the
+ * longest window, which belonged to a 60s helper composition - while the
+ * frame is rendered in the 25.04s scene. The captured frame was blank, and
+ * the approval gate accepted it, because the out-of-range moment really was
+ * inside the window it had been compared against.
+ */
+describe("computeEffectiveVisibility - a window belongs to one composition's timeline", () => {
+  const hostIn = (compositionId: string, startSeconds: number, endSeconds: number): SlotHostFacts => ({
+    compositionId,
+    layerIndex: 1,
+    layerName: null,
+    threeDLayer: false,
+    hasTrackMatte: false,
+    trackMatteType: null,
+    matteSource: "UNKNOWN",
+    parentLayerIndex: null,
+    parentIsAnimated: false,
+    siblingPreRenderedPass: false,
+    scalePercent: 100,
+    rotationDegrees: 0,
+    enabled: true,
+    inFrame: true,
+    windowSeconds: { startSeconds, endSeconds }
+  });
+
+  const facts = (hosts: SlotHostFacts[]): Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds"> => ({
+    hosts,
+    visibleWindowSeconds: null
+  });
+
+  it("uses the scene's own host, not the longer window of a nested helper composition", () => {
+    const both = facts([hostIn("comp-helper", 0, 60), hostIn("comp-scene", 1.2, 8.88)]);
+    // Unscoped, the longest window still wins - that is the slot's own visibility.
+    expect(selectEvidenceFrameSeconds(both)).toBe(30);
+    // Scoped to the composition actually being rendered, the moment must fall inside it.
+    expect(selectEvidenceFrameSeconds(both, { compositionId: "comp-scene", durationSeconds: 25.04 })).toBeCloseTo(5.04, 5);
+  });
+
+  it("never returns a moment past the end of the composition being rendered", () => {
+    const both = facts([hostIn("comp-helper", 0, 60), hostIn("comp-scene", 1.2, 8.88)]);
+    const seconds = selectEvidenceFrameSeconds(both, { compositionId: "comp-scene", durationSeconds: 25.04 }) as number;
+    expect(seconds).toBeLessThan(25.04);
+  });
+
+  it("says there is no provable moment when the slot has no host in that composition", () => {
+    expect(selectEvidenceFrameSeconds(facts([hostIn("comp-helper", 0, 60)]), { compositionId: "comp-scene", durationSeconds: 25.04 })).toBeNull();
+  });
+
+  it("bounds a legacy whole-slot window by what will actually be rendered", () => {
+    // An older manifest carries no hosts, only a window that can outlast the
+    // composition. Keep such projects working, but never point past the end.
+    const legacy = { hosts: [], visibleWindowSeconds: { startSeconds: 0, endSeconds: 60 } };
+    expect(selectEvidenceFrameSeconds(legacy)).toBe(30);
+    expect(selectEvidenceFrameSeconds(legacy, { compositionId: "comp-scene", durationSeconds: 25.04 })).toBeCloseTo(12.52, 5);
+  });
+
+  it("refuses when even the start of the window is past the end of the composition", () => {
+    const late = { hosts: [], visibleWindowSeconds: { startSeconds: 40, endSeconds: 60 } };
+    expect(selectEvidenceFrameSeconds(late, { compositionId: "comp-scene", durationSeconds: 25.04 })).toBeNull();
+  });
+});

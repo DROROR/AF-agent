@@ -810,11 +810,33 @@ function visibleOpacityWindow(host: SlotHostFacts, window: { startSeconds: numbe
  * and calling it evidence.
  */
 export function computeEffectiveVisibility(
-  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">
+  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">,
+  /**
+   * When given, ONLY hosts living in this composition are considered.
+   *
+   * REAL 2026-09-25 DEFECT. A slot is usually placed by several hosts, and
+   * each host's window is measured in ITS OWN composition's timeline. Those
+   * numbers are not comparable, and an evidence frame is rendered in ONE
+   * composition - the scene's. On a real template a slot had a host inside a
+   * 60s helper composition (window 0-60) and a host in the 25.04s scene
+   * (window 1.2-8.88); the longest-window rule picked 0-60 and produced an
+   * evidence moment of 30s, which is past the end of the thing being
+   * rendered. The captured frame was blank, and the approval gate accepted
+   * it, because 30 really is inside 0-60.
+   *
+   * Callers rendering a specific composition must pass its id, so the moment
+   * they get back is expressible in the timeline they will actually render.
+   * Omitted, the behaviour is unchanged for callers that only want the
+   * slot's own visibility regardless of where it is watched from.
+   */
+  inCompositionId?: string
 ): { startSeconds: number; endSeconds: number } | null {
   let best: { startSeconds: number; endSeconds: number } | null = null;
   for (const host of facts.hosts ?? []) {
     if (host.enabled === false || host.inFrame === false) {
+      continue;
+    }
+    if (inCompositionId !== undefined && host.compositionId !== inCompositionId) {
       continue;
     }
     const window = host.windowSeconds ?? null;
@@ -835,10 +857,13 @@ export function computeEffectiveVisibility(
   // ONLY when no host reported a window of its own. A host that was examined
   // and found switched off, off-frame or held invisible is a real answer, and
   // this must not talk it back into visibility.
-  const examined = (facts.hosts ?? []).some((host) => (host.windowSeconds ?? null) !== null);
+  const examined = (facts.hosts ?? []).some(
+    (host) => (inCompositionId === undefined || host.compositionId === inCompositionId) && (host.windowSeconds ?? null) !== null
+  );
   if (examined) {
     return null;
   }
+
   const fallback = facts.visibleWindowSeconds ?? null;
   return fallback !== null && fallback.endSeconds > fallback.startSeconds ? fallback : null;
 }
@@ -851,12 +876,35 @@ export function computeEffectiveVisibility(
  * first frame of a layer is routinely mid-transition - faded out, sliding in,
  * or behind an animation - and a frame showing nothing proves nothing.
  */
-export function selectEvidenceFrameSeconds(facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">): number | null {
-  const window = computeEffectiveVisibility(facts);
+export function selectEvidenceFrameSeconds(
+  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">,
+  /**
+   * The composition the frame will actually be rendered in. Supplying it does
+   * two things, and both matter - see computeEffectiveVisibility's own doc
+   * comment for the real defect they prevent:
+   *
+   *  - only hosts living in that composition are considered, because a
+   *    window measured in another composition's timeline is not a moment in
+   *    this one;
+   *  - the chosen moment must fall inside that composition's own duration.
+   *    A manifest written before host-level facts existed carries only a
+   *    whole-slot window with no composition attached, and that window can
+   *    legitimately be longer than the thing being rendered. Rather than
+   *    refuse every older project, the moment is bounded by what will
+   *    actually exist on the timeline, and refused outright when even the
+   *    start of the window lies past the end of it.
+   */
+  renderedIn?: { compositionId: string; durationSeconds: number }
+): number | null {
+  const window = computeEffectiveVisibility(facts, renderedIn?.compositionId);
   if (window === null) {
     return null;
   }
-  return window.startSeconds + (window.endSeconds - window.startSeconds) / 2;
+  const end = renderedIn === undefined ? window.endSeconds : Math.min(window.endSeconds, renderedIn.durationSeconds);
+  if (!(end > window.startSeconds)) {
+    return null;
+  }
+  return window.startSeconds + (end - window.startSeconds) / 2;
 }
 
 /**

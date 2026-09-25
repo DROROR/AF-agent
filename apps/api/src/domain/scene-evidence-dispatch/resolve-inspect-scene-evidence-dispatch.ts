@@ -317,7 +317,11 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       return { ok: false, reason: `Scene "${scenePlanId}" has no mapping "${slotEvidenceMappingId}" to capture slot evidence for` };
     }
     const placeholder = (manifestScene?.placeholders ?? []).find((candidate) => candidate.placeholderId === mapping.manifestPlaceholderId);
-    const seconds = placeholder?.slotFacts ? selectEvidenceFrameSeconds(placeholder.slotFacts) : null;
+    // The frame is rendered in the SCENE's own composition, so the moment must
+    // be expressible in that timeline - never in a nested helper composition's
+    // (see selectEvidenceFrameSeconds's own doc comment for the blank-frame
+    // defect this prevents).
+    const seconds = placeholder?.slotFacts ? selectEvidenceFrameSeconds(placeholder.slotFacts, { compositionId: scene.manifestCompositionId, durationSeconds: composition.durationSeconds }) : null;
     if (seconds === null) {
       return {
         ok: false,
