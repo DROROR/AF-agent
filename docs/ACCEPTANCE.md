@@ -675,3 +675,18 @@ Run on QA project `2247ad6a-1279-4b5a-804e-63bfbdefdb8c` ("QA-Render-Test"), bui
 **Unrelated interruptions, both recovered:** the failed landscape build left After Effects holding unsaved changes and `CREATE_PREVIEW` correctly refused (`AE_PROJECT_NOT_SAFE_TO_REPLACE`); closing the project then dropped the ae-mcp bridge (`AE_NOT_CONNECTED`), which a full After Effects restart fixed. Both gates refused rather than guessing, and neither damaged anything.
 
 **Still not done, and not attempted here:** native 1080x1920 Reels output (no dashboard screen exists for `SET_REELS_LAYOUT`, so the feature is unreachable from the UI despite worker, API and database support being complete), audio/soundtrack handling (not a feature at all - audio files can be uploaded and nothing consumes them), the three-template MVP requirement, and the interrupted-job recovery test.
+
+#### MVP criterion 4 - timestamp accuracy within one source frame
+
+Checked with `scripts/qa/verify-render-timing.mjs`, which compares a rendered file against the SOURCE composition as the template manifest reports it — never against a hardcoded expectation and never against a number typed by the operator. It expresses the tolerance in FRAMES rather than seconds, because a second means a different number of frames at 24fps than at 60fps and the acceptance criterion is written in frames. It exits non-zero on failure so it can gate a release rather than print something a human skims past.
+
+First result, on the only template that has reached a render so far:
+
+```
+source   QA_Scene: 10s @ 25fps = 250 frames
+rendered output.mp4: 10s @ 25fps = 250 frames
+drift    0 frame(s); frame rate matches
+PASS: within one source frame.
+```
+
+Zero drift, not merely within tolerance. This must be repeated for each of the three templates the MVP requires; one template passing is not the criterion.
