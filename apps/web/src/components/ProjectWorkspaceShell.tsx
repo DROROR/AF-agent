@@ -143,7 +143,15 @@ export function ProjectWorkspaceShell({
         <h1>{project.project.name}</h1>
         <div className="workspace-header__actions">
           {plan ? <PlanStatusBadge status={plan.plan.status} /> : null}
-          {SIMPLIFIED_PROJECT_WORKSPACE ? null : <ProjectSettingsControls mode={mode} setMode={setMode} onDelete={() => setConfirmingDelete(true)} />}
+          {/*
+            The operator asked twice for these to stay where they always
+            were: "delete wala etc wo bhe top me he rkhi jidr pehle tha". I
+            had moved them out because a destructive button one stray click
+            from the top of every page is a hazard for someone who is not a
+            developer - the deletion dialog remains the guard against that.
+            Their call, made twice, so it stands.
+          */}
+          <ProjectSettingsControls mode={mode} setMode={setMode} onDelete={() => setConfirmingDelete(true)} />
         </div>
       </div>
       {/*
@@ -159,18 +167,6 @@ export function ProjectWorkspaceShell({
       <details className="advanced-details workspace-header__details">
         <summary>{t.projectWorkspace.header.detailsToggle}</summary>
         <ProjectTechnicalFacts project={project} plan={plan} unresolvedCount={unresolvedCount} />
-        {SIMPLIFIED_PROJECT_WORKSPACE ? (
-          <div className="workspace-header__controls">
-            <div className="workspace-mode-toggle" role="group" aria-label={t.workspaceMode.toggleAriaLabel}>
-              <button type="button" className="workspace-mode-toggle__option" data-active={mode === "simple"} onClick={() => setMode("simple")}>
-                {t.workspaceMode.simpleAction}
-              </button>
-              <button type="button" className="workspace-mode-toggle__option" data-active={mode === "advanced"} onClick={() => setMode("advanced")}>
-                {t.workspaceMode.advancedAction}
-              </button>
-            </div>
-          </div>
-        ) : null}
       </details>
       <Dialog
         open={confirmingDelete}
@@ -273,21 +269,6 @@ export function ProjectWorkspaceShell({
         })}
       </nav>
       {children}
-      {SIMPLIFIED_PROJECT_WORKSPACE ? (
-        // Everything that is not a step on the way to a finished video, in
-        // one closed drawer at the very bottom: the engineering facts support
-        // asks for, the Advanced view switch, and Delete Project. Nothing was
-        // removed - it is out of the way, not gone.
-        <details className="advanced-details workspace-footer__details">
-          <summary>{t.projectWorkspace.header.settingsDrawerToggle}</summary>
-          <div className="workspace-footer__controls">
-            <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)}>
-              <Trash2 aria-hidden="true" />
-              {t.projectWorkspace.deleteProjectAction}
-            </Button>
-          </div>
-        </details>
-      ) : null}
     </>
   );
 }

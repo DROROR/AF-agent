@@ -362,44 +362,34 @@ describe("Project workspace - what was taken off the page", () => {
     expect(document.querySelector(".next-action")).not.toBeNull();
   });
 
-  it("the page header carries the project's name and status and nothing else - no mode switch, no armed Delete button", async () => {
+  it("keeps the technical facts, the Advanced switch and Delete Project at the top, where the operator asked for them", async () => {
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
 
-    const header = document.querySelector(".workspace-header") as HTMLElement;
-    expect(within(header).queryByRole("button", { name: "Delete Project" })).toBeNull();
-    expect(within(header).queryByRole("button", { name: "Advanced" })).toBeNull();
-    expect(within(header).queryByRole("button", { name: "Simple" })).toBeNull();
-  });
-
-  it("keeps the technical facts and the Advanced switch under the header, closed - where the operator asked for them back", async () => {
-    stubAll();
-    renderShell();
-    await screen.findByText("White App Promo");
-
+    // The facts stay in a closed disclosure: one line of chrome, and no hunt
+    // when support asks which template and revision this is.
     const header = document.querySelector(".workspace-header__details") as HTMLElement;
     expect(header).not.toBeNull();
-    // Closed by default: one line of chrome, no hunt when support asks which
-    // template and revision this is.
     expect((header as HTMLDetailsElement).open).toBe(false);
     expect(header.textContent).toContain("Source SHA");
-    within(header).getByRole("button", { name: "Advanced" });
-    within(header).getByRole("button", { name: "Simple" });
+
+    // The switch and Delete sit in the header actions, as they always did.
+    const actions = document.querySelector(".workspace-header__actions") as HTMLElement;
+    within(actions).getByRole("button", { name: "Advanced" });
+    within(actions).getByRole("button", { name: "Simple" });
+    within(actions).getByRole("button", { name: "Delete Project" });
   });
 
-  it("does NOT bring Delete Project back to the top with them - it stays at the foot", async () => {
+  it("still asks before deleting - the confirmation is what guards a destructive button at the top of every page", async () => {
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
 
-    const header = document.querySelector(".workspace-header__details") as HTMLElement;
-    expect(within(header).queryByRole("button", { name: "Delete Project" })).toBeNull();
-
-    const foot = document.querySelector(".workspace-footer__details") as HTMLElement;
-    expect(foot).not.toBeNull();
-    expect((foot as HTMLDetailsElement).open).toBe(false);
-    within(foot).getByRole("button", { name: "Delete Project" });
+    const actions = document.querySelector(".workspace-header__actions") as HTMLElement;
+    fireEvent.click(within(actions).getByRole("button", { name: "Delete Project" }));
+    // Nothing is deleted on the first click; a dialog asks first.
+    await screen.findByText(/Delete this project/i);
   });
 
   it("the Advanced switch still works from the header, and still reveals the same three extra tabs - hidden, never deleted", async () => {
@@ -410,7 +400,7 @@ describe("Project workspace - what was taken off the page", () => {
     const nav = document.querySelector(".workspace-tabs") as HTMLElement;
     expect(within(nav).getAllByRole("link")).toHaveLength(5);
 
-    fireEvent.click(within(document.querySelector(".workspace-header__details") as HTMLElement).getByRole("button", { name: "Advanced" }));
+    fireEvent.click(within(document.querySelector(".workspace-header__actions") as HTMLElement).getByRole("button", { name: "Advanced" }));
 
     expect(
       within(document.querySelector(".workspace-tabs") as HTMLElement)
