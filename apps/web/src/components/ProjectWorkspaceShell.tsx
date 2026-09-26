@@ -146,12 +146,32 @@ export function ProjectWorkspaceShell({
           {SIMPLIFIED_PROJECT_WORKSPACE ? null : <ProjectSettingsControls mode={mode} setMode={setMode} onDelete={() => setConfirmingDelete(true)} />}
         </div>
       </div>
-      {SIMPLIFIED_PROJECT_WORKSPACE ? null : (
-        <details className="advanced-details workspace-header__details">
-          <summary>{t.projectWorkspace.header.detailsToggle}</summary>
-          <ProjectTechnicalFacts project={project} plan={plan} unresolvedCount={unresolvedCount} />
-        </details>
-      )}
+      {/*
+        The technical facts and the Advanced switch live here, under the
+        header, because the operator asked for them back after the first
+        simplification moved them to the foot: "ye section ko top me he rkho,
+        waha he sae hai". They are closed by default, so they cost one line of
+        chrome and answer "which template is this, which revision" without a
+        hunt. Delete Project deliberately did NOT come back with them - it is
+        destructive, it is not a step in making a video, and it does not
+        belong one stray click from the top of every page.
+      */}
+      <details className="advanced-details workspace-header__details">
+        <summary>{t.projectWorkspace.header.detailsToggle}</summary>
+        <ProjectTechnicalFacts project={project} plan={plan} unresolvedCount={unresolvedCount} />
+        {SIMPLIFIED_PROJECT_WORKSPACE ? (
+          <div className="workspace-header__controls">
+            <div className="workspace-mode-toggle" role="group" aria-label={t.workspaceMode.toggleAriaLabel}>
+              <button type="button" className="workspace-mode-toggle__option" data-active={mode === "simple"} onClick={() => setMode("simple")}>
+                {t.workspaceMode.simpleAction}
+              </button>
+              <button type="button" className="workspace-mode-toggle__option" data-active={mode === "advanced"} onClick={() => setMode("advanced")}>
+                {t.workspaceMode.advancedAction}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </details>
       <Dialog
         open={confirmingDelete}
         onClose={() => setConfirmingDelete(false)}
@@ -260,9 +280,11 @@ export function ProjectWorkspaceShell({
         // removed - it is out of the way, not gone.
         <details className="advanced-details workspace-footer__details">
           <summary>{t.projectWorkspace.header.settingsDrawerToggle}</summary>
-          <ProjectTechnicalFacts project={project} plan={plan} unresolvedCount={unresolvedCount} />
           <div className="workspace-footer__controls">
-            <ProjectSettingsControls mode={mode} setMode={setMode} onDelete={() => setConfirmingDelete(true)} />
+            <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)}>
+              <Trash2 aria-hidden="true" />
+              {t.projectWorkspace.deleteProjectAction}
+            </Button>
           </div>
         </details>
       ) : null}

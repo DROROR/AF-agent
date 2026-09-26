@@ -373,22 +373,36 @@ describe("Project workspace - what was taken off the page", () => {
     expect(within(header).queryByRole("button", { name: "Simple" })).toBeNull();
   });
 
-  it("but nothing was removed: the technical facts, the Advanced switch and Delete Project are all in one drawer at the foot of the page", async () => {
+  it("keeps the technical facts and the Advanced switch under the header, closed - where the operator asked for them back", async () => {
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
 
-    const drawer = document.querySelector(".workspace-footer__details") as HTMLElement;
-    expect(drawer).not.toBeNull();
-    // Closed by default - it holds nothing anyone needs to make a video.
-    expect((drawer as HTMLDetailsElement).open).toBe(false);
-    within(drawer).getByRole("button", { name: "Delete Project" });
-    within(drawer).getByRole("button", { name: "Advanced" });
-    within(drawer).getByRole("button", { name: "Simple" });
-    expect(drawer.textContent).toContain("Source SHA");
+    const header = document.querySelector(".workspace-header__details") as HTMLElement;
+    expect(header).not.toBeNull();
+    // Closed by default: one line of chrome, no hunt when support asks which
+    // template and revision this is.
+    expect((header as HTMLDetailsElement).open).toBe(false);
+    expect(header.textContent).toContain("Source SHA");
+    within(header).getByRole("button", { name: "Advanced" });
+    within(header).getByRole("button", { name: "Simple" });
   });
 
-  it("the Advanced switch still works from there, and still reveals the same three extra tabs - hidden, never deleted", async () => {
+  it("does NOT bring Delete Project back to the top with them - it stays at the foot", async () => {
+    stubAll();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    const header = document.querySelector(".workspace-header__details") as HTMLElement;
+    expect(within(header).queryByRole("button", { name: "Delete Project" })).toBeNull();
+
+    const foot = document.querySelector(".workspace-footer__details") as HTMLElement;
+    expect(foot).not.toBeNull();
+    expect((foot as HTMLDetailsElement).open).toBe(false);
+    within(foot).getByRole("button", { name: "Delete Project" });
+  });
+
+  it("the Advanced switch still works from the header, and still reveals the same three extra tabs - hidden, never deleted", async () => {
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
@@ -396,7 +410,7 @@ describe("Project workspace - what was taken off the page", () => {
     const nav = document.querySelector(".workspace-tabs") as HTMLElement;
     expect(within(nav).getAllByRole("link")).toHaveLength(5);
 
-    fireEvent.click(within(document.querySelector(".workspace-footer__details") as HTMLElement).getByRole("button", { name: "Advanced" }));
+    fireEvent.click(within(document.querySelector(".workspace-header__details") as HTMLElement).getByRole("button", { name: "Advanced" }));
 
     expect(
       within(document.querySelector(".workspace-tabs") as HTMLElement)
