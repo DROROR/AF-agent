@@ -93,18 +93,57 @@ function renderTab(): void {
  * present on this tab too.
  */
 describe("ProjectExportTab", () => {
-  it("never exposes the raw composition picker or template-name fields Advanced's Render Settings tab shows", async () => {
+  /**
+   * THE DEAD END, PINNED (2026-09-26). Rendering is impossible until a
+   * master composition is saved for an output, and until this change the
+   * only form that could save one lived on the Render Settings tab - which
+   * the normal nav does not list at all. So the Export button was greyed
+   * out forever and the product's own advice was "switch to Advanced view".
+   * The operator spent two days on the phone over exactly this.
+   *
+   * These two tests are the whole guarantee, and they are deliberately a
+   * matched pair: the setup form is HERE for an output that is blocked on
+   * it, and it is GONE for one that is not. Either alone would pass while
+   * the dead end came back - the first would still pass if the form were
+   * simply always shown (clutter for everyone), and the second would still
+   * pass if the form were never shown at all (the original bug).
+   */
+  it("THE DEAD END: an output that cannot render without setup shows the real setup form in place, never a pointer to another tab", async () => {
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
     });
     renderTab();
     await screen.findAllByText("Not set up yet");
-    expect(screen.queryByLabelText("Master composition")).toBeNull();
-    expect(screen.queryByLabelText("Render Settings template name")).toBeNull();
-    expect(screen.queryByLabelText("Output Module template name")).toBeNull();
+
+    // The real fields, on this tab, with a real Save - not a link, not an
+    // instruction to change modes.
+    expect(screen.getAllByLabelText("Master composition")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Render Settings template name")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Output Module template name")).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(2);
+    // And it no longer tells anyone to go somewhere else to do it.
+    expect(document.body.textContent).not.toContain("Advanced view");
+  });
+
+  it("and the setup form disappears for an output that is already set up against the current template - it is a fix, not permanent clutter", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+    renderTab();
+    await screen.findByText("Not ready yet");
+
+    // Only REELS is still missing its setup, so exactly one form is drawn.
+    expect(screen.getAllByLabelText("Master composition")).toHaveLength(1);
   });
 
   it("shows a plain 'not set up yet' message (never the raw fields) when a variant has no render configuration", async () => {
@@ -233,7 +272,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
 
     const button = renderButton();
     expect(button.disabled).toBe(true);
-    const reason = screen.getAllByText("No master composition is saved for this output yet. Choose one in Render Settings (Advanced view).")[0]!;
+    const reason = screen.getAllByText("This output has not been set up yet. Fill in the short setup form just below and press Save.")[0]!;
     expect(button.getAttribute("aria-describedby")).toBe(reason.getAttribute("id"));
   });
 
@@ -254,7 +293,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
     // The LANDSCAPE card is configured; its own button must give the
     // session reason, while REELS (still unconfigured) keeps its own.
     screen.getByText("The complete preview has to be approved on the Preview tab before rendering.");
-    screen.getByText("No master composition is saved for this output yet. Choose one in Render Settings (Advanced view).");
+    screen.getByText("This output has not been set up yet. Fill in the short setup form just below and press Save.");
   });
 
   it("reports a STALE master as a re-selection problem, never as 'not configured' - they need different fixes", async () => {
@@ -274,7 +313,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
     renderTab();
     await screen.findAllByText("Not set up yet");
 
-    screen.getByText("The template changed since this master composition was chosen. Re-select it in Render Settings.");
+    screen.getByText("The template changed since this output was set up. Set it up again in the form just below.");
   });
 
   it("an ENABLED Render button carries no reason at all - the explanation only ever appears when it is actually blocked", async () => {

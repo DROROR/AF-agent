@@ -604,14 +604,29 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
   );
 }
 
-function VariantConfigCard({
+/**
+ * The one form that decides which composition in the template IS the final
+ * video for an output, plus the two AE Render Queue template names. All
+ * three are required and none of them can be guessed in code (see
+ * render-project.ts's own "not assumed here" note), so a human genuinely
+ * has to fill this in once per project before anything can be rendered.
+ *
+ * EXPORTED (2026-09-26) so ProjectExportTab can render this exact component
+ * inline, rather than sending someone to a tab the normal nav does not list.
+ * Exported, never copied: two forms writing the same render_outputs row
+ * would be two chances to disagree about what "configured" means, and the
+ * disagreement would surface as a permanently greyed-out Export button -
+ * which is the very failure this move exists to end.
+ */
+export function VariantConfigCard({
   projectId,
   variant,
   compositions,
   currentConfig,
   currentSourceSha,
   session,
-  renderReady
+  renderReady,
+  showRenderAction = true
 }: {
   projectId: string;
   variant: RenderOutputVariant;
@@ -620,6 +635,13 @@ function VariantConfigCard({
   currentSourceSha: string;
   session: ExecutionSessionDto | null;
   renderReady: boolean;
+  /**
+   * False where the surrounding page already owns the render trigger (the
+   * Export tab). Two identical Render buttons a few centimetres apart is
+   * exactly the "something up top, something else below" the operator
+   * complained about - and only the button, never the saving, is dropped.
+   */
+  showRenderAction?: boolean;
 }): ReactElement {
   const { t } = useLocale();
   const { setRenderOutput } = useProjectWorkspaceContext();
@@ -803,6 +825,7 @@ function VariantConfigCard({
               can dispatch the same RENDER, so they must never give a client
               two different explanations for the same refusal.
             */}
+            {showRenderAction ? (
             <Button
               variant="secondary"
               disabled={!canRender || isDispatching}
@@ -823,6 +846,7 @@ function VariantConfigCard({
             >
               {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.renderSettings.renderAction}
             </Button>
+            ) : null}
           </div>
         </>
       )}

@@ -133,13 +133,18 @@ export function resolveNextAction(input: NextActionInput): NextAction {
   if (!input.allScenesComplete) {
     return { id: "executeRemainingScenes", tab: "preview" };
   }
-  // Render Settings is the step nothing in the UI used to point at, and the
-  // one the operator got stuck on: without a LANDSCAPE master the Export
-  // tab's button is permanently disabled, and in Simple Mode the tab that
-  // fixes it is not even in the nav (ProjectWorkspaceShell hides it) - so
-  // this action's own copy has to say that too.
+  // THE DEAD END, now closed. Without a LANDSCAPE master the Export tab's
+  // render button is permanently disabled, and the only form that could set
+  // one lived on Render Settings - a tab the normal (Simple) nav does not
+  // list at all. The instruction therefore used to be "switch to Advanced
+  // view and open Render Settings", which is a request to understand the
+  // app's structure, not an action. That exact form is now rendered inline
+  // on the Export tab whenever the output it belongs to is unconfigured or
+  // stale (ProjectExportTab -> VariantConfigCard, the very same component,
+  // not a copy), so the next action points at a tab that is always in the
+  // nav and contains its own fix.
   if (!input.landscapeRenderConfigured) {
-    return { id: "configureRenderOutput", tab: "renderSettings" };
+    return { id: "configureRenderOutput", tab: "export" };
   }
   if (!input.fullPreviewApproved) {
     return { id: "reviewFinalPreview", tab: "preview" };

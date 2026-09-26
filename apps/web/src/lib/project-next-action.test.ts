@@ -98,15 +98,18 @@ describe("resolveNextAction - the named action is the genuinely blocking one", (
     });
   });
 
-  it("THE STEP NOTHING USED TO POINT AT: sends a fully-executed project to Render Settings when no Landscape master is configured", () => {
+  it("THE DEAD END, CLOSED: sends a fully-executed project with no Landscape master to Export, never to a tab the nav does not list", () => {
     // Without this branch the guidance jumped straight to the complete
     // preview and then to an Export button that is permanently disabled
-    // with "Not configured" - and in Simple Mode the tab that fixes it is
-    // not even in the nav.
+    // with "Not configured". The branch itself used to answer
+    // "renderSettings" - a tab the normal nav omits, so the only honest
+    // instruction was "switch to Advanced view", which is not an action.
+    // The setup form now renders on Export itself, so this points there.
     const result = resolveNextAction(
       input({ planApproved: true, executableSceneCount: 2, firstPreviewApproved: true, allScenesComplete: true, landscapeRenderConfigured: false })
     );
-    expect(result).toEqual({ id: "configureRenderOutput", tab: "renderSettings" });
+    expect(result).toEqual({ id: "configureRenderOutput", tab: "export" });
+    expect(result.tab).not.toBe("renderSettings");
   });
 
   it("only asks for the complete preview once the Landscape master really is configured", () => {

@@ -454,6 +454,14 @@ export const en = {
       export: "Locked until Final Preview is approved"
     },
     /** The tab nav's own marker for the tab holding the current next action - the answer to "which tab do I open?" without reading anything else. */
+    /**
+     * 2026-09-26: the tab bar no longer draws this - the checklist on the
+     * project's front page and the "what to do next" banner on every other
+     * page already name the tab and link to it, and a third marker for the
+     * same fact was one of the things the operator had to read and reconcile
+     * before acting. Kept (with its aria strings) because
+     * SIMPLIFIED_PROJECT_WORKSPACE restores it in one line.
+     */
     tabNextBadge: "Next",
     tabNextAriaSuffix: "- your next step is here",
     tabLockedAriaSuffix: "- locked",
@@ -466,6 +474,26 @@ export const en = {
      * labelled elsewhere in this dictionary, and never describe a state the
      * UI has not actually confirmed (see `unknown`/`loadFailed`).
      */
+    /**
+     * The project's front page, top to bottom: every step it takes to get a
+     * finished video, in order, with the one you are on opened up. Copy
+     * rules, learned the hard way from two days of talking the operator
+     * through clicks on the phone: say what the PERSON does, never what the
+     * system does; name a real button exactly as it is labelled elsewhere in
+     * this dictionary; and never describe a state that has not actually been
+     * confirmed.
+     */
+    checklist: {
+      heading: "Your video, step by step",
+      progress: (done: number, total: number): string => `${done} of ${total} done`,
+      openAction: (tab: string): string => `Open ${tab}`,
+      status: {
+        done: "Done",
+        doThisNow: "Do this now",
+        notYet: "Not yet - finish the step above first",
+        ready: "Ready"
+      }
+    },
     nextAction: {
       heading: "What to do next",
       goToAction: (tab: string): string => `Go to ${tab}`,
@@ -501,9 +529,9 @@ export const en = {
           description: "Open the Preview tab and press \"Continue execution\" until every approved scene has been built."
         },
         configureRenderOutput: {
-          title: "Choose the Landscape master",
+          title: "Choose which part of the template is your finished video",
           description:
-            "Open Render Settings, pick the master composition for Landscape and save it. Export stays disabled without it. Render Settings only appears in the tab bar in Advanced view - use the Simple/Advanced toggle above this page."
+            "Open Export. Under \"Landscape\", pick the piece of the template that is the whole finished video, fill in the two After Effects settings names your editor gave you, and press Save. Render stays greyed out until that is saved."
         },
         reviewFinalPreview: {
           title: "Review the complete video",
@@ -539,8 +567,8 @@ export const en = {
       allScenesExecuted: "Every approved scene is already built - continue with the complete preview below.",
       scenesNotExecuted: "The approved scene has to finish building on the Preview tab first.",
       finalPreviewAlreadyApproved: "Already approved. Use \"Regenerate Complete Preview\" if the video needs rebuilding.",
-      renderNotConfigured: "No master composition is saved for this output yet. Choose one in Render Settings (Advanced view).",
-      renderConfigStale: "The template changed since this master composition was chosen. Re-select it in Render Settings.",
+      renderNotConfigured: "This output has not been set up yet. Fill in the short setup form just below and press Save.",
+      renderConfigStale: "The template changed since this output was set up. Set it up again in the form just below.",
       renderNotReady: "The complete preview has to be approved on the Preview tab before rendering.",
       noCompositionChosen: "Choose a master composition above first.",
       noSceneChosen: "Choose a scene above first.",
@@ -553,7 +581,9 @@ export const en = {
       status: "Status",
       scenes: "Scenes",
       unresolved: "Unresolved",
-      detailsToggle: "Project details"
+      detailsToggle: "Project details",
+      /** The one drawer at the foot of every project page holding everything that is not a step in making a video: the technical facts, the Advanced view switch, and Delete Project. */
+      settingsDrawerToggle: "Settings and technical details"
     },
     loadErrorTitle: "Could not load this project",
     notFoundTitle: "Project not found",
@@ -589,6 +619,7 @@ export const en = {
     deleteCancelAction: "Cancel",
     deleteFailedTitle: "Could not delete this project",
     overview: {
+      detailsToggle: "Plan details (for support)",
       projectSection: "Project",
       planSection: "Execution plan",
       safetySection: "Safety / execution state",
@@ -760,7 +791,17 @@ export const en = {
       description: "Render and download the final Landscape and Reels videos.",
       renderAction: (variantLabel: string): string => `Render ${variantLabel}`,
       notConfiguredTitle: "Not set up yet",
-      notConfiguredDescription: "This export isn't set up yet - ask your editor to finish it in Advanced mode.",
+      /**
+       * REAL 2026-09-26 DEAD END. This line used to read "ask your editor to
+       * finish it in Advanced mode", because the only form that could set an
+       * output up lived on the Render Settings tab - which the normal nav
+       * does not list. That made the Export button permanently greyed out
+       * for anyone without an editor on the phone. The form is now rendered
+       * directly underneath this message (ProjectExportTab), so the message
+       * says where it is instead of who to ask. The old wording is gone
+       * rather than kept unused, so it cannot quietly come back.
+       */
+      setUpBelowDescription: "This output needs setting up once before it can be rendered. The short form for it is right below.",
       notReadyTitle: "Not ready yet",
       notReadyDescription: "Finish approving every scene and the Final Preview before this export is ready."
     },

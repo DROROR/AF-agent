@@ -448,6 +448,17 @@ export const he: Dictionary = {
     tabNextBadge: "הבא",
     tabNextAriaSuffix: "- השלב הבא שלכם נמצא כאן",
     tabLockedAriaSuffix: "- נעול",
+    checklist: {
+      heading: "הווידאו שלכם, שלב אחר שלב",
+      progress: (done: number, total: number): string => `${done} מתוך ${total} הושלמו`,
+      openAction: (tab: string): string => `פתיחת ${tab}`,
+      status: {
+        done: "הושלם",
+        doThisNow: "זה מה שעושים עכשיו",
+        notYet: "עדיין לא - יש לסיים קודם את השלב שמעל",
+        ready: "מוכן"
+      }
+    },
     nextAction: {
       heading: "מה לעשות עכשיו",
       goToAction: (tab: string): string => `מעבר ל${tab}`,
@@ -483,9 +494,9 @@ export const he: Dictionary = {
           description: "פתחו את לשונית התצוגה המקדימה ולחצו על \"המשך ביצוע\" עד שכל סצנה מאושרת תיבנה."
         },
         configureRenderOutput: {
-          title: "בחירת קומפוזיציית המאסטר ללנדסקייפ",
+          title: "בחירת החלק בתבנית שהוא הווידאו המוגמר שלכם",
           description:
-            "פתחו את הגדרות הרינדור, בחרו את קומפוזיציית המאסטר ללנדסקייפ ושמרו. הייצוא יישאר מושבת בלעדיה. הגדרות הרינדור מופיעות בשורת הלשוניות רק בתצוגה המתקדמת - השתמשו במתג פשוט/מתקדם מעל הדף."
+            "פתחו את הייצוא. תחת \"לנדסקייפ\", בחרו את החלק בתבנית שהוא כל הווידאו המוגמר, מלאו את שני שמות ההגדרות של After Effects שקיבלתם מהעורך, ולחצו על שמירה. הרינדור יישאר מושבת עד שזה נשמר."
         },
         reviewFinalPreview: {
           title: "בדיקת הווידאו המלא",
@@ -515,8 +526,8 @@ export const he: Dictionary = {
       allScenesExecuted: "כל הסצנות המאושרות כבר נבנו - המשיכו לתצוגה המקדימה המלאה למטה.",
       scenesNotExecuted: "הסצנה המאושרת צריכה לסיים להיבנות בלשונית התצוגה המקדימה קודם.",
       finalPreviewAlreadyApproved: "כבר אושר. השתמשו ב\"יצירה מחדש של התצוגה המקדימה המלאה\" אם צריך לבנות את הווידאו מחדש.",
-      renderNotConfigured: "עדיין לא נשמרה קומפוזיציית מאסטר לפלט הזה. בחרו אחת בהגדרות הרינדור (תצוגה מתקדמת).",
-      renderConfigStale: "התבנית השתנתה מאז שנבחרה קומפוזיציית המאסטר הזו. בחרו אותה מחדש בהגדרות הרינדור.",
+      renderNotConfigured: "הפלט הזה עדיין לא הוגדר. מלאו את טופס ההגדרה הקצר שממש למטה ולחצו על שמירה.",
+      renderConfigStale: "התבנית השתנתה מאז שהפלט הזה הוגדר. הגדירו אותו מחדש בטופס שממש למטה.",
       renderNotReady: "יש לאשר את התצוגה המקדימה המלאה בלשונית התצוגה המקדימה לפני הרינדור.",
       noCompositionChosen: "בחרו קודם קומפוזיציית מאסטר למעלה.",
       noSceneChosen: "בחרו קודם סצנה למעלה.",
@@ -529,7 +540,8 @@ export const he: Dictionary = {
       status: "סטטוס",
       scenes: "סצנות",
       unresolved: "לא פתורות",
-      detailsToggle: "פרטי הפרויקט"
+      detailsToggle: "פרטי הפרויקט",
+      settingsDrawerToggle: "הגדרות ופרטים טכניים"
     },
     loadErrorTitle: "לא ניתן היה לטעון את הפרויקט הזה",
     notFoundTitle: "הפרויקט לא נמצא",
@@ -564,6 +576,7 @@ export const he: Dictionary = {
     deleteCancelAction: "ביטול",
     deleteFailedTitle: "לא ניתן היה למחוק את הפרויקט",
     overview: {
+      detailsToggle: "פרטי התוכנית (לתמיכה)",
       projectSection: "פרויקט",
       planSection: "תוכנית ביצוע",
       safetySection: "בטיחות / מצב ביצוע",
@@ -723,7 +736,7 @@ export const he: Dictionary = {
       description: "רינדור והורדה של סרטוני הלנדסקייפ והרילס הסופיים.",
       renderAction: (variantLabel: string): string => `רינדור ${variantLabel}`,
       notConfiguredTitle: "עדיין לא הוגדר",
-      notConfiguredDescription: "הייצוא הזה עדיין לא הוגדר - בקשו מהעורך שלכם לסיים את ההגדרה במצב מתקדם.",
+      setUpBelowDescription: "צריך להגדיר את הפלט הזה פעם אחת לפני שאפשר לרנדר אותו. הטופס הקצר לכך נמצא ממש למטה.",
       notReadyTitle: "עדיין לא מוכן",
       notReadyDescription: "יש לסיים לאשר כל סצנה ואת התצוגה המקדימה הסופית לפני שהייצוא הזה יהיה מוכן."
     },

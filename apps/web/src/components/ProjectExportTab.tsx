@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
+import { Fragment, useEffect, useState, type ReactElement } from "react";
 import { RENDER_OUTPUT_VARIANTS, type ExecutionSessionDto, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
@@ -12,7 +12,7 @@ import { EmptyState } from "./EmptyState";
 import { LockedStepNotice } from "./LockedStepNotice";
 import { useLocale } from "./LocaleProvider";
 import { dispatchJob, fetchCurrentExecutionSession } from "../lib/projects-api-client";
-import { FinalOutputsCard } from "./ProjectRenderSettingsTab";
+import { FinalOutputsCard, VariantConfigCard } from "./ProjectRenderSettingsTab";
 
 /**
  * "Export" tab (final MVP nav, client-facing UX redesign section H,
@@ -26,6 +26,21 @@ import { FinalOutputsCard } from "./ProjectRenderSettingsTab";
  * already exists, exactly like every other dispatch in this codebase
  * (never accepts a composition/template field from the browser directly -
  * see resolve-render-dispatch.ts).
+ *
+ * THE DEAD END THIS TAB USED TO BE (fixed 2026-09-26). Rendering is
+ * impossible until a master composition has been saved for an output, and
+ * that could only ever be done on the Render Settings tab - which the
+ * normal nav does not list. So the person arrived here, found the one
+ * button they wanted greyed out, and the only instruction anywhere in the
+ * product was "switch to Advanced view". The operator spent two days being
+ * talked through that by phone.
+ *
+ * Now the setup form appears here, in place, for exactly the outputs that
+ * are missing it (or whose saved choice no longer matches the current
+ * template), and disappears the moment it is filled in. It is the SAME
+ * component the Render Settings tab uses, imported - never a second form
+ * writing the same row. Nothing was removed from Render Settings, and its
+ * URL still works for anyone who wants the fuller view.
  */
 export function ProjectExportTab(): ReactElement | null {
   const { t } = useLocale();
@@ -79,17 +94,39 @@ export function ProjectExportTab(): ReactElement | null {
         <p>{t.projectWorkspace.export.description}</p>
       </Card>
 
-      {RENDER_OUTPUT_VARIANTS.map((variant) => (
-        <SimpleExportVariantCard
-          key={variant}
-          projectId={projectId}
-          variant={variant}
-          currentConfig={plan.plan.renderOutputs[variant] ?? null}
-          currentSourceSha={project.manifest.sourceProject.sha256}
-          session={session}
-          renderReady={renderReady}
-        />
-      ))}
+      {RENDER_OUTPUT_VARIANTS.map((variant) => {
+        const currentConfig = plan.plan.renderOutputs[variant] ?? null;
+        const sourceSha = project.manifest.sourceProject.sha256;
+        // Exactly the condition SimpleExportVariantCard's own render gate
+        // treats as "cannot render this" - so the fix is offered for, and
+        // only for, the outputs that are genuinely blocked on it, and this
+        // card vanishes by itself once a real, current choice is saved.
+        const needsSetup = currentConfig === null || currentConfig.sourceProjectSha256 !== sourceSha;
+        return (
+          <Fragment key={variant}>
+            <SimpleExportVariantCard
+              projectId={projectId}
+              variant={variant}
+              currentConfig={currentConfig}
+              currentSourceSha={sourceSha}
+              session={session}
+              renderReady={renderReady}
+            />
+            {needsSetup ? (
+              <VariantConfigCard
+                projectId={projectId}
+                variant={variant}
+                compositions={project.manifest.compositions}
+                currentConfig={currentConfig}
+                currentSourceSha={sourceSha}
+                session={session}
+                renderReady={renderReady}
+                showRenderAction={false}
+              />
+            ) : null}
+          </Fragment>
+        );
+      })}
 
       <FinalOutputsCard projectId={projectId} />
     </div>
@@ -176,7 +213,7 @@ function SimpleExportVariantCard({
       <CardHeader title={variantLabel} />
 
       {currentConfig === null || isStale ? (
-        <EmptyState title={t.projectWorkspace.export.notConfiguredTitle} description={t.projectWorkspace.export.notConfiguredDescription} />
+        <EmptyState title={t.projectWorkspace.export.notConfiguredTitle} description={t.projectWorkspace.export.setUpBelowDescription} />
       ) : !renderReady ? (
         <EmptyState title={t.projectWorkspace.export.notReadyTitle} description={t.projectWorkspace.export.notReadyDescription} />
       ) : !renderWorkerOnline ? (

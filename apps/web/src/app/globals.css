@@ -3503,3 +3503,201 @@ a.workflow-stepper__step:hover {
   color: var(--color-text-muted);
   max-width: 30rem;
 }
+
+/* ==========================================================================
+   Project checklist (2026-09-26 subtraction pass)
+   --------------------------------------------------------------------------
+   The project's front page: the seven real steps, only the current one open
+   and only the current one clickable. Replaces the seven-chip stepper that
+   used to sit as chrome above every page - the operator's complaint was
+   "upar kuch hai neeche kuch hai" (something up top, something else below),
+   caused by three separate elements answering the same question at once.
+   Reuses the same marker vocabulary the stepper used, so the visual language
+   the client already learned is unchanged.
+   ========================================================================== */
+
+.project-checklist {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  padding: var(--space-4);
+}
+
+.project-checklist__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-block-end: var(--space-3);
+}
+
+.project-checklist__heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.project-checklist__progress {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.project-checklist__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.project-checklist__item {
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-2);
+}
+
+.project-checklist__item[data-current="true"] {
+  border-color: var(--brand-primary);
+  background: var(--color-info-bg);
+}
+
+.project-checklist__item[data-state="locked"] {
+  opacity: 0.55;
+}
+
+.project-checklist__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.project-checklist__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+.project-checklist__marker svg {
+  width: 13px;
+  height: 13px;
+}
+
+.project-checklist__marker[data-state="complete"] {
+  background: var(--color-positive-bg, var(--color-surface-sunken));
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
+.project-checklist__item[data-current="true"] .project-checklist__marker {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary-contrast);
+}
+
+.project-checklist__label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.project-checklist__title {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.project-checklist__status {
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}
+
+.project-checklist__item[data-current="true"] .project-checklist__status {
+  color: var(--brand-primary);
+  font-weight: 600;
+}
+
+/* The opened step. Indented past the marker with a logical property so it
+   stays correct in the Hebrew (RTL) layout without a second rule. */
+.project-checklist__action {
+  margin-block-start: var(--space-2);
+  margin-inline-start: calc(22px + var(--space-2));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.project-checklist__action-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.project-checklist__action-description {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+}
+
+.project-checklist--unknown {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-sunken);
+}
+
+.project-checklist__unknown-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.project-checklist__unknown-body > svg {
+  flex-shrink: 0;
+  margin-block-start: 2px;
+  color: var(--color-text-muted);
+}
+
+.project-checklist__unknown-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.project-checklist__unknown-description {
+  margin: 2px 0 0;
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+}
+
+/* The one drawer at the foot of a project page: technical facts, the
+   Advanced view switch, and Delete Project. Closed by default - it holds
+   nothing anyone needs to make a video. */
+.workspace-footer__details {
+  margin-block-start: var(--space-4);
+}
+
+.workspace-footer__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-block-start: var(--space-3);
+}
+
+/* The plan facts and the Advanced approve/reject/reopen controls, below the
+   checklist on a project's front page. Closed: real values support needs,
+   and that nobody making a video has to read first. */
+.project-details-drawer {
+  margin-block-start: var(--space-4);
+}

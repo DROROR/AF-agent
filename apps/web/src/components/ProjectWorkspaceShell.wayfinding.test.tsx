@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectWorkspaceShell } from "./ProjectWorkspaceShell";
 import { ProjectGuidanceProvider } from "./ProjectGuidanceProvider";
@@ -20,14 +20,22 @@ import { PROJECT_ID, SOURCE_SHA, manifestFixture, planFixture, projectDtoFixture
  * the UI says so instead of naming a step it has not confirmed.
  */
 
-let currentPathname = `/projects/${PROJECT_ID}`;
+/**
+ * These cases render a NON-front page (Files) by default. As of the
+ * 2026-09-26 subtraction pass the banner is the "what to do next" voice on
+ * every page EXCEPT the project's front page, where ProjectChecklist owns
+ * that job and says the same thing in a fuller form - two voices on one
+ * screen being the operator's actual complaint ("upar kuch hai neeche kuch
+ * hai"). The front page's own behaviour is pinned separately, below.
+ */
+let currentPathname = `/projects/${PROJECT_ID}/assets`;
 vi.mock("next/navigation", () => ({
   usePathname: () => currentPathname,
   useRouter: () => ({ push: vi.fn() })
 }));
 
 beforeEach(() => {
-  currentPathname = `/projects/${PROJECT_ID}`;
+  currentPathname = `/projects/${PROJECT_ID}/assets`;
   // renderWithLocale sets <html lang> and never restores it, so one Hebrew
   // case would otherwise make every later case in this file render Hebrew.
   document.documentElement.setAttribute("lang", "en");
@@ -166,17 +174,22 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     within(banner()).getByText("You are on the right tab");
   });
 
-  it("THE STEP NOTHING USED TO POINT AT: a fully-executed project with no Landscape master is sent to Render Settings, and told it lives in Advanced view", async () => {
+  it("THE DEAD END, CLOSED: a fully-executed project with no Landscape master is sent to Export - a tab that is always in the nav and now holds the fix", async () => {
     // This is exactly where the operator got stuck: every scene built, the
-    // Export button permanently greyed out, and in Simple Mode the tab that
-    // fixes it is not even in the nav.
+    // Export button permanently greyed out, and the only instruction in the
+    // whole product was to switch to Advanced view and find a tab the nav
+    // does not list. The setup form now lives on Export itself
+    // (ProjectExportTab -> VariantConfigCard), so the instruction is an
+    // action on a tab they can already see.
     stubAll(executedProjectStubs());
     renderShell();
-    await screen.findByText("Choose the Landscape master");
+    await screen.findByText("Choose which part of the template is your finished video");
 
-    const link = within(banner()).getByRole("link", { name: "Go to Render Settings" });
-    expect(link.getAttribute("href")).toBe(`/projects/${PROJECT_ID}/render-settings`);
-    expect(banner().textContent).toContain("Advanced");
+    const link = within(banner()).getByRole("link", { name: "Go to Export" });
+    expect(link.getAttribute("href")).toBe(`/projects/${PROJECT_ID}/export`);
+    // It must never again send anyone to another view to unblock this.
+    expect(banner().textContent).not.toContain("Advanced");
+    expect(banner().textContent).not.toContain("Render Settings");
   });
 
   it("moves on to the complete preview only once the Landscape master really is configured against the current template", async () => {
@@ -196,7 +209,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     renderShell();
     // Despite the complete preview already being approved, the blocking
     // fact is the stale master - so that is what it says.
-    await screen.findByText("Choose the Landscape master");
+    await screen.findByText("Choose which part of the template is your finished video");
   });
 
   it("reaches Export only after the real fullPreviewApproved gate, and reports 'done' once a render artifact exists", async () => {
@@ -219,12 +232,12 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
   it("renders the whole banner in Hebrew, with no English leaking through", async () => {
     stubAll(executedProjectStubs());
     renderShell("he");
-    await screen.findByText("בחירת קומפוזיציית המאסטר ללנדסקייפ");
+    await screen.findByText("בחירת החלק בתבנית שהוא הווידאו המוגמר שלכם");
 
     within(banner()).getByText("מה לעשות עכשיו");
-    within(banner()).getByRole("link", { name: "מעבר להגדרות רינדור" });
+    within(banner()).getByRole("link", { name: "מעבר לייצוא" });
     // The one phrase the English copy would have produced here.
-    expect(banner().textContent).not.toContain("Choose the Landscape master");
+    expect(banner().textContent).not.toContain("Choose which part of the template");
   });
 });
 
@@ -260,15 +273,22 @@ describe("Project wayfinding - locked tabs say what unlocks them", () => {
     screen.getByText("Locked until Final Preview is approved");
   });
 
-  it("marks exactly one tab as the next step, and marks it on the tab the banner links to", async () => {
+  /**
+   * 2026-09-26: the tab bar used to draw its own "Next" badge as well. Three
+   * elements then answered "where do I go" at once - stepper, banner, tab
+   * badge - and the operator had to read and reconcile all three before
+   * acting. The badge went; the lock hints stayed, because "why can I not
+   * use this tab" is a different question nothing else on screen answers.
+   */
+  it("the tab bar no longer marks the next step itself - the banner alone names the tab and links to it", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderShell();
     await screen.findByText("Review the complete video");
 
     const nav = document.querySelector(".workspace-tabs") as HTMLElement;
-    const marked = Array.from(nav.querySelectorAll('[data-next="true"]'));
-    expect(marked).toHaveLength(1);
-    expect(marked[0]!.getAttribute("href")).toBe(`/projects/${PROJECT_ID}/preview`);
+    expect(nav.querySelectorAll('[data-next="true"]')).toHaveLength(0);
+    expect(nav.textContent).not.toContain("Next");
+    // The one remaining pointer still points at the real place.
     expect(within(banner()).getByRole("link").getAttribute("href")).toBe(`/projects/${PROJECT_ID}/preview`);
   });
 });
@@ -303,13 +323,85 @@ describe("Project wayfinding - never invents state", () => {
     expect(within(document.querySelector(".workspace-tabs") as HTMLElement).getAllByRole("link")).toHaveLength(5);
   });
 
-  it("the stepper and the banner never contradict each other - both come from the one shared derivation", async () => {
+  it("the seven-chip stepper is gone from every page's chrome - it named a phase, never an action, and doubled the banner", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderShell();
-
-    // Step 6 of 7 is "Final Preview"; the banner's action for that same
-    // state is reviewing the complete video, on the Preview tab.
-    await screen.findByText("Step 6 of 7 — Final Preview");
     await waitFor(() => expect(banner().textContent).toContain("Review the complete video"));
+
+    expect(document.querySelector(".workflow-stepper")).toBeNull();
+    expect(screen.queryByText(/^Step \d of 7/)).toBeNull();
+  });
+});
+
+/**
+ * SUBTRACTION PASS (2026-09-26). The operator's complaint after the first
+ * round of wayfinding work was about volume, not accuracy: "bahut complex
+ * hai, samajh nahi aa raha" (too complex, I cannot follow it), and then,
+ * precisely, "upar kuch hai neeche kuch hai" - something up top, something
+ * else below. Six layers of chrome stacked above any content, three of them
+ * answering the same question.
+ *
+ * These cases hold the cut in place. Each one would pass again the moment
+ * someone re-adds the thing it names, which is the point.
+ */
+describe("Project workspace - what was taken off the page", () => {
+  it("the project's front page has exactly ONE 'what to do next' voice: the checklist, never the checklist AND the banner", async () => {
+    currentPathname = `/projects/${PROJECT_ID}`;
+    stubAll();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    expect(document.querySelector(".next-action")).toBeNull();
+    // ...and it is still present on every other page, where nothing else
+    // carries the answer.
+    cleanup();
+    currentPathname = `/projects/${PROJECT_ID}/assets`;
+    stubAll();
+    renderShell();
+    await screen.findByText("Review each scene");
+    expect(document.querySelector(".next-action")).not.toBeNull();
+  });
+
+  it("the page header carries the project's name and status and nothing else - no mode switch, no armed Delete button", async () => {
+    stubAll();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    const header = document.querySelector(".workspace-header") as HTMLElement;
+    expect(within(header).queryByRole("button", { name: "Delete Project" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "Advanced" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: "Simple" })).toBeNull();
+  });
+
+  it("but nothing was removed: the technical facts, the Advanced switch and Delete Project are all in one drawer at the foot of the page", async () => {
+    stubAll();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    const drawer = document.querySelector(".workspace-footer__details") as HTMLElement;
+    expect(drawer).not.toBeNull();
+    // Closed by default - it holds nothing anyone needs to make a video.
+    expect((drawer as HTMLDetailsElement).open).toBe(false);
+    within(drawer).getByRole("button", { name: "Delete Project" });
+    within(drawer).getByRole("button", { name: "Advanced" });
+    within(drawer).getByRole("button", { name: "Simple" });
+    expect(drawer.textContent).toContain("Source SHA");
+  });
+
+  it("the Advanced switch still works from there, and still reveals the same three extra tabs - hidden, never deleted", async () => {
+    stubAll();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    const nav = document.querySelector(".workspace-tabs") as HTMLElement;
+    expect(within(nav).getAllByRole("link")).toHaveLength(5);
+
+    fireEvent.click(within(document.querySelector(".workspace-footer__details") as HTMLElement).getByRole("button", { name: "Advanced" }));
+
+    expect(
+      within(document.querySelector(".workspace-tabs") as HTMLElement)
+        .getAllByRole("link")
+        .map((link) => link.textContent)
+    ).toEqual(["Project", "Files", "Scenes", "Preview", "Export", "Work Map", "Render Settings", "Revisions"]);
   });
 });
