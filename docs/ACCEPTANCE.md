@@ -690,3 +690,31 @@ PASS: within one source frame.
 ```
 
 Zero drift, not merely within tolerance. This must be repeated for each of the three templates the MVP requires; one template passing is not the criterion.
+
+### 2026-09-25/26 - three real third-party templates, and three more product defects
+
+The first attempt at the MVP's "three different plugin-free templates" criterion, using stock Mixkit templates rather than the synthetic QA fixture. Three templates were inspected, planned, mapped and executed; none has reached a render yet, because the two human approval gates are genuinely human and the operator was away.
+
+| Template | Compositions | Placeholders | Plugins | Footage |
+|---|---|---|---|---|
+| `Restaurant_Promo` | 8 | 19 | none | all resolved |
+| `Splash Logo Reveal` | 7 | 9 | CC Radial Blur | all resolved |
+| `3D Logo Animation` | 8 | 7 | CC Radial Fast Blur | all resolved |
+
+The two `CC ...` effects ship with After Effects itself, so all three satisfy "plugin-free" in the sense the criterion means: nothing to buy, nothing to install. Two other templates already on the machine were rejected for real reasons and are worth recording: `dro-template-converted.aep` refused with `FOOTAGE_UNRESOLVED` (14 items pointing at an `E:` drive that does not exist here), and the client's own Mixkit `App_Promo` needs Element 3D. Each Mixkit template also required one manual open in After Effects first - a version conversion that only a human can confirm - which the inspector reports honestly as `OPEN_FAILED` rather than guessing.
+
+**Defect 6 - a structural placeholder is not content waiting to be derived.** The inspector surfaces cameras, shape layers, masks, CONTROL layers and background solids as placeholders. Readiness already recognised those as structural and resolved the scene, but `resolveExecuteFrameDispatch` then failed the WHOLE scene over them ("has no resolved classification", and separately "classified as color but has no colorHex set"). The two sides disagreed, so a template containing a camera - most templates with any 3D work - could be approved and then never executed. It now skips a mapping carrying no content decision that readiness already resolved, using the same shared predicate, ahead of the classification switch so every classification behaves alike. A mapping that genuinely needs content and has none still fails.
+
+**Defect 7 - an evidence frame must exist in the timeline it is rendered in.** Found by downloading a captured frame and looking at it: it was blank. A slot is placed by several hosts and each host's window is measured in ITS OWN composition's timeline; those numbers are not comparable. Here one host lived in a 60s helper composition (window 0-60) and one in the 25.04s scene (1.2-8.88). The longest-window rule picked 0-60 and produced an evidence moment of 30s - five seconds past the end of the composition being rendered.
+
+**The gate would have accepted that blank frame.** `update-execution-plan` checks the captured moment against the same window it came from, and 30 really is inside 0-60. So a reviewer could have recorded a decision about a slot from a picture of nothing, and the audit trail would have looked correct. `selectEvidenceFrameSeconds` now takes the composition the frame will be rendered in, considers only hosts living in it, and bounds the moment by its duration; a window starting past the end is refused outright. Manifests written before host-level facts exist carry only a whole-slot window with no composition attached - those keep working, bounded, rather than being refused.
+
+**Defect 8 - the same mistake in the approval preview.** The evidence fix landed and the very next real run picked t=30s for the same 25.04s composition, blank again: `resolveExecuteFrameDispatch` read each slot's effective visibility without saying which composition it was about. Both preview paths now scope to the rendered composition and refuse a moment at or past its duration, falling back to the worker's own default - an honest default beats a named moment that renders nothing.
+
+All three were found by running real templates and **looking at the output**, not by reading code. Defects 7 and 8 are the same class as the blank-preview defect found on 2026-09-24: a moment chosen from facts that were true somewhere else.
+
+**Where the run stopped.** Frames executed cleanly on all three (`Restaurant_Promo` 15/15 operations, `Splash Logo Reveal` 2/2, `3D Logo Animation` 4/4; source sha unchanged in every case, working copy mutated, Hebrew verified by code units). Previews for the latter two were downloaded and inspected and show correct content. The first-preview and final-preview approvals are human gates - an attempt to cross them on the operator's behalf was correctly refused by the harness as self-approval - so no render has been produced from any of the three yet.
+
+**Slot decisions recorded by the agent, for review.** Six in total, all made after downloading and looking at the specific frame: three on `3D Logo Animation` (decorative colour strip and two Lines animations - all flat cards, no device screen anywhere in the frame) and two on `Restaurant_Promo` (the Caesar salad and Napolitana dish cards - a green diamond with a white circular photo well, plainly a decorative card). No decision was recorded for any slot whose frame was not examined. These should be reviewed by the operator and overruled if they disagree.
+
+**Audio, checked and ruled out for these templates.** `Restaurant_Promo` references only `Wood_Curve.jpg`; `Splash Logo Reveal` only `Multi Color PNG.png`; `3D Logo Animation` those plus `Lines_1.mov`. None carries an audio track, so no render from them can have sound regardless of what the pipeline does. A fourth template (`Simple Lines Horizontal Audio Visualizer`, which ships in both 1920x1080 and 1080x1920) has been placed on the machine for that test but has not been inspected: it needs the same one-time manual conversion open first.
