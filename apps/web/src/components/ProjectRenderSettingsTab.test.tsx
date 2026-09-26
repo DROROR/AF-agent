@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { en } from "../lib/i18n/dictionaries/en";
+import { he } from "../lib/i18n/dictionaries/he";
 import { ProjectRenderSettingsTab } from "./ProjectRenderSettingsTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
@@ -579,6 +581,43 @@ describe("ProjectRenderSettingsTab", () => {
     const renderButtons = screen.getAllByRole("button", { name: "Render" });
     fireEvent.click(renderButtons[0]!);
     await screen.findByText(/77777777-7777-7777-7777-777777777777/);
+  });
+
+  /**
+   * REAL 2026-09-26 OPERATOR AUDIT: "render setting me bahut hi kuch hai".
+   * Eight cards sat in one flat grid, five of them diagnostics or one-off
+   * operations, so the two settings that are actually REQUIRED before a
+   * render can run were fifth and sixth down the page.
+   */
+  it("puts the required settings first and the diagnostics in one closed drawer", async () => {
+    stubWorkspace({}, manifestWithNoCompositions());
+    renderTab();
+    await screen.findAllByText(/Reels layout/);
+
+    const drawer = document.querySelector(".render-tools-details") as HTMLDetailsElement;
+    expect(drawer).not.toBeNull();
+    // Closed: nobody needs a diagnostic to make a video.
+    expect(drawer.open).toBe(false);
+    // The four tools are inside it, not scattered through the page.
+    expect(drawer.textContent).toContain("Render capabilities");
+
+    // And the required setting comes before the drawer in document order.
+    const grid = document.querySelector(".overview-grid") as HTMLElement;
+    const firstCard = grid.querySelector(".overview-section") as HTMLElement;
+    expect(firstCard.textContent).toContain("Landscape master");
+    expect(drawer.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it("no longer gives two different cards the same name", () => {
+    // The card that CHOOSES which composition to render and the card that
+    // BUILDS an adapted one were both titled "Landscape master", which is how
+    // an operator ends up filling in the wrong one. The build card only
+    // renders once a session exists, so this pins the two names apart at the
+    // source rather than in a fixture that would not show both at once.
+    for (const dictionary of [en, he]) {
+      const section = dictionary.projectWorkspace.renderSettings;
+      expect(section.buildHorizontalSection).not.toBe(section.variantSection.LANDSCAPE);
+    }
   });
 
   it("renders in Hebrew when the active locale is he - real translated strings, not English fallback text", async () => {

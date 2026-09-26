@@ -48,6 +48,7 @@ function formatBytes(bytes: number): string {
  * fields directly.
  */
 export function ProjectRenderSettingsTab(): ReactElement | null {
+  const { t } = useLocale();
   const { project, plan } = useProjectWorkspaceContext();
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
 
@@ -80,13 +81,18 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
   // own server-side gate, mirrored here only for UI honesty.
   const renderReady = session !== null && (session.status === "READY_TO_RENDER" || session.status === "COMPLETED");
 
+  // SETUP FIRST, TOOLS AFTER (operator audit, 2026-09-26: "render setting me
+  // bahut hi kuch hai"). This tab showed eight cards in one flat grid, and
+  // five of them were diagnostics or one-off operations rather than anything
+  // needed to produce a video - so the two settings that ARE required sat
+  // fifth and sixth down the page. Worse, two different cards were both
+  // titled "Landscape master": the one that BUILDS an adapted composition and
+  // the one that CHOOSES which composition to render.
+  //
+  // The required settings now come first, in the order they are needed, and
+  // the tools live in one closed disclosure. Nothing was removed.
   return (
     <div className="overview-grid">
-      <InspectRenderCapabilitiesCard projectId={projectId} />
-      <BuildHorizontalCompositionCard projectId={projectId} session={session} />
-      <ReelsLayoutCard />
-      <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
-      <DescribeAnyCompositionCard projectId={projectId} session={session} />
       {RENDER_OUTPUT_VARIANTS.map((variant) => (
         <VariantConfigCard
           key={variant}
@@ -99,7 +105,17 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
           renderReady={renderReady}
         />
       ))}
+      <ReelsLayoutCard />
       <FinalOutputsCard projectId={projectId} />
+      <details className="advanced-details render-tools-details">
+        <summary>{t.projectWorkspace.renderSettings.toolsSection}</summary>
+        <div className="overview-grid">
+          <InspectRenderCapabilitiesCard projectId={projectId} />
+          <BuildHorizontalCompositionCard projectId={projectId} session={session} />
+          <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
+          <DescribeAnyCompositionCard projectId={projectId} session={session} />
+        </div>
+      </details>
     </div>
   );
 }
