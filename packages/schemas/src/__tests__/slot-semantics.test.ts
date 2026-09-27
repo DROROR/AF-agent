@@ -687,6 +687,25 @@ describe("selectScenePreviewFrameSeconds - the moment that shows the most of wha
     expect(seconds).toBe(6);
   });
 
+  it("does not land on a transition when a scene shows its slots one after another", () => {
+    // REAL 2026-09-27, on a sequential template: three cards, each on screen
+    // in turn, overlapping only while one hands over to the next. Ranking by
+    // how MANY slots overlap picked that 1.16s crossover and the approval
+    // frame came back mid-slide, with no card readable. Ranking by
+    // slot-seconds picks a stretch where a card is actually sitting still.
+    const sequential = [
+      { startSeconds: 1.2, endSeconds: 8.88 },
+      { startSeconds: 7.72, endSeconds: 15.4 },
+      { startSeconds: 14.24, endSeconds: 21.92 }
+    ];
+    const seconds = selectScenePreviewFrameSeconds(sequential) as number;
+    // Not inside either hand-over window.
+    expect(seconds > 7.72 && seconds < 8.88).toBe(false);
+    expect(seconds > 14.24 && seconds < 15.4).toBe(false);
+    // And genuinely inside one card's own settled time.
+    expect(sequential.some((w) => seconds > w.startSeconds && seconds < w.endSeconds)).toBe(true);
+  });
+
   it("is deterministic: the same windows in any order give the same moment", () => {
     const windows = [
       { startSeconds: 2, endSeconds: 6 },

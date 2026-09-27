@@ -953,9 +953,19 @@ export function selectScenePreviewFrameSeconds(
       continue;
     }
     const length = end - start;
-    // Strictly greater on both keys, so the earliest interval wins an exact
-    // tie - the sweep visits them in ascending time order.
-    if (best === null || coverage > best.coverage || (coverage === best.coverage && length > best.length)) {
+    // SLOT-SECONDS, not slot count (real 2026-09-27 finding on a sequential
+    // template). Ranking by coverage alone walks straight into a transition:
+    // where a scene shows its slots one after another, the only moment two of
+    // them are on screen together is the hand-over between them - on the
+    // template that exposed this, a 1.16s crossover beat a 6.5s stretch where
+    // a card sat still and fully readable, and the approval frame came back
+    // mid-slide. Coverage x length prefers "the most content, for the
+    // longest", which is what a person approving a design needs to see.
+    // Coverage still breaks a tie, then the earliest interval, since the
+    // sweep visits them in ascending time order.
+    const score = coverage * length;
+    const bestScore = best === null ? -1 : best.coverage * best.length;
+    if (best === null || score > bestScore || (score === bestScore && coverage > best.coverage)) {
       best = { coverage, length, midpoint };
     }
   }
