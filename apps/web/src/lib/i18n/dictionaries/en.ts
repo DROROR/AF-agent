@@ -802,8 +802,20 @@ export const en = {
         proposalMissingUnknown:
           "The scan did not return a measured layout, so the fields below start empty and every number is yours to enter. This usually means your editing computer is still running an older version of the worker software.",
         refusalsTitle: "Layers this cannot help with",
+        /**
+         * REAL 2026-09-27: this line used to stop at "each one keeps exactly
+         * what the template gives it", which is true and reads as
+         * reassurance - so a reviewer takes the refusal list as a list of
+         * things not to worry about. It is not. The vertical composition is
+         * the scene's own composition resized, so a refused layer keeps its
+         * template COORDINATES while the frame around them gets narrower: a
+         * layer sitting mid-frame in a wide composition keeps that exact
+         * position, which is no longer mid-frame. The consequence belongs
+         * next to the fact, and the only thing that settles it is the
+         * preview of the composition that actually gets built.
+         */
         refusalsHint:
-          "Nothing was worked out for these, and nothing will be changed in them: each one keeps exactly what the template gives it in the vertical composition.",
+          "Nothing was worked out for these, and nothing in them will be changed - each keeps exactly the position and size the template gives it. In a frame this much narrower that is worth a second look: a layer sitting mid-frame in the wide composition keeps that same position, which is no longer mid-frame, so it can end up partly outside the vertical one. (A layer that is switched off draws nothing either way.) The preview of the finished vertical composition is what settles it - these are the layers to check in it.",
         /**
          * One plain sentence per typed refusal reason. The proposal also
          * carries an English `detail` sentence, which is only ever a

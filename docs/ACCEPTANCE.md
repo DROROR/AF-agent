@@ -744,3 +744,62 @@ Three different frame rates, six renders, zero drift on every one - checked by `
 - **Audio.** None of these three templates contains an audio track, so no render from them can carry sound whatever the pipeline does. A fourth template with an audio layer is on the worker machine but needs one manual conversion open in After Effects before it can be inspected. Separately, a client supplying their OWN music still needs the work described in `docs/AUDIO-DESIGN.md`.
 - **The landscape adapter's limits.** `BUILD_HORIZONTAL_COMPOSITION` refuses 3D, parented and keyframe-animated layers by design. It was not needed here because every scene composition was already 1920x1080 - which is the normal case - but it will refuse on a template whose scene is not.
 - **Reels layout for animated layers.** `BUILD_REELS_COMPOSITION` likewise refuses to move a layer whose position or scale is already keyframed, rather than destroying the animation. On `3D Logo Animation` that left two layers (the animated logo and its shadow) at their original coordinates in the vertical composition.
+
+## 2026-09-27 - the vertical layout rule, tested; and a screen that read as reassurance
+
+### `proposeOutputLayout` had no tests at all
+
+The rule that decides every vertical layout - the one whose two failure
+modes (`artwork sliced off at both edges`, `a background shrunk until the
+top of the frame came out plain black`) both reached a real rendered
+video - was shipped with no test file. `packages/schemas/src/output-layout-proposal.test.ts`
+now holds 29, and they were checked for teeth rather than for green:
+
+| Mutation of the rule | Caught by |
+|---|---|
+| background FITS instead of COVERS | 3 tests |
+| the content clamp removed | 1 test |
+| the never-enlarge guard removed | 1 test |
+| role decided from raw bounds, ignoring on-screen scale | 1 test |
+
+Also checked against the real proposal After Effects returned for job
+`ecf18d3b`: it parses against the schema, its three backgrounds each cover
+1080x1920, and both content layers land inside the frame.
+
+No template appears in the fixtures, and one test deliberately gives a
+background-shaped layer a content-sounding name and vice versa - the rule
+is forbidden from reading a name at all.
+
+### The refusal list told the reviewer the wrong thing (fixed)
+
+`refusalsHint` read: *"Nothing was worked out for these, and nothing will
+be changed in them: each one keeps exactly what the template gives it in
+the vertical composition."* Every word of that is true, and it reads as
+reassurance - so the list of layers the measurement cannot help with
+looks like a list of things not to worry about.
+
+It is not. `BUILD_REELS_COMPOSITION` duplicates the scene's composition
+and resizes the copy to 1080x1920, so a refused layer keeps its template
+COORDINATES while the frame around them gets narrower. A layer sitting
+mid-frame in a 1920-wide composition keeps `x = 960`, which is no longer
+mid-frame - it is near the right edge of an 1080-wide one.
+
+Measured on the real proposal above: of nine refused layers, three were
+`LAYER_DISABLED` (they draw nothing, so genuinely no loss), one was the
+camera, and five were `THREE_D_LAYER` - which do render, and are not
+moved. **Caveat, and the reason no number is shown on screen:** a 3D
+layer's real on-screen position depends on the camera, and resizing the
+composition changes that framing too, so a flat 2D projection of where
+those five land is an estimate, not a measurement. The product does not
+show an estimate as if it were a fact.
+
+The copy now states the consequence beside the fact, exempts switched-off
+layers explicitly, and points at the one thing that does settle it - the
+preview of the vertical composition that actually gets built. Both
+dictionaries updated; the Hebrew was verified by code point, never by eye.
+
+**Still open, deliberately not built here:** for a refused layer whose
+geometry IS flat and readable (keyframed, parented, non-uniform scale),
+the landing box could be computed and shown. For the 3D case - the
+dominant one in practice - it could not, and a warning that appears for
+some refusals and not others would be read as "the rest are fine".
