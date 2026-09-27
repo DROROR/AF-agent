@@ -162,7 +162,7 @@ export function resolveNextAction(input: NextActionInput): NextAction {
  * before rendering LockedStepNotice - the nav must never disagree with the
  * page it links to.
  */
-export function resolveTabLocks(input: Pick<NextActionInput, "stateUnknown" | "hasPlan" | "planApproved" | "executableSceneCount" | "fullPreviewApproved">): {
+export function resolveTabLocks(input: Pick<NextActionInput, "stateUnknown" | "hasPlan" | "planApproved" | "executableSceneCount" | "fullPreviewApproved" | "hasRenderArtifact">): {
   preview: boolean;
   export: boolean;
 } {
@@ -173,6 +173,13 @@ export function resolveTabLocks(input: Pick<NextActionInput, "stateUnknown" | "h
   }
   return {
     preview: !(input.hasPlan && input.planApproved && input.executableSceneCount > 0),
-    export: !input.fullPreviewApproved
+    // A finished render makes Export genuinely usable, whatever the CURRENT
+    // session says. Real 2026-09-27 report: once a session completes, its
+    // fullPreviewApproved is no longer the project's live state, so Export
+    // was marked locked on a project whose videos were sitting there and
+    // downloading fine - the tab opened and worked, with a lock on it. A
+    // lock that contradicts the page behind it teaches people to ignore
+    // locks, which is worse than having none.
+    export: !input.fullPreviewApproved && !input.hasRenderArtifact
   };
 }

@@ -27,7 +27,16 @@ function RevisionsTable({ projectId }: { projectId: string }): ReactElement {
   return (
     <Card>
       <CardHeader title={t.projectWorkspace.revisions.title} />
+      {/*
+        2026-09-27 non-developer audit: this screen opened with "Revision
+        history / Every persisted revision of this execution plan" and then a
+        table - three pieces of engineering vocabulary and no statement of
+        what the page is for or what a version costs. Both lines come before
+        any content now, and the second one is the fact that actually matters
+        to someone using the product: editing the plan un-approves it.
+      */}
       <p>{t.projectWorkspace.revisions.description}</p>
+      <p>{t.projectWorkspace.revisions.whyItMatters}</p>
       {isLoading ? (
         <Skeleton height="1.5rem" />
       ) : error ? (

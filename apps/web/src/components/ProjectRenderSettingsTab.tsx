@@ -93,6 +93,17 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
   // the tools live in one closed disclosure. Nothing was removed.
   return (
     <div className="overview-grid">
+      {/*
+        2026-09-27 non-developer audit: this tab opened straight onto a form
+        with no statement anywhere of what the screen was for. The copy for it
+        already existed in the dictionary and had simply never been rendered -
+        it described the implementation to an engineer, so it has been
+        rewritten as well as shown.
+      */}
+      <Card className="overview-section">
+        <CardHeader title={t.projectWorkspace.renderSettings.title} />
+        <p>{t.projectWorkspace.renderSettings.description}</p>
+      </Card>
       {RENDER_OUTPUT_VARIANTS.map((variant) => (
         <VariantConfigCard
           key={variant}
@@ -113,7 +124,7 @@ export function ProjectRenderSettingsTab(): ReactElement | null {
           <InspectRenderCapabilitiesCard projectId={projectId} />
           <BuildHorizontalCompositionCard projectId={projectId} session={session} />
           <DescribeCompositionTimelineCard projectId={projectId} session={session} plan={plan} />
-          <DescribeAnyCompositionCard projectId={projectId} session={session} />
+          <DescribeAnyCompositionCard projectId={projectId} session={session} compositions={compositions} />
         </div>
       </details>
     </div>
@@ -328,6 +339,7 @@ function DescribeCompositionTimelineCard({
   plan: ExecutionPlanResponse | null;
 }): ReactElement | null {
   const { t } = useLocale();
+  const diagnostics = t.projectWorkspace.renderSettings.timelineDiagnostics;
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [isDispatching, setIsDispatching] = useState<RenderOutputVariant | null>(null);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -374,13 +386,13 @@ function DescribeCompositionTimelineCard({
         }
         const parsedResult = sceneEvidenceResponseSchema.safeParse(status.data.result);
         if (!parsedResult.success) {
-          setResults((prev) => ({ ...prev, [variant]: { jobId: dispatched.data.jobId, error: "result did not match the expected shape" } }));
+          setResults((prev) => ({ ...prev, [variant]: { jobId: dispatched.data.jobId, error: diagnostics.unexpectedShape } }));
           return;
         }
         if (!parsedResult.data.compositionSummary) {
           setResults((prev) => ({
             ...prev,
-            [variant]: { jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? "no compositionSummary in result" }
+            [variant]: { jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? diagnostics.nothingReported }
           }));
           return;
         }
@@ -401,8 +413,8 @@ function DescribeCompositionTimelineCard({
 
   return (
     <Card className="overview-section">
-      <CardHeader title="Composition timeline diagnostics" />
-      <p>Read-only. Reports the real, worker-observed duration/work-area and every top-level layer&apos;s own timing for the currently configured Landscape/Reels master.</p>
+      <CardHeader title={diagnostics.title} />
+      <p>{diagnostics.description}</p>
       {!worker ? <EmptyState title={t.jobDispatch.noWorkerTitle} description={t.jobDispatch.noWorkerDescription} /> : null}
       {dispatchError ? <ErrorState title={t.jobDispatch.failedTitle} description={dispatchError} /> : null}
       <div className="overview-actions">
@@ -420,7 +432,7 @@ function DescribeCompositionTimelineCard({
             }
             onClick={() => void handleDescribe(variant)}
           >
-            {isDispatching === variant ? t.jobDispatch.dispatching : `Describe ${variant} timeline`}
+            {isDispatching === variant ? t.jobDispatch.dispatching : diagnostics.checkAction(t.renders.variantLabel[variant])}
           </Button>
         ))}
       </div>
@@ -430,7 +442,7 @@ function DescribeCompositionTimelineCard({
         return (
           <div key={variant}>
             <p>
-              <strong>{variant}</strong> (job {result.jobId}):
+              <strong>{diagnostics.resultHeading(t.renders.variantLabel[variant], result.jobId)}</strong>
             </p>
             <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem" }}>{"text" in result ? result.text : `ERROR: ${result.error}`}</pre>
           </div>
@@ -458,7 +470,25 @@ function DescribeCompositionTimelineCard({
  */
 type DescribeAnyCompositionMode = "timing" | "layerDetails" | "transforms";
 
-function DescribeAnyCompositionCard({ projectId, session }: { projectId: string; session: ExecutionSessionDto | null }): ReactElement | null {
+function DescribeAnyCompositionCard({
+  projectId,
+  session,
+  compositions
+}: {
+  projectId: string;
+  session: ExecutionSessionDto | null;
+  /**
+   * 2026-09-27 non-developer audit: this used to be a free-text box asking
+   * for a "manifest composition ID", with one specific template's own id as
+   * the example placeholder. The server validates the id against this exact
+   * list anyway (resolveInspectSceneEvidenceDispatch), so a picker over the
+   * project's own compositions is both usable and strictly more correct -
+   * and it carries no template-specific example.
+   */
+  compositions: Composition[];
+}): ReactElement | null {
+  const { t } = useLocale();
+  const copy = t.projectWorkspace.renderSettings.describeAnyComposition;
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [compositionId, setCompositionId] = useState("");
   const [mode, setMode] = useState<DescribeAnyCompositionMode>("timing");
@@ -512,12 +542,12 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
         }
         const parsedResult = sceneEvidenceResponseSchema.safeParse(status.data.result);
         if (!parsedResult.success) {
-          setResult({ jobId: dispatched.data.jobId, error: "result did not match the expected shape" });
+          setResult({ jobId: dispatched.data.jobId, error: copy.unexpectedShape });
           return;
         }
         if (mode === "timing") {
           if (!parsedResult.data.compositionSummary) {
-            setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? "no compositionSummary in result" });
+            setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.compositionSummaryFailureReason ?? copy.nothingReported });
             return;
           }
           const s = parsedResult.data.compositionSummary;
@@ -533,7 +563,7 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
         }
         if (mode === "layerDetails") {
           if (!parsedResult.data.layerDetails) {
-            setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerDetailsFailureReason ?? "no layerDetails in result" });
+            setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerDetailsFailureReason ?? copy.nothingReported });
             return;
           }
           const layerLines = parsedResult.data.layerDetails
@@ -546,7 +576,7 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
           return;
         }
         if (!parsedResult.data.layerTransformFacts) {
-          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerTransformFactsFailureReason ?? "no layerTransformFacts in result" });
+          setResult({ jobId: dispatched.data.jobId, error: parsedResult.data.layerTransformFactsFailureReason ?? copy.nothingReported });
           return;
         }
         const formatProp = (name: string, p: (typeof parsedResult.data.layerTransformFacts)[number]["position"]): string => {
@@ -579,39 +609,43 @@ function DescribeAnyCompositionCard({ projectId, session }: { projectId: string;
 
   return (
     <Card className="overview-section">
-      <CardHeader title="Describe any composition (by manifest composition ID)" />
-      <p>
-        Read-only. Reports the real, worker-observed duration/work-area and every top-level layer&apos;s own timing (&quot;Timing&quot;), each top-level
-        layer&apos;s own opacity/keyframes/stretch/source (&quot;Layer details&quot;), or each top-level layer&apos;s own position/scale/rotation/anchor-point/camera
-        zoom keyframes plus applied effects (&quot;Transform/Camera/Effects&quot;), for ANY composition in this project&apos;s manifest - e.g. a nested scene like
-        &quot;comp-1&quot; (Scene 1) or a deeper precomp like &quot;comp-1600&quot;, not just the configured Landscape/Reels masters.
-      </p>
-      {!worker ? <EmptyState title="No worker available" description="This project's assigned worker is not currently reporting INSPECT_SCENE_EVIDENCE." /> : null}
-      {dispatchError ? <ErrorState title="Dispatch failed" description={dispatchError} /> : null}
-      <Field label="Manifest composition ID" htmlFor="describe-any-composition-id">
-        <Input id="describe-any-composition-id" value={compositionId} onChange={(e) => setCompositionId(e.target.value)} placeholder="e.g. comp-1600" disabled={isDispatching} />
+      <CardHeader title={copy.title} />
+      <p>{copy.description}</p>
+      {!worker ? <EmptyState title={t.jobDispatch.noWorkerTitle} description={copy.noWorkerDescription} /> : null}
+      {dispatchError ? <ErrorState title={copy.failedTitle} description={dispatchError} /> : null}
+      <Field label={copy.compositionLabel} htmlFor="describe-any-composition-id" hint={copy.compositionHint}>
+        <Select id="describe-any-composition-id" value={compositionId} onChange={(e) => setCompositionId(e.target.value)} disabled={isDispatching}>
+          <option value="">{copy.compositionPlaceholder}</option>
+          {compositions.map((composition) => (
+            <option key={composition.compositionId} value={composition.compositionId}>
+              {composition.name} ({composition.widthPx}×{composition.heightPx})
+            </option>
+          ))}
+        </Select>
       </Field>
-      <Field label="What to describe" htmlFor="describe-any-composition-mode">
+      <Field label={copy.modeLabel} htmlFor="describe-any-composition-mode">
         <Select
           id="describe-any-composition-mode"
           value={mode}
           onChange={(e) => setMode(e.target.value === "layerDetails" ? "layerDetails" : e.target.value === "transforms" ? "transforms" : "timing")}
           disabled={isDispatching}
         >
-          <option value="timing">Timing (duration/work-area/layer in-out)</option>
-          <option value="layerDetails">Layer details (opacity/keyframes/stretch/source)</option>
-          <option value="transforms">Transform/Camera/Effects (position/scale/rotation/zoom/plugins)</option>
+          <option value="timing">{copy.modeTiming}</option>
+          <option value="layerDetails">{copy.modeLayerDetails}</option>
+          <option value="transforms">{copy.modeTransforms}</option>
         </Select>
       </Field>
       <div className="overview-actions">
         <Button variant="secondary" disabled={!worker || isDispatching || compositionId.trim().length === 0} onClick={() => void handleDescribe()}>
-          {isDispatching ? "Dispatching…" : "Describe composition"}
+          {isDispatching ? copy.reading : copy.readAction}
         </Button>
       </div>
       {result ? (
         <div>
           <p>
-            <strong>{compositionId.trim()}</strong> (job {result.jobId}):
+            <strong>
+              {copy.resultHeading(compositions.find((c) => c.compositionId === compositionId.trim())?.name ?? compositionId.trim(), result.jobId)}
+            </strong>
           </p>
           <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.75rem" }}>{"text" in result ? result.text : `ERROR: ${result.error}`}</pre>
         </div>
@@ -764,24 +798,38 @@ export function VariantConfigCard({
           </Field>
 
           {selectedComposition ? (
-            <dl className="overview-fact-list">
-              <div>
-                <dt>{t.projectWorkspace.renderSettings.compositionLabel}</dt>
-                <dd>{selectedComposition.name}</dd>
-              </div>
-              <div>
-                <dt>{t.projectWorkspace.renderSettings.compositionIdentityLabel}</dt>
-                <dd>
-                  <code>{selectedComposition.compositionId}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>{t.projectWorkspace.renderSettings.dimensionsLabel}</dt>
-                <dd>
-                  {selectedComposition.widthPx}×{selectedComposition.heightPx}
-                </dd>
-              </div>
-            </dl>
+            <>
+              <dl className="overview-fact-list">
+                <div>
+                  <dt>{t.projectWorkspace.renderSettings.compositionLabel}</dt>
+                  <dd>{selectedComposition.name}</dd>
+                </div>
+                <div>
+                  <dt>{t.projectWorkspace.renderSettings.dimensionsLabel}</dt>
+                  <dd>
+                    {selectedComposition.widthPx}×{selectedComposition.heightPx}
+                  </dd>
+                </div>
+              </dl>
+              {/*
+                The internal identifier sat between the two facts a person
+                genuinely reads off this card (which composition, and its
+                size) - a pure diagnostic at the same visual level as the
+                setting itself. Hidden, never removed: it is still one click
+                away for anyone debugging a mismatch.
+              */}
+              <details className="advanced-details">
+                <summary>{t.projectWorkspace.renderSettings.technicalDetailsToggle}</summary>
+                <dl className="overview-fact-list">
+                  <div>
+                    <dt>{t.projectWorkspace.renderSettings.compositionIdentityLabel}</dt>
+                    <dd>
+                      <code>{selectedComposition.compositionId}</code>
+                    </dd>
+                  </div>
+                </dl>
+              </details>
+            </>
           ) : null}
 
           <Field

@@ -514,7 +514,8 @@ export const en = {
         },
         approveScenes: {
           title: "Approve the scenes",
-          description: "Every scene is reviewed. Press \"Approve Scenes\" at the top of the Scenes tab - this unlocks the Preview tab."
+          description:
+            "Every scene is reviewed. Press \"Approve Scenes\" at the top of the Scenes tab - this unlocks the Preview tab. If this video also needs the tall Reels version, set its layout first (Render Settings, in Advanced view): setting it afterwards sends the plan back to Draft and cancels both preview approvals."
         },
         startFirstPreview: {
           title: "Create the first preview",
@@ -695,8 +696,12 @@ export const en = {
       }
     },
     revisions: {
-      title: "Revision history",
-      description: "Every persisted revision of this execution plan.",
+      title: "History of your plan",
+      /** Plain-language purpose line, before any table: "revision" is engineering vocabulary and this screen used to open with it twice. */
+      description:
+        "A read-only record of every saved version of this project's plan. Nothing on this page can be changed, undone or restored - it is here so you can see what happened and when.",
+      whyItMatters:
+        "A new version is saved every time the plan is edited, including from other screens such as the Reels layout. Each new version returns the plan to Draft, so it has to be approved again.",
       tableCaption: "Execution plan revision history",
       revisionColumn: "Revision",
       statusColumn: "Status",
@@ -709,7 +714,17 @@ export const en = {
     },
     renderSettings: {
       title: "Render Settings",
-      description: "Explicitly choose the master composition each render output uses - never guessed from an active/first/largest composition.",
+      /**
+       * Rendered at the top of the tab, before any control (2026-09-27
+       * non-developer audit). The old wording - "explicitly choose the master
+       * composition each render output uses, never guessed from an active/
+       * first/largest composition" - described the IMPLEMENTATION's promise
+       * to an engineer, and was not shown on screen at all.
+       */
+      description:
+        "Everything about turning this project into finished video files. The two settings at the top are needed once, before anything can be rendered. The Reels layout below them is only needed if you also want the tall version for phones. \"Tools and diagnostics\" at the foot of the page only reads what After Effects reports - it changes nothing.",
+      /** The one disclosure inside an output's card holding the identifier nobody needs in order to use the screen. */
+      technicalDetailsToggle: "Technical details",
       variantSection: { LANDSCAPE: "Landscape master", REELS: "Reels master" },
       compositionLabel: "Master composition",
       compositionPlaceholder: "Select a composition…",
@@ -756,6 +771,20 @@ export const en = {
         noLayersDescription: "After Effects reported no top-level layer in this scene's composition, so there is nothing to place in the vertical frame.",
         layersTitle: "Layers in this scene",
         valuesAreYours: "Every X, Y and scale below is yours. The values on the left are what the source composition holds today, shown so you can see what you are moving - they are never copied into the fields.",
+        /**
+         * REAL 2026-09-27: the first hand-made vertical render came out with
+         * the content cut off at both sides and empty bands above and below,
+         * because each layer's POSITION was mapped into the tall frame while
+         * its scale was left at the original value - so 1920-wide content
+         * stayed 1920 wide inside a 1080-wide frame. These two lines state
+         * the facts that make that mistake visible. They state, and never
+         * compute: no scale is suggested, derived or pre-filled anywhere.
+         */
+        sourceFrameFact: (widthPx: number, heightPx: number): string =>
+          `This scene is ${widthPx}×${heightPx} in the template. The frame you are placing it into is 1080×1920.`,
+        sourceFrameUnknown: "This project's manifest does not record this scene's size, so it cannot be shown here.",
+        scaleRelationshipNote:
+          "Scale is a percentage of the layer's own original size - the same percentage shown on the left, not a percentage of the new frame. Moving a layer does not resize it: content wider than 1080 stays that wide and is cut off at both edges unless you lower its scale too.",
         layerLegend: (layerIndex: number, layerName: string): string => `Layer ${layerIndex}: ${layerName}`,
         currentValues: (position: string, scale: string): string => `Source composition holds position ${position} and scale ${scale}.`,
         currentUnknown: "After Effects did not report a position or a scale for this layer.",
@@ -782,7 +811,73 @@ export const en = {
           `Layer ${layerIndex} at ${positionX}, ${positionY}, scale ${scalePercent}%`,
         savedNote:
           "Applied the next time this scene is executed: the scene's composition is duplicated, the copy is resized to 1080×1920 and exactly these layers are moved. The original composition is never changed.",
-        clearAction: "Remove this Reels layout"
+        clearAction: "Remove this Reels layout",
+        /**
+         * REAL 2026-09-27 INCIDENT (docs/ACCEPTANCE.md). Setting the Reels
+         * layout is a plan edit: it writes a new plan version, which returns
+         * the plan to Draft and orphans the live execution session together
+         * with both of its preview approvals. That is the approval model
+         * working - but nothing said so, and the guidance's own order put
+         * render configuration AFTER the previews, so following it walked
+         * straight into losing an approved plan and a completed session.
+         *
+         * Copy rules: name every real consequence, name NOTHING that is not
+         * genuinely at stake right now (see plan-edit-impact.ts), and say
+         * what to do differently next time.
+         */
+        planEditWarning: {
+          inlineNotice:
+            "Careful: this project has approved work, and saving a Reels layout undoes some of it. Press the button to see exactly what, before anything is saved.",
+          saveTitle: "Saving this Reels layout undoes approvals",
+          clearTitle: "Removing this Reels layout undoes approvals",
+          intro:
+            "The Reels layout is part of the plan, so saving it writes a new version of the plan - and a new version cannot carry approvals that were given to the old one. This will:",
+          losesPlanApproval: "Send the plan back to Draft. The scenes have to be approved again.",
+          losesSession: "Drop the preview work in progress. The scenes have to be built again from the start.",
+          losesFirstPreviewApproval: "Cancel your approval of the first preview.",
+          losesFullPreviewApproval: "Cancel your approval of the complete video preview.",
+          sessionUnknown:
+            "This project's preview progress could not be read just now, so we cannot list exactly what is in flight. If a preview is running, it will be dropped.",
+          advice: "None of this happens if the Reels layout is set BEFORE the plan is approved.",
+          confirmSaveAction: "Save anyway",
+          confirmClearAction: "Remove anyway",
+          cancelAction: "Go back"
+        }
+      },
+      /**
+       * Both diagnostics below had every single string hardcoded in English
+       * inside the component - including a placeholder naming one specific
+       * template's composition id. Moved here so they are translatable at
+       * all, and rewritten for someone who does not know what a composition,
+       * a manifest or a dispatch is.
+       */
+      timelineDiagnostics: {
+        title: "Check a finished video's timeline",
+        description:
+          "Read-only. Asks your editing computer what After Effects really reports for the piece of the template you chose as the finished video: how long it runs, and when each layer starts and ends. Nothing is changed and nothing is saved.",
+        checkAction: (variantLabel: string): string => `Check ${variantLabel}`,
+        resultHeading: (variantLabel: string, jobId: string): string => `${variantLabel} - reported by job ${jobId}`,
+        unexpectedShape: "The reply did not match the shape this screen expects.",
+        nothingReported: "The scan finished but reported no timeline for this composition."
+      },
+      describeAnyComposition: {
+        title: "Look inside any part of the template",
+        description:
+          "Read-only. Reports what After Effects really holds for any part of this template - not only the two pieces chosen as finished videos. Used to work out why a scene goes black, or why a layer never appears. Nothing is changed and nothing is saved.",
+        compositionLabel: "Which part of the template",
+        compositionPlaceholder: "Choose a part of the template",
+        compositionHint: "The template's own parts, exactly as the last inspection found them - including the pieces nested inside other scenes.",
+        modeLabel: "What to report",
+        modeTiming: "Timing - how long it runs, and when each layer starts and ends",
+        modeLayerDetails: "Layers - transparency, keyframes, speed and source",
+        modeTransforms: "Position, scale, camera and effects",
+        readAction: "Read it",
+        reading: "Reading…",
+        failedTitle: "Could not read this",
+        noWorkerDescription: "This project's editing computer is not offering the read-only scan this needs right now.",
+        resultHeading: (compositionName: string, jobId: string): string => `${compositionName} - reported by job ${jobId}`,
+        unexpectedShape: "The reply did not match the shape this screen expects.",
+        nothingReported: "The scan finished but reported nothing of this kind for this composition."
       },
       renderAction: "Render",
       sessionNotReadyTitle: "Not ready to render yet",
@@ -909,9 +1004,18 @@ export const en = {
   },
   workMapTab: {
     title: "Work Map",
-    description: "The client's own intent for each scene - what they want used, not yet what the plan will execute.",
+    /**
+     * "Work Map" is this product's own name for the brief, and it is printed
+     * on the tab - so the first line of the screen explains it rather than
+     * assuming it (2026-09-27 non-developer audit). The previous copy spoke
+     * about "the client" in the third person to an audience that IS the
+     * client, and named two internal concepts ("the execution plan", "Scene
+     * Mapping") before saying what the page was for.
+     */
+    description:
+      "Your Work Map is what you asked for, in your own words, scene by scene. It is a note of what you want - nothing here changes a video on its own.",
     intro:
-      "This describes what the client wants (desired asset, text, timing, instructions) - it is never automatically applied to the execution plan. Use Scene Mapping to turn an entry into a real, approved mapping.",
+      "One row for each scene you described. Fill in as much or as little as you like: a file, some text, how long it should run, a note. Each row only becomes part of the video once you match it to a scene and approve it on the Scenes tab.",
     addRow: "Add row",
     removeRow: "Remove",
     save: "Save work map",
@@ -920,17 +1024,18 @@ export const en = {
     emptyTitle: "No work map entries yet",
     emptyDescription: "Add a row for each scene the client described, even before a template has been inspected.",
     fields: {
-      sourceReference: "Client's scene reference",
-      sourceCompositionId: "Matched composition ID",
-      desiredAssetId: "Desired asset ID",
-      desiredText: "Desired text",
-      assetTimestampSeconds: "Asset timestamp (seconds)",
-      desiredDurationSeconds: "Desired duration (seconds)",
-      instructions: "Instructions"
+      sourceReference: "What you call this scene",
+      /** Both of these are pickers showing real names; the labels used to say "ID" while the control never showed one. */
+      sourceCompositionId: "Scene in the template",
+      desiredAssetId: "File to use",
+      desiredText: "Text to show",
+      assetTimestampSeconds: "Start this file at (seconds)",
+      desiredDurationSeconds: "How long it should run (seconds)",
+      instructions: "Anything else we should know"
     },
     fieldHints: {
-      desiredAssetId: "A real asset ID from this project's Asset Catalog - not yet validated here, only when actually mapped in Scene Mapping.",
-      sourceCompositionId: "Leave empty if no template has been inspected yet."
+      desiredAssetId: "Only files already uploaded on the Files tab appear here. Choosing one records what you want; it reaches the video when you approve it on the Scenes tab.",
+      sourceCompositionId: "The template's own scenes appear here once it has been inspected. Leave it unmatched if you are not sure which one you mean."
     },
     ai: {
       heading: "Tell AI what you want",
@@ -951,6 +1056,10 @@ export const en = {
       editAction: "Edit",
       tellAiAgainAction: "Tell AI again",
       advancedDetailsToggle: "Advanced details",
+      /** The raw identifiers this disclosure holds are support material, not something anyone needs in order to use the screen - so it now says so, and labels them for what they are instead of reusing the form's field labels. */
+      advancedDetailsHint: "Internal identifiers, useful only when someone is helping you debug a problem. Nothing here has to be read to use this page.",
+      advancedCompositionIdLabel: "Template scene id",
+      advancedAssetIdLabel: "File id",
       simple: {
         description: "AI has prepared your video plan. Review it below, then approve it to continue.",
         summaryTitle: "AI found",

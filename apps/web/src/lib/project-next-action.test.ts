@@ -53,7 +53,9 @@ describe("resolveNextAction - never invents state", () => {
   });
 
   it("never claims a tab is locked while the state is unknown - an unverified lock is its own wrong instruction", () => {
-    expect(resolveTabLocks({ stateUnknown: true, hasPlan: false, planApproved: false, executableSceneCount: 0, fullPreviewApproved: false })).toEqual({
+    expect(
+      resolveTabLocks({ stateUnknown: true, hasPlan: false, planApproved: false, executableSceneCount: 0, fullPreviewApproved: false, hasRenderArtifact: false })
+    ).toEqual({
       preview: false,
       export: false
     });
@@ -170,7 +172,25 @@ describe("resolveTabLocks", () => {
   });
 
   it("locks Export on exactly the real fullPreviewApproved gate the server enforces - never on 'all scenes done'", () => {
-    expect(resolveTabLocks(readyToRender({ fullPreviewApproved: false })).export).toBe(true);
+    expect(resolveTabLocks(readyToRender({ fullPreviewApproved: false, hasRenderArtifact: false })).export).toBe(true);
     expect(resolveTabLocks(readyToRender({ fullPreviewApproved: true })).export).toBe(false);
+  });
+
+  /**
+   * REAL 2026-09-27 REPORT. `fullPreviewApproved` belongs to the CURRENT
+   * session, and once a session is no longer current that flag stops
+   * describing the project. Export was therefore drawn with a lock on a
+   * project whose finished videos were sitting on that very tab and
+   * downloading fine - the tab opened, worked, and claimed to be locked. A
+   * lock that contradicts the page behind it teaches people to ignore locks,
+   * which is worse than showing none.
+   *
+   * The pair is the test: either half alone passes for the wrong reason. The
+   * first case proves the lock still exists at all; the second proves a real
+   * finished render clears it with no live session anywhere.
+   */
+  it("keeps Export locked with neither an approved full preview nor any render, and unlocks it for a real finished render even with no live approval", () => {
+    expect(resolveTabLocks(readyToRender({ fullPreviewApproved: false, hasRenderArtifact: false })).export).toBe(true);
+    expect(resolveTabLocks(readyToRender({ fullPreviewApproved: false, hasRenderArtifact: true })).export).toBe(false);
   });
 });

@@ -20,6 +20,15 @@ export interface ProjectStepperStatus {
    * must treat this as "we cannot tell" and say so.
    */
   hasError: boolean;
+  /**
+   * The current execution session specifically was read and answered - a
+   * 200 carrying `null` counts, a failed request does not, and neither does
+   * "still loading". Deliberately NARROWER than `hasError`, which is true if
+   * ANY of the three fetches failed: a caller asking "is there live work
+   * this edit would destroy?" (plan-edit-impact.ts) must not be told "we
+   * cannot tell" because an unrelated work-map request failed.
+   */
+  sessionKnown: boolean;
 }
 
 /**
@@ -37,6 +46,7 @@ export function useProjectStepperStatus(projectId: string): ProjectStepperStatus
   const [renderArtifacts, setRenderArtifacts] = useState<RenderArtifactDto[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [sessionKnown, setSessionKnown] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +66,7 @@ export function useProjectStepperStatus(projectId: string): ProjectStepperStatus
       // A 200 carrying `null`/`[]` is a real answer ("there is none yet").
       // Only a genuine transport/contract failure is unknown-ness.
       setHasError(!workMapResult.ok || !sessionResult.ok || !artifactsResult.ok);
+      setSessionKnown(sessionResult.ok);
       setIsLoading(false);
     }
 
@@ -67,5 +78,5 @@ export function useProjectStepperStatus(projectId: string): ProjectStepperStatus
     };
   }, [projectId]);
 
-  return { workMap, session, renderArtifacts, isLoading, hasError };
+  return { workMap, session, renderArtifacts, isLoading, hasError, sessionKnown };
 }

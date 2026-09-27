@@ -3,9 +3,11 @@
 import { useState, type ReactElement } from "react";
 import { sceneEvidenceResponseSchema, type AnimatablePropertyFact, type LayerTransform, type LayerTransformFact, type ScenePlanEntry } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { useProjectGuidance } from "./ProjectGuidanceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { Dialog } from "./ui/Dialog";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
@@ -122,9 +124,15 @@ function typedNumber(raw: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Which plan edit the confirmation dialog is currently holding back, or null when nothing is pending. */
+type PendingPlanEdit = "save" | "clear" | null;
+
 export function ReelsLayoutCard(): ReactElement | null {
   const { t } = useLocale();
   const { project, plan, applyEdit } = useProjectWorkspaceContext();
+  // The SAME derivation every other screen reads (ProjectGuidanceProvider) -
+  // this card never works out for itself what an edit would cost.
+  const { planEditImpact } = useProjectGuidance();
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [scenePlanId, setScenePlanId] = useState("");
   const [reelsCompositionName, setReelsCompositionName] = useState("");
@@ -134,6 +142,7 @@ export function ReelsLayoutCard(): ReactElement | null {
   const [readError, setReadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pendingEdit, setPendingEdit] = useState<PendingPlanEdit>(null);
 
   if (!project) {
     return null;
@@ -144,6 +153,14 @@ export function ReelsLayoutCard(): ReactElement | null {
   const selectedScene = scenes.find((scene) => scene.id === scenePlanId) ?? null;
   const savedLayout = selectedScene?.reelsLayout ?? null;
   const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", project.project.sourceWorkerId);
+  /**
+   * The scene's own composition as the manifest records it - shown beside
+   * the fixed 1080x1920 target so the reviewer can see the relationship they
+   * are working across. A fact that was already loaded; never a calculation,
+   * and deliberately null rather than assumed when the manifest has no entry.
+   */
+  const sourceComposition = selectedScene ? project.manifest.compositions.find((c) => c.compositionId === selectedScene.manifestCompositionId) ?? null : null;
+  const warning = t.projectWorkspace.renderSettings.reelsLayout.planEditWarning;
 
   /** The manifest's own record of which placeholder sits on a given layer of this scene's composition - a lookup, never an inference. */
   function manifestPlaceholderIdFor(scene: ScenePlanEntry, layerIndex: number): string | null {
@@ -263,8 +280,47 @@ export function ReelsLayoutCard(): ReactElement | null {
     (transform) => transform.positionX < 0 || transform.positionX > REELS_WIDTH_PX || transform.positionY < 0 || transform.positionY > REELS_HEIGHT_PX
   );
   const canSave = selectedScene !== null && reelsCompositionName.trim() !== "" && layerTransforms !== null && !isSaving;
+  const inlineWarning = planEditImpact.requiresConfirmation ? <p className="reels-layout-refusal">{warning.inlineNotice}</p> : null;
 
-  async function handleSave(): Promise<void> {
+  /**
+   * REAL 2026-09-27 INCIDENT. Saving a Reels layout is a plan edit, and a
+   * plan edit returns the plan to DRAFT and orphans the live execution
+   * session with both of its preview approvals. The operator hit exactly
+   * that: an approved plan and a completed session were destroyed by this
+   * button, and every approval had to be given again.
+   *
+   * So the edit now stops here FIRST, and only when there is genuinely
+   * something to lose (plan-edit-impact.ts). A DRAFT plan with no session
+   * saves straight through with no dialog at all - a confirmation nobody
+   * needs is how people learn to click past the one they do.
+   */
+  function requestSave(): void {
+    if (planEditImpact.requiresConfirmation) {
+      setPendingEdit("save");
+      return;
+    }
+    void performSave();
+  }
+
+  function requestClear(): void {
+    if (planEditImpact.requiresConfirmation) {
+      setPendingEdit("clear");
+      return;
+    }
+    void performClear();
+  }
+
+  function confirmPendingEdit(): void {
+    const pending = pendingEdit;
+    setPendingEdit(null);
+    if (pending === "save") {
+      void performSave();
+    } else if (pending === "clear") {
+      void performClear();
+    }
+  }
+
+  async function performSave(): Promise<void> {
     const transforms = buildLayerTransforms();
     if (!selectedScene || transforms === null || reelsCompositionName.trim() === "") {
       return;
@@ -285,7 +341,7 @@ export function ReelsLayoutCard(): ReactElement | null {
     }
   }
 
-  async function handleClear(): Promise<void> {
+  async function performClear(): Promise<void> {
     if (!selectedScene) {
       return;
     }
@@ -351,8 +407,9 @@ export function ReelsLayoutCard(): ReactElement | null {
                 ))}
               </ul>
               <p>{t.projectWorkspace.renderSettings.reelsLayout.savedNote}</p>
+              {inlineWarning}
               <div className="overview-actions">
-                <Button variant="secondary" disabled={isSaving} disabledReason={t.projectWorkspace.disabledReason.working} onClick={() => void handleClear()}>
+                <Button variant="secondary" disabled={isSaving} disabledReason={t.projectWorkspace.disabledReason.working} onClick={requestClear}>
                   {t.projectWorkspace.renderSettings.reelsLayout.clearAction}
                 </Button>
               </div>
@@ -390,6 +447,12 @@ export function ReelsLayoutCard(): ReactElement | null {
                 <strong>{t.projectWorkspace.renderSettings.reelsLayout.layersTitle}</strong>
               </p>
               <p>{t.projectWorkspace.renderSettings.reelsLayout.valuesAreYours}</p>
+              <p>
+                {sourceComposition
+                  ? t.projectWorkspace.renderSettings.reelsLayout.sourceFrameFact(sourceComposition.widthPx, sourceComposition.heightPx)
+                  : t.projectWorkspace.renderSettings.reelsLayout.sourceFrameUnknown}
+              </p>
+              <p>{t.projectWorkspace.renderSettings.reelsLayout.scaleRelationshipNote}</p>
               {layerFacts.map((layer) => {
                 const refusal = layerRefusalFor(layer);
                 const entry = entryFor(layer.layerIndex);
@@ -501,6 +564,7 @@ export function ReelsLayoutCard(): ReactElement | null {
                 />
               </Field>
               {saveError ? <ErrorState title={t.projectWorkspace.renderSettings.reelsLayout.saveFailedTitle} description={saveError} /> : null}
+              {inlineWarning}
               <div className="overview-actions">
                 <Button
                   variant="primary"
@@ -512,7 +576,7 @@ export function ReelsLayoutCard(): ReactElement | null {
                         ? t.projectWorkspace.disabledReason.noSceneChosen
                         : t.projectWorkspace.disabledReason.noLayoutChanges
                   }
-                  onClick={() => void handleSave()}
+                  onClick={requestSave}
                 >
                   {isSaving ? t.projectWorkspace.savingLabel : t.projectWorkspace.renderSettings.reelsLayout.saveAction}
                 </Button>
@@ -521,6 +585,37 @@ export function ReelsLayoutCard(): ReactElement | null {
           )}
         </>
       )}
+
+      {/*
+        The gate itself. It lists ONLY consequences that are genuinely real
+        right now - see plan-edit-impact.ts - and when the session could not
+        be read it says that instead of listing nothing, because "we found no
+        session" and "we could not look" are different facts and only one of
+        them means it is safe to press Save.
+      */}
+      <Dialog
+        open={pendingEdit !== null}
+        onClose={() => setPendingEdit(null)}
+        title={pendingEdit === "clear" ? warning.clearTitle : warning.saveTitle}
+      >
+        <p>{warning.intro}</p>
+        <ul>
+          {planEditImpact.losesPlanApproval ? <li>{warning.losesPlanApproval}</li> : null}
+          {planEditImpact.losesSession ? <li>{warning.losesSession}</li> : null}
+          {planEditImpact.losesFirstPreviewApproval ? <li>{warning.losesFirstPreviewApproval}</li> : null}
+          {planEditImpact.losesFullPreviewApproval ? <li>{warning.losesFullPreviewApproval}</li> : null}
+          {planEditImpact.sessionUnknown ? <li>{warning.sessionUnknown}</li> : null}
+        </ul>
+        <p>{warning.advice}</p>
+        <div className="edit-drawer-actions">
+          <Button variant="secondary" onClick={() => setPendingEdit(null)}>
+            {warning.cancelAction}
+          </Button>
+          <Button variant="danger" onClick={confirmPendingEdit}>
+            {pendingEdit === "clear" ? warning.confirmClearAction : warning.confirmSaveAction}
+          </Button>
+        </div>
+      </Dialog>
     </Card>
   );
 }

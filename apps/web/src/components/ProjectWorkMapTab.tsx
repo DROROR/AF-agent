@@ -316,11 +316,19 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
         {isSimple ? null : (
           <details className="advanced-details">
             <summary>{t.workMapTab.planPreview.advancedDetailsToggle}</summary>
+            {/*
+              2026-09-27 non-developer audit: this list borrowed the FORM's
+              field labels ("Scene in the template", "File to use") to label
+              raw identifiers, which reads as though the identifier is the
+              answer to the question the form asks. It now says what it is -
+              support material - and labels each value for what it really is.
+            */}
+            <p className="field__hint">{t.workMapTab.planPreview.advancedDetailsHint}</p>
             <ul className="advanced-details__list">
               {entries.map((entry) => (
                 <li key={entry.id}>
-                  <code>{entry.id}</code> · {t.workMapTab.fields.sourceCompositionId}: <code>{entry.sourceCompositionId ?? "null"}</code> ·{" "}
-                  {t.workMapTab.fields.desiredAssetId}: <code>{entry.desiredAssetId ?? "null"}</code>
+                  <code>{entry.id}</code> · {t.workMapTab.planPreview.advancedCompositionIdLabel}: <code>{entry.sourceCompositionId ?? "null"}</code> ·{" "}
+                  {t.workMapTab.planPreview.advancedAssetIdLabel}: <code>{entry.desiredAssetId ?? "null"}</code>
                 </li>
               ))}
             </ul>

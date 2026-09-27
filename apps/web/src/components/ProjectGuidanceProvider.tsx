@@ -5,6 +5,7 @@ import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectStepperStatus } from "../lib/use-project-stepper-status";
 import { computeWorkflowSteps, currentStepIndex, type ComputedWorkflowStep } from "../lib/project-workflow-steps";
 import { resolveNextAction, resolveTabLocks, type NextAction } from "../lib/project-next-action";
+import { resolvePlanEditImpact, type PlanEditImpact } from "../lib/plan-edit-impact";
 
 export interface ProjectGuidance {
   /**
@@ -20,6 +21,13 @@ export interface ProjectGuidance {
   currentStepIndex: number;
   nextAction: NextAction;
   tabLocks: { preview: boolean; export: boolean };
+  /**
+   * What an edit to the execution plan would destroy right now - so any
+   * screen that can write a new plan revision warns with the SAME facts,
+   * rather than each one working it out (and eventually disagreeing) on its
+   * own. See plan-edit-impact.ts and the 2026-09-27 incident behind it.
+   */
+  planEditImpact: PlanEditImpact;
 }
 
 const ProjectGuidanceContext = createContext<ProjectGuidance | null>(null);
@@ -45,7 +53,7 @@ const ProjectGuidanceContext = createContext<ProjectGuidance | null>(null);
  */
 export function ProjectGuidanceProvider({ projectId, children }: { projectId: string; children: ReactNode }): ReactElement {
   const { project, plan } = useProjectWorkspaceContext();
-  const { workMap, session, renderArtifacts, isLoading, hasError } = useProjectStepperStatus(projectId);
+  const { workMap, session, renderArtifacts, isLoading, hasError, sessionKnown } = useProjectStepperStatus(projectId);
 
   // A FAILED session is terminal and is treated as "no active session" by
   // ProjectPreviewTab's own button logic - mirrored here so the guidance
@@ -104,7 +112,19 @@ export function ProjectGuidanceProvider({ projectId, children }: { projectId: st
     steps,
     currentStepIndex: currentStepIndex(steps),
     nextAction: resolveNextAction(nextActionInput),
-    tabLocks: resolveTabLocks(nextActionInput)
+    tabLocks: resolveTabLocks(nextActionInput),
+    // Deliberately the RAW session, not `activeSession`: a FAILED session is
+    // not active for guidance purposes, but the current-session endpoint
+    // still returns one that is recoverable for preview regeneration, and a
+    // new plan revision orphans that too. Whatever that endpoint hands back
+    // is real work bound to this revision, and losing it is a real loss.
+    planEditImpact: resolvePlanEditImpact({
+      planApproved: plan?.plan.status === "APPROVED",
+      sessionKnown,
+      hasSession: session !== null,
+      firstPreviewApproved: session?.firstPreviewApproved ?? false,
+      fullPreviewApproved: session?.fullPreviewApproved ?? false
+    })
   };
 
   return <ProjectGuidanceContext.Provider value={value}>{children}</ProjectGuidanceContext.Provider>;
