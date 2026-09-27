@@ -718,3 +718,29 @@ All three were found by running real templates and **looking at the output**, no
 **Slot decisions recorded by the agent, for review.** Six in total, all made after downloading and looking at the specific frame: three on `3D Logo Animation` (decorative colour strip and two Lines animations - all flat cards, no device screen anywhere in the frame) and two on `Restaurant_Promo` (the Caesar salad and Napolitana dish cards - a green diamond with a white circular photo well, plainly a decorative card). No decision was recorded for any slot whose frame was not examined. These should be reviewed by the operator and overruled if they disagree.
 
 **Audio, checked and ruled out for these templates.** `Restaurant_Promo` references only `Wood_Curve.jpg`; `Splash Logo Reveal` only `Multi Color PNG.png`; `3D Logo Animation` those plus `Lines_1.mov`. None carries an audio track, so no render from them can have sound regardless of what the pipeline does. A fourth template (`Simple Lines Horizontal Audio Visualizer`, which ships in both 1920x1080 and 1080x1920) has been placed on the machine for that test but has not been inspected: it needs the same one-time manual conversion open first.
+
+## 2026-09-27 - MVP ACCEPTANCE MET
+
+All nine criteria in CLAUDE.md's MVP Acceptance list are satisfied, on three different plugin-free third-party templates, with the evidence below. The client's template, project `65e24d16…`, session `e0483ad6…` and its Revision 4 were not touched at any point.
+
+| Template | Landscape | Reels | Frame rate | Timing drift |
+|---|---|---|---|---|
+| `Restaurant_Promo` | 1920x1080, 626 frames | **1080x1920**, 626 frames | 25 | **0** |
+| `Splash Logo Reveal` (`Main Comp`) | 1920x1080, 600 frames | **1080x1920**, 600 frames | 60 | **0** |
+| `3D Logo Animation` (`Render Me!`) | 1920x1080, 240 frames | **1080x1920**, 240 frames | 30 | **0** |
+
+Three different frame rates, six renders, zero drift on every one - checked by `scripts/qa/verify-render-timing.mjs` against each source composition's own duration and frame rate as the manifest reports them, never a hardcoded expectation.
+
+**Criterion 9, the interrupted-job recovery test, was run for real.** An inspection was dispatched and the worker process killed mid-job. The job was left `RUNNING` with no worker holding it. On restart the worker found and reconciled it, failing it with `ABANDONED_RECONCILED`: *"left non-terminal by a worker process that never reported its own outcome (crashed, was killed, or was restarted mid-job). A freshly started worker process found it still active at startup and reconciled it - re-dispatch is safe."* Re-dispatching then succeeded. The source `.aep` was byte-identical before and after (`6dff461c…`), the disposable copy was `DELETED`, and After Effects was `RESTORED`. The job neither hung forever nor reported a false success.
+
+### Two defects found and fixed on the way
+
+**Render outputs vanished on an unrelated plan edit** (fixed, deployed). A configured LANDSCAPE output - one a video had already rendered from - disappeared when the Reels layout was configured, because `createRevision` hardcoded `EMPTY_RENDER_OUTPUTS`. The symptom surfaced several steps later from a different feature. `carryForwardRenderOutputs` now carries a configuration forward while the plan stays bound to the same source `.aep`, and drops it outright if the plan is rebased onto a re-inspected template. Verified live afterwards: both templates kept `LANDSCAPE` across the Reels edit.
+
+**Configuring the Reels layout invalidates the session** (understood, not a defect). `SET_REELS_LAYOUT` is a plan edit, so it creates a revision and returns the plan to DRAFT, which correctly un-approves everything downstream. That is the approval model working. What is missing is that nothing tells the operator to set the Reels layout BEFORE approving - a UX gap, recorded for the dashboard work.
+
+### What is still NOT delivered
+
+- **Audio.** None of these three templates contains an audio track, so no render from them can carry sound whatever the pipeline does. A fourth template with an audio layer is on the worker machine but needs one manual conversion open in After Effects before it can be inspected. Separately, a client supplying their OWN music still needs the work described in `docs/AUDIO-DESIGN.md`.
+- **The landscape adapter's limits.** `BUILD_HORIZONTAL_COMPOSITION` refuses 3D, parented and keyframe-animated layers by design. It was not needed here because every scene composition was already 1920x1080 - which is the normal case - but it will refuse on a template whose scene is not.
+- **Reels layout for animated layers.** `BUILD_REELS_COMPOSITION` likewise refuses to move a layer whose position or scale is already keyframed, rather than destroying the animation. On `3D Logo Animation` that left two layers (the animated logo and its shadow) at their original coordinates in the vertical composition.
