@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { carryForwardRenderOutputs } from "../../domain/execution-plan/carry-forward-render-outputs.js";
 import type { ExecutionPlanResponse, UpdateExecutionPlanRequest } from "@dyo/schemas";
 import { ExecutionPlanEditError, ExecutionPlanNotFoundError, ProjectNotFoundError, StaleExecutionPlanRevisionError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -209,6 +210,12 @@ export async function updateExecutionPlan(
       templateId: current.templateId,
       sourceProjectSha256: current.sourceProjectSha256,
       scenePlans,
+      // The configured render outputs survive an unrelated plan edit (real
+      // 2026-09-27 incident - see carry-forward-render-outputs.ts). They used
+      // to be discarded here, so configuring the Reels layout silently threw
+      // away an already-working Landscape configuration and the failure only
+      // surfaced several steps later, from a different feature.
+      renderOutputs: carryForwardRenderOutputs(current.renderOutputs, current.sourceProjectSha256, current.sourceProjectSha256),
       approvedAt: null,
       approvedBy: null
     },

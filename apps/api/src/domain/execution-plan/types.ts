@@ -23,6 +23,24 @@ export interface NewExecutionPlanRevision {
   templateId: string;
   sourceProjectSha256: string;
   scenePlans: ScenePlanEntry[];
+  /**
+   * What this revision starts with - REQUIRED, never defaulted by the
+   * repository. Until 2026-09-27 the repositories hardcoded
+   * EMPTY_RENDER_OUTPUTS here, which silently destroyed a configured
+   * render output whenever any unrelated plan edit created a revision
+   * (see carry-forward-render-outputs.ts for the real incident). Making
+   * it a field of the row lets the caller say what the new revision starts
+   * with: revision 1 has nothing to inherit, a superseding revision passes
+   * carryForwardRenderOutputs(...) of the revision it supersedes.
+   *
+   * Optional, defaulting to EMPTY_RENDER_OUTPUTS, because a brand-new plan
+   * genuinely inherits nothing and every test fixture builds one from
+   * scratch. The guarantee that matters is pinned by a test on the real
+   * caller (update-execution-plan), not by the compiler: an omitted field
+   * here means "starts with nothing", which is the honest default, while
+   * silently DISCARDING what a previous revision held is the bug.
+   */
+  renderOutputs?: RenderOutputs;
   approvedAt: Date | null;
   approvedBy: string | null;
 }

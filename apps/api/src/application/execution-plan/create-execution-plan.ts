@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ExecutionPlanResponse } from "@dyo/schemas";
+import { EMPTY_RENDER_OUTPUTS, type ExecutionPlanResponse } from "@dyo/schemas";
 import { ExecutionPlanAlreadyExistsError, ProjectNotFoundError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -40,6 +40,12 @@ export async function createExecutionPlan(deps: CreateExecutionPlanDeps, project
       templateId: project.templateId,
       sourceProjectSha256: project.sourceProjectSha256,
       scenePlans,
+      // Revision 1 has no predecessor, so there is nothing to inherit -
+      // the one case where an empty render-output set is the truth rather
+      // than a discarded human decision (contrast
+      // update-execution-plan.ts's carry-forward, and see
+      // domain/execution-plan/carry-forward-render-outputs.ts).
+      renderOutputs: EMPTY_RENDER_OUTPUTS,
       approvedAt: null,
       approvedBy: null
     },

@@ -6,6 +6,7 @@ import { InMemoryExecutionPlanRepository } from "../test-support/in-memory-execu
 import { createProject } from "../../project/create-project.js";
 import { createExecutionPlan } from "../create-execution-plan.js";
 import { setRenderOutputConfig } from "../set-render-output-config.js";
+import { updateExecutionPlan } from "../update-execution-plan.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
 const fixedNow = () => NOW;
@@ -139,5 +140,45 @@ describe("setRenderOutputConfig", () => {
     });
 
     expect(result.plan.revision).toBe(1);
+  });
+});
+
+/**
+ * REAL 2026-09-27 INCIDENT, live QA. LANDSCAPE had been configured and a
+ * Landscape video had already rendered from it. One unrelated plan edit
+ * later - configuring the Reels layout - the configuration was simply gone,
+ * and the only symptom appeared several steps afterwards, from a different
+ * feature: "Landscape output is not configured for this project yet".
+ *
+ * A plan edit only ever rewrites scenePlans; it cannot add, remove or
+ * renumber a composition, so the composition a config names is exactly as
+ * real after the edit as before it. Discarding the config protected nothing
+ * and destroyed an explicit human decision as a side effect of an unrelated
+ * one.
+ */
+describe("a configured render output survives an unrelated plan edit", () => {
+  it("still holds the LANDSCAPE configuration after the plan is edited", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+    await setRenderOutputConfig(
+      { executionPlanRepository, projectRepository, now: fixedNow },
+      project.projectId,
+      "LANDSCAPE",
+      { manifestCompositionId: "comp-landscape", renderSettingsTemplateName: "Best Settings", outputModuleTemplateName: "H.264" }
+    );
+    const before = await executionPlanRepository.findCurrentByProjectId(project.projectId);
+    expect(before?.renderOutputs.LANDSCAPE?.compositionName).toBe("Landscape Master");
+
+    // Any edit at all - this one just writes a note on the scene.
+    const edited = await updateExecutionPlan(
+      { executionPlanRepository, assetRepository: undefined as never, projectRepository, now: fixedNow },
+      project.projectId,
+      { baseRevision: before!.revision, operations: [{ type: "SET_INSTRUCTIONS", scenePlanId: before!.scenePlans[0]!.id, instructions: "anything at all" }] },
+      "user-1"
+    );
+
+    expect(edited.plan.revision).toBe(before!.revision + 1);
+    // The configuration the operator entered is still there.
+    expect(edited.plan.renderOutputs.LANDSCAPE?.compositionName).toBe("Landscape Master");
+    expect(edited.plan.renderOutputs.LANDSCAPE?.renderSettingsTemplateName).toBe("Best Settings");
   });
 });

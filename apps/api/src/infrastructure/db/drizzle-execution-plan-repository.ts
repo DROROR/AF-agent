@@ -40,12 +40,15 @@ export class DrizzleExecutionPlanRepository implements ExecutionPlanRepository {
         templateId: revisionRow.templateId,
         sourceProjectSha256: revisionRow.sourceProjectSha256,
         scenePlans: revisionRow.scenePlans,
-        // A new revision always starts with no render output config -
-        // never silently carries a prior revision's selection forward
-        // (see render-delivery phase section 3's "fail closed" ethos: a
-        // content edit can change/remove the very composition a prior
-        // revision's config pointed at).
-        renderOutputs: EMPTY_RENDER_OUTPUTS,
+        // Exactly what the caller said this revision starts with - never
+        // a repository-side default. This used to hardcode
+        // EMPTY_RENDER_OUTPUTS on the theory that a content edit could
+        // change or remove the composition a prior revision's config
+        // pointed at; it cannot, and the real cost of that theory was a
+        // configured Landscape output silently disappearing on an
+        // unrelated edit (live QA 2026-09-27 - see
+        // domain/execution-plan/carry-forward-render-outputs.ts).
+        renderOutputs: revisionRow.renderOutputs ?? EMPTY_RENDER_OUTPUTS,
         // Superseded columns (see schema.ts's own doc comment) - always
         // null on a fresh insert, never written to again.
         workingProjectPath: null,

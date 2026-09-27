@@ -1,4 +1,5 @@
-import { EMPTY_RENDER_OUTPUTS, type RenderOutputConfig, type RenderOutputVariant, type ScenePlanEntry } from "@dyo/schemas";
+import { EMPTY_RENDER_OUTPUTS } from "@dyo/schemas";
+import type { RenderOutputConfig, RenderOutputVariant, ScenePlanEntry } from "@dyo/schemas";
 import type {
   ExecutionPlanRecord,
   ExecutionPlanRepository,
@@ -19,7 +20,7 @@ export class InMemoryExecutionPlanRepository implements ExecutionPlanRepository 
       templateId: revisionRow.templateId,
       sourceProjectSha256: revisionRow.sourceProjectSha256,
       scenePlans: revisionRow.scenePlans,
-      renderOutputs: EMPTY_RENDER_OUTPUTS,
+      renderOutputs: revisionRow.renderOutputs ?? EMPTY_RENDER_OUTPUTS,
       approvedAt: revisionRow.approvedAt,
       approvedBy: revisionRow.approvedBy,
       createdAt: now,
