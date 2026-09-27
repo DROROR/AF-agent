@@ -172,6 +172,26 @@ on the project, so it appears in the Render Settings dropdown right away —
 no manual step, no DB/curl access needed. Configure and dispatch RENDER
 REELS exactly the same way as Landscape.
 
+Those position/scale values no longer have to be worked out by hand. The
+read-only layer scan the Reels layout screen already runs
+(INSPECT_SCENE_EVIDENCE with `describeLayerTransforms`) now also measures
+each layer's real bounding box, and the response carries a
+`reelsLayoutProposal`: a deterministic, purely geometric suggestion for
+the whole composition, computed from those measurements alone — never
+from a layer's name and never from a model. A layer that covers the
+source frame is proposed at a scale that covers the new 1080x1920 frame
+(so a background never shrinks and leaves black bands); every other layer
+keeps its own real pixel size, moves to the same proportional place in
+the new frame, and is shrunk only if it would otherwise not fit (so wide
+artwork is never sliced off at the edges). Layers the rule will not touch
+— keyframed, 3D, parented, cameras — come back listed as refusals with
+the reason, so it is always visible which layers it cannot help with.
+
+The proposal is a starting point for the reviewer, nothing more: it
+pre-fills the form, the human edits and approves it, and only the
+approved, persisted `reelsLayout` is ever built. Dispatching numbers that
+were never approved on the plan is refused by the API exactly as before.
+
 ## Backup / recovery notes
 
 Two things hold real state and should be backed up regularly:

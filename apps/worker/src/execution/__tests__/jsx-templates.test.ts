@@ -1,6 +1,7 @@
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import type { SceneEditOperation } from "@dyo/schemas";
+import type { MeasuredLayerGeometry, SceneEditOperation } from "@dyo/schemas";
+import { proposeOutputLayout } from "@dyo/schemas";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -866,6 +867,8 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
     __camera.name = "Camera 1";
     __camera.enabled = true;
     __camera.threeDLayer = true;
+    __camera.hasVideo = false;
+    __camera.parent = null;
     __camera.transform = {
       position: makeAnimatableProp([960, 540, -1000], [
         { time: 0, value: [960, 540, -1000] },
@@ -884,6 +887,9 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
     __elementLayer.name = "Element 3D";
     __elementLayer.enabled = true;
     __elementLayer.threeDLayer = false;
+    __elementLayer.hasVideo = true;
+    __elementLayer.parent = null;
+    __elementLayer.sourceRectAtTime = function () { return { left: -320, top: -90, width: 640, height: 180 }; };
     __elementLayer.transform = {
       position: makeAnimatableProp([960, 540], []),
       scale: makeAnimatableProp([100, 100], []),
@@ -902,10 +908,28 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
     __brokenLayer.name = "Broken Layer";
     Object.defineProperty(__brokenLayer, "transform", { get: function () { throw new Error("simulated unreadable layer"); } });
 
+    // A layer whose own bounds read throws, and which this (older, fake)
+    // object model reports no hasVideo/parent for at all - every one of
+    // those must come back as a HONEST null, never a guessed value.
+    var __unmeasurableLayer = new AVLayer();
+    __unmeasurableLayer.index = 7;
+    __unmeasurableLayer.name = "Unmeasurable";
+    __unmeasurableLayer.enabled = true;
+    __unmeasurableLayer.threeDLayer = false;
+    __unmeasurableLayer.transform = {
+      position: makeAnimatableProp([10, 20], []),
+      scale: makeAnimatableProp([100, 100], []),
+      rotation: makeAnimatableProp(0, []),
+      anchorPoint: makeAnimatableProp([0, 0], [])
+    };
+    __unmeasurableLayer.sourceRectAtTime = function () { throw new Error("simulated unreadable bounds"); };
+
     var __fakeComp = new CompItem();
     __fakeComp.name = ${JSON.stringify(COMP_NAME)};
-    __fakeComp.numLayers = 3;
-    var __layersByIndex = { 1: __camera, 2: __elementLayer, 3: __brokenLayer };
+    __fakeComp.width = 1600;
+    __fakeComp.height = 900;
+    __fakeComp.numLayers = 4;
+    var __layersByIndex = { 1: __camera, 2: __elementLayer, 3: __brokenLayer, 4: __unmeasurableLayer };
     __fakeComp.layer = function (i) { return __layersByIndex[i]; };
 
     var app = {
@@ -954,7 +978,55 @@ describe("buildInspectLayerTransformScript (real 2026-09-11 nested-content audit
     const resultText = runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP);
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(true);
-    expect(result.layers.map((l: { layerName: string }) => l.layerName)).toEqual(["Camera 1", "Element 3D"]);
+    expect(result.layers.map((l: { layerName: string }) => l.layerName)).toEqual(["Camera 1", "Element 3D", "Unmeasurable"]);
+  });
+
+  /**
+   * REAL 2026-09-27 REELS-LAYOUT INCIDENT: position and scale alone
+   * cannot say how much of the frame a layer actually covers, and that
+   * coverage is the single fact that separates a background from
+   * content. Without it a human hand-authored the same layout wrongly
+   * twice (artwork sliced off at both edges, then a background that
+   * shrank and left the top of the video black). These are the facts the
+   * proposal in @dyo/schemas is computed from.
+   */
+  it("reports each layer's own measured bounding box, hasVideo and parenting - the geometry a layout proposal needs", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP));
+    const element = result.layers.find((l: { layerName: string }) => l.layerName === "Element 3D");
+
+    expect(element.bounds).toEqual({ left: -320, top: -90, width: 640, height: 180 });
+    expect(element.hasVideo).toBe(true);
+    expect(element.parented).toBe(false);
+  });
+
+  it("reports the composition's own measured frame size - a proposal cannot judge coverage without it", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP));
+
+    expect(result.compWidthPx).toBe(1600);
+    expect(result.compHeightPx).toBe(900);
+  });
+
+  it("reports null - never a guess - for a layer whose bounds, video component or parenting cannot be read", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP));
+    const unmeasurable = result.layers.find((l: { layerName: string }) => l.layerName === "Unmeasurable");
+
+    expect(unmeasurable.bounds).toBeNull();
+    expect(unmeasurable.hasVideo).toBeNull();
+    expect(unmeasurable.parented).toBeNull();
+    // An unreadable layer never breaks the scan for the layers around it.
+    expect(result.ok).toBe(true);
+  });
+
+  it("never asks a camera for a bounding box it does not have", () => {
+    const script = buildInspectLayerTransformScript(1, COMP_NAME);
+    const result = JSON.parse(runFixedScriptWithoutNativeJson(script, TRANSFORM_APP_SETUP));
+    const camera = result.layers.find((l: { layerName: string }) => l.layerName === "Camera 1");
+
+    expect(camera.bounds).toBeNull();
+    expect(camera.hasVideo).toBe(false);
   });
 
   it("resolves and name-verifies the composition before touching anything, the same as every other script", () => {
@@ -2326,6 +2398,201 @@ describe("BUILD_HORIZONTAL_COMPOSITION (native Landscape, live QA 2026-09-10 urg
     const result = JSON.parse(resultText);
     expect(result.ok).toBe(false);
     expect(result.failureReason).toContain("parented to another layer");
+  });
+});
+
+/**
+ * ONE RULE, TWO ORIENTATIONS (real 2026-09-27 Reels-layout incident).
+ *
+ * The Landscape script above computes its geometry INSIDE After Effects,
+ * in ExtendScript, at execution time. The Reels side cannot work that
+ * way: its layout must be proposed to a human, reviewed, edited and
+ * persisted BEFORE anything is built (layerTransformSchema's own doc
+ * comment, and CLAUDE.md's Runtime AI rule), so the same rule also
+ * exists as a pure function over measured facts
+ * (@dyo/schemas, output-layout-proposal.ts).
+ *
+ * Two implementations of one rule is exactly the arrangement that drifts
+ * silently, so this block pins them together: the SAME measured geometry
+ * is fed to the real Landscape JSX (run for real, in a vm realm, by the
+ * same harness every other script here uses) and to the proposal
+ * function, and their numbers must agree. The Landscape script itself is
+ * deliberately NOT refactored to share code - it renders real client
+ * video today, and its own tests above assert its behavior unchanged.
+ *
+ * The ONE divergence is deliberate and asserted below rather than
+ * hidden: a background. The Landscape script stretches a background
+ * non-uniformly to fill its new frame; an approved layer transform
+ * carries a single uniform `scalePercent` and physically cannot express
+ * that, and a 16:9 background stretched into a 9:16 frame would be
+ * distorted several times over, so the proposal covers uniformly
+ * instead.
+ */
+describe("the Landscape script and the Reels layout proposal are the same geometry rule (real 2026-09-27)", () => {
+  const SOURCE_WIDTH = 1000;
+  const SOURCE_HEIGHT = 1600;
+  /** The frame buildBuildHorizontalCompositionScript itself resizes to - restated here only so the proposal can be asked for the same target. */
+  const LANDSCAPE_TARGET = { widthPx: 1920, heightPx: 1080 };
+
+  interface LayerSpec {
+    layerIndex: number;
+    anchor: [number, number];
+    position: [number, number];
+    scalePercent: number;
+    rect: { left: number; top: number; width: number; height: number };
+  }
+
+  /** Content layers of deliberately awkward shapes: off-centre anchors, non-zero rect origins, already-scaled layers, one too wide to fit, one hard against an edge. */
+  const CONTENT_SPECS: LayerSpec[] = [
+    { layerIndex: 1, anchor: [0, 0], position: [120, 240], scalePercent: 100, rect: { left: 0, top: 0, width: 300, height: 90 } },
+    { layerIndex: 2, anchor: [150, 45], position: [500, 800], scalePercent: 73, rect: { left: -150, top: -45, width: 300, height: 90 } },
+    { layerIndex: 3, anchor: [320, 0], position: [980, 1580], scalePercent: 140, rect: { left: 40, top: 12, width: 640, height: 200 } },
+    { layerIndex: 4, anchor: [500, 600], position: [500, 800], scalePercent: 100, rect: { left: 0, top: 0, width: SOURCE_WIDTH, height: 1200 } }
+  ];
+
+  const BACKGROUND_SPEC: LayerSpec = {
+    layerIndex: 1,
+    anchor: [0, 0],
+    position: [0, 0],
+    scalePercent: 100,
+    rect: { left: 0, top: 0, width: SOURCE_WIDTH, height: SOURCE_HEIGHT }
+  };
+
+  /** The SAME spec list, expressed once as the fake AE object model and once as measured facts - neither side gets its own hand-copied numbers. */
+  function jsxSetupFor(specs: LayerSpec[]): string {
+    return `
+      function CompItem() {}
+      var __specLayers = [];
+      ${specs
+        .map(
+          (spec, i) => `
+      __specLayers[${i}] = (function () {
+        var l = { name: "spec ${spec.layerIndex}", enabled: true, hasVideo: true, threeDLayer: false, parent: null };
+        l.transform = {
+          anchorPoint: { value: ${JSON.stringify(spec.anchor)} },
+          position: { value: ${JSON.stringify(spec.position)}, numKeys: 0, setValue: function (v) { l.transform.position.value = v; } },
+          scale: { value: [${spec.scalePercent}, ${spec.scalePercent}], numKeys: 0, setValue: function (v) { l.transform.scale.value = v; } }
+        };
+        l.sourceRectAtTime = function () { return ${JSON.stringify(spec.rect)}; };
+        return l;
+      })();`
+        )
+        .join("")}
+
+      var __origComp = new CompItem();
+      __origComp.name = ${JSON.stringify(COMP_NAME)};
+      __origComp.width = ${SOURCE_WIDTH};
+      __origComp.height = ${SOURCE_HEIGHT};
+
+      var __theDuplicate = new CompItem();
+      __theDuplicate.numLayers = __specLayers.length;
+      __theDuplicate.layer = function (i) { return __specLayers[i - 1]; };
+      __origComp.duplicate = function () { return __theDuplicate; };
+
+      var __allItems = [__origComp, __theDuplicate];
+      var app = {
+        beginUndoGroup: function () {},
+        endUndoGroup: function () {},
+        project: { numItems: __allItems.length, item: function (i) { return __allItems[i - 1]; } }
+      };
+    `;
+  }
+
+  function measuredFactsFor(specs: LayerSpec[]): MeasuredLayerGeometry[] {
+    return specs.map((spec) => ({
+      layerIndex: spec.layerIndex,
+      layerName: `spec ${spec.layerIndex}`,
+      enabled: true,
+      threeDLayer: false,
+      isCameraLayer: false,
+      hasVideo: true,
+      parented: false,
+      position: { animated: false, currentValue: [...spec.position] },
+      scale: { animated: false, currentValue: [spec.scalePercent, spec.scalePercent] },
+      anchorPoint: { animated: false, currentValue: [...spec.anchor] },
+      bounds: spec.rect
+    }));
+  }
+
+  /** Runs the REAL Landscape script against the fake model and reads back what it actually wrote to each layer. */
+  function runLandscapeScript(specs: LayerSpec[]): Array<{ position: number[]; scale: number[] }> {
+    const script = buildOperationScript(1, COMP_NAME, { type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "parity (Landscape)" });
+    const setup = jsxSetupFor(specs);
+    const context = vm.createContext({});
+    vm.runInContext("JSON = undefined;", context);
+    vm.runInContext(setup, context);
+    const resultText = vm.runInContext(`(new Function("args", ${JSON.stringify(script)}))()`, context) as string;
+    expect(JSON.parse(resultText).ok).toBe(true);
+    return specs.map((_, i) => vm.runInContext(`({ position: __specLayers[${i}].transform.position.value, scale: __specLayers[${i}].transform.scale.value })`, context) as { position: number[]; scale: number[] });
+  }
+
+  it("agrees on every CONTENT layer - same position, same scale, from the same measured geometry", () => {
+    const fromAfterEffects = runLandscapeScript(CONTENT_SPECS);
+    const proposed = proposeOutputLayout({
+      sourceFrame: { widthPx: SOURCE_WIDTH, heightPx: SOURCE_HEIGHT },
+      targetFrame: LANDSCAPE_TARGET,
+      layers: measuredFactsFor(CONTENT_SPECS)
+    });
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) {
+      return;
+    }
+    expect(proposed.proposal.proposals).toHaveLength(CONTENT_SPECS.length);
+
+    for (const [i, spec] of CONTENT_SPECS.entries()) {
+      const entry = proposed.proposal.proposals.find((candidate) => candidate.layerIndex === spec.layerIndex);
+      const applied = fromAfterEffects[i];
+      expect(entry?.role).toBe("CONTENT");
+      // Sub-0.05px agreement across a 1920px frame: the only difference
+      // is the proposal rounding a reviewer-facing number to 3 decimals.
+      expect(entry?.positionX).toBeCloseTo(applied!.position[0]!, 1);
+      expect(entry?.positionY).toBeCloseTo(applied!.position[1]!, 1);
+      expect(entry?.scalePercent).toBeCloseTo(applied!.scale[0]!, 1);
+      expect(entry?.scalePercent).toBeCloseTo(applied!.scale[1]!, 1);
+    }
+  });
+
+  it("diverges on a BACKGROUND, deliberately: After Effects stretches it non-uniformly, the proposal covers uniformly - and both end up filling the frame", () => {
+    const [applied] = runLandscapeScript([BACKGROUND_SPEC]);
+    const proposed = proposeOutputLayout({
+      sourceFrame: { widthPx: SOURCE_WIDTH, heightPx: SOURCE_HEIGHT },
+      targetFrame: LANDSCAPE_TARGET,
+      layers: measuredFactsFor([BACKGROUND_SPEC])
+    });
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) {
+      return;
+    }
+    const entry = proposed.proposal.proposals[0];
+
+    // The script's own non-uniform stretch, which a single uniform
+    // scalePercent cannot express.
+    expect(applied!.scale[0]).not.toBeCloseTo(applied!.scale[1]!, 3);
+    // The proposal's uniform cover - one number, and the frame is still
+    // fully covered on both axes.
+    expect(entry?.role).toBe("BACKGROUND");
+    expect(entry!.proposedBounds.left).toBeLessThanOrEqual(0);
+    expect(entry!.proposedBounds.top).toBeLessThanOrEqual(0);
+    expect(entry!.proposedBounds.left + entry!.proposedBounds.width).toBeGreaterThanOrEqual(LANDSCAPE_TARGET.widthPx);
+    expect(entry!.proposedBounds.top + entry!.proposedBounds.height).toBeGreaterThanOrEqual(LANDSCAPE_TARGET.heightPx);
+  });
+
+  it("refuses the same layers the Landscape script refuses, for the same reasons - animated, 3D and parented", () => {
+    const proposed = proposeOutputLayout({
+      sourceFrame: { widthPx: SOURCE_WIDTH, heightPx: SOURCE_HEIGHT },
+      targetFrame: LANDSCAPE_TARGET,
+      layers: [
+        { ...measuredFactsFor([CONTENT_SPECS[0]!])[0]!, layerIndex: 1, position: { animated: true, currentValue: [0, 0] } },
+        { ...measuredFactsFor([CONTENT_SPECS[0]!])[0]!, layerIndex: 2, threeDLayer: true },
+        { ...measuredFactsFor([CONTENT_SPECS[0]!])[0]!, layerIndex: 3, parented: true }
+      ]
+    });
+    expect(proposed.ok).toBe(true);
+    if (!proposed.ok) {
+      return;
+    }
+    expect(proposed.proposal.proposals).toEqual([]);
+    expect(proposed.proposal.refusals.map((refusal) => refusal.reason)).toEqual(["KEYFRAMED_POSITION_OR_SCALE", "THREE_D_LAYER", "PARENTED_LAYER"]);
   });
 });
 

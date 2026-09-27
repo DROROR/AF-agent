@@ -2208,12 +2208,60 @@ export function buildResolveCompositionIndexScript(expectedCompositionId: number
  * documented "is this plugin missing" flag this worker can rely on
  * without inventing one, so this honestly stops at "applied: yes/no",
  * never a guessed availability verdict.
+ *
+ * REAL 2026-09-27 REELS-LAYOUT INCIDENT - this scan also reports each
+ * layer's own untransformed BOUNDS (`sourceRectAtTime(0, false)`, the
+ * same read buildDescribeLayerAtTimeScript already makes), its
+ * `hasVideo` flag, whether it is `parented`, and the composition's own
+ * measured frame size. Position and scale alone cannot tell anyone how
+ * much of the frame a layer actually covers, and that coverage is the
+ * one fact separating a background (which must cover a new 1080x1920
+ * frame) from content (which must keep its size and stay inside it). A
+ * human hand-authoring a Reels layout without it got the same template
+ * wrong twice - artwork sliced off at both edges, then a background that
+ * shrank and left the top of the video black. With these facts the
+ * deterministic rule in output-layout-proposal.ts can PROPOSE a layout
+ * for a human to review; nothing here proposes or applies anything
+ * itself. Still strictly read-only: every addition is a value read, and
+ * an unreadable one is reported as null rather than guessed.
  */
 export function buildInspectLayerTransformScript(aeProjectItemIndex: number, compositionName: string): FixedJsxScript {
   const compIndexLiteral = String(aeProjectItemIndex);
   const compNameLiteral = JSON.stringify(compositionName);
   const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO INSPECT_LAYER_TRANSFORM")});
   var __result = null;
+  function __readLayerBounds(__lyr) {
+    try {
+      if (typeof __lyr.sourceRectAtTime !== "function") { return null; }
+      var __r = __lyr.sourceRectAtTime(0, false);
+      if (!__r || typeof __r.width !== "number" || typeof __r.height !== "number") { return null; }
+      return { left: __r.left, top: __r.top, width: __r.width, height: __r.height };
+    } catch (__boundsError) {
+      return null;
+    }
+  }
+  function __readIsParented(__lyr) {
+    try {
+      if (typeof __lyr.parent === "undefined") { return null; }
+      return __lyr.parent !== null;
+    } catch (__parentError) {
+      return null;
+    }
+  }
+  function __readHasVideo(__lyr) {
+    try {
+      return typeof __lyr.hasVideo === "boolean" ? __lyr.hasVideo : null;
+    } catch (__hasVideoError) {
+      return null;
+    }
+  }
+  function __readFrameSize(__c, __key) {
+    try {
+      return typeof __c[__key] === "number" ? __c[__key] : null;
+    } catch (__frameError) {
+      return null;
+    }
+  }
   function __readAnimatableProp(__prop) {
     try {
       if (__prop.numKeys > 0) {
@@ -2276,7 +2324,10 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
             anchorPoint: __readAnimatableProp(__layer.transform.anchorPoint),
             pointOfInterest: __isCamera ? __readAnimatableProp(__layer.pointOfInterest) : null,
             zoom: __isCamera ? __readAnimatableProp(__layer.zoom) : null,
-            effects: __effects
+            effects: __effects,
+            bounds: __isCamera ? null : __readLayerBounds(__layer),
+            hasVideo: __readHasVideo(__layer),
+            parented: __readIsParented(__layer)
           });
         } catch (__layerReadError) {
           // A single unreadable layer never fails the whole scan - same
@@ -2284,7 +2335,12 @@ export function buildInspectLayerTransformScript(aeProjectItemIndex: number, com
           // script in this file.
         }
       }
-      __result = JSON.stringify({ ok: true, layers: __layers });
+      __result = JSON.stringify({
+        ok: true,
+        compWidthPx: __readFrameSize(__comp, "width"),
+        compHeightPx: __readFrameSize(__comp, "height"),
+        layers: __layers
+      });
     }
   } catch (__unexpectedError) {
     __result = JSON.stringify({

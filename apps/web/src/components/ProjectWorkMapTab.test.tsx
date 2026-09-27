@@ -62,8 +62,8 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     await screen.findByText("Tell AI what you want");
     expect(screen.getByRole("button", { name: "Claude — Create Video Plan" })).not.toBeNull();
     // Never shows a raw composition/asset ID field by default.
-    expect(screen.queryByLabelText("Matched composition ID")).toBeNull();
-    expect(screen.queryByLabelText("Desired asset ID")).toBeNull();
+    expect(screen.queryByLabelText("Scene in the template")).toBeNull();
+    expect(screen.queryByLabelText("File to use")).toBeNull();
   });
 
   it("Create Video Plan calls the real AI draft endpoint and shows the human-readable plan preview - never the raw form", async () => {
@@ -116,11 +116,11 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     fireEvent.click(screen.getByRole("button", { name: "Add details manually" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Add row" }));
-    const sceneSelect = (await screen.findByLabelText("Matched composition ID")) as HTMLSelectElement;
+    const sceneSelect = (await screen.findByLabelText("Scene in the template")) as HTMLSelectElement;
     expect(sceneSelect.tagName).toBe("SELECT");
     expect(within(sceneSelect).getByText("Scene 01")).not.toBeNull();
 
-    const assetSelect = screen.getByLabelText("Desired asset ID") as HTMLSelectElement;
+    const assetSelect = screen.getByLabelText("File to use") as HTMLSelectElement;
     expect(assetSelect.tagName).toBe("SELECT");
     expect(within(assetSelect).getByText("login-demo.mp4")).not.toBeNull();
   });
@@ -131,11 +131,11 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     fireEvent.click(await screen.findByRole("button", { name: "Add details manually" }));
     fireEvent.click(await screen.findByRole("button", { name: "Add row" }));
 
-    const sceneSelect = (await screen.findByLabelText("Matched composition ID")) as HTMLSelectElement;
+    const sceneSelect = (await screen.findByLabelText("Scene in the template")) as HTMLSelectElement;
     fireEvent.change(sceneSelect, { target: { value: "c1" } });
     expect(sceneSelect.value).toBe("c1");
 
-    const assetSelect = screen.getByLabelText("Desired asset ID") as HTMLSelectElement;
+    const assetSelect = screen.getByLabelText("File to use") as HTMLSelectElement;
     fireEvent.change(assetSelect, { target: { value: "asset-1" } });
     expect(assetSelect.value).toBe("asset-1");
   });
@@ -292,13 +292,13 @@ describe("ProjectWorkMapTab - manual form remains fully available and functional
     // still the Advanced Mode label, unchanged (see the dedicated test below).
     fireEvent.click(screen.getByRole("button", { name: "Edit Plan" }));
 
-    const textField = (await screen.findByLabelText("Desired text")) as HTMLInputElement;
+    const textField = (await screen.findByLabelText("Text to show")) as HTMLInputElement;
     expect(textField.value).toBe("Hello world");
     fireEvent.change(textField, { target: { value: "Updated text" } });
     fireEvent.click(screen.getByRole("button", { name: "Save work map" }));
 
     await waitFor(() => {
-      expect((screen.getByLabelText("Desired text") as HTMLInputElement).value).toBe("Updated text");
+      expect((screen.getByLabelText("Text to show") as HTMLInputElement).value).toBe("Updated text");
     });
   });
 
@@ -316,7 +316,7 @@ describe("ProjectWorkMapTab - manual form remains fully available and functional
     renderWorkMap();
     await screen.findByText("Your Video Plan");
     fireEvent.click(screen.getByRole("button", { name: "Edit Plan" }));
-    await screen.findByLabelText("Desired text");
+    await screen.findByLabelText("Text to show");
     fireEvent.click(screen.getByRole("button", { name: "Save work map" }));
 
     await screen.findByText("This plan changed elsewhere");
@@ -330,7 +330,7 @@ describe("ProjectWorkMapTab - manual form remains fully available and functional
     await screen.findByText("No work map entries yet");
 
     fireEvent.click(screen.getByRole("button", { name: "Add row" }));
-    await screen.findByLabelText("Desired text");
+    await screen.findByLabelText("Text to show");
 
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await screen.findByText("No work map entries yet");

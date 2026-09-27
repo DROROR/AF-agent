@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExecuteSceneEditRequest, PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
+import { proposeOutputLayout, REELS_OUTPUT_HEIGHT_PX, REELS_OUTPUT_WIDTH_PX } from "@dyo/schemas";
 import { validateSceneEditPreconditions, type SceneEditWorkerSnapshot } from "../validate-scene-edit-preconditions.js";
 
 const NOW = new Date("2026-08-26T00:00:00.000Z");
@@ -176,6 +177,66 @@ describe("validateSceneEditPreconditions", () => {
         })
       })
     );
+    expect(result.ok).toBe(false);
+  });
+
+  /**
+   * REAL 2026-09-27 REELS-LAYOUT INCIDENT. A measured layout proposal
+   * (output-layout-proposal.ts) exists so a human does not have to work
+   * the geometry out by hand - it is NOT an approval, and this is the
+   * gate that says so. Numbers that came straight from the proposal,
+   * dispatched without a human having persisted them on the plan, are
+   * refused exactly like any other unapproved value
+   * (layerTransformSchema's own doc comment; CLAUDE.md's Runtime AI
+   * rule).
+   */
+  it("a measured layout proposal is not an approval - proposal numbers that were never persisted on the plan are refused", () => {
+    const proposed = proposeOutputLayout({
+      sourceFrame: { widthPx: 1600, heightPx: 900 },
+      targetFrame: { widthPx: REELS_OUTPUT_WIDTH_PX, heightPx: REELS_OUTPUT_HEIGHT_PX },
+      layers: [
+        {
+          layerIndex: 2,
+          layerName: "a layer",
+          enabled: true,
+          threeDLayer: false,
+          isCameraLayer: false,
+          hasVideo: true,
+          parented: false,
+          position: { animated: false, currentValue: [800, 450] },
+          scale: { animated: false, currentValue: [100, 100] },
+          anchorPoint: { animated: false, currentValue: [800, 450] },
+          bounds: { left: 0, top: 0, width: 1600, height: 900 }
+        }
+      ]
+    });
+    if (!proposed.ok) {
+      throw new Error(proposed.reason);
+    }
+    const entry = proposed.proposal.proposals[0]!;
+    const reelsLayout = {
+      reelsCompositionName: "Text 01 - Reels",
+      // What a human actually reviewed and persisted - deliberately not the proposal.
+      layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 150 }],
+      configuredAt: "2026-08-29T00:00:00.000Z"
+    };
+
+    const result = validateSceneEditPreconditions(
+      baseInput({
+        currentPlan: { id: "plan-1", revision: 1, sourceProjectSha256: SHA, scenePlans: [scene({ reelsLayout })] },
+        request: request({
+          operations: [
+            { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Approved Copy" },
+            {
+              type: "BUILD_REELS_COMPOSITION",
+              reelsCompositionName: reelsLayout.reelsCompositionName,
+              layerTransforms: [{ layerIndex: 2, manifestPlaceholderId: "ph-1", positionX: entry.positionX, positionY: entry.positionY, scalePercent: entry.scalePercent }]
+            }
+          ]
+        })
+      })
+    );
+
     expect(result.ok).toBe(false);
   });
 

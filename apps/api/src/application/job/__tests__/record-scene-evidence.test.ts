@@ -49,6 +49,54 @@ describe("recordSceneEvidenceIfApplicable", () => {
     expect(rows[0]?.sourceProjectSha256).toBe("a".repeat(64));
   });
 
+  /**
+   * REAL 2026-09-27 REELS-LAYOUT INCIDENT - the worker's layer scan now
+   * carries a measured 1080x1920 layout PROPOSAL alongside the facts it
+   * was derived from (scene-evidence.ts). This is the whole path by
+   * which that proposal reaches the API and the dashboard, so it is
+   * asserted to survive the strict response schema intact rather than
+   * being quietly dropped as an unknown key.
+   */
+  it("stores a result carrying a measured Reels layout proposal, intact, including the layers it refused and why", async () => {
+    const sceneEvidenceRepository = new InMemorySceneEvidenceRepository();
+    const reelsLayoutProposal = {
+      sourceFrame: { widthPx: 1600, heightPx: 900 },
+      targetFrame: { widthPx: 1080, heightPx: 1920 },
+      backgroundCoverageRatio: 0.85,
+      proposals: [
+        {
+          layerIndex: 3,
+          layerName: "a layer",
+          role: "BACKGROUND" as const,
+          positionX: 0,
+          positionY: -1186.667,
+          scalePercent: 213.334,
+          sourceBounds: { left: 0, top: 0, width: 1600, height: 900 },
+          proposedBounds: { left: 0, top: -1186.667, width: 3413.344, height: 1920.006 }
+        }
+      ],
+      refusals: [{ layerIndex: 2, layerName: "another layer", reason: "CAMERA_LAYER" as const, detail: "a camera has no 2D bounding box" }]
+    };
+    const job = baseJob();
+
+    await recordSceneEvidenceIfApplicable(
+      { sceneEvidenceRepository, now: () => NOW },
+      { ...job, result: { ...(job.result as Record<string, unknown>), reelsLayoutProposal, reelsLayoutProposalFailureReason: null } }
+    );
+
+    const rows = await sceneEvidenceRepository.listLatestByProject(PROJECT_ID);
+    expect(rows[0]?.response.reelsLayoutProposal).toEqual(reelsLayoutProposal);
+  });
+
+  it("stores a result that carries no proposal at all, unchanged - a worker that predates it is never rejected", async () => {
+    const sceneEvidenceRepository = new InMemorySceneEvidenceRepository();
+    await recordSceneEvidenceIfApplicable({ sceneEvidenceRepository, now: () => NOW }, baseJob());
+
+    const rows = await sceneEvidenceRepository.listLatestByProject(PROJECT_ID);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.response.reelsLayoutProposal ?? null).toBeNull();
+  });
+
   it("never stores anything for a non-SUCCEEDED job, even one with a result-shaped payload", async () => {
     const sceneEvidenceRepository = new InMemorySceneEvidenceRepository();
     await recordSceneEvidenceIfApplicable({ sceneEvidenceRepository, now: () => NOW }, baseJob({ status: "RUNNING" }));

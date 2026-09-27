@@ -1,7 +1,15 @@
 import { stat } from "node:fs/promises";
 import { z } from "zod";
-import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord, CompositionSummary, LayerTransformFact } from "@dyo/schemas";
-import { compositionSummarySchema, hostLayerRecordSchema, layerDetailFactSchema, layerTransformFactSchema } from "@dyo/schemas";
+import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord, CompositionSummary, LayerTransformFact, OutputLayoutProposal } from "@dyo/schemas";
+import {
+  compositionSummarySchema,
+  hostLayerRecordSchema,
+  layerDetailFactSchema,
+  layerTransformFactSchema,
+  proposeOutputLayout,
+  REELS_OUTPUT_HEIGHT_PX,
+  REELS_OUTPUT_WIDTH_PX
+} from "@dyo/schemas";
 import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
@@ -140,7 +148,15 @@ async function fetchCompositionSummary(
 }
 
 const inspectLayerTransformScriptResultSchema = z.union([
-  z.object({ ok: z.literal(true), layers: z.array(layerTransformFactSchema) }).strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      /** The composition's own measured frame - nullable because an unreadable value is reported as null rather than guessed (see buildInspectLayerTransformScript). */
+      compWidthPx: z.number().nullable().optional(),
+      compHeightPx: z.number().nullable().optional(),
+      layers: z.array(layerTransformFactSchema)
+    })
+    .strict(),
   z.object({ ok: z.literal(false), failureReason: z.string() }).strict()
 ]);
 
@@ -154,7 +170,7 @@ async function fetchLayerTransforms(
   client: HeroicSwanMcpClient,
   aeProjectItemIndex: number,
   compositionName: string
-): Promise<{ ok: true; layers: LayerTransformFact[] } | { ok: false; reason: string }> {
+): Promise<{ ok: true; layers: LayerTransformFact[]; compWidthPx: number | null; compHeightPx: number | null } | { ok: false; reason: string }> {
   const script = buildInspectLayerTransformScript(aeProjectItemIndex, compositionName);
   const result = await client.runFixedInspectionScript(script);
   if (!result.ok) {
@@ -171,7 +187,36 @@ async function fetchLayerTransforms(
   if (!parsed.data.ok) {
     return { ok: false, reason: parsed.data.failureReason };
   }
-  return { ok: true, layers: parsed.data.layers };
+  return { ok: true, layers: parsed.data.layers, compWidthPx: parsed.data.compWidthPx ?? null, compHeightPx: parsed.data.compHeightPx ?? null };
+}
+
+/**
+ * REAL 2026-09-27 REELS-LAYOUT INCIDENT - derives the native 1080x1920
+ * layout PROPOSAL from the layer scan that has just been read, using the
+ * single deterministic rule in @dyo/schemas (output-layout-proposal.ts).
+ *
+ * Deliberately no second read of After Effects: the proposal is computed
+ * from exactly the facts this same response already carries, so anyone
+ * holding the response - the API, the dashboard, a test - can recompute
+ * it and get the identical numbers. It is a proposal for a human to
+ * review, never an instruction: the worker's own
+ * BUILD_REELS_COMPOSITION continues to apply ONLY the layerTransforms
+ * persisted on the approved plan.
+ */
+function deriveReelsLayoutProposal(scan: {
+  layers: LayerTransformFact[];
+  compWidthPx: number | null;
+  compHeightPx: number | null;
+}): { proposal: OutputLayoutProposal | null; failureReason: string | null } {
+  if (scan.compWidthPx === null || scan.compHeightPx === null) {
+    return { proposal: null, failureReason: "the layer scan did not report this composition's own frame size, so no layout can be derived from it" };
+  }
+  const result = proposeOutputLayout({
+    sourceFrame: { widthPx: scan.compWidthPx, heightPx: scan.compHeightPx },
+    targetFrame: { widthPx: REELS_OUTPUT_WIDTH_PX, heightPx: REELS_OUTPUT_HEIGHT_PX },
+    layers: scan.layers
+  });
+  return result.ok ? { proposal: result.proposal, failureReason: null } : { proposal: null, failureReason: result.reason };
 }
 
 const describeLayerAtTimeScriptResultSchema = z.union([
@@ -532,10 +577,16 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
 
       let layerTransformFacts: LayerTransformFact[] | null = null;
       let layerTransformFactsFailureReason: string | null = null;
+      // Added to the response ONLY when a layer scan actually succeeded -
+      // see scene-evidence.ts. A response that carries no layer facts
+      // never carries a layout proposal either.
+      let reelsLayout: { reelsLayoutProposal: OutputLayoutProposal | null; reelsLayoutProposalFailureReason: string | null } | null = null;
       if (request.describeLayerTransforms === true) {
         const transformsResult = await fetchLayerTransforms(client, effectiveAeProjectItemIndex, parsedComp.value.name);
         if (transformsResult.ok) {
           layerTransformFacts = transformsResult.layers;
+          const derived = deriveReelsLayoutProposal(transformsResult);
+          reelsLayout = { reelsLayoutProposal: derived.proposal, reelsLayoutProposalFailureReason: derived.failureReason };
         } else {
           layerTransformFactsFailureReason = transformsResult.reason;
         }
@@ -583,6 +634,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           compositionSummaryFailureReason,
           layerTransformFacts,
           layerTransformFactsFailureReason,
+          ...(reelsLayout ?? {}),
           ...(layerAtTime ?? {}),
           ...(fonts ?? {}),
           capturedAt: new Date().toISOString()

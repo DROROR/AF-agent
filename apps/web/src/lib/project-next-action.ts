@@ -117,6 +117,30 @@ export function resolveNextAction(input: NextActionInput): NextAction {
     if (input.scenesNeedingReview > 0 || input.includedSceneCount === 0) {
       return { id: "reviewScenes", tab: "scenes" };
     }
+    // ORDERING, AND WHY THERE IS NO "SET THE REELS LAYOUT" STEP HERE.
+    //
+    // Real 2026-09-27 incident: setting the Reels layout AFTER approval is a
+    // plan edit, so it returned the plan to DRAFT and took the live session
+    // and both preview approvals with it - and this list's own order put
+    // render configuration after the previews, so following it walked
+    // straight into that. The obvious fix is to insert "set the Reels
+    // layout" ahead of approval. It was considered and deliberately not
+    // done, for two reasons:
+    //
+    //  1. NOTHING KNOWS WHETHER THIS VIDEO NEEDS A VERTICAL VERSION. There
+    //     is no persisted fact to derive it from, and a step that cannot be
+    //     derived would have to be assumed - which is exactly what this
+    //     module refuses to do. Every project would be told to do work most
+    //     of them do not need, and the list would stall on it.
+    //  2. IT WOULD BE A GATE THIS FILE DOES NOT OWN. The API approves a plan
+    //     with no Reels layout perfectly happily. A UI-only step ordering
+    //     that pretends otherwise is a second source of truth by another
+    //     name, and the three real MVP templates were approved without one.
+    //
+    // So the warning lives where the damage is done (ReelsLayoutCard, via
+    // plan-edit-impact.ts, which names the loss before it happens), and the
+    // approval step's own copy carries the ordering advice - one string,
+    // shown by both the banner and the checklist, no new state anywhere.
     return { id: "approveScenes", tab: "scenes" };
   }
   // REAL 2026-09-14 DEFECT (see project-workflow-steps.ts): an APPROVED plan

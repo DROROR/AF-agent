@@ -58,7 +58,7 @@ async function writeFakeServer(
     captureShape?: "image" | "fallback" | "none";
     previewFilePath?: string;
     /** "success" returns a real, double-JSON-enveloped {ok:true, layerDetails:[...]} result (the real host's actual ae_run_jsx envelope shape); "hostLayerMatches" returns a real {ok:true, matches:[...]} envelope matching the buildFindHostLayersScript response shape; "compositionSummary" returns a real {ok:true, compDurationSeconds, ...} envelope matching buildDescribeCompositionSummaryScript's own response shape; "error" simulates a TOOL_ERROR; omitted keeps the pre-existing plain-text stub (only reachable by discoverLayerDetails:true requests). */
-    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "layerAtTime" | "projectFonts" | "error";
+    runJsxResult?: "success" | "hostLayerMatches" | "compositionSummary" | "layerTransforms" | "layerTransformsWithoutFrame" | "layerAtTime" | "projectFonts" | "error";
     /** When set, the fake ae_run_jsx tool writes the REAL `code` argument it received to this file path - lets a test verify (from the separate spawned process's own real input) which mode buildInspectCompositionLayerDetailsScript was actually invoked with, not merely that SOME result came back. */
     captureReceivedJsxCodeToFile?: string;
     /** Real 2026-09-11 incident fix - overrides the resolve-by-id script's own canned response. "drifted" simulates the real incident: the id resolves to a DIFFERENT index than aeProjectItemIndex requested (index 48, not 14), proving the inspector uses the freshly-resolved index rather than the stale one. "notFound" simulates the id no longer existing at all. Default (omitted) resolves to the same index/name ae_get_composition already reports - every pre-existing test's own behavior, unchanged. */
@@ -220,9 +220,10 @@ async function writeFakeServer(
                   { layerIndex: 1, layerName: "Scene 1", enabled: true, inPointSeconds: 1.635, outPointSeconds: 8.642, startTimeSeconds: 1.635, sourceCompositionId: "comp-1", sourceDurationSeconds: 7.007007007007 }
                 ]
               }) }) }] };`
-            : options.runJsxResult === "layerTransforms"
+            : options.runJsxResult === "layerTransforms" || options.runJsxResult === "layerTransformsWithoutFrame"
               ? `return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({
                   ok: true,
+                  ${options.runJsxResult === "layerTransforms" ? "compWidthPx: 1600, compHeightPx: 900," : "compWidthPx: null, compHeightPx: null,"}
                   layers: [
                     {
                       layerIndex: 2, layerName: "Camera 1", enabled: true, threeDLayer: true, isCameraLayer: true,
@@ -232,6 +233,15 @@ async function writeFakeServer(
                       pointOfInterest: { animated: false, currentValue: [960, 540, 0], keyframes: null },
                       zoom: { animated: true, currentValue: 2779, keyframes: [{ timeSeconds: 0, value: 2779 }, { timeSeconds: 2.612, value: 800 }] },
                       effects: []
+                    },
+                    {
+                      layerIndex: 3, layerName: "Backdrop", enabled: true, threeDLayer: false, isCameraLayer: false,
+                      position: { animated: false, currentValue: [0, 0], keyframes: null },
+                      scale: { animated: false, currentValue: [100, 100], keyframes: null },
+                      rotation: { animated: false, currentValue: 0, keyframes: null },
+                      anchorPoint: { animated: false, currentValue: [0, 0], keyframes: null },
+                      pointOfInterest: null, zoom: null, effects: [],
+                      bounds: { left: 0, top: 0, width: 1600, height: 900 }, hasVideo: true, parented: false
                     }
                   ]
                 }) }) }] };`
@@ -546,7 +556,7 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
 
     expect(result.kind).toBe("evidence");
     expect(result.response.layerTransformFactsFailureReason).toBeNull();
-    expect(result.response.layerTransformFacts).toEqual([
+    expect(result.response.layerTransformFacts?.[0]).toEqual(
       {
         layerIndex: 2,
         layerName: "Camera 1",
@@ -561,7 +571,48 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
         zoom: { animated: true, currentValue: 2779, keyframes: [{ timeSeconds: 0, value: 2779 }, { timeSeconds: 2.612, value: 800 }] },
         effects: []
       }
-    ]);
+    );
+    expect(result.response.layerTransformFacts?.[1]?.bounds).toEqual({ left: 0, top: 0, width: 1600, height: 900 });
+    expect(result.response.layerTransformFacts?.[1]?.hasVideo).toBe(true);
+    expect(result.response.layerTransformFacts?.[1]?.parented).toBe(false);
+  });
+
+  /**
+   * REAL 2026-09-27 REELS-LAYOUT INCIDENT - the same scan now also
+   * carries a deterministic, measured PROPOSAL for the native 1080x1920
+   * layout, derived from those very facts (no second read of After
+   * Effects) so the dashboard can pre-fill its Reels layout form instead
+   * of asking a human to work the geometry out per layer. It is evidence
+   * for the approval gate, never an instruction: BUILD_REELS_COMPOSITION
+   * still applies only what the approved plan persists.
+   */
+  it("real 2026-09-27: derives a measured 1080x1920 layout proposal from the same scan, with the layers it cannot adapt refused BY REASON rather than dropped", async () => {
+    await writeFakeServer(dir, { runJsxResult: "layerTransforms" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeLayerTransforms: true }))) as SceneEvidenceSuccess;
+
+    const proposal = result.response.reelsLayoutProposal;
+    expect(result.response.reelsLayoutProposalFailureReason).toBeNull();
+    expect(proposal?.sourceFrame).toEqual({ widthPx: 1600, heightPx: 900 });
+    expect(proposal?.targetFrame).toEqual({ widthPx: 1080, heightPx: 1920 });
+    // The full-frame layer is proposed as a background that covers the
+    // whole Reels frame - the failure that left the real video black.
+    const backdrop = proposal?.proposals.find((entry) => entry.layerIndex === 3);
+    expect(backdrop?.role).toBe("BACKGROUND");
+    expect(backdrop!.proposedBounds.top).toBeLessThanOrEqual(0);
+    expect(backdrop!.proposedBounds.top + backdrop!.proposedBounds.height).toBeGreaterThanOrEqual(1920);
+    // The camera is reported as refused, with its reason - never silently missing.
+    expect(proposal?.refusals).toEqual([expect.objectContaining({ layerIndex: 2, reason: "CAMERA_LAYER" })]);
+  });
+
+  it("real 2026-09-27: a scan that never reported the composition's own frame yields NO proposal and says why - never a guessed layout", async () => {
+    await writeFakeServer(dir, { runJsxResult: "layerTransformsWithoutFrame" });
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    const result = (await inspector.inspect(baseRequest({ describeLayerTransforms: true }))) as SceneEvidenceSuccess;
+
+    expect(result.response.layerTransformFacts).toHaveLength(2);
+    expect(result.response.reelsLayoutProposal).toBeNull();
+    expect(result.response.reelsLayoutProposalFailureReason).toMatch(/frame size/);
   });
 
   it("real 2026-09-17: describeLayerAtTime sends the read-only describe-layer-at-time script for exactly that layer and time, and parses its facts into the response", async () => {

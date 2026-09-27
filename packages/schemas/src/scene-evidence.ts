@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { disposableInspectionEvidenceSchema } from "./disposable-inspection.js";
+import { layerBoundsSchema, outputLayoutProposalSchema } from "./output-layout-proposal.js";
 
 /**
  * Request/response contract for the INSPECT_SCENE_EVIDENCE worker
@@ -454,6 +455,18 @@ export type LayerEffectFact = z.infer<typeof layerEffectFactSchema>;
  * null for a camera layer (cameras have no such properties in AE's own
  * scripting model); `pointOfInterest`/`zoom` are null for every non-camera
  * layer.
+ *
+ * Real 2026-09-27 Reels-layout incident: `bounds`/`hasVideo`/`parented`
+ * were added because position and scale ALONE cannot tell anyone - human
+ * or code - how much of the frame a layer actually covers, which is the
+ * single fact that separates a background (must cover the new frame) from
+ * content (must keep its size and stay inside it). See
+ * output-layout-proposal.ts for the rule they feed. All three are
+ * `.optional()`/nullable on purpose: a Worker whose scan predates them
+ * simply does not report them, which must parse as "not measured" (and is
+ * then refused by name in the proposal, never assumed either way) rather
+ * than crash the whole evidence result - the same version-skew tolerance
+ * every other field added to this contract carries.
  */
 export const layerTransformFactSchema = z
   .object({
@@ -468,7 +481,13 @@ export const layerTransformFactSchema = z
     anchorPoint: animatablePropertyFactSchema.nullable(),
     pointOfInterest: animatablePropertyFactSchema.nullable(),
     zoom: animatablePropertyFactSchema.nullable(),
-    effects: z.array(layerEffectFactSchema)
+    effects: z.array(layerEffectFactSchema),
+    /** The layer's own untransformed bounding box from `sourceRectAtTime(0, false)` - null when the layer genuinely has none (a camera) or the read failed, ABSENT when the scan predates this field. No null-defaulting transform, for the same reason layerAtTimeFacts has none: every response written before this field keeps exactly its existing shape. */
+    bounds: layerBoundsSchema.nullable().optional(),
+    /** AE's own `layer.hasVideo` - absent or null means the scan did not report it, never "no". */
+    hasVideo: z.boolean().nullable().optional(),
+    /** Whether the layer is parented to another layer (`layer.parent !== null`) - absent or null means the scan did not report it, never "not parented". */
+    parented: z.boolean().nullable().optional()
   })
   .strict();
 export type LayerTransformFact = z.infer<typeof layerTransformFactSchema>;
@@ -572,6 +591,27 @@ export const sceneEvidenceResponseSchema = z
       .nullable()
       .optional()
       .transform((value) => value ?? null),
+    /**
+     * REAL 2026-09-27 REELS-LAYOUT INCIDENT - a deterministic, measured
+     * PROPOSAL for the native 1080x1920 layout of this composition's own
+     * top-level layers, derived by output-layout-proposal.ts from the
+     * `layerTransformFacts` above (same scan, same frame, no second read)
+     * whenever describeLayerTransforms was requested.
+     *
+     * It is evidence offered to the human approval surface, exactly like
+     * every other field on this response - it pre-fills the Reels layout
+     * form and is edited and approved there. It is NOT an instruction and
+     * has no path into execution: BUILD_REELS_COMPOSITION still applies
+     * only the `layerTransforms` persisted on the approved plan
+     * (layerTransformSchema's own doc comment, and CLAUDE.md's Runtime AI
+     * rule). Layers the rule cannot safely adapt appear in
+     * `proposal.refusals` WITH their reason - never silently missing.
+     *
+     * Same absent-key version-skew tolerance as every field above.
+     */
+    reelsLayoutProposal: outputLayoutProposalSchema.nullable().optional(),
+    /** Present only when a proposal was attempted but could not be derived (e.g. the composition's own frame size was not measured) - kept distinct from `reelsLayoutProposal: null` meaning "not requested". */
+    reelsLayoutProposalFailureReason: z.string().nullable().optional(),
     /**
      * Present ONLY when `describeLayerAtTime` was requested (no
      * null-defaulting transform on purpose): every other evidence response

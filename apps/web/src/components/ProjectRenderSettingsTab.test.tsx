@@ -5,6 +5,7 @@ import { en } from "../lib/i18n/dictionaries/en";
 import { he } from "../lib/i18n/dictionaries/he";
 import { ProjectRenderSettingsTab } from "./ProjectRenderSettingsTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
+import { ProjectGuidanceProvider } from "./ProjectGuidanceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import { PROJECT_ID, SOURCE_SHA, manifestFixture, planFixture, projectDtoFixture, renderArtifactFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
@@ -85,7 +86,10 @@ function renderTab(): void {
   renderWithLocale(
     <DashboardStatusProvider>
       <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-        <ProjectRenderSettingsTab />
+        {/* The real tree always provides this (the project route's own layout); ReelsLayoutCard reads the shared plan-edit impact from it. */}
+        <ProjectGuidanceProvider projectId={PROJECT_ID}>
+          <ProjectRenderSettingsTab />
+        </ProjectGuidanceProvider>
       </ProjectWorkspaceProvider>
     </DashboardStatusProvider>
   );
@@ -155,8 +159,8 @@ describe("ProjectRenderSettingsTab - Final Outputs", () => {
  * partway through its own timeline. Read-only: only ever dispatches
  * INSPECT_SCENE_EVIDENCE, never touches plan/mappings/session state.
  */
-describe("ProjectRenderSettingsTab - Describe any composition (by manifest composition ID)", () => {
-  it("dispatches INSPECT_SCENE_EVIDENCE with the operator-typed compositionId, and renders the real per-layer timing facts once it succeeds", async () => {
+describe("ProjectRenderSettingsTab - Look inside any part of the template", () => {
+  it("dispatches INSPECT_SCENE_EVIDENCE for the composition the operator picked, and renders the real per-layer timing facts once it succeeds", async () => {
     const workerId = "44444444-4444-4444-4444-444444444444";
     const jobId = "55555555-5555-5555-5555-555555555555";
     stubFetchByUrl({
@@ -214,9 +218,9 @@ describe("ProjectRenderSettingsTab - Describe any composition (by manifest compo
       }
     });
     renderTab();
-    const input = await screen.findByLabelText("Manifest composition ID");
-    fireEvent.change(input, { target: { value: "comp-1" } });
-    const button = screen.getByRole("button", { name: "Describe composition" });
+    const input = await screen.findByLabelText("Which part of the template");
+    fireEvent.change(input, { target: { value: "comp-landscape" } });
+    const button = screen.getByRole("button", { name: "Read it" });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
 
@@ -232,7 +236,7 @@ describe("ProjectRenderSettingsTab - Describe any composition (by manifest compo
       workerId,
       projectId: PROJECT_ID,
       scenePlanId: "s1",
-      previewTimingDiscoverCompositionId: "comp-1",
+      previewTimingDiscoverCompositionId: "comp-landscape",
       previewTimingDescribeCompositionSummary: true
     });
 
@@ -312,11 +316,11 @@ describe("ProjectRenderSettingsTab - Describe any composition (by manifest compo
       }
     });
     renderTab();
-    const input = await screen.findByLabelText("Manifest composition ID");
-    fireEvent.change(input, { target: { value: "comp-1600" } });
-    const modeSelect = screen.getByLabelText("What to describe");
+    const input = await screen.findByLabelText("Which part of the template");
+    fireEvent.change(input, { target: { value: "comp-reels" } });
+    const modeSelect = screen.getByLabelText("What to report");
     fireEvent.change(modeSelect, { target: { value: "layerDetails" } });
-    const button = screen.getByRole("button", { name: "Describe composition" });
+    const button = screen.getByRole("button", { name: "Read it" });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
 
@@ -332,7 +336,7 @@ describe("ProjectRenderSettingsTab - Describe any composition (by manifest compo
       workerId,
       projectId: PROJECT_ID,
       scenePlanId: "s1",
-      previewTimingDiscoverCompositionId: "comp-1600",
+      previewTimingDiscoverCompositionId: "comp-reels",
       previewTimingDiscoverLayerDetails: true
     });
 
@@ -601,11 +605,13 @@ describe("ProjectRenderSettingsTab", () => {
     // The four tools are inside it, not scattered through the page.
     expect(drawer.textContent).toContain("Render capabilities");
 
-    // And the required setting comes before the drawer in document order.
+    // The page opens by saying what it is for (2026-09-27 non-developer
+    // audit), and the required setting still comes before the drawer.
     const grid = document.querySelector(".overview-grid") as HTMLElement;
-    const firstCard = grid.querySelector(".overview-section") as HTMLElement;
-    expect(firstCard.textContent).toContain("Landscape master");
-    expect(drawer.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    const cards = Array.from(grid.querySelectorAll(":scope > .overview-section")) as HTMLElement[];
+    expect(cards[0]?.textContent).toContain("Everything about turning this project into finished video files");
+    expect(cards[1]?.textContent).toContain("Landscape master");
+    expect(drawer.compareDocumentPosition(cards[1] as HTMLElement) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
 
   it("no longer gives two different cards the same name", () => {
@@ -625,7 +631,9 @@ describe("ProjectRenderSettingsTab", () => {
     renderWithLocale(
       <DashboardStatusProvider>
         <ProjectWorkspaceProvider projectId={PROJECT_ID}>
-          <ProjectRenderSettingsTab />
+          <ProjectGuidanceProvider projectId={PROJECT_ID}>
+            <ProjectRenderSettingsTab />
+          </ProjectGuidanceProvider>
         </ProjectWorkspaceProvider>
       </DashboardStatusProvider>,
       { locale: "he" }
