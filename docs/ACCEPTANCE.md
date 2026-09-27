@@ -803,3 +803,68 @@ geometry IS flat and readable (keyframed, parented, non-uniform scale),
 the landing box could be computed and shown. For the 3D case - the
 dominant one in practice - it could not, and a warning that appears for
 some refusals and not others would be read as "the rest are fine".
+
+## 2026-09-27 - production audit before client handover
+
+Run against live production, not a fixture: API and dashboard health, the
+worker registry, and every job failure of the last three days.
+
+**Healthy.** Dashboard HTTP 200, API ready, both workers heartbeating
+within seconds. Nine RENDER jobs in three days, zero failures.
+
+**The client's worker is materially behind, and it matters.** Worker
+`345ee0a4` (`DESKTOP-A629N4N`) heartbeats normally and holds all seven
+PRODUCTION capabilities, so the pipeline itself is available to it. The
+two it lacks - `RESTART_WORKER_SAFE`, `RUN_DIAGNOSTIC` - were added on
+**2026-09-12**, so its build predates that. `slotEvidenceMappingId` was
+added to `sceneEvidenceRequestSchema` on **2026-09-24**, and that schema
+is `.strict()`.
+
+That is not a hypothetical: three `INSPECT_SCENE_EVIDENCE` jobs failed on
+2026-09-25 with exactly this, and none since. **The client will hit the
+same failure on the slot-evidence path until the update is installed.**
+The update is required, not optional.
+
+### The failure was reported as a raw Zod dump (fixed)
+
+What a human was given as the entire reason:
+
+```
+[ { "code": "unrecognized_keys", "keys": [ "slotEvidenceMappingId" ], ... } ]
+```
+
+Correct to STORE - naming the exact key is what made the cause findable -
+and useless as the whole explanation offered to the person using the
+product. `apps/web/src/lib/explain-job-error.ts` now recognises this
+failure shape and adds one plain sentence: the editing computer is running
+an older worker than this server, and installing the latest worker update
+fixes it. Wired into the Jobs page (where every failure lands) and the New
+Project wizard (`INSPECT_TEMPLATE`, the first thing done on a new
+computer). **Shown alongside the raw reason, never instead of it** - an
+explanation that swallowed the evidence would have made this incident
+harder to diagnose, not easier.
+
+It recognises a failure that has already happened rather than predicting
+one, so it cannot false-alarm on a healthy worker. It matches Zod's
+machine-readable `code`, not any one field name, so a field added next
+year is explained just as well.
+
+**Why not a version check.** The worker reads its own build marker
+(`BUILD_INFO.json`) but never sends it: `buildHeartbeatPayload` carries
+status, capabilities, After Effects' version and nothing else. There is no
+worker version server-side to compare against. Sending it would be the
+better fix and is not done here.
+
+### Not defects - safety gates doing their job
+
+`AE_PROJECT_NOT_SAFE_TO_REPLACE` (six times: After Effects holding unsaved
+changes), `AE_NOT_CONNECTED` / `AE_TIMEOUT` (the bridge dropping while a
+human uses After Effects by hand), and `BUILD_HORIZONTAL_COMPOSITION`
+refusing a 3D layer. Each refused rather than damaged something.
+
+### Still open
+
+`Template inspection could not produce a valid manifest.` - eight
+occurrences in three days, and the single most common failure in the
+system. The message names no composition, no missing dependency and no
+next step. Not investigated here; it needs its own pass.

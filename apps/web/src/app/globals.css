@@ -3359,6 +3359,17 @@ a.workflow-stepper__step:hover {
   flex-direction: column;
 }
 
+/* The plain-language explanation that sits UNDER a raw job error, never
+   in place of it (JobsPage / explain-job-error.ts). Quieter than the raw
+   reason above it, and narrow enough to read in a table cell. */
+.jobs-history-card__explanation {
+  margin: 0.35rem 0 0;
+  max-width: 46ch;
+  font-size: 0.85em;
+  line-height: 1.45;
+  opacity: 0.85;
+}
+
 .jobs-history-scroll {
   flex: 1;
   min-height: 0;

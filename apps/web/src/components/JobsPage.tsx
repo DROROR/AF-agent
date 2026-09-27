@@ -10,6 +10,7 @@ import { PageHeader } from "./ui/PageHeader";
 import { Skeleton } from "./ui/Skeleton";
 import { computeOverviewMetrics } from "../lib/overview-metrics";
 import { useJobHistory } from "../lib/use-job-history";
+import { explainJobError } from "../lib/explain-job-error";
 
 /** Job history + errors (2026-08-29 closure requirement) - a dedicated card below "Currently active", covering completed/failed/in-progress jobs so no DB/curl access is ever needed to understand what happened. */
 function JobHistorySection(): ReactElement {
@@ -58,7 +59,15 @@ function JobHistorySection(): ReactElement {
                   <td>{job.executionSessionId ?? t.jobs.noSession}</td>
                   <td>{new Date(job.createdAt).toLocaleString()}</td>
                   <td>{job.completedAt ? new Date(job.completedAt).toLocaleString() : t.jobs.noProject}</td>
-                  <td>{job.error?.message ?? t.jobs.noReason}</td>
+                  {/* The raw reason always stays - it is what makes a
+                      cause findable. The explanation, when there is one,
+                      sits beside it rather than in place of it. */}
+                  <td>
+                    {job.error?.message ?? t.jobs.noReason}
+                    {explainJobError(job.error?.message) === "WORKER_BEHIND_SERVER" ? (
+                      <p className="jobs-history-card__explanation">{t.jobs.explanation.WORKER_BEHIND_SERVER}</p>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

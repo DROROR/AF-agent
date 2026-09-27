@@ -214,7 +214,11 @@ export const he: Dictionary = {
     reasonColumn: "סיבה",
     noProject: "—",
     noSession: "—",
-    noReason: "—"
+    noReason: "—",
+    explanation: {
+      WORKER_BEHIND_SERVER:
+        "בדרך כלל זה אומר שבמחשב העריכה רצה גרסה ישנה יותר של תוכנת העובד מזו שבשרת הזה: נשלח אליו פרט שהוא אינו מכיר, ולכן הוא דחה את כל המשימה. התקנת עדכון העובד האחרון במחשב הזה פותרת את הבעיה."
+    }
   },
   workers: {
     title: "עובדים",

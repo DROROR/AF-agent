@@ -220,7 +220,18 @@ export const en = {
     reasonColumn: "Reason",
     noProject: "—",
     noSession: "—",
-    noReason: "—"
+    noReason: "—",
+    /**
+     * REAL 2026-09-25: three jobs failed and showed a raw Zod issue array
+     * as the entire reason. It names the exact key, which is why it is
+     * still shown - but on its own it tells the person using the product
+     * nothing they can act on. Shown ALONGSIDE that raw text, never
+     * instead of it (see explain-job-error.ts).
+     */
+    explanation: {
+      WORKER_BEHIND_SERVER:
+        "This usually means the editing computer is running an older version of the worker software than this server: it was sent a detail it does not recognise, so it refused the whole job. Installing the latest worker update on that computer fixes it."
+    }
   },
   workers: {
     title: "Workers",

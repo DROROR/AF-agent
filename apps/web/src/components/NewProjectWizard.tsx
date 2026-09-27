@@ -10,6 +10,7 @@ import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { StatusBadge } from "./StatusBadge";
 import { ErrorState } from "./ErrorState";
+import { explainJobError } from "../lib/explain-job-error";
 import { EmptyState } from "./EmptyState";
 import { Skeleton } from "./ui/Skeleton";
 import { useLocale } from "./LocaleProvider";
@@ -442,11 +443,20 @@ export function NewProjectWizard(): ReactElement {
                 ) : null}
 
                 {job?.status === "FAILED" ? (
-                  job.error?.message ? (
-                    <ErrorState title={t.projectsNew.template.inspectionFailedTitle} description={job.error.message} />
-                  ) : (
-                    <ErrorState title={t.projectsNew.template.inspectionFailedTitle} />
-                  )
+                  <>
+                    {job.error?.message ? (
+                      <ErrorState title={t.projectsNew.template.inspectionFailedTitle} description={job.error.message} />
+                    ) : (
+                      <ErrorState title={t.projectsNew.template.inspectionFailedTitle} />
+                    )}
+                    {/* Inspecting a template is the first thing anyone does
+                        on a new editing computer, so it is the first place a
+                        worker older than this server shows up. The raw
+                        reason stays above; this only adds what to do. */}
+                    {explainJobError(job.error?.message) === "WORKER_BEHIND_SERVER" ? (
+                      <p className="state-panel__description">{t.jobs.explanation.WORKER_BEHIND_SERVER}</p>
+                    ) : null}
+                  </>
                 ) : null}
 
                 {inspectionResult ? (
