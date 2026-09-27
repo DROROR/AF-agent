@@ -65,7 +65,37 @@ function layerFact(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function jobBody(status: string, layerTransformFacts: unknown) {
+/**
+ * A measured layout proposal exactly as the worker now returns one beside
+ * the layer facts it was derived from (proposeOutputLayout, packages/schemas).
+ * Deliberately built from plain, generic numbers: no template's name, id or
+ * real coordinate appears anywhere in these tests - what is under test is
+ * that whatever the measurement says arrives in the fields and stays
+ * editable, not any particular number.
+ */
+function proposalFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    sourceFrame: { widthPx: 1920, heightPx: 1080 },
+    targetFrame: { widthPx: 1080, heightPx: 1920 },
+    backgroundCoverageRatio: 0.85,
+    proposals: [
+      {
+        layerIndex: 1,
+        layerName: "a layer",
+        role: "CONTENT",
+        positionX: 411,
+        positionY: 733,
+        scalePercent: 56.25,
+        sourceBounds: { left: 0, top: 0, width: 400, height: 200 },
+        proposedBounds: { left: 300, top: 700, width: 225, height: 112.5 }
+      }
+    ],
+    refusals: [],
+    ...overrides
+  };
+}
+
+function jobBody(status: string, layerTransformFacts: unknown, layoutProposal?: { proposal?: unknown; failureReason?: string | undefined }) {
   return {
     status: 200,
     body: {
@@ -90,7 +120,11 @@ function jobBody(status: string, layerTransformFacts: unknown) {
                 layerDetails: null,
                 layerDetailsFailureReason: null,
                 capturedAt: new Date().toISOString(),
-                layerTransformFacts
+                layerTransformFacts,
+                // Absent entirely unless a test supplies one - exactly how an
+                // editing computer that has not been redeployed yet replies.
+                ...(layoutProposal?.proposal === undefined ? {} : { reelsLayoutProposal: layoutProposal.proposal }),
+                ...(layoutProposal?.failureReason === undefined ? {} : { reelsLayoutProposalFailureReason: layoutProposal.failureReason })
               },
         error: null,
         checkpoint: null,
@@ -133,7 +167,15 @@ function sessionBody(overrides: Record<string, unknown> = {}) {
 }
 
 function setup(
-  options: { layerFacts?: unknown[]; reelsLayout?: unknown; calls?: RecordedFetchCall[]; planStatus?: string; session?: unknown } = {}
+  options: {
+    layerFacts?: unknown[];
+    reelsLayout?: unknown;
+    calls?: RecordedFetchCall[];
+    planStatus?: string;
+    session?: unknown;
+    proposal?: unknown;
+    proposalFailureReason?: string;
+  } = {}
 ): void {
   const scene = sceneFixture({ id: "s1", manifestCompositionId: "c1", ...(options.reelsLayout === undefined ? {} : { reelsLayout: options.reelsLayout }) });
   stubFetchByUrl(
@@ -145,7 +187,10 @@ function setup(
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: options.session ?? null } },
-      [`/api/jobs/${JOB_ID}`]: jobBody("SUCCEEDED", options.layerFacts ?? [layerFact()]),
+      [`/api/jobs/${JOB_ID}`]: jobBody("SUCCEEDED", options.layerFacts ?? [layerFact()], {
+        proposal: options.proposal,
+        failureReason: options.proposalFailureReason
+      }),
       "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId: WORKER_ID, operation: "INSPECT_SCENE_EVIDENCE", status: "QUEUED", createdAt: new Date().toISOString() } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
@@ -188,17 +233,137 @@ async function chooseSceneAndReadLayers(): Promise<void> {
  *
  * Zero Reels compositions had ever been built (docs/ACCEPTANCE.md,
  * 2026-09-24) - not because the build was missing, but because no screen ever
- * asked a human for the layout it needs. These tests hold the one rule that
- * made this screen non-obvious: the coordinates are a HUMAN decision, so the
- * dashboard shows facts and never produces a number of its own.
+ * asked a human for the layout it needs. Then the layouts a human produced
+ * from empty fields came out wrong twice in a row (2026-09-27), so the scene
+ * is measured now and the fields arrive filled in.
+ *
+ * The rule these tests hold is therefore the narrower, stronger one: NO
+ * VALUE IS EVER APPLIED THAT THE REVIEWER DID NOT APPROVE. The measurement
+ * fills the form in; what is SAVED is whatever stands in the fields when the
+ * button is pressed. Both halves have to be proved together - "the fields
+ * are populated" alone would pass on a screen that ignored every edit, and
+ * "the edit is saved" alone would pass on the empty form that caused the
+ * incident.
  */
 describe("ReelsLayoutCard", () => {
-  it("never pre-fills a coordinate: the fields start empty next to the real current values, and nothing can be saved until the reviewer types them", async () => {
+  /**
+   * THE WHOLE GUARANTEE, IN ONE TEST. Two layers arrive measured and filled
+   * in; the reviewer disagrees with one of them and changes it; what goes
+   * out is the changed value for that layer and the measured value for the
+   * other. Neither half of that is checkable on its own.
+   */
+  it("arrives filled in from the measured scene, and saves the reviewer's own change in place of the measured value", async () => {
+    const calls: RecordedFetchCall[] = [];
+    setup({
+      calls,
+      layerFacts: [layerFact({ layerIndex: 1 }), layerFact({ layerIndex: 2, layerName: "another layer" })],
+      proposal: proposalFixture({
+        proposals: [
+          {
+            layerIndex: 1,
+            layerName: "a layer",
+            role: "BACKGROUND",
+            positionX: 540,
+            positionY: 960,
+            scalePercent: 177.778,
+            sourceBounds: { left: 0, top: 0, width: 1920, height: 1080 },
+            proposedBounds: { left: -1166.7, top: 0, width: 3413.3, height: 1920 }
+          },
+          {
+            layerIndex: 2,
+            layerName: "another layer",
+            role: "CONTENT",
+            positionX: 411,
+            positionY: 733,
+            scalePercent: 56.25,
+            sourceBounds: { left: 0, top: 0, width: 400, height: 200 },
+            proposedBounds: { left: 300, top: 700, width: 225, height: 112.5 }
+          }
+        ]
+      })
+    });
+    renderCard();
+    await chooseSceneAndReadLayers();
+
+    // Both layers are already ticked and already carry the measured numbers -
+    // no click was needed to reveal a field, and nothing was typed.
+    const xFields = screen.getAllByLabelText("X (pixels)") as HTMLInputElement[];
+    const yFields = screen.getAllByLabelText("Y (pixels)") as HTMLInputElement[];
+    const scaleFields = screen.getAllByLabelText("Scale (%)") as HTMLInputElement[];
+    expect([xFields[0]?.value, yFields[0]?.value, scaleFields[0]?.value]).toEqual(["540", "960", "177.778"]);
+    expect([xFields[1]?.value, yFields[1]?.value, scaleFields[1]?.value]).toEqual(["411", "733", "56.25"]);
+
+    // The measured verdict behind those numbers is stated, not just asserted.
+    expect(screen.getByText(/Measured as this scene's background/)).toBeTruthy();
+    expect(screen.getByText(/Measured as content/)).toBeTruthy();
+
+    // The reviewer disagrees with the second layer and moves it.
+    fireEvent.change(yFields[1] as HTMLInputElement, { target: { value: "1400" } });
+    fireEvent.change(screen.getByLabelText("Name for the vertical composition"), { target: { value: "a name the reviewer chose" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save this Reels layout" }));
+
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH");
+      expect(patch).toBeTruthy();
+      expect((patch?.body as { operations: unknown[] }).operations).toContainEqual({
+        type: "SET_REELS_LAYOUT",
+        scenePlanId: "s1",
+        reelsCompositionName: "a name the reviewer chose",
+        layerTransforms: [
+          // Untouched: exactly what was measured and shown.
+          { layerIndex: 1, manifestPlaceholderId: "ph-1", positionX: 540, positionY: 960, scalePercent: 177.778 },
+          // Changed: the reviewer's number, never the measured 733.
+          { layerIndex: 2, manifestPlaceholderId: null, positionX: 411, positionY: 1400, scalePercent: 56.25 }
+        ]
+      });
+    });
+  });
+
+  /**
+   * A measurement that refuses a layer says so, by name and in plain words -
+   * a layer that quietly vanished from this screen is a gap found by eye in
+   * the finished video, or as a failed job hours later.
+   */
+  it("names every layer the measurement cannot help with, and offers no fields for them", async () => {
+    setup({
+      layerFacts: [layerFact({ layerIndex: 1 }), layerFact({ layerIndex: 2, layerName: "a second layer" }), layerFact({ layerIndex: 3, layerName: "a third layer" })],
+      proposal: proposalFixture({
+        refusals: [
+          { layerIndex: 2, layerName: "a second layer", reason: "PARENTED_LAYER", detail: "english prose from the worker" },
+          { layerIndex: 3, layerName: "a third layer", reason: "NON_UNIFORM_SOURCE_SCALE", detail: "english prose from the worker" }
+        ]
+      })
+    });
+    renderCard();
+    await chooseSceneAndReadLayers();
+
+    expect(screen.getByText("Layers this cannot help with")).toBeTruthy();
+    expect(screen.getByText(/Layer 2: a second layer/)).toBeTruthy();
+    expect(screen.getByText(/It is attached to another layer/)).toBeTruthy();
+    expect(screen.getByText(/Layer 3: a third layer/)).toBeTruthy();
+    expect(screen.getByText(/stretched by different amounts across and down/)).toBeTruthy();
+    // The worker's own English sentence is a fallback, never what is read.
+    expect(screen.queryByText(/english prose from the worker/)).toBeNull();
+
+    // Only the one layer the measurement could adapt is offered at all.
+    expect(screen.getAllByLabelText("X (pixels)")).toHaveLength(1);
+  });
+
+  /**
+   * AN ABSENT PROPOSAL IS "NOT MEASURED", NEVER "NOTHING TO DO". The usual
+   * cause is an editing computer still running an older worker, and the card
+   * has to keep working exactly as it did before that measurement existed:
+   * empty fields, nothing saveable until the reviewer types.
+   */
+  it("says the scene was not measured when the worker sent no proposal, and behaves exactly as it did before", async () => {
     setup();
     renderCard();
     await chooseSceneAndReadLayers();
 
-    // The scan's real values are shown as context...
+    expect(screen.getByText("This scene was not measured")).toBeTruthy();
+    expect(screen.getByText(/still running an older version of the worker software/)).toBeTruthy();
+
+    // The scan's real values are still shown as context...
     expect(screen.getByText(/position 640, 360/)).toBeTruthy();
     expect(screen.getByText(/scale 100, 100/)).toBeTruthy();
 
@@ -208,6 +373,15 @@ describe("ReelsLayoutCard", () => {
     expect((screen.getByLabelText("Y (pixels)") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Scale (%)") as HTMLInputElement).value).toBe("");
     expect((screen.getByRole("button", { name: "Save this Reels layout" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("repeats the worker's own reason when the measurement was attempted and failed", async () => {
+    setup({ proposalFailureReason: "the reason the worker actually gave" });
+    renderCard();
+    await chooseSceneAndReadLayers();
+
+    expect(screen.getByText(/The reason given: the reason the worker actually gave/)).toBeTruthy();
+    expect(screen.queryByText(/still running an older version of the worker software/)).toBeNull();
   });
 
   it("saves exactly the layers ticked and the numbers typed, against the manifest's own placeholder for that layer", async () => {

@@ -753,14 +753,25 @@ export const en = {
       buildHorizontalNotReadyDescription: "The approved scene must finish executing (see the Preview tab) before a Landscape master can be built from it.",
       reelsLayout: {
         title: "Reels layout (1080×1920)",
+        /**
+         * REAL 2026-09-27. This card used to say, in as many words, that
+         * nothing here measures or fills anything in - and that was true,
+         * which is exactly why two hand-made vertical layouts came out
+         * wrong. The scene is now measured and the fields arrive filled in.
+         * The guarantee that actually holds is narrower and stronger, and
+         * every line of copy on this screen has to carry it: NO VALUE IS
+         * EVER APPLIED THAT THE REVIEWER DID NOT APPROVE. The system
+         * measures and proposes; the person checks, changes and saves; only
+         * what was saved is ever executed.
+         */
         description:
-          "Where each layer of a scene sits in the vertical frame. These numbers are your decision - nothing here measures, calculates or fills them in for you. Saving records the layout on the plan; the vertical composition itself is built the next time this scene is executed.",
+          "Where each layer of a scene sits in the vertical frame. The scene is measured for you and these fields arrive filled in, so you are checking a starting point instead of working one out. Nothing is ever applied that you did not approve: change anything you disagree with, then save. Only what you save is used, and the vertical composition itself is built the next time this scene is executed.",
         noScenesTitle: "No scenes to lay out",
         noScenesDescription: "This project has no execution plan with an included scene yet - approve the scene mapping first.",
         sceneLabel: "Scene",
         scenePlaceholderOption: "Choose a scene",
         readLayersHint:
-          "Read-only. Asks the worker to report each top-level layer of this scene, with the position and scale After Effects really holds for it and whether either is animated. Nothing is changed and no value is copied into the fields below.",
+          "Read-only. Asks your editing computer to report each top-level layer of this scene: the position, the scale and the real size After Effects holds for it, and whether any of it is animated. Nothing in the template is changed. The fields below are then filled in from those measurements, for you to check and change.",
         readLayersAction: "Read this scene's layers",
         readingLayers: "Reading…",
         readFailedTitle: "Could not read this scene's layers",
@@ -770,7 +781,52 @@ export const en = {
         noLayersTitle: "No top-level layers reported",
         noLayersDescription: "After Effects reported no top-level layer in this scene's composition, so there is nothing to place in the vertical frame.",
         layersTitle: "Layers in this scene",
-        valuesAreYours: "Every X, Y and scale below is yours. The values on the left are what the source composition holds today, shown so you can see what you are moving - they are never copied into the fields.",
+        valuesAreYours:
+          "These fields start filled in from what was measured in the scene - from each layer's real size and position, never from its name. Every one of them is yours to change. The vertical composition is built from what you save here and from nothing else, so nothing reaches the video until you have approved it.",
+        /** Shown when a measured layout really did arrive - the heading that tells the reviewer what they are looking at before they read a single number. */
+        proposalTitle: "Filled in from the measured scene",
+        proposalSummary: (proposedCount: number): string =>
+          `${proposedCount} ${proposedCount === 1 ? "layer was" : "layers were"} measured and filled in below. Read them, change anything you disagree with, and save - nothing is applied until you do.`,
+        proposalRoleBackground:
+          "Measured as this scene's background: it fills the frame today, so it is enlarged to cover the taller frame completely. That is what stops a black band appearing above and below the video.",
+        proposalRoleContent:
+          "Measured as content: it keeps its own real size, is made smaller only if it would not otherwise fit, and is kept inside the frame so nothing is cut off at the edges.",
+        /**
+         * An absent measurement is "not measured", never "nothing to do" -
+         * so it is said out loud, with the reason when there is one. The
+         * usual cause is an editing computer still running an older worker.
+         */
+        proposalMissingTitle: "This scene was not measured",
+        proposalMissingWithReason: (reason: string): string =>
+          `The layout could not be measured, so the fields below start empty and every number is yours to enter. The reason given: ${reason}`,
+        proposalMissingUnknown:
+          "The scan did not return a measured layout, so the fields below start empty and every number is yours to enter. This usually means your editing computer is still running an older version of the worker software.",
+        refusalsTitle: "Layers this cannot help with",
+        refusalsHint:
+          "Nothing was worked out for these, and nothing will be changed in them: each one keeps exactly what the template gives it in the vertical composition.",
+        /**
+         * One plain sentence per typed refusal reason. The proposal also
+         * carries an English `detail` sentence, which is only ever a
+         * fallback - what a reader sees is written here, in their own
+         * language.
+         */
+        refusalReason: {
+          KEYFRAMED_POSITION_OR_SCALE:
+            "Its position or scale is animated. Writing one fixed position over that would destroy the animation, so the layer is left exactly as the template has it.",
+          THREE_D_LAYER: "It is a 3D layer. Where it lands on screen depends on the camera as well, which this flat measurement does not cover.",
+          PARENTED_LAYER: "It is attached to another layer. Moving it on its own, while the layer it follows stays where it is, would place it wrongly.",
+          CAMERA_LAYER: "It is a camera. A camera has no size on screen and no scale to move.",
+          LAYER_DISABLED: "It is switched off in the template, so there is nothing to move.",
+          NO_VIDEO_CONTENT: "It has no picture of its own - it is sound, or a guide - so there is nothing to move.",
+          GEOMETRY_NOT_MEASURED:
+            "The scan did not report everything needed about this layer. Reading this scene's layers again usually fixes it.",
+          UNREADABLE_TRANSFORM: "Its position, scale or anchor point could not be read at all.",
+          UNREADABLE_BOUNDS: "Its real size on screen could not be read, so there is no way to tell how much room it needs.",
+          NON_UNIFORM_SOURCE_SCALE:
+            "It is stretched by different amounts across and down. A saved layout carries one scale for both directions, and any single value would change this layer's shape.",
+          DEGENERATE_GEOMETRY:
+            "As the template leaves it, it has no real size on screen - scaled to nothing, or mirrored - so there is no honest way to place it."
+        },
         /**
          * REAL 2026-09-27: the first hand-made vertical render came out with
          * the content cut off at both sides and empty bands above and below,
@@ -796,8 +852,9 @@ export const en = {
         positionXLabel: "X (pixels)",
         positionYLabel: "Y (pixels)",
         scaleLabel: "Scale (%)",
-        framePreviewTitle: "Where you have placed them",
-        framePreviewHint: "The 1080×1920 frame, with a marker at each position you have entered. It shows your own numbers back to you and never suggests any.",
+        framePreviewTitle: "Where they will sit",
+        framePreviewHint:
+          "The 1080×1920 frame, with a marker at every position now in the fields - filled in or changed by you, it always shows what is there right now. The background layer is marked apart from the rest.",
         framePreviewAlt: "The 1080 by 1920 frame with a marker at each position entered",
         outsideFrameWarning: "A position you entered falls outside the 1080×1920 frame. That is allowed - the layer simply will not be visible.",
         incompleteWarning: "Every layer you tick needs an X, a Y and a scale greater than 0.",

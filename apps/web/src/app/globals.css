@@ -2614,6 +2614,39 @@ a.workflow-stepper__step:hover {
   color: var(--color-negative-text);
 }
 
+/* Why the filled-in numbers for this layer are what they are - a measured
+   verdict about its own geometry, stated beside the fields it explains. */
+.reels-layout-role {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+/* The measured layout that could not be derived at all: not an empty form
+   the reviewer was always meant to fill in from nothing, and styled so it
+   does not read like one. */
+.reels-layout-unmeasured,
+.reels-layout-refusals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-neutral-border);
+  border-inline-start-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-bg);
+  color: var(--color-neutral-text);
+}
+
+.reels-layout-unmeasured p,
+.reels-layout-refusals p {
+  margin: 0;
+}
+
+.reels-layout-refusals ul {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+}
+
 .reels-layout-include {
   display: flex;
   align-items: center;
@@ -2664,6 +2697,13 @@ a.workflow-stepper__step:hover {
   color: var(--color-text-on-primary);
   font-size: 0.7rem;
   line-height: 1.4;
+}
+
+/* The layer measured as this scene's background - marked apart so a reviewer
+   can see at a glance which one covers the frame. */
+.reels-layout-frame__marker[data-role="BACKGROUND"] {
+  background: var(--brand-primary);
+  color: var(--brand-primary-contrast);
 }
 
 /* ==========================================================================

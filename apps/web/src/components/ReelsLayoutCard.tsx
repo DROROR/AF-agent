@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, type ReactElement } from "react";
-import { sceneEvidenceResponseSchema, type AnimatablePropertyFact, type LayerTransform, type LayerTransformFact, type ScenePlanEntry } from "@dyo/schemas";
+import {
+  sceneEvidenceResponseSchema,
+  type AnimatablePropertyFact,
+  type LayerTransform,
+  type LayerTransformFact,
+  type OutputLayoutProposal,
+  type OutputLayoutProposalEntry,
+  type OutputLayoutRefusalReason,
+  type ScenePlanEntry
+} from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectGuidance } from "./ProjectGuidanceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
@@ -20,27 +29,49 @@ import { resolveProjectWorker } from "../lib/resolve-project-worker";
 /**
  * THE NATIVE REELS LAYOUT SURFACE.
  *
- * Until today the native 1080x1920 output was unreachable from the dashboard:
- * the edit operation (SET_REELS_LAYOUT), the worker build
+ * The native 1080x1920 output was unreachable from the dashboard until
+ * 2026-09-24: the edit operation (SET_REELS_LAYOUT), the worker build
  * (BUILD_REELS_COMPOSITION) and the persisted `reelsLayout` all existed and
  * were tested, and no screen anywhere asked a human for the one thing they
- * need - so the 2026-09-24 end-to-end run rendered Landscape only and the
- * database had never held a single Reels composition (docs/ACCEPTANCE.md).
+ * need - so that end-to-end run rendered Landscape only and the database had
+ * never held a single Reels composition (docs/ACCEPTANCE.md).
  *
- * The values are a HUMAN decision, and this screen is built around that rule
- * rather than around convenience:
+ * WHAT CHANGED ON 2026-09-27, AND WHAT DID NOT. This card used to state, in
+ * its own copy, that "nothing here measures, calculates, suggests or
+ * pre-fills a coordinate" - and it really did not. Two hand-made vertical
+ * layouts were produced from those empty fields and both were wrong in the
+ * two ways plain arithmetic is always wrong: positions mapped into the new
+ * frame with the scales left alone (1920-wide artwork sliced off both
+ * edges), then everything scaled to the new width (the background shrank
+ * with it and the top 38% of the video came out black). Those are facts
+ * about measured geometry, not something a person should be left to work out
+ * per layer in their head, so the fields now ARRIVE FILLED IN from
+ * `proposeOutputLayout` (packages/schemas/src/output-layout-proposal.ts),
+ * computed from each layer's real `sourceRectAtTime` box and never from a
+ * layer's name.
  *
- *   - Nothing here measures, calculates, suggests or pre-fills a coordinate.
- *     Every X, Y and scale that reaches the plan was typed by the reviewer.
- *     The source composition's own current values are shown BESIDE the fields
- *     as context and are never copied into them, because a value the reviewer
- *     did not choose is exactly what layerTransformSchema's own doc comment
- *     forbids ("no AI guessing coordinates at execution time").
+ * The invariant this screen is built on is therefore narrower than it was,
+ * and stronger: NO VALUE IS EVER APPLIED THAT THE REVIEWER DID NOT APPROVE.
+ * The system measures and proposes; the person reads, changes anything they
+ * disagree with, and saves; execution uses ONLY what was saved
+ * (layerTransformSchema's own doc comment, and CLAUDE.md's Runtime AI rule).
+ * Concretely:
+ *
+ *   - Every pre-filled X, Y and scale stays fully editable, and what is sent
+ *     is whatever stands in the fields at the moment Save is pressed - the
+ *     proposal has no path of its own into the plan.
+ *   - A layer the measurement cannot safely adapt is REFUSED with its
+ *     reason and listed as such, never silently dropped and never guessed at.
+ *   - An ABSENT proposal means "this scene was not measured" - said out loud,
+ *     with `reelsLayoutProposalFailureReason` when the worker gave one - and
+ *     the card falls back to exactly its previous empty-field behaviour. It
+ *     never means "there is nothing to do here".
  *   - The composition name is typed, never generated from the scene's name.
- *   - The frame diagram plots only the numbers the reviewer has entered. It
- *     is a mirror, not a suggestion.
+ *   - The frame diagram plots the numbers that are in the fields right now,
+ *     proposed or edited. It is a mirror of the current state, never a
+ *     separate suggestion.
  *
- * The one value this screen does resolve for itself is
+ * The one other value this screen resolves for itself is
  * `manifestPlaceholderId`: looked up from the project's OWN manifest by the
  * composition and layer index the scan reported - a recorded fact about which
  * placeholder lives on that layer, not a coordinate and not a judgement. A
@@ -73,6 +104,26 @@ function emptyEntry(): LayerEntryFormState {
   return { include: false, positionX: "", positionY: "", scalePercent: "" };
 }
 
+/**
+ * The measured proposal turned into exactly what the form holds: one string
+ * per field, already ticked. This is the ONLY place a proposed number enters
+ * this card, and it enters as form state - editable, overwritable, and read
+ * back out of the fields when Save is pressed. There is no second path from
+ * a proposal into the plan.
+ */
+function prefilledEntries(proposal: OutputLayoutProposal): Record<number, LayerEntryFormState> {
+  const prefilled: Record<number, LayerEntryFormState> = {};
+  for (const entry of proposal.proposals) {
+    prefilled[entry.layerIndex] = {
+      include: true,
+      positionX: String(entry.positionX),
+      positionY: String(entry.positionY),
+      scalePercent: String(entry.scalePercent)
+    };
+  }
+  return prefilled;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -88,9 +139,20 @@ function formatPropertyValue(fact: AnimatablePropertyFact | null): string | null
 }
 
 /**
- * Why a layer cannot be given a target here - the two real refusals, made
- * visible while the reviewer is choosing rather than discovered as a failed
- * job hours later:
+ * Why a layer cannot be given a target here, made visible while the reviewer
+ * is choosing rather than discovered as a failed job hours later.
+ *
+ * ONE ANSWER, NOT TWO. When a measured proposal is present it is the only
+ * authority: a layer it proposed numbers for is offerable, a layer it refused
+ * carries that refusal and its typed reason, and this function computes
+ * nothing of its own. Re-deriving a second verdict from the same facts is how
+ * a screen ends up disagreeing with the rule that actually runs - the
+ * proposal's own refusal order (a parented AND keyframed layer is reported as
+ * parented) would not survive being recomputed here.
+ *
+ * Only with NO proposal at all - an older worker - does the local fallback
+ * apply, and then it is deliberately the SAME pair of refusals this card has
+ * always made:
  *
  *   - `ANIMATED`: the build refuses to write a static transform over
  *     keyframed position/scale rather than destroying that animation
@@ -102,14 +164,29 @@ function formatPropertyValue(fact: AnimatablePropertyFact | null): string | null
  *     all (a camera layer genuinely has no scale), so there is nothing to
  *     target.
  */
-type LayerRefusal = "ANIMATED" | "UNREADABLE" | null;
+export type LayerRefusal =
+  | { source: "LOCAL"; kind: "ANIMATED" | "UNREADABLE" }
+  | { source: "PROPOSAL"; reason: OutputLayoutRefusalReason; detail: string }
+  | null;
 
-export function layerRefusalFor(layer: LayerTransformFact): LayerRefusal {
+export function layerRefusalFor(layer: LayerTransformFact, proposal: OutputLayoutProposal | null = null): LayerRefusal {
+  if (proposal !== null) {
+    if (proposal.proposals.some((entry) => entry.layerIndex === layer.layerIndex)) {
+      return null;
+    }
+    const refused = proposal.refusals.find((entry) => entry.layerIndex === layer.layerIndex);
+    if (refused) {
+      return { source: "PROPOSAL", reason: refused.reason, detail: refused.detail };
+    }
+    // A layer the proposal mentions in neither list is a shape this
+    // dashboard has never seen. Falling through to the local rule keeps the
+    // layer visible and offerable rather than inventing a verdict for it.
+  }
   if (layer.position === null || layer.scale === null) {
-    return "UNREADABLE";
+    return { source: "LOCAL", kind: "UNREADABLE" };
   }
   if (layer.position.animated || layer.scale.animated) {
-    return "ANIMATED";
+    return { source: "LOCAL", kind: "ANIMATED" };
   }
   return null;
 }
@@ -137,6 +214,14 @@ export function ReelsLayoutCard(): ReactElement | null {
   const [scenePlanId, setScenePlanId] = useState("");
   const [reelsCompositionName, setReelsCompositionName] = useState("");
   const [layerFacts, setLayerFacts] = useState<LayerTransformFact[] | null>(null);
+  /**
+   * The measured proposal that came back with the SAME layer read - kept
+   * beside the facts it was derived from, and null whenever the worker sent
+   * none. Null is "this scene was not measured", never "nothing to do": the
+   * card says so on screen and falls back to empty fields.
+   */
+  const [layoutProposal, setLayoutProposal] = useState<OutputLayoutProposal | null>(null);
+  const [proposalFailureReason, setProposalFailureReason] = useState<string | null>(null);
   const [entries, setEntries] = useState<Record<number, LayerEntryFormState>>({});
   const [isReadingLayers, setIsReadingLayers] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -174,6 +259,11 @@ export function ReelsLayoutCard(): ReactElement | null {
     return null;
   }
 
+  /** The measured proposal for one layer, or null - a lookup on layerIndex, never a guess and never a match on a name. */
+  function proposalEntryFor(layerIndex: number): OutputLayoutProposalEntry | null {
+    return layoutProposal?.proposals.find((entry) => entry.layerIndex === layerIndex) ?? null;
+  }
+
   function entryFor(layerIndex: number): LayerEntryFormState {
     return entries[layerIndex] ?? emptyEntry();
   }
@@ -185,9 +275,14 @@ export function ReelsLayoutCard(): ReactElement | null {
   /**
    * Read-only: dispatches the EXISTING generic layer-transform scan against
    * this scene's own composition (the same capability the Render Settings
-   * diagnostics already use) and reports what After Effects really holds -
-   * position, scale, and whether either is keyframed. Nothing is mutated,
-   * nothing is saved, and the result is never turned into a suggested value.
+   * diagnostics already use, and no new endpoint) and reports what After
+   * Effects really holds - position, scale, real bounding box, and whether
+   * any of it is keyframed. Nothing is mutated and nothing is saved.
+   *
+   * The same response carries the measured layout proposal derived from
+   * those very facts, which is what fills the fields in below. Filling a
+   * field in is not applying it: the reviewer reads, edits and saves, and
+   * only the saved values are ever executed.
    */
   async function handleReadLayers(): Promise<void> {
     if (!worker || !selectedScene) {
@@ -196,6 +291,8 @@ export function ReelsLayoutCard(): ReactElement | null {
     setIsReadingLayers(true);
     setReadError(null);
     setLayerFacts(null);
+    setLayoutProposal(null);
+    setProposalFailureReason(null);
     setEntries({});
     const dispatched = await dispatchJob({
       operation: "INSPECT_SCENE_EVIDENCE",
@@ -238,6 +335,13 @@ export function ReelsLayoutCard(): ReactElement | null {
         setReadError(parsed.data.layerTransformFactsFailureReason ?? t.projectWorkspace.renderSettings.reelsLayout.readNoLayers);
         return;
       }
+      // Absent on an older worker, which must not break the read - the card
+      // then behaves exactly as it did before, with empty fields and a line
+      // saying the scene was not measured.
+      const proposal = parsed.data.reelsLayoutProposal ?? null;
+      setLayoutProposal(proposal);
+      setProposalFailureReason(parsed.data.reelsLayoutProposalFailureReason ?? null);
+      setEntries(proposal === null ? {} : prefilledEntries(proposal));
       setLayerFacts(parsed.data.layerTransformFacts);
       return;
     }
@@ -253,7 +357,7 @@ export function ReelsLayoutCard(): ReactElement | null {
     const transforms: LayerTransform[] = [];
     for (const layer of layerFacts) {
       const entry = entryFor(layer.layerIndex);
-      if (!entry.include || layerRefusalFor(layer) !== null) {
+      if (!entry.include || layerRefusalFor(layer, layoutProposal) !== null) {
         continue;
       }
       const positionX = typedNumber(entry.positionX);
@@ -273,7 +377,7 @@ export function ReelsLayoutCard(): ReactElement | null {
     return transforms.length === 0 ? null : transforms;
   }
 
-  const includedCount = (layerFacts ?? []).filter((layer) => entryFor(layer.layerIndex).include && layerRefusalFor(layer) === null).length;
+  const includedCount = (layerFacts ?? []).filter((layer) => entryFor(layer.layerIndex).include && layerRefusalFor(layer, layoutProposal) === null).length;
   const layerTransforms = buildLayerTransforms();
   const isIncomplete = includedCount > 0 && layerTransforms === null;
   const outsideFrame = (layerTransforms ?? []).some(
@@ -374,6 +478,8 @@ export function ReelsLayoutCard(): ReactElement | null {
                 // fact and every typed number belongs to the old one.
                 setScenePlanId(event.target.value);
                 setLayerFacts(null);
+                setLayoutProposal(null);
+                setProposalFailureReason(null);
                 setEntries({});
                 setReadError(null);
                 setSaveError(null);
@@ -446,7 +552,32 @@ export function ReelsLayoutCard(): ReactElement | null {
               <p>
                 <strong>{t.projectWorkspace.renderSettings.reelsLayout.layersTitle}</strong>
               </p>
-              <p>{t.projectWorkspace.renderSettings.reelsLayout.valuesAreYours}</p>
+              {/*
+                Measured or not measured, said out loud. An absent proposal
+                is never allowed to look like an empty form the reviewer was
+                always meant to fill in from nothing - it is a scene that was
+                not measured, with the worker's own reason when there is one.
+              */}
+              {layoutProposal === null ? (
+                <div className="reels-layout-unmeasured">
+                  <p>
+                    <strong>{t.projectWorkspace.renderSettings.reelsLayout.proposalMissingTitle}</strong>
+                  </p>
+                  <p>
+                    {proposalFailureReason === null
+                      ? t.projectWorkspace.renderSettings.reelsLayout.proposalMissingUnknown
+                      : t.projectWorkspace.renderSettings.reelsLayout.proposalMissingWithReason(proposalFailureReason)}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p>
+                    <strong>{t.projectWorkspace.renderSettings.reelsLayout.proposalTitle}</strong>
+                  </p>
+                  <p>{t.projectWorkspace.renderSettings.reelsLayout.proposalSummary(layoutProposal.proposals.length)}</p>
+                  <p>{t.projectWorkspace.renderSettings.reelsLayout.valuesAreYours}</p>
+                </>
+              )}
               <p>
                 {sourceComposition
                   ? t.projectWorkspace.renderSettings.reelsLayout.sourceFrameFact(sourceComposition.widthPx, sourceComposition.heightPx)
@@ -454,7 +585,14 @@ export function ReelsLayoutCard(): ReactElement | null {
               </p>
               <p>{t.projectWorkspace.renderSettings.reelsLayout.scaleRelationshipNote}</p>
               {layerFacts.map((layer) => {
-                const refusal = layerRefusalFor(layer);
+                const refusal = layerRefusalFor(layer, layoutProposal);
+                // A layer the measurement refused is reported in one place -
+                // the list below, with its reason - rather than half here
+                // and half there.
+                if (refusal !== null && refusal.source === "PROPOSAL") {
+                  return null;
+                }
+                const proposed = proposalEntryFor(layer.layerIndex);
                 const entry = entryFor(layer.layerIndex);
                 const position = formatPropertyValue(layer.position);
                 const scale = formatPropertyValue(layer.scale);
@@ -467,8 +605,20 @@ export function ReelsLayoutCard(): ReactElement | null {
                         : t.projectWorkspace.renderSettings.reelsLayout.currentValues(position, scale)}
                     </p>
                     {layer.threeDLayer ? <p>{t.projectWorkspace.renderSettings.reelsLayout.layerIsThreeD}</p> : null}
-                    {refusal === "ANIMATED" ? <p className="reels-layout-refusal">{t.projectWorkspace.renderSettings.reelsLayout.layerAnimatedRefusal}</p> : null}
-                    {refusal === "UNREADABLE" ? (
+                    {/* Why the filled-in numbers are what they are - a measured
+                        verdict about this layer's own geometry, so the reviewer
+                        can judge them instead of merely accepting them. */}
+                    {proposed === null ? null : (
+                      <p className="reels-layout-role" data-role={proposed.role}>
+                        {proposed.role === "BACKGROUND"
+                          ? t.projectWorkspace.renderSettings.reelsLayout.proposalRoleBackground
+                          : t.projectWorkspace.renderSettings.reelsLayout.proposalRoleContent}
+                      </p>
+                    )}
+                    {refusal !== null && refusal.kind === "ANIMATED" ? (
+                      <p className="reels-layout-refusal">{t.projectWorkspace.renderSettings.reelsLayout.layerAnimatedRefusal}</p>
+                    ) : null}
+                    {refusal !== null && refusal.kind === "UNREADABLE" ? (
                       <p className="reels-layout-refusal">{t.projectWorkspace.renderSettings.reelsLayout.layerUnreadableRefusal}</p>
                     ) : null}
                     {refusal !== null ? null : (
@@ -529,25 +679,57 @@ export function ReelsLayoutCard(): ReactElement | null {
                 );
               })}
 
+              {/*
+                Every layer the measurement could not adapt, with the reason
+                in the reader's own language. Never silently dropped: a layer
+                missing from this screen is a gap discovered by eye in the
+                finished video, or as a failed job hours later.
+              */}
+              {layoutProposal === null || layoutProposal.refusals.length === 0 ? null : (
+                <div className="reels-layout-refusals">
+                  <p>
+                    <strong>{t.projectWorkspace.renderSettings.reelsLayout.refusalsTitle}</strong>
+                  </p>
+                  <p>{t.projectWorkspace.renderSettings.reelsLayout.refusalsHint}</p>
+                  <ul>
+                    {layoutProposal.refusals.map((refusal) => (
+                      <li key={refusal.layerIndex}>
+                        <strong>{t.projectWorkspace.renderSettings.reelsLayout.layerLegend(refusal.layerIndex, refusal.layerName)}</strong>{" "}
+                        {/* The typed reason is what a reader sees; `detail` is
+                            English prose from the worker, a fallback only. */}
+                        {t.projectWorkspace.renderSettings.reelsLayout.refusalReason[refusal.reason] ?? refusal.detail}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <p>
                 <strong>{t.projectWorkspace.renderSettings.reelsLayout.framePreviewTitle}</strong>
               </p>
               <p>{t.projectWorkspace.renderSettings.reelsLayout.framePreviewHint}</p>
-              {/* Plots only what the reviewer typed - a mirror of their own
-                  numbers inside the fixed frame, never a proposed placement. */}
+              {/* Plots the numbers that are in the fields RIGHT NOW - filled
+                  in from the measurement, then changed by the reviewer. A
+                  mirror of the current state, never a second suggestion. The
+                  measured role only marks the background apart from the rest;
+                  it moves no marker. */}
               <div className="reels-layout-frame" role="img" aria-label={t.projectWorkspace.renderSettings.reelsLayout.framePreviewAlt}>
-                {(layerTransforms ?? []).map((transform) => (
-                  <span
-                    key={transform.layerIndex}
-                    className="reels-layout-frame__marker"
-                    style={{
-                      insetInlineStart: `${(transform.positionX / REELS_WIDTH_PX) * 100}%`,
-                      top: `${(transform.positionY / REELS_HEIGHT_PX) * 100}%`
-                    }}
-                  >
-                    {transform.layerIndex}
-                  </span>
-                ))}
+                {(layerTransforms ?? []).map((transform) => {
+                  const proposed = proposalEntryFor(transform.layerIndex);
+                  return (
+                    <span
+                      key={transform.layerIndex}
+                      className="reels-layout-frame__marker"
+                      data-role={proposed === null ? undefined : proposed.role}
+                      style={{
+                        insetInlineStart: `${(transform.positionX / REELS_WIDTH_PX) * 100}%`,
+                        top: `${(transform.positionY / REELS_HEIGHT_PX) * 100}%`
+                      }}
+                    >
+                      {transform.layerIndex}
+                    </span>
+                  );
+                })}
               </div>
               {outsideFrame ? <p className="reels-layout-refusal">{t.projectWorkspace.renderSettings.reelsLayout.outsideFrameWarning}</p> : null}
               {isIncomplete ? <p className="reels-layout-refusal">{t.projectWorkspace.renderSettings.reelsLayout.incompleteWarning}</p> : null}
