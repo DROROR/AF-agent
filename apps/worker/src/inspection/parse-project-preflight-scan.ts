@@ -253,6 +253,67 @@ export function boundLayerInventory(inventory: readonly ScannedCompositionInvent
 }
 
 /**
+ * Stitches the bounded slices of one project-wide scan back into a single
+ * raw result, ready for `parseProjectPreflightScan`.
+ *
+ * Why slices exist at all (2026-09-28, real client incident): the scan used
+ * to walk the whole project in one ae_run_jsx, and on a 77-composition
+ * template the ae-mcp bridge gave up first - "[AE_TIMEOUT] Timed out after
+ * 30000ms waiting for After Effects". That limit is inside the bridge, so no
+ * client-side budget can move it; the worker can only ask for less per call.
+ *
+ * Fails the WHOLE scan if any single slice failed. A partial project is the
+ * one outcome that must never be returned quietly: it is indistinguishable
+ * from a template that genuinely has fewer layers, which is exactly the
+ * false negative that let a timed-out scan report 0 placeholders, 0 footage
+ * and 0 fonts as though they were facts.
+ */
+export function mergeProjectPreflightScans(
+  parts: readonly unknown[]
+): { ok: true; merged: ProjectPreflightScan } | { ok: false; reason: string } {
+  if (parts.length === 0) {
+    return { ok: false, reason: "the project preflight scan produced no slices at all" };
+  }
+
+  const compositions: z.infer<typeof compositionEffectsSchema>[] = [];
+  const fonts: string[] = [];
+  const footage: z.infer<typeof footageItemSchema>[] = [];
+  let compositionCount = 0;
+  // Only claim fonts/footage were scanned when EVERY slice carried them - a
+  // single slice from an older build would otherwise make a partial list
+  // look complete.
+  let everySliceCarriedFontsAndFootage = true;
+
+  for (const [index, part] of parts.entries()) {
+    const parsed = projectPreflightScanResultSchema.safeParse(part);
+    if (!parsed.success) {
+      return { ok: false, reason: `project preflight scan slice ${index + 1} of ${parts.length} did not match the expected shape: ${parsed.error.message}` };
+    }
+    if (!parsed.data.ok) {
+      return { ok: false, reason: `project preflight scan slice ${index + 1} of ${parts.length} reported failure: ${parsed.data.failureReason}` };
+    }
+    compositions.push(...parsed.data.compositions);
+    compositionCount = Math.max(compositionCount, parsed.data.compositionCount);
+    if (parsed.data.fonts === undefined || parsed.data.footage === undefined) {
+      everySliceCarriedFontsAndFootage = false;
+      continue;
+    }
+    fonts.push(...parsed.data.fonts);
+    footage.push(...parsed.data.footage);
+  }
+
+  return {
+    ok: true,
+    merged: {
+      ok: true,
+      compositionCount,
+      compositions,
+      ...(everySliceCarriedFontsAndFootage ? { fonts, footage } : {})
+    }
+  };
+}
+
+/**
  * Derives the manifest's real plugin evidence from one raw
  * buildScanProjectEffectsScript result. Never throws, never guesses: an
  * unparseable or script-reported-failed scan returns a typed failure the

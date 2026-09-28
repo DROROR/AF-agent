@@ -2428,7 +2428,43 @@ const BLENDING_MODE_KEYS = [
   "STENCIL_ALPHA", "STENCIL_LUMA", "SILHOUETE_ALPHA", "SILHOUETTE_LUMA", "ALPHA_ADD", "LUMINESCENT_PREMUL"
 ] as const;
 
-export function buildScanProjectPreflightScript(): FixedJsxScript {
+/**
+ * Project items scanned per call (2026-09-28, real client incident).
+ *
+ * This scan used to walk the WHOLE project in one ae_run_jsx. On a
+ * 77-composition template that call never returned inside the ae-mcp
+ * bridge's own hard limit:
+ *
+ *   [AE_TIMEOUT] Timed out after 30000ms waiting for After Effects
+ *                (method: system.runJsx)
+ *
+ * That 30s lives inside ae-mcp, not in this worker, so no client-side
+ * budget can move it - raising ours from 15s to 300s changed nothing at
+ * all, because the bridge gave up first. The only thing this worker
+ * controls is how much work it asks for per call, so it now asks for a
+ * bounded slice and stitches the slices together.
+ *
+ * Deliberately small. A slice is pure extra round trips, which this
+ * inspector already makes one of per composition anyway; a slice that is
+ * too large is a template that cannot be inspected at all.
+ */
+export const SCAN_PROJECT_ITEMS_PER_CALL = 10;
+
+/**
+ * Scans project items `startItemIndex`..`endItemIndex` (1-based, inclusive,
+ * clamped to the project's real item count inside AE).
+ *
+ * Both bounds are integers emitted as literals - the script stays fixed and
+ * allowlisted in exactly the way every other parameterised builder here is.
+ * Callers stitch the slices with `mergeProjectPreflightScans`.
+ */
+export function buildScanProjectPreflightScript(startItemIndex = 1, endItemIndex = Number.MAX_SAFE_INTEGER): FixedJsxScript {
+  if (!Number.isInteger(startItemIndex) || startItemIndex < 1) {
+    throw new Error(`buildScanProjectPreflightScript: startItemIndex must be a positive integer, got ${startItemIndex}`);
+  }
+  if (!Number.isInteger(endItemIndex) || endItemIndex < startItemIndex) {
+    throw new Error(`buildScanProjectPreflightScript: endItemIndex must be an integer >= startItemIndex, got ${endItemIndex}`);
+  }
   const script = `${JSON_STRINGIFY_POLYFILL}function __readFact(read) {
     try {
       var __value = read();
@@ -2458,7 +2494,13 @@ export function buildScanProjectPreflightScript(): FixedJsxScript {
     var __compositions = [];
     var __fonts = [];
     var __footage = [];
-    for (var __itemIndex = 1; __itemIndex <= app.project.numItems; __itemIndex++) {
+    // Bounded slice - see SCAN_PROJECT_ITEMS_PER_CALL. The upper bound is
+    // clamped inside AE, so a caller asking past the end of the project is
+    // simply a shorter slice, never an error.
+    var __scanStart = ${startItemIndex};
+    var __scanEnd = ${endItemIndex === Number.MAX_SAFE_INTEGER ? "app.project.numItems" : String(endItemIndex)};
+    if (__scanEnd > app.project.numItems) { __scanEnd = app.project.numItems; }
+    for (var __itemIndex = __scanStart; __itemIndex <= __scanEnd; __itemIndex++) {
       var __item = null;
       try {
         __item = app.project.item(__itemIndex);

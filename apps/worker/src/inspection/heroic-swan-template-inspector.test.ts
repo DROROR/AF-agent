@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HeroicSwanTemplateInspector, OPEN_PROJECT_TIMEOUT_MS, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS } from "./heroic-swan-template-inspector.js";
+import { HeroicSwanTemplateInspector, MAX_PROJECT_SCAN_SLICES, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS } from "./heroic-swan-template-inspector.js";
+import { SCAN_PROJECT_ITEMS_PER_CALL } from "../execution/jsx-templates.js";
 import type { ManifestInspectionResult, RawInspectionCapture } from "./template-inspector.js";
 import { buildOpenProjectScript } from "../execution/jsx-templates.js";
 
@@ -1394,14 +1395,21 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
     expect(result.toolCalls.map((c) => c.tool)).toContain("ae_list_instances");
   });
 
-  // 2026-09-28, real client incident: the heaviest call the inspector makes -
-  // one ae_run_jsx across every composition and every layer - was running on
-  // the client's DEFAULT 15s budget, the same as a call that reads one
-  // number. A 77-composition template timed out, and the inspection then
-  // reported SUCCESS with 0 placeholders, 0 footage and 0 fonts. This pins
-  // that the scan carries its own explicit budget, and that the budget is
-  // meaningfully larger than the default it used to inherit.
-  it("12. the project-wide preflight scan runs on its own explicit timeout, never the client default", async () => {
+  // 2026-09-28, real client incident, in two parts.
+  //
+  // Part one: the heaviest call the inspector makes - one ae_run_jsx across
+  // every composition and every layer - ran on the client's DEFAULT 15s
+  // budget, the same as a call that reads one number. A 77-composition
+  // template timed out and the inspection reported SUCCESS with 0
+  // placeholders, 0 footage and 0 fonts.
+  //
+  // Part two: raising that budget to 300s changed nothing, because the
+  // binding limit was never ours - "[AE_TIMEOUT] Timed out after 30000ms
+  // waiting for After Effects (method: system.runJsx)" comes from inside the
+  // ae-mcp bridge. The only lever this worker has is asking for less per
+  // call, so the scan is sliced. These assertions pin the lever, not the
+  // number that could not matter.
+  it("12. the project-wide preflight scan is sliced, and each slice carries its own budget above the bridge's own 30s limit", async () => {
     const source = await readFile(new URL("./heroic-swan-template-inspector.ts", import.meta.url), "utf8");
     const fnStart = source.indexOf("async function scanProjectPreflightEvidence(");
     expect(fnStart).toBeGreaterThan(-1);
@@ -1410,13 +1418,30 @@ describe("HeroicSwanTemplateInspector - single-open + poll-not-reopen (2026-09-0
       .filter((index) => index !== -1);
     const fnEnd = nextDeclarationIndexes.length > 0 ? Math.min(...nextDeclarationIndexes) : -1;
     const fnBody = source.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
-    // The budget is passed - a bare runFixedInspectionScript(script) silently
-    // inherits the 15s default, which is the whole defect.
+
+    // Sliced: the script is built for an explicit item range, never for the
+    // whole project in one call - which is the shape that cannot finish.
+    expect(fnBody).toContain("buildScanProjectPreflightScript(nextItemIndex, endItemIndex)");
+    expect(fnBody).not.toMatch(/buildScanProjectPreflightScript\(\)/);
+    expect(fnBody).toContain("SCAN_PROJECT_ITEMS_PER_CALL");
+    // The slices are stitched, and a failed slice fails the whole scan
+    // rather than yielding a quietly partial project.
+    expect(fnBody).toContain("mergeProjectPreflightScans(slices)");
+    // Bounded: a project whose item count never terminates the loop must not
+    // keep calling After Effects forever.
+    expect(fnBody).toContain("MAX_PROJECT_SCAN_SLICES");
+
+    // Each slice still carries an explicit budget - a bare
+    // runFixedInspectionScript(script) silently inherits the 15s default.
     expect(fnBody).toContain("runFixedInspectionScript(script, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS)");
     expect(fnBody).not.toMatch(/runFixedInspectionScript\(script\)/);
-    // And it is a real budget for a whole-project walk, not a token bump.
-    expect(PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
-    expect(PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS).toBeGreaterThan(OPEN_PROJECT_TIMEOUT_MS);
+    // Above the bridge's own 30s, so a slice that really does hang surfaces
+    // ae-mcp's specific AE_TIMEOUT rather than this worker's generic one.
+    expect(PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS).toBeGreaterThan(30_000);
+    // A slice is a bounded amount of work, not the whole project renamed.
+    expect(SCAN_PROJECT_ITEMS_PER_CALL).toBeGreaterThan(0);
+    expect(SCAN_PROJECT_ITEMS_PER_CALL).toBeLessThanOrEqual(25);
+    expect(MAX_PROJECT_SCAN_SLICES).toBeGreaterThanOrEqual(100);
   });
 
   it("11. structural invariant: ensureTargetProjectOpen's app.open() call is never routed through callWithTransientRetry - only a single direct client.runFixedInspectionScript call", async () => {

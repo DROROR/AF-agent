@@ -21,11 +21,11 @@ import {
   type CompositionDetail,
   type CompositionSummary
 } from "./parse-mcp-shapes.js";
-import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript, type FixedJsxScript } from "../execution/jsx-templates.js";
+import { buildInspectCompositionPrecompsScript, buildOpenProjectScript, buildScanProjectPreflightScript, SCAN_PROJECT_ITEMS_PER_CALL, type FixedJsxScript } from "../execution/jsx-templates.js";
 import { computeTextVerification } from "@dyo/schemas";
 import { prepareConversionCopy } from "./legacy-project-conversion.js";
 import { assessUnsavedProjectBlock } from "./assess-unsaved-project-block.js";
-import { boundLayerInventory, parseProjectPreflightScan, type ParseProjectPreflightScanResult, type ProjectPreflightEvidence } from "./parse-project-preflight-scan.js";
+import { boundLayerInventory, mergeProjectPreflightScans, parseProjectPreflightScan, type ParseProjectPreflightScanResult, type ProjectPreflightEvidence } from "./parse-project-preflight-scan.js";
 import { readCompleteTextVerification, type RunSliceScript } from "./complete-template-text.js";
 import { withDisposableProject } from "./disposable-project.js";
 import { unwrapJsxResult } from "../execution/unwrap-jsx-result.js";
@@ -170,12 +170,32 @@ export const OPEN_PROJECT_TIMEOUT_MS = 75_000;
  * template inspected before it was small enough to finish inside 15s, which
  * is exactly why this went unnoticed.
  *
- * Generous on purpose: this call is read-only, runs once per inspection, and
- * a slow answer is worth far more than a fast, silently empty one. It stays
- * bounded rather than unlimited so a genuinely wedged AE still fails instead
- * of hanging the job forever.
+ * 2026-09-28, same day, second finding: raising this from the 15s default to
+ * 300s changed NOTHING. The next run failed in the same way, and the job's
+ * own evidence said why:
+ *
+ *   [AE_TIMEOUT] Timed out after 30000ms waiting for After Effects
+ *                (method: system.runJsx)
+ *
+ * The binding limit is 30s, and it lives inside the ae-mcp bridge, not in
+ * this worker - so no client-side budget can move it. The real fix is to ask
+ * for less per call (see SCAN_PROJECT_ITEMS_PER_CALL); this budget now
+ * applies PER SLICE, and is kept comfortably above the bridge's own 30s so
+ * that a slice which really does hang surfaces the bridge's specific error
+ * rather than this worker's generic one - the difference between an incident
+ * that explains itself and one that does not.
  */
-export const PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS = 300_000;
+export const PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS = 60_000;
+
+/**
+ * Hard ceiling on how many slices one project-wide scan may take, so a
+ * project whose reported item count never terminates the loop cannot keep
+ * calling After Effects forever. At 10 items per slice this covers a 2,000
+ * item project - an order of magnitude beyond the largest real template seen
+ * (146 items). Reaching it is a typed failure, never a partial scan passed
+ * off as complete.
+ */
+export const MAX_PROJECT_SCAN_SLICES = 200;
 
 /**
  * If the single app.open() attempt above times out, MCP/stdio has no
@@ -968,16 +988,49 @@ async function scanProjectPreflightEvidence(
   logger: pino.Logger | undefined,
   retryOptions: TransientRetryOptions | undefined
 ): Promise<ParseProjectPreflightScanResult> {
-  const script = buildScanProjectPreflightScript();
-  const result = await callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS), retryOptions);
-  if (!result.ok) {
-    return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
+  const slices: unknown[] = [];
+  let nextItemIndex = 1;
+  // app.project.numItems, as reported by the first slice. The field is named
+  // compositionCount for historical reasons; it has always carried the
+  // project's total ITEM count, which is exactly what bounds this loop.
+  let totalProjectItems: number | null = null;
+
+  for (let sliceNumber = 1; totalProjectItems === null || nextItemIndex <= totalProjectItems; sliceNumber++) {
+    if (sliceNumber > MAX_PROJECT_SCAN_SLICES) {
+      return {
+        ok: false,
+        reason: `the project-wide preflight scan exceeded ${MAX_PROJECT_SCAN_SLICES} slices (${SCAN_PROJECT_ITEMS_PER_CALL} project items each) without reaching the end of the project - refusing to keep calling After Effects`
+      };
+    }
+    const endItemIndex = nextItemIndex + SCAN_PROJECT_ITEMS_PER_CALL - 1;
+    const script = buildScanProjectPreflightScript(nextItemIndex, endItemIndex);
+    const result = await callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS), retryOptions);
+    if (!result.ok) {
+      return { ok: false, reason: `ae_run_jsx failed (project items ${nextItemIndex}-${endItemIndex}): ${result.error.message}` };
+    }
+    const unwrapped = unwrapJsxResult(result.content);
+    if (!unwrapped.ok) {
+      return { ok: false, reason: unwrapped.reason };
+    }
+    slices.push(unwrapped.value);
+
+    if (totalProjectItems === null) {
+      const reported = (unwrapped.value as { compositionCount?: unknown } | null)?.compositionCount;
+      if (typeof reported !== "number" || !Number.isFinite(reported)) {
+        // Without the project's own item count there is no honest stopping
+        // point, and guessing one would silently scan part of a project.
+        return { ok: false, reason: "the project-wide preflight scan's first slice did not report the project's item count, so the remaining slices cannot be bounded" };
+      }
+      totalProjectItems = reported;
+    }
+    nextItemIndex = endItemIndex + 1;
   }
-  const unwrapped = unwrapJsxResult(result.content);
-  if (!unwrapped.ok) {
-    return { ok: false, reason: unwrapped.reason };
+
+  const merged = mergeProjectPreflightScans(slices);
+  if (!merged.ok) {
+    return { ok: false, reason: merged.reason };
   }
-  return parseProjectPreflightScan(unwrapped.value);
+  return parseProjectPreflightScan(merged.merged);
 }
 
 function rawCaptureFor(toolCalls: RawToolCallCapture[], note: string, projectOpenEvidence?: ProjectOpenEvidence): RawInspectionCapture {
