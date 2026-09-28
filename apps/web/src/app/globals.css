@@ -3094,6 +3094,18 @@ a.workflow-stepper__step:hover {
   gap: var(--space-3);
 }
 
+/*
+  The bar holds the hint, the Mapping Assistant action and Approve Scenes.
+  With space-between alone the middle child lands dead centre, which is
+  where the assistant button ended up once it joined the bar - reported as
+  "the Claude button is in the middle". Letting the hint take the free space
+  keeps both actions together on the trailing edge, where actions belong.
+*/
+.simple-scenes__approve-bar > p {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
 .simple-scenes__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
