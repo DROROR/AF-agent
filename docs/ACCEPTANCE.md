@@ -967,3 +967,54 @@ The worker's own `MANIFEST_NOT_BUILT` message is still a fixed string, so
 anything reading the job through the API rather than this screen still sees
 only the generic sentence. Putting the note in the message itself is a
 worker change and was not made here.
+
+## 2026-09-28 — Advice that could not work: "confirm the dialog, then retry"
+
+**What happened.** The client ran `INSPECT_TEMPLATE` against
+`Android_App_Promo_CC2014+.aep` — an untouched Envato download in the CC2014
+project format. Job `ee88e03c` failed with `OPEN_FAILED`: After Effects
+accepted `app.open()` and ended up holding no project, the signature of a
+suppressed version-conversion dialog. The message told them:
+
+> Open the project in After Effects yourself once, confirm whatever it asks,
+> then retry this inspection.
+
+They did exactly that. It failed again, identically.
+
+**Why it could never work.** Every attempt copies the bytes at `targetPath`
+into a fresh disposable `.aep`, opens that copy, and deletes it afterwards
+(`cleanup: DELETED`). Clicking OK in the After Effects window changes what AE
+holds in memory; it does not change the file on disk. So the next disposable
+copy is still a CC2014 file, and still asks. The loop has no exit.
+
+The step that ends it is **File > Save As** — writing a project in the running
+version's format — and then pointing the job at the saved file. The message
+never said so.
+
+**The evidence that settles it.** Every successful `INSPECT_TEMPLATE` on this
+system opens a file whose name ends `(converted).aep`:
+
+| Template | Path |
+|---|---|
+| t1 | `…\619\Restaurant_Promo (Mixkit) (converted).aep` |
+| t2 | `…\565\Splash Logo Reveal (converted).aep` |
+| t3 | `…\561\3D Logo Animation (converted).aep` |
+| t4 | `…\Simple Lines Horizontal Audio Visualizer_1080_1920 (converted).aep` |
+
+The only exception is `QA-Smoke.aep`, which a JSX script builds natively in the
+running version and so has nothing to convert. Nothing about the client's
+machine differs — same AE `26.3x87`, same 9 worker capabilities, same build.
+The difference is one file, saved once.
+
+**Fixed.** `disposable-project.ts` now names the file, the Save As, and the
+re-run. `heroic-swan-template-inspector.ts` already gave the complete advice on
+its own conversion path; this one did not, and this was the path the client
+hit. Regression test: `disposable-project.test.ts` asserts the message carries
+`Save As` and the target path, and asserts the old "confirm whatever it asks,
+then retry" phrasing is gone. Verified by mutation — restoring the old string
+fails that test alone.
+
+**Left standing.** `docs/STEP-BY-STEP.md` already carried the conversion step,
+with the warning that skipping it fails the first inspection. The client had
+the instruction and the product contradicted it. Documentation does not
+substitute for an error message that names the next action.

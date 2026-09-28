@@ -388,6 +388,23 @@ describe("withDisposableProject - opening, footage and inspection failures", () 
     expect(result.ok === false && result.code).toBe("OPEN_FAILED");
   });
 
+  // 2026-09-28: a client read this exact message, did precisely what it said -
+  // opened the file, clicked through the conversion dialog, re-ran - and was
+  // stuck in a loop, because every attempt copies the bytes on disk afresh.
+  // The advice is only actionable if it names the step that changes the file.
+  it("tells the human to SAVE the converted project, not merely to confirm the dialog", async () => {
+    const { result } = await run({ opensInstead: null });
+    expect(result.ok === false && result.code).toBe("OPEN_FAILED");
+    const reason = result.ok === false ? result.reason : "";
+    expect(reason).toMatch(/interactive one-time confirmation/i);
+    // The step that actually changes the file on disk.
+    expect(reason).toMatch(/Save As/i);
+    // And which file to open, so the human is not left guessing.
+    expect(reason).toContain(TARGET);
+    // Confirming alone must not be offered as sufficient.
+    expect(reason).not.toMatch(/confirm whatever it asks, then retry/i);
+  });
+
   it("fails closed when After Effects opens something other than the copy", async () => {
     const { result } = await run({ opensInstead: "C:\\somewhere\\else.aep" });
     expect(result.ok === false && result.code).toBe("OPEN_FAILED");

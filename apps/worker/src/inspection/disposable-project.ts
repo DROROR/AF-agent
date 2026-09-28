@@ -410,9 +410,19 @@ export async function withDisposableProject<T>(
       // very dialogs `app.beginSuppressDialogs()` prevents from appearing.
       // Never asserted as file corruption: a human must confirm which it is,
       // by opening the file in After Effects themselves once.
+      //
+      // 2026-09-28: the advice used to stop at "confirm whatever it asks,
+      // then retry this inspection". A client followed it exactly and stayed
+      // stuck, because it cannot work: every attempt opens a FRESH disposable
+      // copy of the bytes on disk, and that copy is deleted afterwards.
+      // Clicking OK in the After Effects window changes what AE holds in
+      // memory, never the file - so the next copy asks again, forever. The
+      // file itself has to stop asking, which means Save As. The sibling
+      // path in heroic-swan-template-inspector.ts already said so; this one
+      // did not, and this is the one the client hit.
       return fail(
         "OPEN_FAILED",
-        "After Effects accepted the open but ended up with no project associated - this is what a project requiring an interactive one-time confirmation in After Effects looks like (a version conversion, or an unacknowledged missing-font/plugin warning), never automatic file corruption. Open the project in After Effects yourself once, confirm whatever it asks, then retry this inspection"
+        `After Effects accepted the open but ended up with no project associated - this is what a project requiring an interactive one-time confirmation in After Effects looks like (a version conversion, or an unacknowledged missing-font/plugin warning), never automatic file corruption. Confirming that dialog once is not enough on its own: every attempt opens a fresh copy of the file exactly as it is stored on disk, so the file itself has to stop asking. Open "${request.targetPath}" in After Effects, answer whatever it asks, then File > Save As under a new name in the same folder, and re-run this inspection against that saved file.`
       );
     }
     if (!windowsPathsEqual(openedPath, candidatePath)) {
