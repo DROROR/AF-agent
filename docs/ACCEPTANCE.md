@@ -922,3 +922,48 @@ reads.
 
 **This is a WORKER fix.** Deploying the server does not deliver it - the
 editing computer needs a new worker build installed.
+
+## 2026-09-28 - the client's first inspection, and the message that hid the answer
+
+The client ran two `INSPECT_TEMPLATE` jobs on their own machine
+(`DESKTOP-A629N4N`). Both failed, and all the product told them was:
+
+```
+Template inspection could not produce a valid manifest.
+```
+
+The real reason was already persisted on the job, in its own result:
+
+```
+Could not hash the real source .aep at sourceProjectPath (cannot access
+C:\DYO-Agent\copy\...\Android_App_Promo_CC2014+.aep:
+ENOENT: no such file or directory)
+```
+
+**The path did not exist.** A ten-second fix, presented as an opaque
+failure of the system. `job-dispatcher.ts` deliberately preserves the whole
+`RawInspectionCapture` as the failed job's result "for troubleshooting" -
+nothing was ever missing from the record, it simply was never shown to
+the person who could act on it.
+
+This is the item the 2026-09-27 audit listed as still open ("eight
+occurrences in three days, and the single most common failure in the
+system... names no composition, no missing dependency and no next step").
+
+**Fixed in the dashboard, deliberately not in the worker.** A failed
+inspection now parses its own persisted capture and prints the note beside
+the generic message. Read-only, no new endpoint, and nothing on the worker
+changes - which is the point: the computer that hits this is usually the
+one running an older worker, and a fix needing a worker update would not
+have reached this client at all.
+
+The generic message stays; the note explains it rather than replacing it.
+Two tests pin both halves - a capture present, and a failed job with no
+capture at all - and the first fails if the note is not rendered.
+
+### Still not fixed
+
+The worker's own `MANIFEST_NOT_BUILT` message is still a fixed string, so
+anything reading the job through the API rather than this screen still sees
+only the generic sentence. Putting the note in the message itself is a
+worker change and was not made here.

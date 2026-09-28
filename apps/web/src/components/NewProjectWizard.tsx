@@ -302,6 +302,31 @@ export function NewProjectWizard(): ReactElement {
   const inspectionResult: InspectTemplateResponse | null =
     parsedInspectionResult?.success && parsedInspectionResult.data.kind === "manifest" ? parsedInspectionResult.data.response : null;
 
+  /**
+   * REAL 2026-09-28: a client's first two inspections failed, and all the
+   * product told them was "Template inspection could not produce a valid
+   * manifest." The actual reason was sitting in the job's own persisted
+   * result the whole time:
+   *
+   *   Could not hash the real source .aep at sourceProjectPath (cannot
+   *   access C:\...\Template.aep: ENOENT: no such file or directory)
+   *
+   * i.e. the path they typed does not exist - a thing they could have
+   * fixed in ten seconds. job-dispatcher.ts deliberately PRESERVES the
+   * whole RawInspectionCapture as the failed job's result "for
+   * troubleshooting"; nothing was ever missing, it simply was not shown.
+   *
+   * So a failed inspection now reads its own capture and shows the note
+   * beside the generic message. Read-only, no new endpoint, and nothing
+   * on the worker changes - which matters, because the computer that hits
+   * this is usually the one that has not been updated recently.
+   */
+  const failedCapture = job?.status === "FAILED" ? inspectTemplateResultSchema.safeParse(job.result) : null;
+  const failureNote: string | null =
+    failedCapture?.success && failedCapture.data.kind === "raw_capture" && failedCapture.data.note.trim() !== ""
+      ? failedCapture.data.note
+      : null;
+
   async function handleCreateProject(): Promise<void> {
     if (!inspectionResult) return;
     setIsCreatingProject(true);
@@ -449,6 +474,10 @@ export function NewProjectWizard(): ReactElement {
                     ) : (
                       <ErrorState title={t.projectsNew.template.inspectionFailedTitle} />
                     )}
+                    {/* What the worker actually reported, which the generic
+                        message above replaces. Shown verbatim: it names the
+                        real path and the real reason. */}
+                    {failureNote ? <p className="state-panel__description">{failureNote}</p> : null}
                     {/* Inspecting a template is the first thing anyone does
                         on a new editing computer, so it is the first place a
                         worker older than this server shows up. The raw

@@ -382,6 +382,113 @@ describe("NewProjectWizard", () => {
     expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
   });
 
+  /**
+   * REAL 2026-09-28: a client's first two inspections failed and the whole
+   * product told them was "Template inspection could not produce a valid
+   * manifest." The real reason - the path they typed does not exist - was
+   * already persisted on the job as a raw_capture note, and simply was not
+   * shown. Nothing here asks the worker for anything new.
+   */
+  it("shows what the worker actually reported for a failed inspection, not only the generic manifest message", async () => {
+    const note =
+      "Could not hash the real source .aep at sourceProjectPath (cannot access C:\\DYO-Agent\\copy\\Template.aep: ENOENT: no such file or directory) - the inspection was abandoned.";
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } },
+      "/api/jobs/11111111-1111-1111-1111-111111111111": {
+        status: 200,
+        body: {
+          job: {
+            jobId: "11111111-1111-1111-1111-111111111111",
+            workerId: "44444444-4444-4444-4444-444444444444",
+            projectId: null,
+            operation: "INSPECT_TEMPLATE",
+            status: "FAILED",
+            payload: {},
+            // Exactly the shape job-dispatcher.ts preserves "for troubleshooting".
+            result: {
+              kind: "raw_capture",
+              capturedAt: new Date().toISOString(),
+              toolCalls: [],
+              note
+            },
+            error: { code: "MANIFEST_NOT_BUILT", message: "Template inspection could not produce a valid manifest." },
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      },
+      "/api/jobs": {
+        status: 201,
+        body: {
+          jobId: "11111111-1111-1111-1111-111111111111",
+          workerId: "44444444-4444-4444-4444-444444444444",
+          operation: "INSPECT_TEMPLATE",
+          status: "QUEUED",
+          createdAt: new Date().toISOString()
+        }
+      }
+    });
+
+    renderWizard();
+    await goToTemplateStep();
+    await selectWorkerAndFillTemplateFields();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+
+    await waitFor(() => expect(screen.getByText(note)).not.toBeNull(), { timeout: 5000 });
+    // The generic message stays: the note explains it, never replaces it.
+    expect(screen.getByText("Template inspection could not produce a valid manifest.")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("falls back to the generic message alone when a failed job carries no capture to explain it", async () => {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } },
+      "/api/jobs/11111111-1111-1111-1111-111111111111": {
+        status: 200,
+        body: {
+          job: {
+            jobId: "11111111-1111-1111-1111-111111111111",
+            workerId: "44444444-4444-4444-4444-444444444444",
+            projectId: null,
+            operation: "INSPECT_TEMPLATE",
+            status: "FAILED",
+            payload: {},
+            result: null,
+            error: { code: "MANIFEST_NOT_BUILT", message: "Template inspection could not produce a valid manifest." },
+            checkpoint: null,
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        }
+      },
+      "/api/jobs": {
+        status: 201,
+        body: {
+          jobId: "11111111-1111-1111-1111-111111111111",
+          workerId: "44444444-4444-4444-4444-444444444444",
+          operation: "INSPECT_TEMPLATE",
+          status: "QUEUED",
+          createdAt: new Date().toISOString()
+        }
+      }
+    });
+
+    renderWizard();
+    await goToTemplateStep();
+    await selectWorkerAndFillTemplateFields();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+
+    await waitFor(() => expect(screen.getByText("Template inspection could not produce a valid manifest.")).not.toBeNull(), { timeout: 5000 });
+    expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
+  });
+
   describe("real 2026-09-11 incident: a genuinely long-running INSPECT_TEMPLATE job (18 minutes, 51 compositions) exposed two bugs - a single transient poll failure permanently stopping all polling, and a page refresh discarding all knowledge of the in-flight/completed job", () => {
     it("a transient fetchJobStatus failure mid-poll does not permanently stop polling - it keeps trying until the real terminal status lands (root cause of 'stuck loading despite SUCCEEDED')", async () => {
       stubFetchByUrl({
