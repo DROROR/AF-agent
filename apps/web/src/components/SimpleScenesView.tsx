@@ -96,7 +96,15 @@ function StoryboardThumb({
 export function SimpleScenesView(): ReactElement {
   const { t } = useLocale();
   const { project, plan, approveScenes, isStale, createPlan } = useProjectWorkspaceContext();
-  const { suggestions, accept, reject } = useMappingSuggestions(project?.project.projectId ?? "");
+  // 2026-09-28: Simple mode consumed suggestions but could never ASK for
+  // them - `generate` lived only in MappingAssistantPanel, which Advanced
+  // mode renders and Simple mode does not. So the view that exists to be the
+  // easy path showed "Needs your choice" on every scene with nothing
+  // suggested, and the one feature that would have answered it was reachable
+  // only by switching to Advanced. Reported by a real operator mid-session.
+  const { suggestions, aiAvailable, isGenerating, error: suggestionsError, generate, accept, reject } = useMappingSuggestions(
+    project?.project.projectId ?? ""
+  );
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
@@ -219,6 +227,30 @@ export function SimpleScenesView(): ReactElement {
       {actionError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} /> : null}
 
       <Storyboard projectId={projectId} realScenes={realScenes} previewQueue={previewQueue} />
+
+      {/*
+        The ASK half of the Mapping Assistant, in the view that exists to be
+        the easy path. Simple mode already accepted and rejected suggestions
+        per scene; it simply had no way to request any, so every scene read
+        "Needs your choice" with nothing proposed. Deliberately just the
+        button and its outcome - the full panel, with its evidence and
+        history, stays in Advanced.
+      */}
+      <Card className="simple-scenes__assistant-bar">
+        <p>{aiAvailable ? t.mappingAssistant.description : t.mappingAssistant.connectProviderHint}</p>
+        {aiAvailable ? (
+          <Button
+            variant="secondary"
+            disabled={isGenerating || isStale}
+            onClick={() => void generate()}
+          >
+            {isGenerating ? t.mappingAssistant.generating : t.mappingAssistant.generateAction}
+          </Button>
+        ) : null}
+      </Card>
+      {suggestionsError ? (
+        <ErrorState title={t.mappingAssistant.title} description={suggestionsError} />
+      ) : null}
 
       <Card className="simple-scenes__approve-bar">
         <p>

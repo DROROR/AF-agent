@@ -80,6 +80,7 @@ function manifestWithNested() {
 
 function stubWorkspace(options: {
   suggestions?: unknown[];
+  aiAvailable?: boolean;
   assets?: unknown[];
   scenes?: ReturnType<typeof sceneFixture>[];
   manifest?: ReturnType<typeof manifestFixture>;
@@ -105,7 +106,7 @@ function stubWorkspace(options: {
       status: 200,
       body: {
         suggestions: options.suggestions ?? [],
-        aiAvailable: false,
+        aiAvailable: options.aiAvailable ?? false,
         sceneEvidenceAvailability: {}
       }
     },
@@ -151,6 +152,28 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     expect(details.open).toBe(false);
     fireEvent.click(screen.getByText("Advanced details"));
     expect(details.open).toBe(true);
+  });
+
+  // 2026-09-28, reported by a real operator mid-session: Simple mode could
+  // accept and reject suggestions but could never ASK for any - `generate`
+  // lived only in MappingAssistantPanel, which Advanced renders and Simple
+  // does not. Every scene read "Needs your choice" with nothing proposed,
+  // and the one feature that would have answered it was reachable only by
+  // leaving the view that exists to be the easy path.
+  it("offers Generate suggestions in Simple mode when an AI provider is connected", async () => {
+    stubWorkspace({ aiAvailable: true });
+    renderView();
+    // Awaited, not queried: availability arrives with the suggestions fetch,
+    // which settles after the first scene heading paints.
+    expect(await screen.findByRole("button", { name: "Generate suggestions" })).not.toBeNull();
+  });
+
+  it("tells the operator how to enable it, rather than showing a dead button, when no AI provider is connected", async () => {
+    stubWorkspace({ aiAvailable: false });
+    renderView();
+    await screen.findByRole("heading", { name: "App Features" });
+    expect(screen.queryByRole("button", { name: "Generate suggestions" })).toBeNull();
+    expect(screen.queryByText("Connect an AI provider in Settings to use AI Mapping Assistant.")).not.toBeNull();
   });
 
   it("shows a genuine PENDING content suggestion as a visual review item with Keep Original / Use Suggestion actions", async () => {
