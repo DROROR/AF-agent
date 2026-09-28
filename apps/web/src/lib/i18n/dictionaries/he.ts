@@ -1140,6 +1140,16 @@ export const he: Dictionary = {
     suggestedTextLabel: (text: string): string => `Claude מציע: "${text}"`,
     keepOriginalAction: "השארת המקור",
     useSuggestionAction: "שימוש בהצעה",
+    findingsTitle: (count: number): string =>
+      count === 1
+        ? "קלוד בדק עוד שכבה אחת ולא מצא מה לשנות"
+        : `קלוד בדק עוד ${count} שכבות ולא מצא מה לשנות`,
+    findingsDescription:
+      "אלה חלקים של התבנית עצמה, לא מקומות לתוכן שלך. כל אחת שומרת בדיוק את מה שהתבנית נותנת לה. אפשר לפתוח כדי לקרוא למה, ולבטל כל אחת מהן.",
+    findingsLayerLabel: (name: string): string => `שכבה "${name}"`,
+    findingsNoReason: "קלוד לא נתן סיבה לזו.",
+    findingsAcceptAllAction: (count: number): string =>
+      count === 1 ? "מסכים - להשאיר כמו בתבנית" : `מסכים עם כל ${count} - להשאיר כמו בתבנית`,
     approveScenesAction: "אישור הסצנות",
     approvingScenes: "מאשר…",
     allScenesReadyHint: "כל הסצנות מוכנות - אשרו כדי להמשיך.",

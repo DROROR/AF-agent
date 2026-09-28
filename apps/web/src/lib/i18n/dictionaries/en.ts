@@ -1299,6 +1299,16 @@ export const en = {
     suggestedTextLabel: (text: string): string => `Claude suggests: "${text}"`,
     keepOriginalAction: "Keep original",
     useSuggestionAction: "Use suggestion",
+    findingsTitle: (count: number): string =>
+      count === 1
+        ? "Claude looked at 1 more layer and found nothing to change"
+        : `Claude looked at ${count} more layers and found nothing to change`,
+    findingsDescription:
+      "These are parts of the template itself - borders, adjustment layers, fades - rather than places your content goes. Each keeps exactly what the template gives it. Open this to read why, and to overrule any of them.",
+    findingsLayerLabel: (name: string): string => `Layer "${name}"`,
+    findingsNoReason: "Claude gave no reason for this one.",
+    findingsAcceptAllAction: (count: number): string =>
+      count === 1 ? "Agree - leave it as the template has it" : `Agree with all ${count} - leave them as the template has them`,
     approveScenesAction: "Approve Scenes",
     approvingScenes: "Approving…",
     allScenesReadyHint: "Every scene is ready - approve to continue.",

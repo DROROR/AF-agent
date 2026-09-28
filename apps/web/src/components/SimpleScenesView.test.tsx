@@ -165,14 +165,14 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     renderView();
     // Awaited, not queried: availability arrives with the suggestions fetch,
     // which settles after the first scene heading paints.
-    expect(await screen.findByRole("button", { name: "Generate suggestions" })).not.toBeNull();
+    expect(await screen.findByRole("button", { name: "Claude \u2014 Generate suggestions" })).not.toBeNull();
   });
 
   it("tells the operator how to enable it, rather than showing a dead button, when no AI provider is connected", async () => {
     stubWorkspace({ aiAvailable: false });
     renderView();
     await screen.findByRole("heading", { name: "App Features" });
-    expect(screen.queryByRole("button", { name: "Generate suggestions" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Generate suggestions/ })).toBeNull();
     expect(screen.queryByText("Connect an AI provider in Settings to use AI Mapping Assistant.")).not.toBeNull();
   });
 
@@ -190,6 +190,41 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     await screen.findByText('Claude suggests: "New headline"');
     expect(screen.queryByRole("button", { name: "Keep original" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Use suggestion" })).not.toBeNull();
+  });
+
+  // 2026-09-28, real client session: a 77-composition template surfaced 30
+  // structural layers as editable placeholders. Claude examined each, said in
+  // its reasoning that none is a content slot, and returned suggestions
+  // carrying no text, no asset and no classification. This view rendered all
+  // thirty as review items - identical pairs of blank buttons in one card,
+  // with the reasoning stored but never shown.
+  it("does not turn a suggestion that proposes nothing into a blank review item - it reports it as a finding, with Claude's reason", async () => {
+    stubWorkspace({
+      suggestions: [
+        mappingSuggestionFixture({
+          id: "s-empty",
+          scenePlanId: "scene-parent",
+          mappingId: "mapping-1",
+          source: "AI",
+          confidence: 0.05,
+          suggestedText: null,
+          suggestedAssetId: null,
+          suggestedClassification: null,
+          reasoning: "'Borders' is a decorative overlay layer, not a content slot."
+        })
+      ]
+    });
+    renderView();
+    // Awaited, not queried: suggestions land after the first heading paints.
+    // Never silent - the reason Claude gave is on screen.
+    await screen.findByText("'Borders' is a decorative overlay layer, not a content slot.");
+    // And not a decision: nothing is proposed, so no review queue, no buttons.
+    expect(screen.queryByText("Needs your review")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use suggestion" })).toBeNull();
+    // Exactly one action for the whole set, never one per finding - and it
+    // must exist, or an unresolved suggestion would keep Approve Scenes
+    // disabled forever with no way to clear it.
+    expect(screen.queryByRole("button", { name: "Agree - leave it as the template has it" })).not.toBeNull();
   });
 
   it("never renders a RESOLVED (structural, no-op) suggestion as a review item - only genuinely PENDING content decisions reach this view", async () => {

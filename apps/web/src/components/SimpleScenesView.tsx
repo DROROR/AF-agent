@@ -14,6 +14,7 @@ import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { ClaudeActionButton } from "./ui/ClaudeActionButton";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { Skeleton } from "./ui/Skeleton";
@@ -228,26 +229,6 @@ export function SimpleScenesView(): ReactElement {
 
       <Storyboard projectId={projectId} realScenes={realScenes} previewQueue={previewQueue} />
 
-      {/*
-        The ASK half of the Mapping Assistant, in the view that exists to be
-        the easy path. Simple mode already accepted and rejected suggestions
-        per scene; it simply had no way to request any, so every scene read
-        "Needs your choice" with nothing proposed. Deliberately just the
-        button and its outcome - the full panel, with its evidence and
-        history, stays in Advanced.
-      */}
-      <Card className="simple-scenes__assistant-bar">
-        <p>{aiAvailable ? t.mappingAssistant.description : t.mappingAssistant.connectProviderHint}</p>
-        {aiAvailable ? (
-          <Button
-            variant="secondary"
-            disabled={isGenerating || isStale}
-            onClick={() => void generate()}
-          >
-            {isGenerating ? t.mappingAssistant.generating : t.mappingAssistant.generateAction}
-          </Button>
-        ) : null}
-      </Card>
       {suggestionsError ? (
         <ErrorState title={t.mappingAssistant.title} description={suggestionsError} />
       ) : null}
@@ -262,6 +243,30 @@ export function SimpleScenesView(): ReactElement {
                 ? t.simpleScenes.scenesNotReadyHint
                 : t.simpleScenes.previewsUpdatingHint}
         </p>
+        {/*
+          The ASK half of the Mapping Assistant, in the view that exists to be
+          the easy path. Simple mode already accepted and rejected suggestions
+          per scene; it simply had no way to request any, so every scene read
+          "Needs your choice" with nothing proposed. It sits in this existing
+          bar rather than a row of its own, beside the action it feeds, and
+          carries the same Claude affordance Advanced uses - because the same
+          real Anthropic call is what happens on the click. The full panel,
+          with its evidence and review history, stays in Advanced.
+        */}
+        {aiAvailable ? null : (
+          // Never a dead button: with no provider connected, say what would
+          // connect one instead of offering an action that cannot happen.
+          <p className="simple-scenes__ai-hint">{t.mappingAssistant.connectProviderHint}</p>
+        )}
+        {aiAvailable ? (
+          <ClaudeActionButton
+            label={t.mappingAssistant.generateAction}
+            busyLabel={t.mappingAssistant.generating}
+            busy={isGenerating}
+            disabled={isStale}
+            onClick={() => void generate()}
+          />
+        ) : null}
         <Button
           variant="primary"
           disabled={scenesApproved || !allReady || isApproving || isStale}

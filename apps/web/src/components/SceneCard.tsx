@@ -160,7 +160,29 @@ export function SceneCard({
   const { t } = useLocale();
   const mapping = primaryMapping(realScene);
   const asset = mapping?.selectedAssetId ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null) : null;
-  const hasGenuineReview = pendingSuggestions.length > 0;
+  // 2026-09-28, real client session: a 77-composition template surfaced 30
+  // structural layers (a border overlay, a "Sharpen" adjustment layer, a
+  // black fade solid) as editable placeholders. Claude examined each, said in
+  // its reasoning that none is a content slot, and returned a suggestion
+  // carrying NO text, NO asset and NO classification - it proposes nothing.
+  //
+  // This card rendered each of those as a review item anyway: thirty
+  // identical pairs of blank "Keep original / Use suggestion" buttons in one
+  // scene, with the reasoning that explains them stored but never shown. A
+  // decision with nothing to decide is not a decision, and thirty of them is
+  // not a review queue.
+  //
+  // A suggestion now reaches the queue only when it actually proposes
+  // something. The rest are reported as what they are - findings, with the
+  // reasoning visible - and still individually actionable, so nothing is
+  // hidden or applied on the operator's behalf.
+  const proposals = pendingSuggestions.filter(
+    (s) => s.suggestedText !== null || s.suggestedAssetId !== null || s.suggestedClassification !== null
+  );
+  const findings = pendingSuggestions.filter(
+    (s) => s.suggestedText === null && s.suggestedAssetId === null && s.suggestedClassification === null
+  );
+  const hasGenuineReview = proposals.length > 0;
   const hasNoMappingsToReview = realScene.scenePlan.mappings.length === 0;
   const status = deriveCardStatus(hasGenuineReview, previewEntry.state, previewEntry.isStale, realScene.scenePlan.approvalState, hasNoMappingsToReview);
   const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
@@ -210,7 +232,7 @@ export function SceneCard({
       {hasGenuineReview ? (
         <div className="scene-card__review-queue">
           <h4>{t.simpleScenes.reviewQueueTitle}</h4>
-          {pendingSuggestions.map((suggestion) => {
+          {proposals.map((suggestion) => {
             const suggestedAsset = suggestion.suggestedAssetId ? ((assets ?? []).find((a) => a.id === suggestion.suggestedAssetId) ?? null) : null;
             return (
               <div key={suggestion.id} className="scene-card__review-item">
@@ -238,6 +260,40 @@ export function SceneCard({
             );
           })}
         </div>
+      ) : null}
+
+      {findings.length > 0 ? (
+        <details className="scene-card__findings">
+          <summary>{t.simpleScenes.findingsTitle(findings.length)}</summary>
+          <p className="scene-card__findings-description">{t.simpleScenes.findingsDescription}</p>
+          {findings.map((finding) => (
+            <div key={finding.id} className="scene-card__finding">
+              {(() => {
+                // The layer's own name lives on the mapping this suggestion
+                // is about, never on the suggestion itself. Omitted rather
+                // than invented when the mapping cannot be found.
+                const named = realScene.scenePlan.mappings.find((m) => m.id === finding.mappingId);
+                return named?.placeholderName ? <p className="scene-card__finding-layer">{t.simpleScenes.findingsLayerLabel(named.placeholderName)}</p> : null;
+              })()}
+              <p className="scene-card__finding-reason">{finding.reasoning ?? t.simpleScenes.findingsNoReason}</p>
+            </div>
+          ))}
+          {/*
+            ONE action for the whole set, not one per finding - a button per
+            item is exactly the wall this block exists to remove.
+            It is still required: an unresolved suggestion keeps the scene out
+            of `reviewsReady`, so leaving thirty of them pending would disable
+            Approve Scenes forever with no way to clear them.
+          */}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={suggestionsBusy}
+            onClick={() => findings.forEach((finding) => onAcceptSuggestion(finding))}
+          >
+            {t.simpleScenes.findingsAcceptAllAction(findings.length)}
+          </Button>
+        </details>
       ) : null}
 
       <details className="advanced-details">
