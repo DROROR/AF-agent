@@ -4,9 +4,17 @@ Renders a small Markdown subset to a PDF using nothing but the standard
 library, because this host has neither pip nor any PDF tool and the guide
 has to be shareable as a file.
 
-Deliberately narrow: headings, paragraphs, bullets, numbered items and
-**bold** / *italic* runs. Anything richer belongs in a real typesetter, not
-here - this exists to produce one readable handout, not to be a converter.
+Deliberately narrow: headings, paragraphs, bullets, numbered items,
+**bold** / *italic* / `code` runs, fenced code blocks, block quotes,
+horizontal rules and simple pipe tables. Anything richer belongs in a real
+typesetter, not here - this exists to produce readable handouts, not to be
+a converter.
+
+The four block kinds beyond plain text were added for the step-by-step
+guide (2026-09-28), which is mostly Windows paths and two-column
+"field -> what to put" tables. Rendering those as raw Markdown - literal
+pipes and backticks down the page - would have made the handout worse than
+no handout.
 """
 import re, sys, zlib
 
@@ -59,16 +67,43 @@ def runs(text):
     return out or [(text, "F1")]
 
 def parse(md):
-    blocks = []
+    blocks, in_code, table = [], False, []
+
+    def flush_table():
+        # A pipe table is emitted as ONE block so the renderer can size its
+        # columns from every row at once and keep it off a page break.
+        if table:
+            blocks.append(("table", table[:])); table.clear()
+
     for raw in md.split("\n"):
         line = raw.rstrip()
+
+        if line.strip().startswith("```"):
+            flush_table()
+            in_code = not in_code
+            continue
+        if in_code:
+            blocks.append(("code", raw)); continue
+
+        # A table ends at the first line that is not a row.
+        if line.strip().startswith("|") and line.strip().endswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            # The |---|---| separator carries no content.
+            if not all(set(c) <= set("-: ") and c for c in cells):
+                table.append(cells)
+            continue
+        flush_table()
+
         if not line.strip(): blocks.append(("gap", "")); continue
-        if line.startswith("### "): blocks.append(("h3", line[4:]))
+        if re.match(r"^-{3,}$", line.strip()): blocks.append(("rule", "")); continue
+        if line.startswith("> "): blocks.append(("quote", line[2:]))
+        elif line.startswith("### "): blocks.append(("h3", line[4:]))
         elif line.startswith("## "): blocks.append(("h2", line[3:]))
         elif line.startswith("# "): blocks.append(("h1", line[2:]))
         elif re.match(r"^[-*] ", line): blocks.append(("li", line[2:]))
         elif re.match(r"^\d+\. ", line): blocks.append(("ol", line))
         else: blocks.append(("p", line))
+    flush_table()
     return blocks
 
 class Page:
@@ -83,6 +118,67 @@ def render(blocks):
     for kind, text in blocks:
         if kind == "gap":
             p.y -= 6; continue
+
+        if kind == "rule":
+            if not p.room(14): newpage()
+            p.y -= 8
+            p.ops.append(f"0.75 G 0.6 w {ML} {p.y:.1f} m {W-MR} {p.y:.1f} l S 0 G")
+            p.y -= 6
+            continue
+
+        if kind == "code":
+            # Courier, on a tinted band, never wrapped: these are file paths
+            # and a broken path is a wrong path.
+            if not p.room(LEAD + 4): newpage()
+            p.y -= LEAD
+            p.ops.append(f"0.945 g {ML} {p.y-3.5:.1f} {W-ML-MR:.1f} {LEAD:.1f} re f 0 g")
+            p.ops.append(f"BT /F4 9.5 Tf 1 0 0 1 {ML+6} {p.y:.1f} Tm ({esc(text)}) Tj ET")
+            continue
+
+        if kind == "quote":
+            avail = W - ML - MR - 18
+            lines = wrap(re.sub(r"\*\*|\*|`", "", text), BODY, False, avail)
+            if not p.room(len(lines) * LEAD + 6): newpage()
+            top = p.y
+            for ln in lines:
+                p.y -= LEAD
+                p.ops.append(f"BT /F3 {BODY} Tf 1 0 0 1 {ML+18} {p.y:.1f} Tm ({esc(ln)}) Tj ET")
+            p.ops.append(f"0.55 G 2.2 w {ML+6} {top-2:.1f} m {ML+6} {p.y-3:.1f} l S 0 G")
+            p.y -= 4
+            continue
+
+        if kind == "table":
+            rows = text
+            ncol = max(len(r) for r in rows)
+            avail = W - ML - MR
+            # Widest cell per column decides the split, so a short "Field"
+            # column does not get the same room as a long instruction.
+            weights = [max(width(re.sub(r"\*\*|\*|`", "", r[c]) if c < len(r) else "", BODY) for r in rows) or 1 for c in range(ncol)]
+            total = sum(weights)
+            widths = [max(52, avail * w / total) for w in weights]
+            scale = avail / sum(widths)
+            widths = [w * scale for w in widths]
+            need = sum(max(1, len(wrap(re.sub(r"\*\*|\*|`", "", (r[c] if c < len(r) else "")), BODY, False, widths[c] - 10))) for r in rows for c in [0]) * LEAD + 12
+            if not p.room(need) and p.ops: newpage()
+            p.y -= 6
+            for ri, row in enumerate(rows):
+                cellw = [wrap(re.sub(r"\*\*|\*|`", "", (row[c] if c < len(row) else "")), BODY, ri == 0, widths[c] - 10) for c in range(ncol)]
+                h = max(len(c) for c in cellw) * LEAD
+                if not p.room(h + 4): newpage()
+                if ri == 0:
+                    p.ops.append(f"0.93 g {ML} {p.y-h+LEAD-4.5:.1f} {avail:.1f} {h:.1f} re f 0 g")
+                x = ML
+                for c in range(ncol):
+                    yy = p.y
+                    for ln in cellw[c]:
+                        yy -= LEAD
+                        p.ops.append(f"BT /{'F2' if ri == 0 else 'F1'} {BODY} Tf 1 0 0 1 {x+5:.1f} {yy:.1f} Tm ({esc(ln)}) Tj ET")
+                    x += widths[c]
+                p.y -= h
+                p.ops.append(f"0.82 G 0.5 w {ML} {p.y-4.5:.1f} m {W-MR} {p.y-4.5:.1f} l S 0 G")
+            p.y -= 8
+            continue
+
         size, bold, gap_before, indent = BODY, False, 0, 0
         if kind == "h1": size, bold, gap_before = 20, True, 10
         elif kind == "h2": size, bold, gap_before = 14, True, 16
