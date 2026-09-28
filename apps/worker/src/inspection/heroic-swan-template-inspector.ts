@@ -151,6 +151,33 @@ const ALL_DISCOVERY_TOOLS: readonly AllowedInspectionTool[] = ["ae_health", ...R
 export const OPEN_PROJECT_TIMEOUT_MS = 75_000;
 
 /**
+ * The project-wide preflight scan's own budget (2026-09-28, real client
+ * incident).
+ *
+ * This is the single heaviest call the inspector makes: one ae_run_jsx that
+ * walks EVERY composition and EVERY layer in the project, reading each
+ * layer's real type, footage, fonts and text. Everything downstream depends
+ * on it - layerKind, footageReferenced, requiredFonts, missingFootage - and
+ * `build-project-facts.ts` honestly falls back to "Unknown" for every layer
+ * the scan did not cover.
+ *
+ * It was running on the client's DEFAULT 15s, the same budget as a call that
+ * reads one number. On a 77-composition template it timed out
+ * ("MCP error -32001: Request timed out"), and the inspection then finished
+ * "successfully" with 261 unknown items, 0 editable placeholders, 0 footage
+ * and 0 fonts - a manifest describing a project far emptier than the real
+ * one, and indistinguishable from a genuinely simple template. Every
+ * template inspected before it was small enough to finish inside 15s, which
+ * is exactly why this went unnoticed.
+ *
+ * Generous on purpose: this call is read-only, runs once per inspection, and
+ * a slow answer is worth far more than a fast, silently empty one. It stays
+ * bounded rather than unlimited so a genuinely wedged AE still fails instead
+ * of hanging the job forever.
+ */
+export const PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS = 300_000;
+
+/**
  * If the single app.open() attempt above times out, MCP/stdio has no
  * cancellation guarantee - the ae-mcp bridge may still be processing (or
  * queued behind) that original request. Re-issuing app.open() in that
@@ -942,7 +969,7 @@ async function scanProjectPreflightEvidence(
   retryOptions: TransientRetryOptions | undefined
 ): Promise<ParseProjectPreflightScanResult> {
   const script = buildScanProjectPreflightScript();
-  const result = await callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script), retryOptions);
+  const result = await callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS), retryOptions);
   if (!result.ok) {
     return { ok: false, reason: `ae_run_jsx failed: ${result.error.message}` };
   }

@@ -1018,3 +1018,56 @@ fails that test alone.
 with the warning that skipping it fails the first inspection. The client had
 the instruction and the product contradicted it. Documentation does not
 substitute for an error message that names the next action.
+
+## 2026-09-28 — The heaviest call in the system ran on the smallest budget
+
+**What happened.** `INSPECT_TEMPLATE` on a 77-composition template
+(`Android_App_Promo_CC2014+`) reported **SUCCEEDED** after 5m59s and produced
+a manifest describing almost nothing:
+
+| | This template | Four templates that work |
+|---|---|---|
+| Compositions | 77 | 7–9 |
+| Editable placeholders | **0** | 3–15 |
+| Footage referenced | **0** | 1–4 |
+| Required fonts | **0** | — |
+| Unknown items | **261** | — |
+
+Every layer came back `sourceType: "Unknown"`, while the project demonstrably
+references 27 footage items — After Effects had listed them by name in an
+earlier `FOOTAGE_UNRESOLVED` refusal on the very same file.
+
+**Root cause.** One `unknownItems` entry carried it:
+
+> the project-wide preflight scan did not complete
+> (ae_run_jsx failed: MCP error -32001: Request timed out)
+
+A single `ae_run_jsx` walks every composition and every layer, and is the sole
+source of layer kind, footage, fonts and missing-footage facts.
+`scanProjectPreflightEvidence` called it as `runFixedInspectionScript(script)`
+— no budget — so it inherited `DEFAULT_TIMEOUT_MS`, **15 seconds**. The same
+file's `app.open()` had been given an explicit 75s two incidents earlier. The
+heaviest call in the inspector was running on the budget of a call that reads
+one number.
+
+`build-project-facts.ts` then did exactly what it documents: fell back to
+`"Unknown"` for every layer rather than guessing. Honest — and invisible. The
+result is indistinguishable from a genuinely simple, placeholder-free,
+plugin-free template.
+
+**Why it survived until now.** Every previously inspected template was 7–9
+compositions and finished inside 15s. The budget was never the binding
+constraint until a real client template was four times larger.
+
+**Fixed.** `PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS = 300_000`, passed explicitly.
+Test `12.` pins that the call passes a budget (a bare
+`runFixedInspectionScript(script)` fails it), that the budget is at least
+120s, and that it exceeds `OPEN_PROJECT_TIMEOUT_MS`.
+
+**Still open — the more dangerous half.** A timed-out scan still yields a
+**SUCCEEDED** job. The summary shows zeros that read as facts about the
+template rather than as a failure to read it. Nothing on the wizard screen
+distinguishes "this template has no placeholders" from "we could not see its
+placeholders". The evidence is already persisted in `unknownItems`; the
+dashboard does not surface it. Until that is fixed, a large template can still
+fail quietly in a way that looks like success.
