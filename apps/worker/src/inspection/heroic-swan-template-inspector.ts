@@ -638,7 +638,12 @@ const openProjectScriptResultSchema = z.union([
   z
     .object({
       ok: z.literal(true),
-      resultingValue: z.object({ openedPath: z.string().nullable(), openedName: z.string().nullable() })
+      // `openedName` is optional for exactly the reason ae-edit-bridge.ts's
+      // openProjectResultValueSchema spells out: After Effects can omit it,
+      // nothing in this repository reads it, and INSPECT_TEMPLATE must not
+      // fail over a field it does not use. `openedPath` - the one value
+      // that is actually checked - stays required.
+      resultingValue: z.object({ openedPath: z.string().nullable(), openedName: z.string().nullable().optional() })
     })
     .strict(),
   z.object({ ok: z.literal(false), failureReason: z.string() }).strict()

@@ -66,11 +66,48 @@ export type OperationExecutionResult = OperationExecutionSuccess | OperationExec
 
 export type SaveProjectResult = { ok: true; resultingValue: unknown } | { ok: false; failureReason: string };
 
-/** What buildOpenProjectScript's own JSON.stringify(...) result actually contains on success - see that function's own doc comment. */
+/**
+ * What buildOpenProjectScript's own JSON.stringify(...) result actually
+ * contains on success - see that function's own doc comment.
+ *
+ * REAL 2026-09-27 INCIDENT (project MVP-T1-Restaurant-Promo). Four
+ * consecutive EXECUTE_FRAME jobs failed, every one of them with:
+ *
+ *   could not confirm the session working copy is open in After Effects:
+ *   open-project script's result did not match the expected
+ *   {openedPath, openedName} shape:
+ *   [{ "code": "invalid_type", "received": "undefined",
+ *      "path": ["openedName"], "message": "Required" }]
+ *
+ * The same code had succeeded seven times earlier the same day, so
+ * nothing about the build changed - After Effects simply stopped
+ * reporting a project name. The script asks for `app.project.name`, and
+ * a JSON.stringify drops a key whose value is `undefined` rather than
+ * emitting null, so the field vanishes from the payload entirely.
+ *
+ * WHY THIS IS THE FIX, WHATEVER THE CAUSE. `openedName` is not read
+ * ANYWHERE - not here, not by any caller, not in a log line. Across the
+ * whole repository it appears only in two schemas that demand it, one
+ * error message that names it, and the two scripts that produce it. The
+ * single value this function uses is `openedPath`, which stays required
+ * and is still checked against the requested path by windowsPathsEqual
+ * below - that comparison is the actual safety gate, and it is untouched.
+ * Failing a job outright over a field nobody consumes turns a cosmetic
+ * gap in After Effects' reporting into a hard stop on real work.
+ *
+ * So it is accepted when present and accepted when absent. The unknown-key
+ * strictness stays: this tolerates a MISSING unused field, never an
+ * unexpected one.
+ *
+ * NOT DIAGNOSED, and deliberately not guessed at here: why After Effects
+ * began omitting the name. That question belongs to the script, and the
+ * script is reviewed, versioned and allowlisted (CLAUDE.md safety rule 2)
+ * - it is not worth editing for a value nothing reads.
+ */
 const openProjectResultValueSchema = z
   .object({
     openedPath: z.string().nullable(),
-    openedName: z.string().nullable()
+    openedName: z.string().nullable().optional()
   })
   .strict();
 

@@ -868,3 +868,57 @@ refusing a 3D layer. Each refused rather than damaged something.
 occurrences in three days, and the single most common failure in the
 system. The message names no composition, no missing dependency and no
 next step. Not investigated here; it needs its own pass.
+
+## 2026-09-27 - EXECUTE_FRAME blocked by a field nothing reads
+
+Four consecutive `EXECUTE_FRAME` jobs on `MVP-T1-Restaurant-Promo` failed,
+every one identically:
+
+```
+could not confirm the session working copy is open in After Effects:
+open-project script's result did not match the expected
+{openedPath, openedName} shape:
+[{ "code": "invalid_type", "received": "undefined",
+   "path": ["openedName"], "message": "Required" }]
+```
+
+Reproducible, and a hard stop: "Start execution" could not proceed at all.
+
+**Not a regression.** `openedName` has been in the bridge schema since
+2026-09-08 and in the scripts since before that, and the very same worker
+build succeeded **seven times earlier the same day** (last success 14:23,
+first failure 15:25). Nothing about the code changed between them - After
+Effects simply stopped reporting a project name. The script asks for
+`app.project.name`, and `JSON.stringify` omits a key whose value is
+`undefined` rather than writing null, so the field left the payload
+entirely.
+
+**`openedName` is read nowhere.** Across the whole repository it occurs in
+exactly five non-test places: two schemas that demand it, one error message
+that names it, and the two scripts that produce it. No caller, no log line,
+nothing. The only value `openProject` uses is `openedPath`.
+
+Both schemas now accept it as optional - `apps/worker/src/execution/ae-edit-bridge.ts`
+and `apps/worker/src/inspection/heroic-swan-template-inspector.ts`, which
+carried the identical latent fault on the INSPECT_TEMPLATE path. This is
+correct independently of why After Effects omitted the name: failing a job
+over a field nobody consumes turns a cosmetic gap in AE's reporting into a
+hard stop on real work.
+
+**What was deliberately NOT loosened**, each pinned by its own test:
+`openedPath` stays required; a result missing it is still refused; an
+unexpected key is still refused (`.strict()` is untouched); and a result
+naming a DIFFERENT open project is still refused by `windowsPathsEqual` -
+that comparison is the actual safety gate and it is unchanged.
+
+Verified with teeth: the two tolerance tests fail against the old required
+schema and pass against the new one, while the three refusal tests pass
+against both.
+
+**Not diagnosed:** why After Effects began omitting the name. That question
+belongs to the JSX, which is reviewed, versioned and allowlisted
+(CLAUDE.md safety rule 2), and is not worth editing for a value nothing
+reads.
+
+**This is a WORKER fix.** Deploying the server does not deliver it - the
+editing computer needs a new worker build installed.

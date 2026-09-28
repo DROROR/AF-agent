@@ -188,6 +188,67 @@ describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-
     expect(fake.lastScript).not.toContain("CloseOptions.DO_NOT_SAVE_CHANGES");
   });
 
+  /**
+   * REAL 2026-09-27: four consecutive EXECUTE_FRAME jobs failed because
+   * After Effects stopped reporting a project name, and JSON.stringify
+   * drops an undefined value rather than emitting null - so the key was
+   * simply absent. Nothing reads openedName, so its absence must never
+   * stop real work. openedPath, which IS read, stays strict.
+   */
+  it("opens normally when After Effects reports no project name at all - the field nothing reads cannot fail a job", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      // Exactly the payload shape that failed in production: openedName absent entirely.
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: WORKING_COPY_PATH } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    expect(await bridge.openProject(WORKING_COPY_PATH)).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
+  });
+
+  it("tolerates a missing name on the reopen-from-disk path too - the same schema guards both", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, previousValue: { closedUnsavedCopy: true }, resultingValue: { openedPath: WORKING_COPY_PATH } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    expect(await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true })).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
+  });
+
+  it("still refuses when the path it DOES read is missing - tolerance extends to the unused field only", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedName: "working-copy.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+    expect(result.ok).toBe(false);
+  });
+
+  it("still refuses a genuinely unexpected key - a missing unused field is tolerated, a surprise is not", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: WORKING_COPY_PATH, somethingNobodyExpected: 1 } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+    expect(result.ok).toBe(false);
+  });
+
+  it("still refuses when AE reports a DIFFERENT project open, name or no name - the real safety gate is untouched", async () => {
+    const fake = new FakeMutationClient({
+      ok: true,
+      content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: "C:\\somewhere\\else.aep" } })
+    });
+    const bridge = new HeroicSwanAeEditBridge({ createMutationClient: () => fake });
+
+    const result = await bridge.openProject(WORKING_COPY_PATH);
+    expect(result.ok).toBe(false);
+  });
+
   it("real 2026-09-14: discardUnsavedChanges reopens the working copy from disk (close without saving, never save) and still verifies AE's own reopened path", async () => {
     const fake = new FakeMutationClient({
       ok: true,
