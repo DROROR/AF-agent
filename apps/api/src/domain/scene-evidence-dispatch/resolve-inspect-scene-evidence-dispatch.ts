@@ -1,4 +1,12 @@
-import { MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST, selectEvidenceFrameSeconds, type ScenePlanEntry, type SceneEvidenceRequest, type TemplateManifest } from "@dyo/schemas";
+import {
+  MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST,
+  computeEffectiveVisibility,
+  selectEvidenceFrameSeconds,
+  selectScenePreviewFrameSeconds,
+  type ScenePlanEntry,
+  type SceneEvidenceRequest,
+  type TemplateManifest
+} from "@dyo/schemas";
 import { derivePreviewTimingTargets } from "../preview-timing/derive-preview-timing-targets.js";
 
 export interface InspectSceneEvidenceDispatchPlanSnapshot {
@@ -343,6 +351,30 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     .sort((a, b) => a - b)
     .slice(0, MAX_LAYERS_PER_SCENE_EVIDENCE_REQUEST);
 
+  // WHICH MOMENT the storyboard thumbnail shows (2026-09-28, real client
+  // session). This used to be a flat 0 - "the very start of the
+  // composition" - and on a real client template every thumbnail came back
+  // black, because a composition's first frame is very often a fade-in from
+  // black. A black square is not a preview; the operator could not tell a
+  // scene with content from one without.
+  //
+  // selectScenePreviewFrameSeconds is the SAME evidence-based rule the
+  // execute-frame path already uses: sweep the slots' own provable
+  // visibility windows and take the longest stretch where the most of them
+  // are on screen together. No composition name, index or duration
+  // assumption - only what the slots themselves prove.
+  //
+  // It returns null when no slot has a provable window, and then the
+  // composition's midpoint is used rather than its first frame: still
+  // deterministic, still template-agnostic, and far likelier to show
+  // something than t=0.
+  const storyboardFrameSeconds =
+    selectScenePreviewFrameSeconds(
+      (manifestScene?.placeholders ?? [])
+        .filter((placeholder) => placeholder.compositionId === scene.manifestCompositionId)
+        .map((placeholder) => (placeholder.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts, scene.manifestCompositionId) : null))
+    ) ?? composition.durationSeconds / 2;
+
   return {
     ok: true,
     payload: {
@@ -362,7 +394,7 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
       // whole evidence result (see SceneEvidenceResponse.preview's own
       // doc comment) - the structural layer facts remain useful on
       // their own either way.
-      previewTimestampSeconds: slotEvidenceSeconds ?? 0,
+      previewTimestampSeconds: slotEvidenceSeconds ?? storyboardFrameSeconds,
       // WHICH SLOT this frame is evidence for, carried into the job's own
       // persisted payload so the upload callback can attribute the captured
       // frame to this mapping (real 2026-09-24 defect: without it, every

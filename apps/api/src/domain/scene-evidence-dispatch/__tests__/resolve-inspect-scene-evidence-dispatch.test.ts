@@ -109,8 +109,12 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
       aeProjectItemIndex: 5,
       compositionName: "Scene 01",
       layerIndices: [1, 3],
-      previewTimestampSeconds: 0
+      previewTimestampSeconds: expect.any(Number)
     });
+    // 2026-09-28: never the first frame - a composition's frame 0 is very
+    // often a fade-in from black, and every storyboard thumbnail on a real
+    // client template came back black because this was a flat 0.
+    expect(result.ok && result.payload.previewTimestampSeconds).toBeGreaterThan(0);
   });
 
   it("live-QA generic AE layer-discovery capability: omits discoverLayerDetails from the payload entirely when not requested - existing callers see byte-identical behavior", () => {
@@ -202,8 +206,12 @@ describe("resolveInspectSceneEvidenceDispatch", () => {
       aeProjectItemIndex: 5,
       compositionName: "Scene 01",
       layerIndices: [],
-      previewTimestampSeconds: 0
+      previewTimestampSeconds: expect.any(Number)
     });
+    // 2026-09-28: never the first frame - a composition's frame 0 is very
+    // often a fade-in from black, and every storyboard thumbnail on a real
+    // client template came back black because this was a flat 0.
+    expect(result.ok && result.payload.previewTimestampSeconds).toBeGreaterThan(0);
   });
 
   it("live QA Blocker 2 fix: a composition with no manifest.scenes entry at all (e.g. isNestedOnlyReferenced at the flat manifest level, promoted to a real scene by the grouping UI) still resolves ok with layerIndices: []", () => {
@@ -913,13 +921,16 @@ describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
     expect(result.ok && result.payload.slotEvidenceMappingId).toBe("mapping-1");
   });
 
-  it("still captures the composition's start when no slot evidence was asked for", () => {
+  it("captures a representative moment, never the composition's first frame, when no slot evidence was asked for", () => {
     const result = resolveInspectSceneEvidenceDispatch({
       scenePlanId: "scene-1",
       currentPlan: validPlan({ scenePlans: [scenePlan({ mappings: [mapping] })] }),
       currentProjectManifest: manifestWithSlotFacts(slotFacts)
     });
-    expect(result.ok && result.payload.previewTimestampSeconds).toBe(0);
+    // Was a flat 0 until 2026-09-28. On a real client template that made
+    // every storyboard thumbnail black, because a composition's first frame
+    // is very often a fade-in from black.
+    expect(result.ok && result.payload.previewTimestampSeconds).toBeGreaterThan(0);
     // Attributed to no slot at all: a plain representative scene frame, which
     // is exactly what every capture taken before slot attribution existed was.
     expect(result.ok && result.payload.slotEvidenceMappingId).toBeUndefined();
