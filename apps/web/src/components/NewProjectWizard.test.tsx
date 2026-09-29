@@ -167,6 +167,41 @@ describe("NewProjectWizard", () => {
     expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("enables Inspect Template for the QUOTED path Windows' own 'Copy as path' produces (real client failure, 2026-09-28)", async () => {
+    // Shift+right-click > Copy as path wraps the path in double quotes.
+    // The wizard used to sit disabled with nothing explaining why, and the
+    // natural fix - deleting the closing quote alone - then dispatched a
+    // path whose surviving opening quote was not absolute, so the worker
+    // joined it onto its work root and reported ENOENT for a real file.
+    stubFetchByUrl({ "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } } });
+    renderWizard();
+    await goToTemplateStep();
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
+    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+
+    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+      target: { value: '"C:\\DYO-Agent\\copy\\Android_App_Promo_CC2014+.aep"' }
+    });
+
+    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("enables Inspect Template for a path left with only the OPENING quote - the exact string the failed client job carried", async () => {
+    stubFetchByUrl({ "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } } });
+    renderWizard();
+    await goToTemplateStep();
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
+    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+
+    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+      target: { value: '"C:\\DYO-Agent\\copy\\Android_App_Promo_CC2014+.aep' }
+    });
+
+    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+  });
+
   it("dispatches a real job, shows running progress, then the real completed result with source SHA - and lets the operator promote it into a real project", async () => {
     // Two real poll ticks (POLL_INTERVAL_MS=2000 in the component) happen
     // sequentially in this one test - real timers, not faked - so the

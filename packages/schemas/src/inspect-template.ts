@@ -12,6 +12,39 @@ import { templateManifestSchema } from "./template-manifest.js";
  */
 
 /**
+ * How a pasted source project path is read, before any other layer looks
+ * at it - so the wizard's "Inspect" gate, this request schema and the
+ * path the worker finally stat()s are all literally the same string.
+ *
+ * Real client failure, 2026-09-28. Windows Explorer's own "Copy as path"
+ * (Shift+right-click, or Ctrl+Shift+C) hands out the path ALREADY wrapped
+ * in double quotes. That trailing quote makes `hasAepExtension` false, so
+ * the wizard's Inspect button sits disabled with nothing on screen saying
+ * why; the natural next move is to delete the closing quote alone, which
+ * enables the button and leaves the OPENING one in place. The job then
+ * dispatched carried `"C:\...\Android_App_Promo_CC2014+.aep`, which
+ * `path.isAbsolute()` rejects (work-root.ts), so the worker joined it onto
+ * its own work root and stat()ed
+ * `C:\DYO-Agent\app\"C:\DYO-Agent\copy\...aep` - ENOENT, reported as a
+ * file the operator could plainly see existed.
+ *
+ * A double quote is an ILLEGAL character in a Windows path, so removing
+ * every one of them can never damage a path After Effects could have
+ * opened - which is why an unmatched quote is stripped too, not only a
+ * balanced pair. A single quote IS legal in a Windows filename, so only a
+ * matched surrounding pair of those is removed, never one that belongs to
+ * the name itself.
+ *
+ * Normalization only - it still does not prove the file exists. That
+ * remains the worker's stat()+isFile() check (CLAUDE.md Safety Rule 8).
+ */
+export function normalizeSourceProjectPath(rawPath: string): string {
+  const withoutDoubleQuotes = rawPath.replace(/"/g, "").trim();
+  const singleQuoted = /^'([\s\S]+)'$/.exec(withoutDoubleQuotes)?.[1];
+  return (singleQuoted ?? withoutDoubleQuotes).trim();
+}
+
+/**
  * Case-insensitive .aep suffix check - the one shared rule every layer
  * (this request schema, the worker's own filesystem check in
  * hash-source-project.ts, and the New Project wizard's own client-side
@@ -21,9 +54,12 @@ import { templateManifestSchema } from "./template-manifest.js";
  * filesystem access, which only the worker has - see CLAUDE.md Safety
  * Rule 8 and hash-source-project.ts's own stat()+isFile() check, which
  * this does NOT replace.
+ *
+ * Judges the NORMALIZED path, so the gate agrees with the path actually
+ * dispatched rather than with whatever the clipboard happened to carry.
  */
 export function hasAepExtension(path: string): boolean {
-  return /\.aep$/i.test(path.trim());
+  return /\.aep$/i.test(normalizeSourceProjectPath(path));
 }
 
 export const inspectTemplateRequestSchema = z.object({
@@ -39,9 +75,16 @@ export const inspectTemplateRequestSchema = z.object({
    * directory-only path was accepted and silently produced a fallback
    * "raw_capture" result instead of being rejected up front).
    */
-  sourceProjectPath: z.string().min(1, "Source project path is required").refine(hasAepExtension, {
-    message: "Source project path must be a file path ending in .aep"
-  })
+  sourceProjectPath: z
+    .string()
+    // Normalized FIRST, so what the worker receives is what every check
+    // above judged - a quoted clipboard path is accepted and cleaned here
+    // rather than rejected late by a stat() the operator cannot explain.
+    .transform(normalizeSourceProjectPath)
+    .refine((path) => path.length > 0, { message: "Source project path is required" })
+    .refine(hasAepExtension, {
+      message: "Source project path must be a file path ending in .aep"
+    })
 });
 export type InspectTemplateRequest = z.infer<typeof inspectTemplateRequestSchema>;
 

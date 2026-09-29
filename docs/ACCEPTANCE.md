@@ -1071,3 +1071,101 @@ distinguishes "this template has no placeholders" from "we could not see its
 placeholders". The evidence is already persisted in `unknownItems`; the
 dashboard does not surface it. Until that is fixed, a large template can still
 fail quietly in a way that looks like success.
+
+---
+
+## 2026-09-28 — Correction: the 300s budget was not the fix
+
+The entry above closes with **"Fixed. `PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS =
+300_000`"**. That is wrong, and the run that disproved it happened the same
+afternoon: with the 300s budget deployed, the scan still failed — and failed
+in **5m23s and 5m59s**, never reaching 300s from the start of the job.
+
+**The real limit was never ours.** `ae-mcp` enforces its own hard **30 second**
+cap on `system.runJsx`. No client-side budget can move it. A single
+`ae_run_jsx` that walks every composition and every layer of a 77-composition
+template cannot finish inside 30s, so raising our own timeout from 15s to 300s
+changed nothing except how long we waited to be told the same thing.
+
+**Fixed for real** (`3d419d6`): the project-wide scan is **sliced**.
+`SCAN_PROJECT_ITEMS_PER_CALL = 10`, `buildScanProjectPreflightScript(start,
+end)` walks only that window, and `scanProjectPreflightEvidence` loops the
+slices and merges them with `mergeProjectPreflightScans`. The merge fails the
+WHOLE scan if any slice fails, and reports `fonts`/`footage` as scanned only
+when **every** slice carried them — a partial scan can never be mistaken for a
+complete one.
+
+Measured on the real client template, same file, same machine:
+
+| | Before | After |
+|---|---|---|
+| Unresolved items | 261 | **0** |
+| Placeholders | 0 | **30** |
+| Footage items | 0 | **27** |
+| Fonts | 0 | **3** |
+
+**The day's actual root cause, separately:** `ae-mcp-bootstrap.jsx` had never
+been installed into After Effects' `Scripts/Startup/` folder on the client
+machine (`Test-Path` → `False`). Reboots, AE restarts and preference toggling
+all failed until it was placed there. Nothing in the product reported this as
+distinct from a dead bridge.
+
+### Still open from that day
+
+A timed-out or sliced-out scan still yields a **SUCCEEDED** job whose summary
+shows zeros that read as facts about the template rather than as a failure to
+read it. The evidence is persisted in `unknownItems`; the dashboard does not
+surface it.
+
+---
+
+## 2026-09-29 — Windows' own "Copy as path" could not be pasted into the wizard
+
+Found during the pre-presentation audit, in the client worker's own job
+history: **19 of its 20 jobs ever have FAILED.** The most recent one named its
+own cause.
+
+```
+Could not hash the real source .aep at sourceProjectPath
+(cannot access "C:\DYO-Agent\copy\...\Android_App_Promo_CC2014+.aep:
+ ENOENT: no such file or directory, stat
+ 'C:\DYO-Agent\app\"C:\DYO-Agent\copy\...\Android_App_Promo_CC2014+.aep')
+```
+
+**Root cause.** Windows Explorer's own *Copy as path* (Shift+right-click, or
+Ctrl+Shift+C) hands out the path **already wrapped in double quotes** — the
+ordinary way a Windows user supplies a path. The chain:
+
+1. The trailing `"` makes `hasAepExtension` false, so the wizard's **Inspect
+   Template button sits disabled with nothing on screen saying why.** This is
+   the client's reported *"button he disable hai"*.
+2. The natural repair — deleting the closing quote alone — enables the button
+   and leaves the **opening** quote in place.
+3. `path.isAbsolute()` (`work-root.ts:22`) rejects a string starting with `"`,
+   so the worker **joined it onto its own work root**, producing
+   `C:\DYO-Agent\app\"C:\DYO-Agent\copy\...`.
+4. ENOENT — reported against a file the operator could plainly see existed.
+
+Two separate client complaints, one bug.
+
+**Fixed.** `normalizeSourceProjectPath` in `inspect-template.ts` — the same
+file that already declares `hasAepExtension` "the one shared rule every layer
+validates against", so the wizard's gate, the request schema and the path the
+worker finally `stat()`s are now literally the same string.
+
+A double quote is an **illegal character in a Windows path**, so every one is
+removed — an unmatched quote as well as a balanced pair, which is what the
+failing job actually carried. A single quote **is** legal in a Windows
+filename, so only a matched surrounding pair of those is stripped, never one
+belonging to the name (`C:\work\Dror's Promo.aep` survives intact). The
+request schema normalizes **before** it validates, so what is dispatched is
+what was judged.
+
+Pinned by 13 tests: the real quoted clipboard string, the opening-quote-only
+string the failed job carried, the already-clean path, a filename containing a
+legal apostrophe, quotes-only input rejected as *"required"* rather than
+accepted as empty, and the 2026-08-30 directory-path rejection still holding.
+
+**Not fixed by this.** The client's worker still runs a build from before the
+slicing fix — its last attempt was 2026-09-28 11:21, and `3d419d6` landed at
+15:18. It needs the current worker package before it can inspect anything.

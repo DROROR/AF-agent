@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { hasAepExtension, inspectTemplateResultSchema, type InspectTemplateResponse, type JobDto } from "@dyo/schemas";
+import {
+  hasAepExtension,
+  inspectTemplateResultSchema,
+  normalizeSourceProjectPath,
+  type InspectTemplateResponse,
+  type JobDto
+} from "@dyo/schemas";
 import { PageHeader } from "./ui/PageHeader";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -252,7 +258,7 @@ export function NewProjectWizard(): ReactElement {
     const result = await dispatchJob({
       operation: "INSPECT_TEMPLATE",
       workerId,
-      payload: { templateId: templateId.trim(), sourceProjectPath: sourceProjectPath.trim() }
+      payload: { templateId: templateId.trim(), sourceProjectPath: normalizeSourceProjectPath(sourceProjectPath) }
     });
     setIsDispatching(false);
     if (!result.ok) {
@@ -264,7 +270,7 @@ export function NewProjectWizard(): ReactElement {
       jobId: result.data.jobId,
       workerId,
       templateId: templateId.trim(),
-      sourceProjectPath: sourceProjectPath.trim(),
+      sourceProjectPath: normalizeSourceProjectPath(sourceProjectPath),
       name: name.trim()
     });
     // Optimistic first snapshot from the dispatch response itself - the
@@ -275,7 +281,7 @@ export function NewProjectWizard(): ReactElement {
       projectId: null,
       operation: "INSPECT_TEMPLATE",
       status: result.data.status,
-      payload: { templateId: templateId.trim(), sourceProjectPath: sourceProjectPath.trim() },
+      payload: { templateId: templateId.trim(), sourceProjectPath: normalizeSourceProjectPath(sourceProjectPath) },
       result: null,
       error: null,
       checkpoint: null,
