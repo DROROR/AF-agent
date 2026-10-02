@@ -1624,3 +1624,26 @@ when it opens and closes.
 **Confirmed live on the same screen:** the master scene's preview now arrives (the
 captured-frame wait in worker build `574a9ea`), and the drawer offers each layer only what
 its kind takes.
+
+## 2026-10-02 - A light-flare clip was offered as a scene's only "video" slot
+
+**Seen live on the test project:** one scene's edit drawer offered a single file slot,
+named after a flare clip. A reviewer looking for where the phone screenshot goes chose a
+screenshot for it and was shown a full slot decision ("flat card, 100% confident", crop
+warnings, evidence frame) about a layer that is an effect.
+
+**Cause (from the stored inspection, not a guess):** the layer is video footage, the size
+of the whole picture, on screen for just over a second, and its blending mode is Screen -
+it only adds light to the scene beneath it. Nested inspection surfaced every video footage
+layer that was not a pre-rendered pass.
+
+**Fix:** inside a nested composition, moving footage whose own blending mode is a
+lightening one (Add, Lighten, Screen, Color Dodge, Classic Color Dodge, Linear Dodge,
+Lighter Color) is the template's effect and is not offered. Both facts come from the scan;
+a mode that was not read hides nothing, a still picture is left as it was, and a scene's
+own top-level layers are unchanged.
+
+**Checked offline** by rebuilding the manifest from that project's stored inspection: the
+flare clip is gone, every other placeholder keeps its id, and each of the eight scenes has
+at least one phone screen to put a picture in. **Not yet run on real After Effects** - it
+needs worker build of this commit and a new inspection.

@@ -206,8 +206,15 @@ type NestedLayerDecision =
  * those becomes an unknownItem: genuine uncertainty is reported, never
  * silently hidden.
  */
-function decideNestedLayer(layer: LayerFact, layersByIndex: ReadonlyMap<number, LayerFact>): NestedLayerDecision {
+function decideNestedLayer(
+  layer: LayerFact,
+  layersByIndex: ReadonlyMap<number, LayerFact>,
+  scanned: ScannedSlotLayer | undefined
+): NestedLayerDecision {
   if (layer.enabled === false || layer.guideLayer === true || layer.trackMatte?.isTrackMatte === true) {
+    return { kind: "structural" };
+  }
+  if (isLightOverlay(layer, scanned)) {
     return { kind: "structural" };
   }
   if (layer.layerKind === "ShapeLayer" || layer.layerKind === "CameraLayer" || layer.layerKind === "LightLayer") {
@@ -231,6 +238,44 @@ function decideNestedLayer(layer: LayerFact, layersByIndex: ReadonlyMap<number, 
     kind: "uncertain",
     reason: `nested layer could not be confirmed as either structural or an editable placeholder: ${classification.evidence.reason}`
   };
+}
+
+/**
+ * Blending modes that only ever ADD light to the picture beneath: wherever
+ * the layer is black it shows nothing at all.
+ */
+const LIGHTENING_BLENDING_MODES: ReadonlySet<string> = new Set([
+  "ADD",
+  "LIGHTEN",
+  "SCREEN",
+  "COLOR_DODGE",
+  "CLASSIC_COLOR_DODGE",
+  "LINEAR_DODGE",
+  "LIGHTER_COLOR"
+]);
+
+/**
+ * A light overlay: moving footage laid over the picture in a lightening
+ * blending mode - a flare, a light leak, a burst of particles.
+ *
+ * REAL 2026-10-02 DEFECT: a one-second flare clip, blended Screen over a
+ * whole scene, was offered as that scene's only "video" slot. A reviewer
+ * looking for where the phone screenshot goes picked a screenshot for it and
+ * was walked through a slot decision about a layer that is an effect. A
+ * client's own clip put there would show only its bright parts, as a ghost
+ * over the scene - it is the template's effect, never client content.
+ *
+ * Both halves are AE facts from the scan, never a name: the source is video
+ * footage, and the layer's own blending mode is a lightening one. A mode the
+ * scan could not read is not a lightening mode, so nothing is hidden on an
+ * unknown.
+ */
+function isLightOverlay(layer: LayerFact, scanned: ScannedSlotLayer | undefined): boolean {
+  if (layer.layerKind !== "AVLayer" || layer.footage?.hasVideo !== true || layer.footage.isStill) {
+    return false;
+  }
+  const blendingMode = scanned?.detail?.blendingMode;
+  return typeof blendingMode === "string" && LIGHTENING_BLENDING_MODES.has(blendingMode);
 }
 
 /**
@@ -553,7 +598,7 @@ function collectNestedPlaceholders(
 
       const decision: NestedLayerDecision =
         screenCard === null
-          ? decideNestedLayer(layer, layersByIndex)
+          ? decideNestedLayer(layer, layersByIndex, layerFactsByCompositionAndIndex.get(identity))
           : layer === screenCard
             ? { kind: "surface", classification: SCREEN_CARD_CLASSIFICATION }
             : { kind: "structural" };

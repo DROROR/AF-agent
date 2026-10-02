@@ -35,6 +35,12 @@ export interface ScannedSlotLayer {
          * excludes only on an explicit true).
          */
         adjustmentLayer?: boolean | null | undefined;
+        /**
+         * AE's own blending mode for this layer, by its enum name (2026-10-02).
+         * Read by build-manifest.ts to tell a light overlay - footage added
+         * onto the picture - from a clip the client could replace.
+         */
+        blendingMode?: string | null | undefined;
         parentLayerIndex?: number | null | undefined;
         hasTransformKeyframes?: boolean | null | undefined;
         inPointSeconds?: number | null | undefined;

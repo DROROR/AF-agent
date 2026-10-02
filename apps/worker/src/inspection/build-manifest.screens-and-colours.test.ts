@@ -177,3 +177,36 @@ describe("each Color Control effect is one editable colour", () => {
     expect(placeholdersOf(facts(withText)).map((p) => [p.placeholderType, p.layerName])).toEqual([["text", "Headline"]]);
   });
 });
+
+describe("moving footage laid over the picture in a lightening blending mode is an effect, not a slot", () => {
+  const clip = (index: number, name: string, isStill = false) =>
+    layer({
+      index,
+      name,
+      layerKind: "AVLayer",
+      footage: { hasVideo: true, hasAudio: false, isStill, isMissing: false, widthPx: 1920, heightPx: 1080 }
+    });
+  const blended = (blendingMode: string | null): Record<string, ScannedSlotLayer> => ({
+    [`${SCENE}:1`]: { kind: "AVLayer", detail: { blendingMode } }
+  });
+  const emptyCard = composition({ compositionId: CARD, name: "Card" });
+  const typesOf = (sceneLayers: LayerFact[], scanned: Record<string, ScannedSlotLayer>) =>
+    placeholdersOf(facts(graph(emptyCard, false, sceneLayers), scanned)).map((p) => [p.placeholderType, p.layerName]);
+
+  it.each(["SCREEN", "ADD", "LIGHTEN", "LINEAR_DODGE"])("%s: not offered, and the text beside it still is", (mode) => {
+    expect(typesOf([clip(1, "glow"), text(2, "Headline")], blended(mode))).toEqual([["text", "Headline"]]);
+  });
+
+  it("a clip in the normal mode is still the client's video slot", () => {
+    expect(typesOf([clip(1, "clip")], blended("NORMAL"))).toEqual([["video", "clip"]]);
+  });
+
+  it("a clip whose blending mode was never read is still offered - unknown hides nothing", () => {
+    expect(typesOf([clip(1, "clip")], blended(null))).toEqual([["video", "clip"]]);
+    expect(typesOf([clip(1, "clip")], {})).toEqual([["video", "clip"]]);
+  });
+
+  it("a still picture in a lightening mode is left as it was", () => {
+    expect(typesOf([clip(1, "photo", true)], blended("SCREEN")).map(([, name]) => name)).toEqual(["photo"]);
+  });
+});
