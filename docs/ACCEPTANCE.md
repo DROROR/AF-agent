@@ -1437,3 +1437,18 @@ happened twice in one day.
 **Fix:** the placeholder is now a plain instruction and the example moved under the
 box as a hint; a line beside the disabled button says the description is missing; the
 typed description is kept per project in the browser so a refresh no longer empties it.
+
+## 2026-10-02 - A disabled AI button answered a press with nothing; a 90-second call showed no progress
+
+**User report:** "if it is empty, why can I click it?" and a request for a full-screen
+loading state with a progress bar and the time taken.
+
+**Fix:**
+- "Create Video Plan" is no longer disabled for an empty description. A website or a
+  business description is enough to plan from (a plain standing request is sent in the
+  description's place). With nothing at all filled in, the press answers with an alert
+  naming what is needed and moves focus to the description box.
+- While the call runs, a full-screen panel shows the stage, a progress bar and a
+  running clock. The bar fills over the 90 seconds a real call has taken and waits at
+  95% until the answer arrives - it never shows finished early.
+- The plan view states how long the plan took to write.

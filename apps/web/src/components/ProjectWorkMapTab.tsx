@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { parseHttpWebsiteUrl, type ProjectBrandInputs, type ProjectResponse, type WorkMapEntry } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
@@ -73,6 +73,37 @@ function toEntry(row: RowForm): Omit<WorkMapEntry, "id"> & { id?: string } {
     instructions: row.instructions.trim() === "" ? null : row.instructions.trim(),
     ...(row.targetPlaceholderId !== undefined ? { targetPlaceholderId: row.targetPlaceholderId } : {})
   };
+}
+
+/** Sent as the request when the client gave a website or a business description but typed nothing in the description box. Plain English on purpose - it is read by the model, never shown to a person. */
+const DEFAULT_PLAN_REQUEST = "Plan a promo video for this business using the template's own scenes. Take the product name, the features and the tone from the business description and the website.";
+
+/** A real plan call has taken 87-90 seconds; the bar fills over this long and then waits just short of full until the answer arrives - it never claims to be finished early. */
+const EXPECTED_PLAN_SECONDS = 90;
+
+function formatElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** Covers the whole screen while the plan is being written: what is happening, how long it has been, how long it usually takes. */
+function PlanProgressOverlay({ elapsedSeconds }: { elapsedSeconds: number }): ReactElement {
+  const { t } = useLocale();
+  const percent = Math.min(95, Math.round((elapsedSeconds / EXPECTED_PLAN_SECONDS) * 100));
+  return (
+    <div className="busy-overlay" role="status" aria-live="polite">
+      <div className="busy-overlay__panel">
+        <h3 className="busy-overlay__title">{t.workMapTab.ai.progressTitle}</h3>
+        <p className="busy-overlay__step">{t.workMapTab.ai.progressStep(elapsedSeconds)}</p>
+        <div className="busy-overlay__bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+          <div className="busy-overlay__bar-fill" style={{ width: `${percent}%` }} />
+        </div>
+        <p className="busy-overlay__time">{t.workMapTab.ai.progressElapsed(formatElapsed(elapsedSeconds))}</p>
+        <p className="busy-overlay__hint">{t.workMapTab.ai.progressHint}</p>
+      </div>
+    </div>
+  );
 }
 
 const INSTRUCTIONS_DRAFT_KEY_PREFIX = "dyo.aiPlanDraft.";
@@ -150,6 +181,23 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const [brandInputsError, setBrandInputsError] = useState<string | null>(null);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
   const [createPlanError, setCreatePlanError] = useState<string | null>(null);
+  // Seconds since "Create Video Plan" was pressed - drives the full-screen
+  // progress shown while the real AI call runs (a real one takes 60-90s,
+  // and a small spinner on the button did not read as "working").
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // How long the last finished call really took - shown above the plan.
+  const [lastPlanSeconds, setLastPlanSeconds] = useState<number | null>(null);
+  const [nothingToPlanFrom, setNothingToPlanFrom] = useState(false);
+  const instructionsRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!isCreatingPlan) {
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [isCreatingPlan]);
   const [viewMode, setViewMode] = useState<ViewMode>("tellAi");
   const [hasEnteredPreviewOnce, setHasEnteredPreviewOnce] = useState(false);
   const [isApprovingPlan, setIsApprovingPlan] = useState(false);
@@ -238,9 +286,24 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const websiteUrlIsUsable = websiteUrl.trim() === "" || parseHttpWebsiteUrl(websiteUrl) !== null;
 
   async function handleCreatePlan(): Promise<void> {
-    if (instructions.trim() === "" || !websiteUrlIsUsable) {
+    // Was: a silent return (and a disabled button) whenever the description
+    // was empty. A press that does nothing and says nothing is a dead end -
+    // seen three times on 2026-10-02.
+    // if (instructions.trim() === "" || !websiteUrlIsUsable) {
+    //   return;
+    // }
+    if (!websiteUrlIsUsable) {
       return;
     }
+    const hasAnythingToPlanFrom = instructions.trim() !== "" || aboutClient.trim() !== "" || websiteUrl.trim() !== "";
+    if (!hasAnythingToPlanFrom) {
+      setNothingToPlanFrom(true);
+      instructionsRef.current?.focus();
+      return;
+    }
+    setNothingToPlanFrom(false);
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
     setIsCreatingPlan(true);
     setCreatePlanError(null);
     setBrandInputsError(null);
@@ -263,7 +326,11 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
       }
     }
 
-    const result = await createAiDraft(instructions.trim());
+    // A website or a business description is enough to plan from: the
+    // description box is then optional, and this plain request stands in.
+    // const result = await createAiDraft(instructions.trim());
+    const result = await createAiDraft(instructions.trim() === "" ? DEFAULT_PLAN_REQUEST : instructions.trim());
+    setLastPlanSeconds(Math.round((Date.now() - startedAt) / 1000));
     setIsCreatingPlan(false);
     if (result.ok) {
       setHasEnteredPreviewOnce(true);
@@ -336,6 +403,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             className="input"
             rows={6}
             placeholder={t.workMapTab.ai.placeholder}
+            ref={instructionsRef}
             value={instructions}
             disabled={isCreatingPlan}
             onChange={(event) => setInstructions(event.target.value)}
@@ -349,12 +417,18 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             label={t.workMapTab.ai.createPlanAction}
             busyLabel={t.workMapTab.ai.creatingPlan}
             busy={isCreatingPlan}
-            disabled={instructions.trim() === "" || !websiteUrlIsUsable}
+            // disabled={instructions.trim() === "" || !websiteUrlIsUsable}
+            disabled={!websiteUrlIsUsable}
             onClick={() => void handleCreatePlan()}
           />
         </div>
-        {/* A disabled button with no stated reason is a dead end - say why. */}
-        {instructions.trim() === "" ? <p className="field__hint">{t.workMapTab.ai.needDescription}</p> : null}
+        {/* {instructions.trim() === "" ? <p className="field__hint">{t.workMapTab.ai.needDescription}</p> : null} */}
+        {nothingToPlanFrom ? (
+          <p className="field__error" role="alert">
+            {t.workMapTab.ai.needSomething}
+          </p>
+        ) : null}
+        {isCreatingPlan ? <PlanProgressOverlay elapsedSeconds={elapsedSeconds} /> : null}
       </Card>
     );
   }
@@ -366,6 +440,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
       <Card>
         <CardHeader title={t.workMapTab.planPreview.title} />
         <p>{isSimple ? t.workMapTab.planPreview.simple.description : t.workMapTab.planPreview.description}</p>
+        {lastPlanSeconds !== null ? <p className="field__hint">{t.workMapTab.ai.planTook(formatElapsed(lastPlanSeconds))}</p> : null}
         {entries.length === 0 ? (
           <EmptyState title={t.workMapTab.emptyTitle} description={t.workMapTab.emptyDescription} />
         ) : isSimple ? (

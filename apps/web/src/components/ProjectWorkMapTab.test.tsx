@@ -580,14 +580,66 @@ describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructi
   });
 
   describe("an empty description must look empty (real confusion, seen twice 2026-10-02)", () => {
-    it("says why the button is off, and stops saying it once something is typed", async () => {
-      window.localStorage.clear();
+    it("a press with nothing filled in answers with what is needed - never a dead button", async () => {
       stubWorkspace({ status: 200, body: { workMap: null } });
       renderWorkMap();
-      const textarea = await screen.findByLabelText("Describe your video");
-      expect(screen.getByText(/Write what you want in the box above first/)).not.toBeNull();
-      fireEvent.change(textarea, { target: { value: "A short promo." } });
-      expect(screen.queryByText(/Write what you want in the box above first/)).toBeNull();
+      await screen.findByLabelText("Describe your video");
+      const button = screen.getByRole("button", { name: "Claude — Create Video Plan" }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      fireEvent.click(button);
+      expect((await screen.findByRole("alert")).textContent).toMatch(/Give the assistant something to work from first/);
+    });
+
+    it("a business description alone is enough - the description box is optional", async () => {
+      const calls: Array<{ url: string; method: string; body: unknown }> = [];
+      stubFetchByUrl(
+        {
+          [`/api/projects/${PROJECT_ID}/work-map/ai-draft`]: { status: 201, body: { workMap: workMapFixture({ revision: 1 }, [workMapEntryFixture({ id: "wm-1", sourceCompositionId: "c1", desiredText: "Hello" })]) } },
+          [`/api/projects/${PROJECT_ID}/brand-inputs`]: { status: 200, body: projectDtoFixture() },
+          [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
+          [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+          [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [] } },
+          [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+        },
+        calls
+      );
+      renderWorkMap();
+      fireEvent.change(await screen.findByLabelText("About your business (optional)"), { target: { value: "We make apps for clinics." } });
+      fireEvent.click(screen.getByRole("button", { name: "Claude — Create Video Plan" }));
+
+      await screen.findByText("Your Video Plan");
+      const draft = calls.find((call) => call.url.includes("/work-map/ai-draft"));
+      expect((draft?.body as { instructions: string }).instructions).toMatch(/Plan a promo video for this business/);
+      // And the user is told how long it really took.
+      expect(screen.getByText(/This plan took \d+:\d\d to write\./)).not.toBeNull();
+    });
+
+    it("covers the screen with progress and a running clock while the plan is being written", async () => {
+      let release: (() => void) | undefined;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      stubWorkspace({ status: 200, body: { workMap: null } });
+      const realFetch = globalThis.fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).includes("/work-map/ai-draft")) {
+            await pending;
+          }
+          return realFetch(input, init);
+        })
+      );
+      renderWorkMap();
+      fireEvent.change(await screen.findByLabelText("Describe your video"), { target: { value: "A short promo." } });
+      fireEvent.click(screen.getByRole("button", { name: "Claude — Create Video Plan" }));
+
+      const overlay = await screen.findByRole("status");
+      expect(within(overlay).getByText("Claude is writing your video plan")).not.toBeNull();
+      expect(within(overlay).getByText("Time so far: 0:00")).not.toBeNull();
+      expect(within(overlay).getByRole("progressbar")).not.toBeNull();
+      release?.();
+      await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
     });
 
     it("the box's own placeholder is an instruction, never a made-up request that reads as already typed", async () => {
