@@ -97,7 +97,7 @@ function StoryboardThumb({
  */
 export function SimpleScenesView(): ReactElement {
   const { t } = useLocale();
-  const { project, plan, approveScenes, isStale, createPlan } = useProjectWorkspaceContext();
+  const { project, plan, approveScenes, isStale, createPlan, refetch } = useProjectWorkspaceContext();
   // 2026-09-28: Simple mode consumed suggestions but could never ASK for
   // them - `generate` lived only in MappingAssistantPanel, which Advanced
   // mode renders and Simple mode does not. So the view that exists to be the
@@ -206,7 +206,13 @@ export function SimpleScenesView(): ReactElement {
     setBusySuggestionId(null);
     if (!result.ok) {
       setActionError(result.message ?? null);
+      return;
     }
+    // Accepting writes to the plan and moves its revision on. REAL 2026-10-02
+    // DEFECT: this screen kept the old one, so the very next edit was refused
+    // with "Expected revision 3, but the current revision is 4", and the card
+    // went on showing "No text set" for a text that had just been accepted.
+    await refetch();
   }
 
   /** Several suggestions in one request - one plan revision, one result. */
@@ -223,7 +229,9 @@ export function SimpleScenesView(): ReactElement {
     setBusySuggestionId(null);
     if (!result.ok) {
       setActionError(result.message ?? null);
+      return;
     }
+    await refetch();
   }
 
   async function handleReject(suggestion: MappingSuggestion): Promise<void> {

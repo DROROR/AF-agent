@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Dialog } from "./Dialog";
+import { LocaleProvider } from "../LocaleProvider";
 import { renderWithLocale } from "../../test-utils/render-with-locale";
 
 afterEach(cleanup);
@@ -71,6 +72,33 @@ describe("Dialog", () => {
     );
     fireEvent.mouseDown(screen.getByText("Body content"));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Real 2026-10-02 defect: the scene edit drawer passes a new onClose on
+  // every render, and each keystroke moved focus off the box being typed in.
+  it("leaves focus where the person is typing when it re-renders with a new onClose", () => {
+    const view = renderWithLocale(
+      <Dialog open onClose={() => {}} title="T">
+        <input aria-label="field" />
+      </Dialog>
+    );
+    const field = screen.getByLabelText("field");
+    field.focus();
+    expect(document.activeElement).toBe(field);
+
+    const latestOnClose = vi.fn();
+    view.rerender(
+      <LocaleProvider>
+        <Dialog open onClose={latestOnClose} title="T">
+          <input aria-label="field" />
+        </Dialog>
+      </LocaleProvider>
+    );
+    expect(document.activeElement).toBe(field);
+
+    // And Escape still reaches the LATEST onClose.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(latestOnClose).toHaveBeenCalledTimes(1);
   });
 
   it("shows the Hebrew close label when the active locale is he", () => {

@@ -24,6 +24,15 @@ export function Dialog({ open, onClose, title, children, variant = "modal" }: Di
   const titleId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // The latest onClose, without making it a reason to re-run the focus
+  // effect below. REAL 2026-10-02 DEFECT: a caller passing a new function on
+  // every render (the scene edit drawer does) re-ran that effect on every
+  // keystroke - it moved focus to the dialog itself each time, so a person
+  // typing had to click back into the box after every single letter.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) {
@@ -34,7 +43,7 @@ export function Dialog({ open, onClose, title, children, variant = "modal" }: Di
 
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !containerRef.current) {
@@ -64,7 +73,7 @@ export function Dialog({ open, onClose, title, children, variant = "modal" }: Di
       document.removeEventListener("keydown", handleKeyDown);
       previouslyFocused.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) {
     return null;

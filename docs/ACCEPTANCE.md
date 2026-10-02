@@ -1604,3 +1604,23 @@ read in the scan, SET_COLOR_CONTROL, and placing a screenshot in a phone screen,
 After Effects. A phone screen's verdict comes out "flat card, not confident", so a person
 confirms it when choosing its picture. The scene background (a gradient effect) is still
 not offered as a colour.
+
+## 2026-10-02 - Scenes: the next save was refused after accepting a suggestion; typing lost focus after every letter
+
+**Seen live on release `574a9ea`:** after "Use suggestion" on a card, saving the edit
+drawer failed with "Expected revision 3, but the current revision is 4", the page showed
+"This plan changed elsewhere", and the card still read "No text set". In the drawer, each
+typed letter needed another click into the box.
+
+**Cause 1:** accepting a suggestion writes to the plan and moves its revision on; Simple
+mode never reloaded the plan afterwards (the Advanced panel always did).
+**Fix:** the plan is reloaded after one or several suggestions are accepted.
+
+**Cause 2:** the dialog re-ran its focus effect whenever its `onClose` changed, and the
+drawer passes a new function on every render - so every keystroke moved focus to the
+dialog itself. **Fix:** the dialog keeps the latest `onClose` in a ref; focus moves only
+when it opens and closes.
+
+**Confirmed live on the same screen:** the master scene's preview now arrives (the
+captured-frame wait in worker build `574a9ea`), and the drawer offers each layer only what
+its kind takes.
