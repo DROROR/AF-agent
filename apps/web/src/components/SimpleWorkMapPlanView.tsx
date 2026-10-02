@@ -258,7 +258,8 @@ export function AiPlanSummaryPanel({ aiSummary, assets, usedAssetIds, projectId 
             {assets.map((asset) => (
               <li key={asset.id} className="ai-used__file">
                 {isShowableImage(asset) ? (
-                  <img src={assetFileUrl(projectId, asset.id)} alt={asset.label ?? asset.originalFilename} />
+                  // Decorative: the file's name is the very next element, so a second copy in `alt` only read out (and copied) as "ss ss".
+                  <img src={assetFileUrl(projectId, asset.id)} alt="" />
                 ) : (
                   <span className="ai-used__file-kind">{asset.mediaKind}</span>
                 )}
@@ -324,11 +325,12 @@ export function SimpleWorkMapPlanView({ manifest, entries, assets, onEditPlan, a
         />
       ) : null}
 
-      <div className="plan-summary">
-        <p className="plan-summary__found">
-          <strong>{s.summaryTitle}:</strong> {s.summaryScenes(summary.mainSceneCount)}, {s.summarySupporting(summary.supportingCompositionCount)}, {s.summaryUnresolved(summary.unresolvedItemCount)}
-        </p>
-      </div>
+      {/* Counts of main/nested compositions said nothing a client could act on ("1 main scene, 76 supporting nested compositions" above four scene cards) - only what still needs them is shown. */}
+      {summary.unresolvedItemCount > 0 ? (
+        <div className="plan-summary">
+          <p className="plan-summary__found">{s.summaryUnresolved(summary.unresolvedItemCount)}</p>
+        </div>
+      ) : null}
 
       {showNoPlaceholdersNotice ? <p className="plan-summary__notice">{s.noPlaceholdersNotice}</p> : null}
 

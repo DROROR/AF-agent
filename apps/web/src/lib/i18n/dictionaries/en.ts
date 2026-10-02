@@ -1193,9 +1193,6 @@ export const en = {
       advancedAssetIdLabel: "File id",
       simple: {
         description: "AI has prepared your video plan. Review it below, then approve it to continue.",
-        summaryTitle: "AI found",
-        summaryScenes: (n: number): string => `${n} main scene${n === 1 ? "" : "s"}`,
-        summarySupporting: (n: number): string => `${n} supporting nested composition${n === 1 ? "" : "s"}`,
         summaryUnresolved: (n: number): string => `${n} unresolved item${n === 1 ? "" : "s"}`,
         noPlaceholdersNotice:
           "AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.",
@@ -1368,6 +1365,7 @@ export const en = {
     suggestedTextLabel: (text: string): string => `Claude suggests: "${text}"`,
     keepOriginalAction: "Keep original",
     useSuggestionAction: "Use suggestion",
+    useAllSuggestionsAction: (n: number): string => `Use all ${n} suggestions`,
     findingsTitle: (count: number): string =>
       count === 1
         ? "Claude looked at 1 more layer and found nothing to change"

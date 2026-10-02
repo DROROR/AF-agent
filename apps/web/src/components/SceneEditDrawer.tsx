@@ -46,6 +46,12 @@ function placeholderTypeForMediaKind(mediaKind: MediaKind): PlaceholderType {
 export interface SceneEditDrawerProps {
   scenePlanId: string | null;
   onClose: () => void;
+  /**
+   * Narrows the drawer to these mappings of the scene - used when a card
+   * shows only some of a scene's layers (see resolveSceneMappingHomes).
+   * Null/absent: every mapping of the scene, exactly as before.
+   */
+  onlyMappingIds?: readonly string[] | null;
 }
 
 interface MappingFormState {
@@ -136,7 +142,7 @@ function isSlotDecisionPersisted(form: MappingFormState, mapping: PlaceholderMap
  * one batched PATCH (one revision bump), diffed against the scene's
  * current real values - an untouched field is never resent/cleared.
  */
-export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps): ReactElement | null {
+export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneEditDrawerProps): ReactElement | null {
   const { t } = useLocale();
   const { project, plan, applyEdit } = useProjectWorkspaceContext();
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
@@ -163,7 +169,8 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
     setFinalDuration(scene.finalDuration !== null ? String(scene.finalDuration) : "");
     setInstructions(scene.instructions ?? "");
     setMappings(
-      scene.mappings.map((mapping) => ({
+      // scene.mappings.map((mapping) => ({
+      scene.mappings.filter((mapping) => onlyMappingIds == null || onlyMappingIds.includes(mapping.id)).map((mapping) => ({
         mappingId: mapping.id,
         label: mapping.placeholderName ?? mapping.id,
         text: mapping.text ?? "",
@@ -184,7 +191,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
     );
     setError(null);
     setIsConfirmingDiscard(false);
-  }, [scene]);
+  }, [scene, onlyMappingIds]);
 
   if (!scenePlanId || !scene) {
     return null;

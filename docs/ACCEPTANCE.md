@@ -1498,3 +1498,50 @@ the website (the fetch tool returns page text only); the logo is the uploaded fi
 No rendered frame exists at this step - a real picture of the video comes only from
 After Effects, after the Scenes step. Plans written before this change have no
 summary until created again.
+
+## 2026-10-02 - Every layer and every suggestion sat on the master's one card
+
+**First live run of plan -> Scenes:** "Generate suggestions" on `fe32ffac-...` took 51s
+and produced 28 suggestions; the 9 that came from the AI plan each reached their own
+layer. That link is now proven on a real run.
+
+**User report:** "why is the AI suggestion on one scene only, the card gets so tall the
+whole UI breaks, and why none on the others?"
+
+**Cause:** a single-master template keeps all 28 mappings under the master's scene
+plan, so one card carried every layer and every suggestion while the cards for the
+master's parts each said "No content matching required". The review list also never
+named the layer a suggestion was for, and showed the same "currently" text on each.
+
+**Fix (display only, ownership unchanged):** a layer nested inside a composition that
+has its own card is shown on that card (`resolveSceneMappingHomes`, first step of the
+manifest's nested chain). Each suggestion names its layer. A card with several
+suggestions offers "Use all N suggestions" as one request. A card's Edit opens only
+that card's layers.
+
+**Not a defect:** 19 of the 28 layers have no suggestion because the plan had no
+content for them. The human still decides each: new text, or keep the template's.
+
+## 2026-10-02 - The master scene's preview never arrived, and the screen blamed time
+
+**Evidence:** job for `!MAIN` SUCCEEDED in 32s with `preview: null` and
+`previewFailureReason: could not verify the captured preview file on disk (ENOENT ...)`.
+The nine lighter compositions of the same template each produced their frame.
+
+**Cause 1 (worker):** ae-mcp's `view.captureFrame` returns the output path straight
+after `saveFrameToPng()` and reports `bytes: 0` when the file is not there yet. The
+worker checked the file once, immediately.
+**Fix:** the captured frame is waited for, bounded (30s), and accepted only once its
+size has stopped changing (`wait-for-captured-frame.ts`), in both scene previews and
+First Preview. Needs a worker update to take effect.
+
+**Cause 2 (web):** a preview job that finished without a picture was polled for the
+whole two-minute window and then reported as "taking longer than expected".
+**Fix:** once the job has succeeded and no picture followed, the scene says so at once.
+
+**Still unproven:** that the file does appear late on the real machine. If After
+Effects never writes it, the wait will not help and the reason shown will say so.
+
+**Also:** the plan screen's "1 main scene, 76 supporting nested compositions" line was
+removed (nothing a client can act on); a file's name was read out twice beside its
+picture.

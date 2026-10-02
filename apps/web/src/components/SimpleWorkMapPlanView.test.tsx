@@ -129,10 +129,13 @@ describe("the plan shows what the assistant did (real complaint 2026-10-02: noth
 
   it("shows the client's own files as real pictures, each marked used or not used", () => {
     renderWithLocale(<AiPlanSummaryPanel aiSummary={null} assets={[logo, clip]} usedAssetIds={new Set(["a-logo"])} projectId="p1" />);
-    const picture = screen.getByRole("img", { name: "logo.png" }) as HTMLImageElement;
-    expect(picture.src).toContain("/api/projects/p1/assets/a-logo/file");
+    // The picture is decorative (alt=""): the file's name is printed right under it, once.
+    const pictures = document.querySelectorAll<HTMLImageElement>(".ai-used__file img");
     // A video is named, never given a broken picture.
-    expect(screen.queryByRole("img", { name: "demo.mp4" })).toBeNull();
+    expect(pictures).toHaveLength(1);
+    expect(pictures[0]?.src).toContain("/api/projects/p1/assets/a-logo/file");
+    expect(pictures[0]?.alt).toBe("");
+    expect(screen.getAllByText("logo.png")).toHaveLength(1);
     expect(screen.getByText("Used in this plan")).not.toBeNull();
     expect(screen.getByText("Not used")).not.toBeNull();
   });

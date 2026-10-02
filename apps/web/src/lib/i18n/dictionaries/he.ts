@@ -1029,9 +1029,6 @@ export const he: Dictionary = {
       advancedAssetIdLabel: "מזהה קובץ",
       simple: {
         description: "הבינה המלאכותית הכינה את תוכנית הווידאו שלכם. בדקו אותה למטה, ואז אשרו אותה כדי להמשיך.",
-        summaryTitle: "הבינה המלאכותית מצאה",
-        summaryScenes: (n: number): string => `${n} סצנות ראשיות`,
-        summarySupporting: (n: number): string => `${n} קומפוזיציות מקוננות תומכות`,
         summaryUnresolved: (n: number): string => `${n} פריטים לא פתורים`,
         noPlaceholdersNotice:
           "הבינה המלאכותית בדקה את התבנית הזו אך לא זיהתה פלייסהולדרים ניתנים לעריכה סטנדרטיים. DYO יכולה לשמר את האנימציה והמבנה המקונן המקוריים, אך החלפות אוטומטיות יבוצעו רק כאשר מיפוי בטוח מאושר.",
@@ -1200,6 +1197,7 @@ export const he: Dictionary = {
     suggestedTextLabel: (text: string): string => `Claude מציע: "${text}"`,
     keepOriginalAction: "השארת המקור",
     useSuggestionAction: "שימוש בהצעה",
+    useAllSuggestionsAction: (n: number): string => `שימוש בכל ${n} ההצעות`,
     findingsTitle: (count: number): string =>
       count === 1
         ? "קלוד בדק עוד שכבה אחת ולא מצא מה לשנות"

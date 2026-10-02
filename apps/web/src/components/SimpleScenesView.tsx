@@ -6,6 +6,7 @@ import type { MappingSuggestion } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
+import { resolveSceneMappingHomes } from "../lib/scene-mapping-homes";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { groupIntoRealScenes, type RealScene } from "../lib/real-scene-grouping";
 import { isScenePreviewSettled, useScenePreviewQueue, type UseScenePreviewQueueResult } from "../lib/use-scene-preview-queue";
@@ -103,12 +104,15 @@ export function SimpleScenesView(): ReactElement {
   // easy path showed "Needs your choice" on every scene with nothing
   // suggested, and the one feature that would have answered it was reachable
   // only by switching to Advanced. Reported by a real operator mid-session.
-  const { suggestions, aiAvailable, isGenerating, error: suggestionsError, generate, accept, reject } = useMappingSuggestions(
+  const { suggestions, aiAvailable, isGenerating, error: suggestionsError, generate, accept, reject, acceptBatch } = useMappingSuggestions(
     project?.project.projectId ?? ""
   );
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+  // Set when Edit is pressed on a card that SHOWS layers another scene
+  // owns: the drawer then opens the owner, narrowed to that card's layers.
+  const [editingMappingIds, setEditingMappingIds] = useState<string[] | null>(null);
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isApproving, setIsApproving] = useState(false);
@@ -147,10 +151,16 @@ export function SimpleScenesView(): ReactElement {
 
   const pending = (suggestions ?? []).filter((s) => s.status === "PENDING");
   const pendingByScene = new Map<string, MappingSuggestion[]>();
+  // Which card each layer is shown on - see resolveSceneMappingHomes.
+  const homes = resolveSceneMappingHomes(project.manifest, realScenes);
   for (const suggestion of pending) {
-    const bucket = pendingByScene.get(suggestion.scenePlanId) ?? [];
+    // Was bucketed by suggestion.scenePlanId alone, which put every
+    // suggestion of a single-master template on the master's one card.
+    // const bucket = pendingByScene.get(suggestion.scenePlanId) ?? [];
+    const cardId = (suggestion.mappingId !== null ? homes.cardIdByMappingId.get(suggestion.mappingId) : undefined) ?? suggestion.scenePlanId;
+    const bucket = pendingByScene.get(cardId) ?? [];
     bucket.push(suggestion);
-    pendingByScene.set(suggestion.scenePlanId, bucket);
+    pendingByScene.set(cardId, bucket);
   }
 
   const reviewsReady = realScenes.every(
@@ -193,6 +203,23 @@ export function SimpleScenesView(): ReactElement {
     setBusySuggestionId(suggestion.id);
     setActionError(null);
     const result = await accept(suggestion.id, plan!.plan.revision);
+    setBusySuggestionId(null);
+    if (!result.ok) {
+      setActionError(result.message ?? null);
+    }
+  }
+
+  /** Several suggestions in one request - one plan revision, one result. */
+  async function handleAcceptMany(many: MappingSuggestion[]): Promise<void> {
+    if (many.length === 0) {
+      return;
+    }
+    setBusySuggestionId(many[0]!.id);
+    setActionError(null);
+    const result = await acceptBatch(
+      many.map((suggestion) => suggestion.id),
+      plan!.plan.revision
+    );
     setBusySuggestionId(null);
     if (!result.ok) {
       setActionError(result.message ?? null);
@@ -292,16 +319,39 @@ export function SimpleScenesView(): ReactElement {
               previewEntry={previewQueue.getEntry(realScene.scenePlan.id)}
               pendingSuggestions={pendingByScene.get(realScene.scenePlan.id) ?? []}
               suggestionsBusy={busySuggestionId !== null}
-              onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
+              cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
+              // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
+              onEdit={() => {
+                const hosted = homes.mappingsByCardId.get(realScene.scenePlan.id) ?? [];
+                const owner = hosted.find((entry) => entry.ownerScenePlanId !== realScene.scenePlan.id);
+                if (owner) {
+                  // This card shows layers another scene owns: open the
+                  // owner, narrowed to just the layers shown here.
+                  setEditingMappingIds(hosted.filter((entry) => entry.ownerScenePlanId === owner.ownerScenePlanId).map((entry) => entry.mapping.id));
+                  setEditingSceneId(owner.ownerScenePlanId);
+                } else {
+                  const shownIds = hosted.map((entry) => entry.mapping.id);
+                  setEditingMappingIds(shownIds.length === realScene.scenePlan.mappings.length ? null : shownIds);
+                  setEditingSceneId(realScene.scenePlan.id);
+                }
+              }}
               onRegeneratePreview={() => previewQueue.regenerate(realScene.scenePlan.id)}
               onAcceptSuggestion={(suggestion) => void handleAccept(suggestion)}
               onRejectSuggestion={(suggestion) => void handleReject(suggestion)}
+              onAcceptSuggestions={(many) => void handleAcceptMany(many)}
             />
           ))}
         </div>
       )}
 
-      <SceneEditDrawer scenePlanId={editingSceneId} onClose={() => setEditingSceneId(null)} />
+      <SceneEditDrawer
+        scenePlanId={editingSceneId}
+        onlyMappingIds={editingMappingIds}
+        onClose={() => {
+          setEditingSceneId(null);
+          setEditingMappingIds(null);
+        }}
+      />
     </>
   );
 }

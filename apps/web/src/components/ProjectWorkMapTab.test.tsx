@@ -246,9 +246,9 @@ describe("ProjectWorkMapTab - Simple Mode scene filtering (live QA fix)", () => 
     expect(screen.queryByText("Pre-comp 0")).toBeNull();
     expect(screen.queryByText("Pre-comp 1")).toBeNull();
     expect(screen.queryByText("Pre-comp 2")).toBeNull();
-    // The plain-language "what AI found" summary reflects the real manifest facts.
-    expect(screen.getByText(/1 main scene/)).not.toBeNull();
-    expect(screen.getByText(/3 supporting nested compositions/)).not.toBeNull();
+    // Composition counts are template internals - never shown to the client.
+    expect(screen.queryByText(/main scene\b/)).toBeNull();
+    expect(screen.queryByText(/supporting nested compositions/)).toBeNull();
     // CASE B: manifestFixture's own scene has zero editable placeholders - the
     // honest plain-language notice must appear, never a bare "—".
     expect(

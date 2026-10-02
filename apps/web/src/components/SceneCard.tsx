@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import type { AssetDto, MappingSuggestion } from "@dyo/schemas";
+import type { AssetDto, MappingSuggestion, PlaceholderMapping } from "@dyo/schemas";
 import type { RealScene } from "../lib/real-scene-grouping";
 import type { ScenePreviewEntry, ScenePreviewState } from "../lib/use-scene-preview-queue";
 import { assetFileUrl, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
@@ -59,8 +59,11 @@ function deriveCardStatus(
   return hasNoMappingsToReview ? "noChangeNeeded" : "ready";
 }
 
-function primaryMapping(realScene: RealScene) {
-  return realScene.scenePlan.mappings.find((m) => m.selectedAssetId || m.text) ?? realScene.scenePlan.mappings[0] ?? null;
+// function primaryMapping(realScene: RealScene) {
+//   return realScene.scenePlan.mappings.find((m) => m.selectedAssetId || m.text) ?? realScene.scenePlan.mappings[0] ?? null;
+// }
+function primaryMapping(mappings: readonly PlaceholderMapping[]) {
+  return mappings.find((m) => m.selectedAssetId || m.text) ?? mappings[0] ?? null;
 }
 
 /**
@@ -133,6 +136,15 @@ export interface SceneCardProps {
   onRegeneratePreview: () => void;
   onAcceptSuggestion: (suggestion: MappingSuggestion) => void;
   onRejectSuggestion: (suggestion: MappingSuggestion) => void;
+  /**
+   * The layers shown on THIS card - which can differ from the scene plan's
+   * own mappings when a template keeps every layer under one master scene
+   * (see resolveSceneMappingHomes). Absent: the scene plan's own mappings,
+   * exactly as before.
+   */
+  cardMappings?: readonly PlaceholderMapping[];
+  /** Applies several suggestions in ONE request. Absent: no "use all" button is offered - several single accepts fired together would each carry the same plan revision and all but the first would be refused as stale. */
+  onAcceptSuggestions?: (suggestions: MappingSuggestion[]) => void;
 }
 
 /**
@@ -155,10 +167,14 @@ export function SceneCard({
   onEdit,
   onRegeneratePreview,
   onAcceptSuggestion,
-  onRejectSuggestion
+  onRejectSuggestion,
+  cardMappings,
+  onAcceptSuggestions
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
-  const mapping = primaryMapping(realScene);
+  const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
+  // const mapping = primaryMapping(realScene);
+  const mapping = primaryMapping(shownMappings);
   const asset = mapping?.selectedAssetId ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null) : null;
   // 2026-09-28, real client session: a 77-composition template surfaced 30
   // structural layers (a border overlay, a "Sharpen" adjustment layer, a
@@ -183,7 +199,8 @@ export function SceneCard({
     (s) => s.suggestedText === null && s.suggestedAssetId === null && s.suggestedClassification === null
   );
   const hasGenuineReview = proposals.length > 0;
-  const hasNoMappingsToReview = realScene.scenePlan.mappings.length === 0;
+  // const hasNoMappingsToReview = realScene.scenePlan.mappings.length === 0;
+  const hasNoMappingsToReview = shownMappings.length === 0;
   const status = deriveCardStatus(hasGenuineReview, previewEntry.state, previewEntry.isStale, realScene.scenePlan.approvalState, hasNoMappingsToReview);
   const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
 
@@ -232,13 +249,25 @@ export function SceneCard({
       {hasGenuineReview ? (
         <div className="scene-card__review-queue">
           <h4>{t.simpleScenes.reviewQueueTitle}</h4>
+          {/* One press for the whole card - several suggestions each with their own pair of buttons is slow to get through. */}
+          {proposals.length > 1 && onAcceptSuggestions ? (
+            <Button size="sm" variant="primary" disabled={suggestionsBusy} onClick={() => onAcceptSuggestions(proposals)}>
+              {t.simpleScenes.useAllSuggestionsAction(proposals.length)}
+            </Button>
+          ) : null}
           {proposals.map((suggestion) => {
             const suggestedAsset = suggestion.suggestedAssetId ? ((assets ?? []).find((a) => a.id === suggestion.suggestedAssetId) ?? null) : null;
+            // The layer THIS suggestion is for. Was always the card's first
+            // mapping, so every suggestion showed the same "currently" text
+            // and none said which layer it meant.
+            const target = shownMappings.find((m) => m.id === suggestion.mappingId) ?? null;
             return (
               <div key={suggestion.id} className="scene-card__review-item">
+                {target?.placeholderName ? <p className="scene-card__review-layer">{target.placeholderName}</p> : null}
                 {suggestion.suggestedText ? (
                   <>
-                    <p className="scene-card__review-current">{t.simpleScenes.currentTextLabel(mapping?.text ?? "")}</p>
+                    {/* <p className="scene-card__review-current">{t.simpleScenes.currentTextLabel(mapping?.text ?? "")}</p> */}
+                    {target?.text ? <p className="scene-card__review-current">{t.simpleScenes.currentTextLabel(target.text)}</p> : null}
                     <p className="scene-card__review-suggested">{t.simpleScenes.suggestedTextLabel(suggestion.suggestedText)}</p>
                   </>
                 ) : suggestedAsset ? (
@@ -272,7 +301,7 @@ export function SceneCard({
                 // The layer's own name lives on the mapping this suggestion
                 // is about, never on the suggestion itself. Omitted rather
                 // than invented when the mapping cannot be found.
-                const named = realScene.scenePlan.mappings.find((m) => m.id === finding.mappingId);
+                const named = shownMappings.find((m) => m.id === finding.mappingId);
                 return named?.placeholderName ? <p className="scene-card__finding-layer">{t.simpleScenes.findingsLayerLabel(named.placeholderName)}</p> : null;
               })()}
               <p className="scene-card__finding-reason">{finding.reasoning ?? t.simpleScenes.findingsNoReason}</p>
