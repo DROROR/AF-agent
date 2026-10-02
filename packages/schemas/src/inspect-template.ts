@@ -62,6 +62,60 @@ export function hasAepExtension(path: string): boolean {
   return /\.aep$/i.test(normalizeSourceProjectPath(path));
 }
 
+/**
+ * The marker the worker puts in the filename of every disposable
+ * inspection copy it creates (CLAUDE.md Safety Rule 1: After Effects only
+ * ever opens a copy, never the original). Declared HERE, in the shared
+ * contract, and imported by the worker's own disposable-project.ts, so the
+ * name the worker generates and the name every layer recognizes can never
+ * drift apart.
+ */
+export const DISPOSABLE_COPY_FILENAME_MARKER = ".dyo-inspect-";
+
+/** A copy the worker could not delete is renamed with this suffix - visible, inert, and deliberately no longer a disposable copy. */
+export const DISPOSABLE_COPY_QUARANTINE_SUFFIX = ".quarantine";
+
+/** Last path segment, for either separator - this module is shared with the browser, so it cannot use node:path. */
+function lastPathSegment(value: string): string {
+  const segments = value.split(/[\\/]/);
+  return segments[segments.length - 1] ?? "";
+}
+
+/**
+ * True only for a path the worker itself would have created as a
+ * disposable inspection copy.
+ *
+ * REAL 2026-10-02 DEFECT this closes. An earlier inspection's disposable
+ * copy was still on disk - by design, since the sweep that would remove it
+ * is reporting-only on purpose (a wildcard delete in the folder holding the
+ * client's own template is exactly the cleanup that removes the wrong file
+ * once). An operator pasted that leftover in as the template source. It
+ * ends in .aep and it really exists, so every check passed, and the worker
+ * dutifully made a disposable copy OF the disposable copy:
+ *
+ *   requested: ...(converted).dyo-inspect-ff9d115a-....aep
+ *   opened:    ...(converted).dyo-inspect-ff9d115a-....dyo-inspect-3e43ee20-....aep
+ *
+ * The inspection itself succeeded - the content was identical - but a
+ * project created from it would have anchored its templateId, path and
+ * source hash to a file whose whole purpose is to be thrown away, and
+ * every later execute/render would fail on a source that had vanished.
+ *
+ * The worker already had this exact predicate, tested, in
+ * disposable-project.ts - and nothing in production ever called it. The
+ * knowledge existed; the gate did not. It lives here now for the same
+ * reason hasAepExtension does: so the wizard's own Inspect gate, this
+ * request schema and the worker all judge the string identically.
+ *
+ * A quarantined copy is NOT one: it has been renamed precisely so it is
+ * inert, and it no longer ends in .aep, so hasAepExtension rejects it
+ * first and with a clearer message.
+ */
+export function isDisposableCopyPath(path: string): boolean {
+  const base = lastPathSegment(normalizeSourceProjectPath(path)).toLowerCase();
+  return base.includes(DISPOSABLE_COPY_FILENAME_MARKER) && base.endsWith(".aep");
+}
+
 export const inspectTemplateRequestSchema = z.object({
   templateId: z.string().min(1),
   /**
@@ -84,6 +138,13 @@ export const inspectTemplateRequestSchema = z.object({
     .refine((path) => path.length > 0, { message: "Source project path is required" })
     .refine(hasAepExtension, {
       message: "Source project path must be a file path ending in .aep"
+    })
+    // Judged AFTER the .aep rule, so a quarantined copy (which no longer
+    // ends in .aep) is reported as the wrong kind of file rather than as a
+    // disposable copy - the clearer of the two messages for that case.
+    .refine((path) => !isDisposableCopyPath(path), {
+      message:
+        "That is a temporary inspection copy this system created, not your template. It is deleted automatically, so a project built on it would lose its source. Use your own .aep - the same path without the .dyo-inspect-... part."
     })
 });
 export type InspectTemplateRequest = z.infer<typeof inspectTemplateRequestSchema>;

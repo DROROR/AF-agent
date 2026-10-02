@@ -166,6 +166,8 @@ export const en = {
       sourceProjectPathPlaceholder: "e.g. C:\\DYO-Agent\\copies\\template.aep",
       sourceProjectPathHint:
         "Must be the full file path to a COPY of the .aep, never the original file or a folder - the path must end in .aep.",
+      sourceProjectPathDisposableCopy:
+        "That is a temporary inspection copy this system created, not your template. It is deleted automatically, so a project built on it would lose its source. Use the same path without the \".dyo-inspect-...\" part.",
       inspectAction: "Inspect Template",
       inspecting: "Dispatching…",
       statusQueued: "Queued on the Worker - waiting for it to pick this up.",
@@ -456,7 +458,8 @@ export const en = {
       assets: "Files",
       preview: "Preview",
       export: "Export",
-      workMap: "Work Map",
+      /* Named exactly as the stepper names this same step ("AI Plan"), not "Work Map" - Simple Mode now lists it, and a client should meet one name for one thing. */
+      workMap: "AI Plan",
       revisions: "Revisions",
       renderSettings: "Render Settings"
     },

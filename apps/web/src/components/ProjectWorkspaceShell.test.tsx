@@ -175,21 +175,24 @@ describe("ProjectWorkspaceShell - final nav (Project / Files / Scenes / Preview 
       .map((link) => link.textContent ?? "");
   }
 
-  it("Simple Mode shows exactly Project / Files / Scenes / Preview / Export, in that order - never Work Map/Render Settings/Revisions", async () => {
+  // 2026-10-02: the AI plan step joined Simple Mode. It was Advanced-only,
+  // so the one tab where a client describes their video (and gives their
+  // website) was missing from the mode clients actually use.
+  it("Simple Mode shows exactly Project / Files / AI Plan / Scenes / Preview / Export, in the guided order - never Render Settings/Revisions", async () => {
     stubWorkspace();
     renderShell();
     await screen.findByText("White App Promo");
 
-    expect(tabLabels()).toEqual(["Project", "Files", "Scenes", "Preview", "Export"]);
+    expect(tabLabels()).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export"]);
   });
 
-  it("Advanced Mode adds Work Map / Render Settings / Revisions after the same five Simple tabs, never replacing them", async () => {
+  it("Advanced Mode adds only Render Settings / Revisions after the same six Simple tabs, never replacing them", async () => {
     stubWorkspace();
     renderShell();
     await screen.findByText("White App Promo");
 
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
 
-    expect(tabLabels()).toEqual(["Project", "Files", "Scenes", "Preview", "Export", "Work Map", "Render Settings", "Revisions"]);
+    expect(tabLabels()).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export", "Render Settings", "Revisions"]);
   });
 });

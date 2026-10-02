@@ -45,11 +45,28 @@ interface TabDef {
  * Export tab for any output that is missing it, so the five tabs below are
  * genuinely everything the job needs. These three remain Advanced-only for
  * the fuller technical view, and all three URLs still work directly.
+ *
+ * 2026-10-02: superseded in one respect - Work Map is no longer one of the
+ * Advanced-only three. It is the AI plan step, the client now uses it to
+ * describe the video and hand over their website, and it is listed in
+ * Simple Mode as "AI Plan" (see tabsFor below). Only Render Settings and
+ * Revisions remain Advanced-only.
  */
 function tabsFor(projectId: string, mode: "simple" | "advanced"): TabDef[] {
+  // 2026-10-02: the AI plan step moved INTO Simple Mode. It was
+  // Advanced-only, which meant the one step where a client describes the
+  // video they want - and now gives their own website for the assistant to
+  // read - was on a tab Simple Mode does not list. It was reachable only by
+  // following the stepper's own link, so a client browsing the tabs could
+  // not find the feature at all.
+  //
+  // Placed between Files and Scenes, which is where it falls in the guided
+  // flow (WORKFLOW_STEP_IDS: upload -> tellClaude -> reviewPlan ->
+  // sceneMappings), rather than appended at the end.
   const simpleTabs: TabDef[] = [
     { href: `/projects/${projectId}`, labelKey: "overview" },
     { href: `/projects/${projectId}/assets`, labelKey: "assets" },
+    { href: `/projects/${projectId}/work-map`, labelKey: "workMap" },
     { href: `/projects/${projectId}/scenes`, labelKey: "scenes" },
     { href: `/projects/${projectId}/preview`, labelKey: "preview" },
     { href: `/projects/${projectId}/export`, labelKey: "export" }
@@ -57,9 +74,12 @@ function tabsFor(projectId: string, mode: "simple" | "advanced"): TabDef[] {
   if (mode === "simple") {
     return simpleTabs;
   }
+  // What stays Advanced-only is deliberately only what a client never needs
+  // to act on: the technical render form (which already appears on Export
+  // for any output missing one, so leaving it out is no longer a dead end)
+  // and the plan's revision history.
   return [
     ...simpleTabs,
-    { href: `/projects/${projectId}/work-map`, labelKey: "workMap" },
     { href: `/projects/${projectId}/render-settings`, labelKey: "renderSettings" },
     { href: `/projects/${projectId}/revisions`, labelKey: "revisions" }
   ];

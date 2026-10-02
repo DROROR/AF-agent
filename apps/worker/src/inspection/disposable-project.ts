@@ -15,6 +15,7 @@ import {
   buildOpenProjectScript,
   type FixedJsxScript
 } from "../execution/jsx-templates.js";
+import { DISPOSABLE_COPY_FILENAME_MARKER, DISPOSABLE_COPY_QUARANTINE_SUFFIX } from "@dyo/schemas";
 import { canonicalizeWindowsPath, windowsPathsEqual } from "./canonical-windows-path.js";
 import { hashSourceProject } from "./hash-source-project.js";
 import { workerProjectStateLock, type ProjectStateLock } from "./project-state-lock.js";
@@ -113,11 +114,17 @@ export type DisposableProjectResult<T> =
 /** Timeout for opening a project - app.open on a large template genuinely takes longer than an ordinary read-only call. */
 const OPEN_TIMEOUT_MS = 120_000;
 
-/** The marker every disposable copy's filename carries. Stale-copy recovery only ever considers a file whose name contains it, so nothing else can be swept up. */
-export const DISPOSABLE_FILENAME_MARKER = ".dyo-inspect-";
-
-/** A copy that could not be deleted is renamed with this suffix - visible, inert, and never matched as a disposable copy again. */
-export const QUARANTINE_SUFFIX = ".quarantine";
+/**
+ * The marker every disposable copy's filename carries, and the suffix an
+ * undeletable one is renamed with. Both now come from the shared contract
+ * (@dyo/schemas), because the New Project request schema has to REFUSE a
+ * path carrying this marker - a leftover copy pasted in as the template
+ * source produced a copy of a copy on 2026-10-02 - and a marker defined
+ * twice is a marker that eventually disagrees with itself. Re-exported
+ * under their existing names so every caller here is unchanged.
+ */
+export const DISPOSABLE_FILENAME_MARKER = DISPOSABLE_COPY_FILENAME_MARKER;
+export const QUARANTINE_SUFFIX = DISPOSABLE_COPY_QUARANTINE_SUFFIX;
 
 /**
  * Windows paths and POSIX paths need different separator rules, and getting it

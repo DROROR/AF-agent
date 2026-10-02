@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import {
   hasAepExtension,
+  isDisposableCopyPath,
   inspectTemplateResultSchema,
   normalizeSourceProjectPath,
   type InspectTemplateResponse,
@@ -152,11 +153,29 @@ export function NewProjectWizard(): ReactElement {
     selectedWorker.status === "ONLINE" &&
     selectedWorker.aeAvailability === "ONLINE" &&
     selectedWorker.mcpAvailability === "ONLINE";
+  /**
+   * 2026-10-02: a leftover disposable inspection copy was pasted in as the
+   * template source. It ends in .aep and really exists, so nothing refused
+   * it, and the worker made a copy of the copy - a project built on it
+   * would have anchored to a file that is deleted by design.
+   *
+   * Shown as a field error, never only as a disabled button: a button that
+   * sits disabled with nothing on screen saying why is the exact failure
+   * the 2026-09-28 Copy-as-path bug was reported as ("button he disable
+   * hai"), and repeating it here would trade one silent dead end for
+   * another.
+   */
+  const sourceProjectPathError =
+    sourceProjectPath.trim() !== "" && isDisposableCopyPath(sourceProjectPath)
+      ? t.projectsNew.template.sourceProjectPathDisposableCopy
+      : null;
+
   const canInspect =
     name.trim() !== "" &&
     workerReady &&
     templateId.trim() !== "" &&
     hasAepExtension(sourceProjectPath) &&
+    sourceProjectPathError === null &&
     !isDispatching &&
     (job === null || RETRYABLE_STATUSES.has(job.status));
 
@@ -441,6 +460,7 @@ export function NewProjectWizard(): ReactElement {
                   label={t.projectsNew.template.sourceProjectPathLabel}
                   htmlFor="inspect-source-path"
                   hint={t.projectsNew.template.sourceProjectPathHint}
+                  {...(sourceProjectPathError === null ? {} : { error: sourceProjectPathError })}
                 >
                   <Input
                     id="inspect-source-path"

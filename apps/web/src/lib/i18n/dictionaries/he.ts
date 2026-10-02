@@ -160,6 +160,8 @@ export const he: Dictionary = {
       sourceProjectPathPlaceholder: "לדוגמה: C:\\DYO-Agent\\copies\\template.aep",
       sourceProjectPathHint:
         "חייב להיות נתיב מלא לקובץ שהוא עותק של ה-.aep, לעולם לא הקובץ המקורי או תיקייה - הנתיב חייב להסתיים ב-.aep.",
+      sourceProjectPathDisposableCopy:
+        "זהו עותק בדיקה זמני שהמערכת יצרה, לא התבנית שלכם. הוא נמחק אוטומטית, ולכן פרויקט שייבנה עליו יאבד את המקור. השתמשו באותו נתיב בלי החלק \".dyo-inspect-...\".",
       inspectAction: "בדיקת תבנית",
       inspecting: "שולח…",
       statusQueued: "בתור אצל העובד - ממתין שיאסוף את המשימה.",
@@ -441,7 +443,8 @@ export const he: Dictionary = {
       assets: "קבצים",
       preview: "תצוגה מקדימה",
       export: "ייצוא",
-      workMap: "מפת עבודה",
+      /* ראה en.ts */
+      workMap: "תוכנית בינה מלאכותית",
       revisions: "גרסאות",
       renderSettings: "הגדרות רינדור"
     },

@@ -1289,3 +1289,46 @@ template offers a single image slot (`Your_image`), which is thin for a
 service built on putting app screenshots into device mockups; and client
 audio is still design-only (`docs/AUDIO-DESIGN.md`) — a template's own music
 renders, the client's own does not.
+
+## 2026-10-02 (later) — a leftover inspection copy was accepted as the template
+
+Found while verifying the worker update on FAHADNAKASH. The path pasted into
+the New Project wizard was an earlier inspection's own disposable copy, still
+on disk:
+
+```
+requested: ...(converted).dyo-inspect-ff9d115a-407c-4371-98e6-22dab787df51.aep
+opened:    ...(converted).dyo-inspect-ff9d115a-....dyo-inspect-3e43ee20-....aep
+```
+
+It ends in `.aep` and really exists, so every check passed and the worker made
+a disposable copy **of the disposable copy**. The inspection itself was valid
+(28 placeholders, identical content), but a project created from it would have
+anchored its path and source hash to a file that exists to be thrown away.
+Stopped before **Create Project** was pressed; no such project exists.
+
+**Root cause.** `isDisposableCopyPath()` already existed in
+`disposable-project.ts`, with tests - and nothing in production called it. The
+knowledge was there; the gate was not.
+
+**Fixed.** The predicate and its marker now live in `inspect-template.ts`
+beside `hasAepExtension`, the request schema refuses such a path, and the
+worker imports the marker from there so it is defined once. The wizard shows
+the reason on the field itself rather than only disabling **Inspect Template**
+- a button disabled with nothing on screen saying why was the exact complaint
+behind the 2026-09-28 Copy-as-path bug. 15 tests, including the real path.
+
+**Deliberately not changed.** Leftover copies are still not deleted
+automatically: `findStaleDisposableCopies` is reporting-only on purpose, since
+a wildcard delete in the folder holding the client's own template is the
+cleanup that removes the wrong file once. **Still open:** that function is
+also never called in production, so leftovers are never reported either.
+
+### The AI plan step was missing from Simple Mode
+
+The Work Map tab - where a client describes the video and, as of today, gives
+their website - was Advanced-only. In Simple Mode it could be reached only by
+following the stepper's link. It is now a Simple Mode tab, placed between
+Files and Scenes where it falls in the guided flow, and labelled **AI Plan**,
+the name the stepper already uses for the same step. Only Render Settings and
+Revisions remain Advanced-only.

@@ -737,3 +737,63 @@ describe("NewProjectWizard", () => {
     }, 15000);
   });
 });
+
+/**
+ * REAL 2026-10-02 DEFECT: a leftover disposable inspection copy was pasted
+ * in as the template source. It ends in .aep and really exists, so every
+ * check passed and the worker made a disposable copy OF the disposable
+ * copy; a project created from it would have anchored to a file that is
+ * deleted by design.
+ */
+describe("NewProjectWizard - a temporary inspection copy is refused, out loud", () => {
+  const DISPOSABLE = "C:\\templates\\Promo (converted).dyo-inspect-ff9d115a-407c-4371-98e6-22dab787df51.aep";
+  const REAL = "C:\\templates\\Promo (converted).aep";
+
+  async function atTemplateStep(): Promise<void> {
+    stubFetchByUrl({ "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker()] } } });
+    renderWizard();
+    await goToTemplateStep();
+    await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
+    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+  }
+
+  function pathField(): HTMLElement {
+    return screen.getByLabelText("Source project path (on the Worker machine)");
+  }
+
+  function inspectButton(): HTMLElement {
+    return screen.getByRole("button", { name: "Inspect Template" });
+  }
+
+  it("says what is wrong and what to use instead - never only a disabled button", async () => {
+    await atTemplateStep();
+    fireEvent.change(pathField(), { target: { value: DISPOSABLE } });
+
+    const message = await screen.findByText(/temporary inspection copy/);
+    expect(message.textContent).toContain(".dyo-inspect-");
+    expect(inspectButton().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("clears the message and enables Inspect once the real template path is used", async () => {
+    await atTemplateStep();
+    fireEvent.change(pathField(), { target: { value: DISPOSABLE } });
+    await screen.findByText(/temporary inspection copy/);
+
+    fireEvent.change(pathField(), { target: { value: REAL } });
+    await waitFor(() => expect(screen.queryByText(/temporary inspection copy/)).toBeNull());
+    await waitFor(() => expect(inspectButton().hasAttribute("disabled")).toBe(false));
+  });
+
+  it("catches it even when pasted with Windows' own Copy-as-path quotes", async () => {
+    await atTemplateStep();
+    fireEvent.change(pathField(), { target: { value: `"${DISPOSABLE}"` } });
+    await screen.findByText(/temporary inspection copy/);
+    expect(inspectButton().hasAttribute("disabled")).toBe(true);
+  });
+
+  it("says nothing at all while the field is still empty", async () => {
+    await atTemplateStep();
+    expect(screen.queryByText(/temporary inspection copy/)).toBeNull();
+  });
+});

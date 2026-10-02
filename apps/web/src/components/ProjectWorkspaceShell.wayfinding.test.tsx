@@ -324,7 +324,7 @@ describe("Project wayfinding - never invents state", () => {
     expect(document.querySelector('.workspace-tabs [data-next="true"]')).toBeNull();
     expect(document.querySelector('.workspace-tabs [data-locked="true"]')).toBeNull();
     // Navigation itself is never taken away - every tab is still reachable.
-    expect(within(document.querySelector(".workspace-tabs") as HTMLElement).getAllByRole("link")).toHaveLength(5);
+    expect(within(document.querySelector(".workspace-tabs") as HTMLElement).getAllByRole("link")).toHaveLength(6);
   });
 
   it("the seven-chip stepper is gone from every page's chrome - it named a phase, never an action, and doubled the banner", async () => {
@@ -396,13 +396,13 @@ describe("Project workspace - what was taken off the page", () => {
     await screen.findByText(/Delete this project/i);
   });
 
-  it("the Advanced switch still works from the header, and still reveals the same three extra tabs - hidden, never deleted", async () => {
+  it("the Advanced switch still works from the header, and reveals the two technical tabs - hidden, never deleted", async () => {
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
 
     const nav = document.querySelector(".workspace-tabs") as HTMLElement;
-    expect(within(nav).getAllByRole("link")).toHaveLength(5);
+    expect(within(nav).getAllByRole("link")).toHaveLength(6);
 
     fireEvent.click(within(document.querySelector(".workspace-header__actions") as HTMLElement).getByRole("button", { name: "Advanced" }));
 
@@ -410,6 +410,6 @@ describe("Project workspace - what was taken off the page", () => {
       within(document.querySelector(".workspace-tabs") as HTMLElement)
         .getAllByRole("link")
         .map((link) => link.textContent)
-    ).toEqual(["Project", "Files", "Scenes", "Preview", "Export", "Work Map", "Render Settings", "Revisions"]);
+    ).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export", "Render Settings", "Revisions"]);
   });
 });
