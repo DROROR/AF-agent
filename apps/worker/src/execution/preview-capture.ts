@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
 import { HeroicSwanMcpClient } from "../inspection/heroic-swan-mcp-client.js";
+import { waitForCapturedFrame, type CapturedFrameWaitOptions } from "../inspection/wait-for-captured-frame.js";
 import { parseCaptureFrame } from "../inspection/parse-mcp-shapes.js";
 
 /**
@@ -67,7 +67,9 @@ export class HeroicSwanPreviewCapture implements PreviewCapture {
 
   constructor(
     private readonly aeMcpPath: string,
-    timeouts: HeroicSwanPreviewCaptureTimeouts = {}
+    timeouts: HeroicSwanPreviewCaptureTimeouts = {},
+    /** Test-only override - production uses wait-for-captured-frame.ts's real constants. */
+    private readonly capturedFrameWait?: CapturedFrameWaitOptions
   ) {
     this.connectTimeoutMs = timeouts.connectTimeoutMs ?? DEFAULT_CAPTURE_CONNECT_TIMEOUT_MS;
     this.callTimeoutMs = timeouts.callTimeoutMs ?? DEFAULT_CAPTURE_CALL_TIMEOUT_MS;
@@ -97,21 +99,16 @@ export class HeroicSwanPreviewCapture implements PreviewCapture {
       if (!parsed.ok) {
         return { ok: false, reason: `ae_capture_frame response did not match the confirmed shape: ${parsed.reason}` };
       }
-      try {
-        // Verified independently via this worker's own filesystem stat
-        // call - never trusted from AE's self-report alone (matches the
-        // scene-evidence inspector's own "actual verified image existence").
-        const fileStat = await stat(parsed.value.path);
-        if (!fileStat.isFile() || fileStat.size <= 0) {
-          return { ok: false, reason: "captured preview file exists but is empty or not a regular file" };
-        }
-        return { ok: true, path: parsed.value.path, bytes: fileStat.size, timestampSeconds };
-      } catch (error) {
-        return {
-          ok: false,
-          reason: `could not verify the captured preview file on disk (${error instanceof Error ? error.message : String(error)})`
-        };
+      // Verified independently via this worker's own filesystem stat
+      // call - never trusted from AE's self-report alone (matches the
+      // scene-evidence inspector's own "actual verified image existence").
+      // Waited for, because ae-mcp returns the path before AE has finished
+      // writing a heavy still - see wait-for-captured-frame.ts.
+      const captured = await waitForCapturedFrame(parsed.value.path, this.capturedFrameWait);
+      if (!captured.ok) {
+        return { ok: false, reason: captured.reason };
       }
+      return { ok: true, path: parsed.value.path, bytes: captured.bytes, timestampSeconds };
     } finally {
       await client.close();
     }

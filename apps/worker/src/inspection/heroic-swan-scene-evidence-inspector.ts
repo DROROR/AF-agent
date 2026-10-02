@@ -1,4 +1,3 @@
-import { stat } from "node:fs/promises";
 import { z } from "zod";
 import type { SceneEvidenceRequest, ScenePreview, LayerDetailFact, HostLayerRecord, CompositionSummary, LayerTransformFact, OutputLayoutProposal } from "@dyo/schemas";
 import {
@@ -14,6 +13,7 @@ import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-sw
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
 import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
+import { waitForCapturedFrame, type CapturedFrameWaitOptions } from "./wait-for-captured-frame.js";
 import { withDisposableProject } from "./disposable-project.js";
 import {
   buildDescribeCompositionSummaryScript,
@@ -299,6 +299,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
   private readonly logger: McpChildTerminationLogger | undefined;
   private readonly jobExecutionRegistry: JobExecutionRegistry | undefined;
   private readonly openProjectOptions: OpenProjectOptions | undefined;
+  private readonly capturedFrameWait: CapturedFrameWaitOptions | undefined;
 
   constructor(config: {
     aeMcpPath: string | undefined;
@@ -308,7 +309,10 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
     jobExecutionRegistry?: JobExecutionRegistry;
     /** Test-only override for the open-project timeout/poll budget - production uses heroic-swan-template-inspector.ts's real constants. */
     openProjectOptions?: OpenProjectOptions;
+    /** Test-only override for how long a captured frame is waited for on disk - production uses wait-for-captured-frame.ts's real constants. */
+    capturedFrameWait?: CapturedFrameWaitOptions;
   }) {
+    this.capturedFrameWait = config.capturedFrameWait;
     this.aeMcpPath = config.aeMcpPath;
     this.logger = config.logger;
     this.jobExecutionRegistry = config.jobExecutionRegistry;
@@ -515,23 +519,21 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
           if (!parsedCapture.ok) {
             previewFailureReason = `ae_capture_frame response did not match either confirmed shape: ${parsedCapture.reason}`;
           } else {
-            try {
-              // Verified independently via this worker's own filesystem
-              // stat call (worker and ae-mcp are co-located on the same
-              // Windows machine) - never trusted from AE's self-report
-              // alone. "actual verified image existence" (Phase 7B section 7).
-              const fileStat = await stat(parsedCapture.value.path);
-              if (!fileStat.isFile() || fileStat.size <= 0) {
-                previewFailureReason = "captured preview file exists but is empty or not a regular file";
-              } else {
-                preview = {
-                  timestampSeconds: request.previewTimestampSeconds,
-                  path: parsedCapture.value.path,
-                  bytes: fileStat.size
-                };
-              }
-            } catch (error) {
-              previewFailureReason = `could not verify the captured preview file on disk (${error instanceof Error ? error.message : String(error)})`;
+            // Verified independently via this worker's own filesystem
+            // stat call (worker and ae-mcp are co-located on the same
+            // Windows machine) - never trusted from AE's self-report
+            // alone. "actual verified image existence" (Phase 7B section 7).
+            // Waited for, because ae-mcp returns the path before AE has
+            // finished writing a heavy still - see wait-for-captured-frame.ts.
+            const captured = await waitForCapturedFrame(parsedCapture.value.path, this.capturedFrameWait);
+            if (captured.ok) {
+              preview = {
+                timestampSeconds: request.previewTimestampSeconds,
+                path: parsedCapture.value.path,
+                bytes: captured.bytes
+              };
+            } else {
+              previewFailureReason = captured.reason;
             }
           }
         }

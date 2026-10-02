@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isScenePreviewSettled, type ScenePreviewEntry } from "./use-scene-preview-queue";
+import { hasFinishedWithoutPreview, isScenePreviewSettled, type ScenePreviewEntry } from "./use-scene-preview-queue";
 
 const entry = (overrides: Partial<ScenePreviewEntry>): ScenePreviewEntry => ({
   preview: null,
@@ -31,5 +31,13 @@ describe("isScenePreviewSettled (real 2026-09-14 Match Your Content lock)", () =
   it("never settles a stale preview that has not failed, or a scene simply waiting for a worker to come online", () => {
     expect(isScenePreviewSettled(entry({ state: "ready", isStale: true }))).toBe(false);
     expect(isScenePreviewSettled(entry({ state: "idle", errorMessage: "No computer is online to generate this preview right now." }))).toBe(false);
+  });
+});
+
+describe("hasFinishedWithoutPreview (real 2026-10-02 \"!MAIN\" preview that never arrived)", () => {
+  it("keeps waiting on the first read after the job succeeded, then stops instead of running out the whole window", () => {
+    expect(hasFinishedWithoutPreview(0)).toBe(false);
+    expect(hasFinishedWithoutPreview(1)).toBe(false);
+    expect(hasFinishedWithoutPreview(2)).toBe(true);
   });
 });

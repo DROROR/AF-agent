@@ -761,7 +761,8 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
 
   it("reports previewFailureReason when the captured file does not actually exist on disk - never trusts AE's self-report alone", async () => {
     await writeFakeServer(dir, { captureShape: "image", previewFilePath: join(dir, "does-not-exist.png") });
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
+    // A captured frame is waited for (wait-for-captured-frame.ts) - kept short here, the real window is 30 s.
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir, capturedFrameWait: { timeoutMs: 300, pollIntervalMs: 50 } });
     const result = (await inspector.inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");

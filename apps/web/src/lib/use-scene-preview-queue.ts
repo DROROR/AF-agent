@@ -65,6 +65,24 @@ const MAX_POLL_ATTEMPTS = 30;
 /** ~3 minutes of waiting for the worker's single job slot before a refused preview is reported as failed. */
 const MAX_BUSY_RETRIES = 45;
 
+/**
+ * A preview job can SUCCEED and still carry no picture: the worker reports
+ * the scene's layer facts either way, and a frame After Effects never wrote
+ * is only a note inside that result.
+ *
+ * REAL 2026-10-02 (project fe32ffac, "!MAIN"): exactly that happened, and
+ * the scene sat on "generating" for the whole two-minute window before
+ * blaming time - "Preview is taking longer than expected" - for a job that
+ * had finished 90 seconds earlier. The worker uploads the picture before it
+ * reports the job, so one further status read after SUCCEEDED is already
+ * conclusive; a second is allowed purely as slack.
+ */
+const POLLS_AFTER_SUCCESS_BEFORE_GIVING_UP = 2;
+
+export function hasFinishedWithoutPreview(pollsSeenSucceededWithoutPreview: number): boolean {
+  return pollsSeenSucceededWithoutPreview >= POLLS_AFTER_SUCCESS_BEFORE_GIVING_UP;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -149,6 +167,7 @@ export function useScenePreviewQueue(
           hasFailed: true
         });
       };
+      let succeededPolls = 0;
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
         await sleep(POLL_INTERVAL_MS);
         if (runId !== runIdRef.current) return;
@@ -167,6 +186,13 @@ export function useScenePreviewQueue(
         if (job.ok && (job.data.status === "FAILED" || job.data.status === "CANCELLED")) {
           failWith("Preview could not be generated for this scene. Please try again.");
           return;
+        }
+        if (job.ok && job.data.status === "SUCCEEDED") {
+          succeededPolls += 1;
+          if (hasFinishedWithoutPreview(succeededPolls)) {
+            failWith("After Effects finished but did not produce a picture for this scene. Please try again.");
+            return;
+          }
         }
       }
       failWith("Preview is taking longer than expected. Please try again.");
