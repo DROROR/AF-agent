@@ -15,6 +15,9 @@ function input(overrides: Partial<NextActionInput> = {}): NextActionInput {
     stateUnknown: false,
     hasPlan: true,
     planApproved: false,
+    // A project whose files are already uploaded - the uploadFiles pointer has
+    // its own tests below, so every other test stays about what it was about.
+    assetCount: 1,
     scenesNeedingReview: 0,
     includedSceneCount: 2,
     executableSceneCount: 0,
@@ -192,5 +195,33 @@ describe("resolveTabLocks", () => {
   it("keeps Export locked with neither an approved full preview nor any render, and unlocks it for a real finished render even with no live approval", () => {
     expect(resolveTabLocks(readyToRender({ fullPreviewApproved: false, hasRenderArtifact: false })).export).toBe(true);
     expect(resolveTabLocks(readyToRender({ fullPreviewApproved: false, hasRenderArtifact: true })).export).toBe(false);
+  });
+});
+
+/**
+ * 2026-10-02: a freshly created project was pointed straight at "review each
+ * scene" with an empty Asset Catalog, so every "Asset" dropdown in the edit
+ * drawer was empty and the instruction could not be carried out.
+ */
+describe("resolveNextAction - files come before scene review", () => {
+  it("points at the Files tab while the project has no assets", () => {
+    expect(resolveNextAction(input({ assetCount: 0 }))).toEqual({ id: "uploadFiles", tab: "assets" });
+  });
+
+  it("points at scene review as soon as one real asset exists", () => {
+    expect(resolveNextAction(input({ assetCount: 1, scenesNeedingReview: 2 }))).toEqual({ id: "reviewScenes", tab: "scenes" });
+  });
+
+  it("still asks for the plan first, since nothing can be mapped without one", () => {
+    expect(resolveNextAction(input({ hasPlan: false, assetCount: 0 }))).toEqual({ id: "createPlan", tab: "scenes" });
+  });
+
+  it("never points back at uploads once the plan is approved", () => {
+    const action = resolveNextAction(input({ planApproved: true, assetCount: 0, executableSceneCount: 2 }));
+    expect(action.id).not.toBe("uploadFiles");
+  });
+
+  it("says nothing at all while the real state is still unknown", () => {
+    expect(resolveNextAction(input({ stateUnknown: true, assetCount: 0 }))).toEqual({ id: "unknown", tab: null });
   });
 });

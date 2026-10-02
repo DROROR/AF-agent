@@ -24,8 +24,10 @@ import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { Button } from "./ui/Button";
 import { ErrorState } from "./ErrorState";
+import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
 import { SlotReviewPanel, type SlotReviewChoice } from "./SlotReviewPanel";
+import { groupMappingsByLayerPath, placeholderGroupPathLabel } from "../lib/scene-placeholder-groups";
 
 /** Every real asset kind maps to the closest real placeholderType MAP_ASSET requires; a non-visual kind (AUDIO/DOCUMENT/OTHER) is honestly "unknown" rather than a fabricated visual type. */
 function placeholderTypeForMediaKind(mediaKind: MediaKind): PlaceholderType {
@@ -52,6 +54,13 @@ interface MappingFormState {
   text: string;
   assetTimestamp: string;
   selectedAssetId: string;
+  /**
+   * The colour typed/picked in THIS form session - "" means "no explicit
+   * colour", which leaves the template's own colour untouched. Only ever
+   * rendered for a mapping the manifest classified "color"; sent as
+   * SET_BRAND_COLOR, which normalizes it to canonical #RRGGBB server-side.
+   */
+  colorHex: string;
   /** The reviewer's explicit choice in THIS form session, or null while undecided - never defaulted, since a default would be a decision nobody made. */
   templateTextDecision: TemplateTextDecision | null;
   /** The reviewer's explicit SLOT decision in this form session (Stage 4), or null while undecided - same rule. */
@@ -75,6 +84,26 @@ function isTemplateDecisionPersisted(form: MappingFormState, mapping: Placeholde
   }
   const trimmed = form.text.trim();
   return (trimmed === "" ? null : trimmed) === mapping.text;
+}
+
+/**
+ * Whether the colour shown in the form differs from the one the plan holds.
+ * Case-INSENSITIVE on purpose: the plan stores the canonical uppercase
+ * #RRGGBB that apply-execution-plan-edit.ts normalizes to, while a native
+ * colour input reports lowercase. A byte comparison would therefore report a
+ * change on a colour nobody touched, and every save would emit a no-op
+ * SET_BRAND_COLOR for every colour mapping in the scene.
+ */
+export function isBrandColorChanged(formColorHex: string, persistedColorHex: string | null): boolean {
+  const trimmed = formColorHex.trim();
+  const next = trimmed === "" ? null : trimmed;
+  if (next === null) {
+    return persistedColorHex !== null;
+  }
+  if (persistedColorHex === null) {
+    return true;
+  }
+  return next.toUpperCase() !== persistedColorHex.toUpperCase();
 }
 
 /**
@@ -140,6 +169,7 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
         text: mapping.text ?? "",
         assetTimestamp: mapping.assetTimestamp !== null ? String(mapping.assetTimestamp) : "",
         selectedAssetId: mapping.selectedAssetId ?? "",
+        colorHex: mapping.colorHex ?? "",
         templateTextDecision: mapping.keepTemplateText?.decision ?? null,
         slotDecision:
           mapping.slotReview == null
@@ -198,6 +228,37 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
       }
     }
     return { ...none, text: undefined };
+  }
+
+  /**
+   * The manifest placeholder a mapping came from, or null when it has no
+   * manifest origin. Same walk as templateTextFor above, for the same
+   * reason: the manifest is the only place that records WHICH composition a
+   * nested layer actually lives in (`layerPath`), and the plan's own mapping
+   * deliberately does not duplicate that.
+   */
+  function manifestLayerPathFor(mappingId: string): readonly string[] | null {
+    const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
+    if (!mapping || mapping.manifestPlaceholderId === null) {
+      return null;
+    }
+    for (const manifestScene of project?.manifest.scenes ?? []) {
+      for (const placeholder of manifestScene.placeholders) {
+        if (placeholder.placeholderId === mapping.manifestPlaceholderId) {
+          return placeholder.layerPath;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The manifest's own classification value for this mapping. "color" is the
+   * only value for which a colour field may be offered at all - the same gate
+   * resolveExecuteFrameDispatch applies before it will run SET_BRAND_COLOR.
+   */
+  function classificationFor(mappingId: string): string | null {
+    return scene!.mappings.find((candidate) => candidate.id === mappingId)?.placeholderClassification.value ?? null;
   }
 
   /** Assessed with the SAME pure function the backend gate uses, against the text currently typed in the form - so the warning tracks what the reviewer is actually about to save. */
@@ -263,6 +324,19 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
           ops.push({ type: "CLEAR_TEXT", scenePlanId: currentScene.id, mappingId: form.mappingId });
         } else {
           ops.push({ type: "SET_TEXT", scenePlanId: currentScene.id, mappingId: form.mappingId, text: nextText });
+        }
+      }
+
+      // Only ever emitted for a mapping the MANIFEST itself classified
+      // "color" - the same gate resolveExecuteFrameDispatch applies before it
+      // will run SET_BRAND_COLOR, so the UI can never queue an edit the
+      // executor then refuses.
+      if (classificationFor(form.mappingId) === "color" && isBrandColorChanged(form.colorHex, originalMapping.colorHex)) {
+        const nextColor = form.colorHex.trim();
+        if (nextColor === "") {
+          ops.push({ type: "CLEAR_BRAND_COLOR", scenePlanId: currentScene.id, mappingId: form.mappingId });
+        } else {
+          ops.push({ type: "SET_BRAND_COLOR", scenePlanId: currentScene.id, mappingId: form.mappingId, colorHex: nextColor });
         }
       }
 
@@ -370,6 +444,9 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
       if ((trimmedTimestamp === "" ? null : Number(trimmedTimestamp)) !== originalMapping.assetTimestamp) {
         return true;
       }
+      if (classificationFor(form.mappingId) === "color" && isBrandColorChanged(form.colorHex, originalMapping.colorHex)) {
+        return true;
+      }
       if ((form.selectedAssetId === "" ? null : form.selectedAssetId) !== originalMapping.selectedAssetId) {
         return true;
       }
@@ -462,6 +539,34 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
     }
   }
 
+  // One section per composition the layers ACTUALLY live in. A single-master
+  // template keeps every real scene in a nested composition, so without this
+  // the drawer is one flat list in which 23 fieldsets are legended "Text A",
+  // "Text B" or "Text C" and nobody can tell which scene they belong to - see
+  // scene-placeholder-groups.ts for the full defect note.
+  const renderGroups = groupMappingsByLayerPath(
+    mappings.map((mapping) => ({ mappingId: mapping.mappingId, layerPath: manifestLayerPathFor(mapping.mappingId) }))
+  );
+  const mappingIndexById = new Map(mappings.map((mapping, index) => [mapping.mappingId, index]));
+  const orderedForRender = renderGroups.flatMap((group) =>
+    group.mappingIds.map((mappingId, positionInGroup) => {
+      const index = mappingIndexById.get(mappingId) as number;
+      return {
+        mapping: mappings[index] as MappingFormState,
+        // The ORIGINAL index into `mappings`, not the display position - every
+        // onChange below writes back by index, so regrouping must never
+        // renumber them.
+        index,
+        groupLabel:
+          positionInGroup !== 0
+            ? null
+            : group.layerPath.length === 0
+              ? t.projectWorkspace.editDrawer.ownLayersGroupLabel
+              : placeholderGroupPathLabel(group)
+      };
+    })
+  );
+
   return (
     <Dialog open onClose={requestClose} title={t.projectWorkspace.editDrawer.title} variant="drawer">
       <div className="edit-drawer-form">
@@ -490,8 +595,21 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
             onChange={(event) => setInstructions(event.target.value)}
           />
         </Field>
-        {mappings.map((mapping, index) => (
-          <fieldset key={mapping.mappingId} className="edit-drawer-form">
+        {mappings.length === 0 ? (
+          <EmptyState
+            title={t.projectWorkspace.editDrawer.noMappingsTitle}
+            description={t.projectWorkspace.editDrawer.noMappingsDescription}
+          />
+        ) : null}
+        {orderedForRender.map(({ mapping, index, groupLabel }) => (
+          <div key={mapping.mappingId} className="edit-drawer-group-item">
+            {groupLabel === null ? null : (
+              <h3 className="edit-drawer-group-heading">
+                {groupLabel}
+                <span className="edit-drawer-group-heading__hint">{t.projectWorkspace.editDrawer.groupPathHint}</span>
+              </h3>
+            )}
+            <fieldset className="edit-drawer-form">
             <legend>{mapping.label}</legend>
             <Field label={t.projectWorkspace.editDrawer.assetLabel} htmlFor={`mapping-asset-${mapping.mappingId}`} hint={t.projectWorkspace.editDrawer.assetHint}>
               <Select
@@ -522,6 +640,55 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                 }}
               />
             </Field>
+            {(() => {
+              if (classificationFor(mapping.mappingId) !== "color") {
+                return null;
+              }
+              // A nested colour layer is deliberately NOT offered a picker:
+              // the worker refuses SET_BRAND_COLOR through a nested target
+              // (see build-manifest.ts decideNestedLayer), so a field here
+              // would promise an edit that can never run.
+              if ((manifestLayerPathFor(mapping.mappingId) ?? []).length > 0) {
+                return <p className="field__hint">{t.projectWorkspace.editDrawer.colorNestedUnsupported}</p>;
+              }
+              const setColor = (value: string): void => {
+                const next = [...mappings];
+                next[index] = { ...mapping, colorHex: value };
+                setMappings(next);
+              };
+              return (
+                <Field
+                  label={t.projectWorkspace.editDrawer.colorLabel}
+                  htmlFor={`mapping-color-${mapping.mappingId}`}
+                  hint={t.projectWorkspace.editDrawer.colorHint}
+                >
+                  <div className="edit-drawer-color">
+                    <Input
+                      id={`mapping-color-${mapping.mappingId}`}
+                      value={mapping.colorHex}
+                      placeholder="#RRGGBB"
+                      onChange={(event) => setColor(event.target.value)}
+                    />
+                    <input
+                      type="color"
+                      className="edit-drawer-color__swatch"
+                      aria-label={t.projectWorkspace.editDrawer.colorSwatchLabel}
+                      /* A native colour input cannot represent "unset", so an
+                         empty or partial value shows black WITHOUT the form
+                         state claiming black was chosen - only a real change
+                         event writes a colour. */
+                      value={/^#[0-9A-Fa-f]{6}$/.test(mapping.colorHex) ? mapping.colorHex : "#000000"}
+                      onChange={(event) => setColor(event.target.value)}
+                    />
+                    {mapping.colorHex === "" ? null : (
+                      <Button size="sm" variant="ghost" onClick={() => setColor("")}>
+                        {t.projectWorkspace.editDrawer.colorClearAction}
+                      </Button>
+                    )}
+                  </div>
+                </Field>
+              );
+            })()}
             {(() => {
               const assessment = assessMapping(mapping);
               if (assessment.status === "NOT_APPLICABLE" || assessment.status === "REPLACED") {
@@ -686,7 +853,8 @@ export function SceneEditDrawer({ scenePlanId, onClose }: SceneEditDrawerProps):
                 }}
               />
             </Field>
-          </fieldset>
+            </fieldset>
+          </div>
         ))}
         <div className="edit-drawer-actions">
           <Button variant="ghost" onClick={requestClose} disabled={isSaving}>

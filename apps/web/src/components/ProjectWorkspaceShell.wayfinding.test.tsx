@@ -6,7 +6,7 @@ import { ProjectGuidanceProvider } from "./ProjectGuidanceProvider";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
-import { PROJECT_ID, SOURCE_SHA, manifestFixture, planFixture, projectDtoFixture, renderArtifactFixture, sceneFixture, stubFetchByUrl, workMapEntryFixture, workMapFixture } from "../test-utils/execution-plan-fixtures";
+import { PROJECT_ID, SOURCE_SHA, assetFixture, manifestFixture, planFixture, projectDtoFixture, renderArtifactFixture, sceneFixture, stubFetchByUrl, workMapEntryFixture, workMapFixture } from "../test-utils/execution-plan-fixtures";
 
 /**
  * REAL 2026-09-25 INCIDENT: the person who uses this dashboard every day
@@ -89,6 +89,10 @@ function stubAll(overrides: Record<string, Parameters<typeof stubFetchByUrl>[0][
     [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
     [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
     [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
+    // ProjectGuidanceProvider reads the Asset Catalog too (2026-10-02): with
+    // no files the next action is "upload the client's files", and an
+    // unstubbed fetch reads as "not known yet", not as zero.
+    [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture()] } },
     [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
     ...overrides
   });

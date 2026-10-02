@@ -7,6 +7,7 @@ import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import {
   PROJECT_ID,
+  assetFixture,
   SOURCE_SHA,
   manifestFixture,
   planFixture,
@@ -91,6 +92,10 @@ function stubAll(overrides: Record<string, Parameters<typeof stubFetchByUrl>[0][
     [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } },
     [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
     [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
+    // ProjectGuidanceProvider reads the Asset Catalog too (2026-10-02): with
+    // no files the next action is "upload the client's files", and an
+    // unstubbed fetch reads as "not known yet", not as zero.
+    [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture()] } },
     [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
     ...overrides
   });

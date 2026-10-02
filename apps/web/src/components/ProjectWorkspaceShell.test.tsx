@@ -6,7 +6,7 @@ import { ProjectGuidanceProvider } from "./ProjectGuidanceProvider";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
-import { PROJECT_ID, manifestFixture, planFixture, projectDtoFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
+import { PROJECT_ID, assetFixture, manifestFixture, planFixture, projectDtoFixture, stubFetchByUrl } from "../test-utils/execution-plan-fixtures";
 
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -41,6 +41,10 @@ function stubWorkspace(): void {
     [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
     [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
     [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
+    // ProjectGuidanceProvider reads the Asset Catalog too (2026-10-02): with
+    // no files the next action is "upload the client's files", and an
+    // unstubbed fetch reads as "not known yet", not as zero.
+    [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture()] } },
     [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
   });
 }
@@ -99,6 +103,10 @@ describe("ProjectWorkspaceShell - Delete Project", () => {
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
+    // ProjectGuidanceProvider reads the Asset Catalog too (2026-10-02): with
+    // no files the next action is "upload the client's files", and an
+    // unstubbed fetch reads as "not known yet", not as zero.
+    [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture()] } },
       [`/api/projects/${PROJECT_ID}`]: [
         { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
         { status: 204, body: null }
@@ -126,6 +134,10 @@ describe("ProjectWorkspaceShell - Delete Project", () => {
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
+    // ProjectGuidanceProvider reads the Asset Catalog too (2026-10-02): with
+    // no files the next action is "upload the client's files", and an
+    // unstubbed fetch reads as "not known yet", not as zero.
+    [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture()] } },
       [`/api/projects/${PROJECT_ID}`]: [
         { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
         { status: 409, body: { error: { code: "PROJECT_HAS_ACTIVE_JOB", message: "Project has a job still in progress - wait for it to finish before deleting", requestId: "r1" } } }

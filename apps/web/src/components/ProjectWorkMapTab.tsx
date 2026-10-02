@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import type { ProjectResponse, WorkMapEntry } from "@dyo/schemas";
+import { parseHttpWebsiteUrl, type ProjectBrandInputs, type ProjectResponse, type WorkMapEntry } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useWorkspaceMode } from "./WorkspaceModeProvider";
 import { useWorkMap } from "../lib/use-work-map";
 import { useProjectAssets } from "../lib/use-project-assets";
+import { updateProjectBrandInputs } from "../lib/projects-api-client";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { ClaudeActionButton } from "./ui/ClaudeActionButton";
@@ -107,6 +108,12 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [instructions, setInstructions] = useState("");
+  // The client's own website and business description. Seeded from the
+  // project's already-persisted brand inputs, so they are typed once and
+  // come back on every later visit.
+  const [websiteUrl, setWebsiteUrl] = useState(project.project.brandInputs.websiteUrl ?? "");
+  const [aboutClient, setAboutClient] = useState(project.project.brandInputs.textInstructions ?? "");
+  const [brandInputsError, setBrandInputsError] = useState<string | null>(null);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
   const [createPlanError, setCreatePlanError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("tellAi");
@@ -193,12 +200,35 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
     }
   }
 
+  /** Empty is always allowed - these fields are optional. Anything else must be a real http(s) address, checked with the SAME function the API and the fetch allowlist use. */
+  const websiteUrlIsUsable = websiteUrl.trim() === "" || parseHttpWebsiteUrl(websiteUrl) !== null;
+
   async function handleCreatePlan(): Promise<void> {
-    if (instructions.trim() === "") {
+    if (instructions.trim() === "" || !websiteUrlIsUsable) {
       return;
     }
     setIsCreatingPlan(true);
     setCreatePlanError(null);
+    setBrandInputsError(null);
+
+    // Saved BEFORE the draft is requested, because the draft reads these
+    // values server-side from the persisted project - an unsaved website
+    // would simply not be read. Replaces the whole object, per the API's
+    // own contract, so the fields this card does not edit are carried
+    // through unchanged rather than cleared.
+    const nextWebsite = websiteUrl.trim() === "" ? null : websiteUrl.trim();
+    const nextAbout = aboutClient.trim() === "" ? null : aboutClient.trim();
+    const current = project.project.brandInputs;
+    if (nextWebsite !== current.websiteUrl || nextAbout !== current.textInstructions) {
+      const brandInputs: ProjectBrandInputs = { ...current, websiteUrl: nextWebsite, textInstructions: nextAbout };
+      const saved = await updateProjectBrandInputs(projectId, brandInputs);
+      if (!saved.ok) {
+        setIsCreatingPlan(false);
+        setBrandInputsError(saved.message ?? null);
+        return;
+      }
+    }
+
     const result = await createAiDraft(instructions.trim());
     setIsCreatingPlan(false);
     if (result.ok) {
@@ -238,6 +268,34 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
         <CardHeader title={t.workMapTab.ai.heading} />
         <p>{t.workMapTab.description}</p>
         {createPlanError ? <ErrorState title={t.workMapTab.ai.createPlanFailedTitle} description={createPlanError} /> : null}
+        {brandInputsError ? <ErrorState title={t.workMapTab.ai.saveDetailsFailedTitle} description={brandInputsError} /> : null}
+        <Field
+          label={t.workMapTab.ai.websiteLabel}
+          htmlFor="work-map-website-url"
+          hint={t.workMapTab.ai.websiteHint}
+          {...(websiteUrlIsUsable ? {} : { error: t.workMapTab.ai.websiteInvalid })}
+        >
+          <Input
+            id="work-map-website-url"
+            type="url"
+            inputMode="url"
+            placeholder={t.workMapTab.ai.websitePlaceholder}
+            value={websiteUrl}
+            disabled={isCreatingPlan}
+            onChange={(event) => setWebsiteUrl(event.target.value)}
+          />
+        </Field>
+        <Field label={t.workMapTab.ai.aboutClientLabel} htmlFor="work-map-about-client" hint={t.workMapTab.ai.aboutClientHint}>
+          <textarea
+            id="work-map-about-client"
+            className="input"
+            rows={3}
+            placeholder={t.workMapTab.ai.aboutClientPlaceholder}
+            value={aboutClient}
+            disabled={isCreatingPlan}
+            onChange={(event) => setAboutClient(event.target.value)}
+          />
+        </Field>
         <Field label={t.workMapTab.ai.textareaLabel} htmlFor="work-map-ai-instructions">
           <textarea
             id="work-map-ai-instructions"
@@ -257,7 +315,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             label={t.workMapTab.ai.createPlanAction}
             busyLabel={t.workMapTab.ai.creatingPlan}
             busy={isCreatingPlan}
-            disabled={instructions.trim() === ""}
+            disabled={instructions.trim() === "" || !websiteUrlIsUsable}
             onClick={() => void handleCreatePlan()}
           />
         </div>

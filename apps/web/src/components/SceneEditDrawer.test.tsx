@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SceneEditDrawer } from "./SceneEditDrawer";
+import { SceneEditDrawer, isBrandColorChanged } from "./SceneEditDrawer";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import { classifySlotSemantics, computeTextVerification, type SlotStructuralFacts } from "@dyo/schemas";
@@ -826,5 +826,230 @@ describe("SceneEditDrawer - a decision is only 'recorded' once the plan holds it
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Discard the unsaved changes?")).toBeNull();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-10-02: the drawer rendered every nested placeholder of a single-master
+ * template as one flat list (23 of 30 fieldsets legended "Text A"/"Text B"/
+ * "Text C"), and offered no colour field at all even though SET_BRAND_COLOR,
+ * the plan's own colorHex and the worker's own JSX had all shipped.
+ */
+describe("SceneEditDrawer - colour", () => {
+  const COLOR_CLASSIFICATION = {
+    value: "color",
+    source: "MANIFEST",
+    evidence: ["layer is a single uniform solid fill with no other source"]
+  };
+
+  function colorSetup(mappingOverrides: Record<string, unknown> = {}, placeholderOverrides: Record<string, unknown> = {}) {
+    const scenes = [
+      sceneFixture({
+        id: "s1",
+        mappings: [
+          mappingFixture({
+            placeholderName: "BACKGROUND",
+            placeholderClassification: COLOR_CLASSIFICATION,
+            ...mappingOverrides
+          })
+        ]
+      })
+    ];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: manifestFixture([
+            placeholderFixture({ layerName: "BACKGROUND", placeholderType: "color", originalText: undefined, ...placeholderOverrides })
+          ])
+        }
+      }
+    });
+  }
+
+  function savedOperations(): Array<Record<string, unknown>> {
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.map(([, init]) => init)
+      .find((init): init is RequestInit & { body: string } => typeof init?.body === "string" && init.body.includes("operations"));
+    if (!call) {
+      return [];
+    }
+    return (JSON.parse(call.body) as { operations: Array<Record<string, unknown>> }).operations;
+  }
+
+  it("offers a colour field for a mapping the manifest classified color, and emits SET_BRAND_COLOR", async () => {
+    colorSetup();
+    const onClose = vi.fn();
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("BACKGROUND");
+    const colorInput = (await screen.findByLabelText("Colour")) as HTMLInputElement;
+    fireEvent.change(colorInput, { target: { value: "#1A2B3C" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(savedOperations()).toContainEqual({
+      type: "SET_BRAND_COLOR",
+      scenePlanId: "s1",
+      mappingId: "mapping-1",
+      colorHex: "#1A2B3C"
+    });
+  });
+
+  it("offers no colour field at all for a mapping that is not classified color", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [mappingFixture()] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    expect(screen.queryByLabelText("Colour")).toBeNull();
+  });
+
+  it("refuses a picker for a NESTED colour layer, because the worker cannot recolour one", async () => {
+    colorSetup({}, { layerPath: ["outer", "inner"] });
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("BACKGROUND");
+    await screen.findByText(
+      "This colour layer sits inside a nested composition, which cannot be recoloured yet - the template's own colour is kept."
+    );
+    expect(screen.queryByLabelText("Colour")).toBeNull();
+  });
+
+  it("clears a colour the plan already holds with CLEAR_BRAND_COLOR", async () => {
+    colorSetup({ colorHex: "#112233" });
+    const onClose = vi.fn();
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("BACKGROUND");
+    fireEvent.click(await screen.findByRole("button", { name: "Use the template's colour" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(savedOperations()).toContainEqual({ type: "CLEAR_BRAND_COLOR", scenePlanId: "s1", mappingId: "mapping-1" });
+  });
+
+  it("sends no colour operation when the colour was never touched", async () => {
+    colorSetup({ colorHex: "#112233" });
+    const onClose = vi.fn();
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("BACKGROUND");
+    fireEvent.change(screen.getByLabelText("Instructions / notes"), { target: { value: "a note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    const types = savedOperations().map((operation) => operation.type);
+    expect(types).not.toContain("SET_BRAND_COLOR");
+    expect(types).not.toContain("CLEAR_BRAND_COLOR");
+  });
+});
+
+describe("SceneEditDrawer - one section per composition", () => {
+  it("heads each nested composition with its own path, and the scene's own layers with their own label", async () => {
+    const scenes = [
+      sceneFixture({
+        id: "s1",
+        mappings: [
+          mappingFixture({ id: "m-nested", manifestPlaceholderId: "ph-nested", placeholderName: "Text A" }),
+          mappingFixture({ id: "m-own", manifestPlaceholderId: "ph-own", placeholderName: "Watermark" })
+        ]
+      })
+    ];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: manifestFixture([
+            placeholderFixture({ placeholderId: "ph-nested", layerName: "Text A", layerPath: ["outer", "inner"] }),
+            placeholderFixture({ placeholderId: "ph-own", layerName: "Watermark", layerPath: [] })
+          ])
+        }
+      }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("Text A");
+    const headings = screen.getAllByRole("heading", { level: 3 }).map((node) => node.textContent ?? "");
+    // The scene's own layers come first even though the nested mapping is
+    // first in the plan's own mapping list.
+    expect(headings[0]).toContain("This scene's own layers");
+    expect(headings[1]).toContain("outer › inner");
+  });
+
+  it("says plainly that a scene has nothing to edit instead of showing a drawer with only duration and notes", async () => {
+    const scenes = [sceneFixture({ id: "s1", mappings: [] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture([]) } }
+    });
+
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("Nothing in this scene can be edited");
+    expect(screen.queryByLabelText("Text")).toBeNull();
+  });
+});
+
+describe("isBrandColorChanged", () => {
+  it("reads an untouched empty colour as unchanged", () => {
+    expect(isBrandColorChanged("", null)).toBe(false);
+  });
+
+  it("reads clearing a stored colour as a change", () => {
+    expect(isBrandColorChanged("", "#112233")).toBe(true);
+  });
+
+  it("reads setting a colour where there was none as a change", () => {
+    expect(isBrandColorChanged("#112233", null)).toBe(true);
+  });
+
+  it("ignores case, because the plan stores uppercase and a colour picker reports lowercase", () => {
+    expect(isBrandColorChanged("#aabbcc", "#AABBCC")).toBe(false);
+  });
+
+  it("still reports a real change", () => {
+    expect(isBrandColorChanged("#aabbcd", "#AABBCC")).toBe(true);
+  });
+
+  it("ignores surrounding whitespace", () => {
+    expect(isBrandColorChanged("  #AABBCC  ", "#AABBCC")).toBe(false);
   });
 });

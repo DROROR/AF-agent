@@ -2,6 +2,37 @@ import { z } from "zod";
 import { templateManifestSchema } from "./template-manifest.js";
 
 /**
+ * An http(s) absolute URL, used for the client's own website. Deliberately
+ * NOT `z.string().url()` alone: that accepts any scheme, including
+ * `javascript:` and `file:`, and this value is handed to a web-fetch tool.
+ * Only http and https are ever accepted, and the host must be a real,
+ * dotted public hostname - never an IP literal, `localhost`, or a bare
+ * single-label name, all of which would point the fetch at private
+ * infrastructure rather than at the client's site.
+ */
+const HTTP_URL_MESSAGE = "Must be a full http:// or https:// website address, e.g. https://example.com";
+export function parseHttpWebsiteUrl(raw: string): URL | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return null;
+  }
+  const host = parsed.hostname;
+  if (host === "localhost" || !host.includes(".") || host.startsWith("[")) {
+    return null;
+  }
+  // An IPv4 literal has only digits and dots - a hostname never does.
+  if (/^[0-9.]+$/.test(host)) {
+    return null;
+  }
+  return parsed;
+}
+
+/**
  * Client's OWN brand inputs for this project - their logo/colors/text
  * instructions, distinct from DYO's own PERMANENT brand rules
  * (dyo-brand-rules.yaml: the DYO logo, the Hebrew "מבית DYO App" line, the
@@ -16,12 +47,33 @@ export const projectBrandInputsSchema = z
     logoAssetId: z.string().min(1).nullable(),
     /** Client's own brand colors as hex strings, e.g. "#1A2B3C" - never validated as "matching" anything, just stored. */
     brandColors: z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/)).max(10),
-    textInstructions: z.string().trim().max(4000).nullable()
+    textInstructions: z.string().trim().max(4000).nullable(),
+    /**
+     * The client's own website, so the AI work-map draft can read it for
+     * their wording, product names and look. Added 2026-10-02.
+     *
+     * `.default(null)` rather than a plain required field ON PURPOSE: this
+     * object is parsed back out of an existing jsonb column, and every row
+     * written before today has no such key. A required field would make
+     * every pre-existing project fail validation on read.
+     *
+     * The host of this URL is also the ONLY domain the draft provider's
+     * web-fetch tool is ever allowed to read - see
+     * anthropic-work-map-draft-provider.ts.
+     */
+    websiteUrl: z
+      .string()
+      .trim()
+      .max(2000)
+      .nullable()
+      .default(null)
+      .refine((value) => value === null || value === "" || parseHttpWebsiteUrl(value) !== null, HTTP_URL_MESSAGE)
+      .transform((value) => (value === null || value === "" ? null : value.trim()))
   })
   .strict();
 export type ProjectBrandInputs = z.infer<typeof projectBrandInputsSchema>;
 
-const DEFAULT_BRAND_INPUTS: ProjectBrandInputs = { logoAssetId: null, brandColors: [], textInstructions: null };
+const DEFAULT_BRAND_INPUTS: ProjectBrandInputs = { logoAssetId: null, brandColors: [], textInstructions: null, websiteUrl: null };
 
 /** PATCH /api/projects/:projectId/brand-inputs - replaces the whole brand-inputs object (small enough that partial-field PATCH semantics aren't worth the complexity). */
 export const updateProjectBrandInputsRequestSchema = projectBrandInputsSchema;

@@ -1,6 +1,27 @@
 import { eq } from "drizzle-orm";
 import { projects, type Database, type ProjectRow } from "@dyo/database";
+import { projectBrandInputsSchema } from "@dyo/schemas";
 import type { NewProject, Project, ProjectRepository } from "../../domain/project/types.js";
+
+/**
+ * `brand_inputs` is a jsonb column, so drizzle's `$type<ProjectBrandInputs>()`
+ * is a compile-time claim about data the database never validated. Every row
+ * written before 2026-10-02 has no `websiteUrl` key at all, and reading one
+ * straight through would hand the rest of the application `undefined` where
+ * it is typed `string | null`.
+ *
+ * Parsing through the schema applies its own documented default instead. A
+ * row that genuinely does not match the contract is reported as absent rather
+ * than passed on half-valid - the same rule the rest of this codebase
+ * follows for state it cannot verify.
+ */
+function toBrandInputs(raw: ProjectRow["brandInputs"]): Project["brandInputs"] {
+  if (raw == null) {
+    return null;
+  }
+  const parsed = projectBrandInputsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
 
 function toDomain(row: ProjectRow): Project {
   return {
@@ -9,7 +30,7 @@ function toDomain(row: ProjectRow): Project {
     templateId: row.templateId,
     sourceProjectSha256: row.sourceProjectSha256,
     manifest: row.manifest,
-    brandInputs: row.brandInputs ?? null,
+    brandInputs: toBrandInputs(row.brandInputs),
     sourceWorkerId: row.sourceWorkerId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt

@@ -145,7 +145,7 @@ describe("buildEvidenceBundles", () => {
       scenePlans: [scene({ instructions: "Use the client's own hero shot" })],
       assets: [realAsset],
       workMap: null,
-      brandInputs: { logoAssetId: "asset-7", brandColors: ["#112233"], textInstructions: null }
+      brandInputs: { logoAssetId: "asset-7", brandColors: ["#112233"], textInstructions: null, websiteUrl: null }
     });
     expect(bundles[0]?.candidateAssets).toEqual([realAsset]);
     expect(bundles[0]?.userInstructions).toBe("Use the client's own hero shot");

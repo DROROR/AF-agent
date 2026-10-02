@@ -519,6 +519,11 @@ export const en = {
           title: "Create the video plan",
           description: "Open the Scenes tab and press \"Create Execution Plan\". Nothing can be reviewed, previewed or rendered until this plan exists."
         },
+        uploadFiles: {
+          title: "Upload the client's files",
+          description:
+            "Open the Files tab and upload the images, videos and logo this video needs. Until they are here, every scene's \"Asset\" dropdown is empty, so no placeholder can be given a picture."
+        },
         reviewScenes: {
           title: "Review each scene",
           description: "Open the Scenes tab and settle every scene marked \"Needs your choice\". \"Approve Scenes\" stays disabled until every included scene is reviewed and at least one scene is included."
@@ -1035,6 +1040,19 @@ export const en = {
       slotDecisionPendingOverride: "Chosen, not saved: this slot is something else. Press Save changes to record it.",
       slotDecisionStale: "This decision was made about different findings, so it no longer covers them. Look again and decide.",
       finalDurationLabel: "Final duration (seconds)",
+      /* 2026-10-02: a single-master template groups every real scene as a nested
+         composition, so the drawer now shows one section per composition. */
+      ownLayersGroupLabel: "This scene's own layers",
+      groupPathHint: "Layers inside this composition of the template.",
+      noMappingsTitle: "Nothing in this scene can be edited",
+      noMappingsDescription:
+        "Template inspection found no editable layer in this composition, so there is no text, image or colour here to change. Use the scene that holds the template's real content.",
+      colorLabel: "Colour",
+      colorSwatchLabel: "Pick a colour",
+      colorHint: "Only solid-colour layers can be recoloured. Clear the field to leave the template's own colour untouched.",
+      colorClearAction: "Use the template's colour",
+      colorNestedUnsupported:
+        "This colour layer sits inside a nested composition, which cannot be recoloured yet - the template's own colour is kept.",
       instructionsLabel: "Instructions / notes",
       unsavedChangesNotice: "Unsaved changes on this scene. Nothing here is recorded until you press Save changes - closing this drawer discards it.",
       discardConfirmTitle: "Discard the unsaved changes?",
@@ -1120,6 +1138,18 @@ export const en = {
     ai: {
       heading: "Tell AI what you want",
       textareaLabel: "Describe your video",
+      /* 2026-10-02: the client's own website and business, so the AI draft can
+         read their real wording instead of inventing it. */
+      websiteLabel: "Your website (optional)",
+      websitePlaceholder: "https://example.com",
+      websiteHint:
+        "If you give this, the assistant reads your site for your product name, your own wording and your tone. Only this address is ever read, and nothing on the page can change what the assistant is allowed to do.",
+      websiteInvalid: "Must be a full http:// or https:// website address, e.g. https://example.com",
+      aboutClientLabel: "About your business (optional)",
+      aboutClientPlaceholder: "We build iOS and Android apps for small clinics. Our tone is calm and plain-spoken.",
+      aboutClientHint: "Saved with the project, so you only type it once.",
+      savingDetails: "Saving your details…",
+      saveDetailsFailedTitle: "Could not save your website and business details",
       placeholder:
         "Use the login screen recording first, then show checkout.\nKeep the original template animations.\nUse our logo at the end.\nKeep the final video around 20 seconds.",
       createPlanAction: "Create Video Plan",

@@ -123,7 +123,7 @@ describe("matchDeterministic", () => {
       bundle({
         currentClassification: "logo",
         candidateAssets: [logoAsset],
-        brandInputs: { logoAssetId: "logo-1", brandColors: [], textInstructions: null }
+        brandInputs: { logoAssetId: "logo-1", brandColors: [], textInstructions: null, websiteUrl: null }
       })
     );
     expect(result).toMatchObject({ suggestedAssetId: "logo-1", suggestedClassification: "logo", confidence: 1, requiresHumanReview: false });
@@ -135,7 +135,7 @@ describe("matchDeterministic", () => {
         currentClassification: null,
         placeholderName: null,
         candidateAssets: [asset({ id: "logo-1", mediaKind: "LOGO" })],
-        brandInputs: { logoAssetId: "logo-1", brandColors: [], textInstructions: null }
+        brandInputs: { logoAssetId: "logo-1", brandColors: [], textInstructions: null, websiteUrl: null }
       })
     );
     expect(result).toBeNull();

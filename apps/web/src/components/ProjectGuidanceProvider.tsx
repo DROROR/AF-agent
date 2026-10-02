@@ -3,6 +3,7 @@
 import { createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectStepperStatus } from "../lib/use-project-stepper-status";
+import { useProjectAssets } from "../lib/use-project-assets";
 import { computeWorkflowSteps, currentStepIndex, type ComputedWorkflowStep } from "../lib/project-workflow-steps";
 import { resolveNextAction, resolveTabLocks, type NextAction } from "../lib/project-next-action";
 import { resolvePlanEditImpact, type PlanEditImpact } from "../lib/plan-edit-impact";
@@ -47,13 +48,23 @@ const ProjectGuidanceContext = createContext<ProjectGuidance | null>(null);
  *
  * It also means ONE fetch of the extra state (work map / execution session /
  * render artifacts), where previously only ProjectWorkflowStepper fetched
- * it. No new API calls were added for any of this: every input below comes
- * either from ProjectWorkspaceProvider's existing project+plan load or from
- * that same pre-existing useProjectStepperStatus call.
+ * it. Every input below comes from ProjectWorkspaceProvider's existing
+ * project+plan load, that same pre-existing useProjectStepperStatus call,
+ * or - added 2026-10-02 - the Asset Catalog, the one genuinely new fetch
+ * here, needed because the next action cannot otherwise tell a project with
+ * no files from one ready for scene review.
  */
 export function ProjectGuidanceProvider({ projectId, children }: { projectId: string; children: ReactNode }): ReactElement {
   const { project, plan } = useProjectWorkspaceContext();
   const { workMap, session, renderArtifacts, isLoading, hasError, sessionKnown } = useProjectStepperStatus(projectId);
+  // 2026-10-02: the Asset Catalog is now an input too, because "review every
+  // scene" is not a carry-out-able instruction while every asset dropdown in
+  // the edit drawer is empty. `assets` is null both while loading AND on a
+  // failed fetch, and that null is folded into stateUnknown below rather than
+  // read as zero - treating "not known yet" as "no files" would point a
+  // project that HAS files back at the upload step, which is exactly the
+  // confidently-wrong instruction this module exists to prevent.
+  const { assets, error: assetsError } = useProjectAssets(projectId);
 
   // A FAILED session is terminal and is treated as "no active session" by
   // ProjectPreviewTab's own button logic - mirrored here so the guidance
@@ -77,7 +88,7 @@ export function ProjectGuidanceProvider({ projectId, children }: { projectId: st
   const landscapeRenderConfigured =
     landscapeConfig !== null && project !== null && landscapeConfig.sourceProjectSha256 === project.manifest.sourceProject.sha256;
 
-  const stateUnknown = isLoading || hasError;
+  const stateUnknown = isLoading || hasError || assets === null;
 
   const steps = computeWorkflowSteps({
     hasProject: project !== null,
@@ -95,6 +106,7 @@ export function ProjectGuidanceProvider({ projectId, children }: { projectId: st
     stateUnknown,
     hasPlan: plan !== null,
     planApproved: plan?.plan.status === "APPROVED",
+    assetCount: assets?.length ?? 0,
     scenesNeedingReview,
     includedSceneCount: includedScenes.length,
     executableSceneCount: executableScenePlanIds.length,
@@ -108,7 +120,7 @@ export function ProjectGuidanceProvider({ projectId, children }: { projectId: st
 
   const value: ProjectGuidance = {
     stateUnknown,
-    loadFailed: hasError,
+    loadFailed: hasError || assetsError !== null,
     steps,
     currentStepIndex: currentStepIndex(steps),
     nextAction: resolveNextAction(nextActionInput),

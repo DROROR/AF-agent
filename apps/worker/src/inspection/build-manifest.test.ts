@@ -358,3 +358,60 @@ describe("buildTemplateManifest - slot semantics", () => {
     expect(placeholder.slotFacts?.hosts[0]?.matteSource).toBe("UNKNOWN");
   });
 });
+
+/**
+ * REAL 2026-10-02 DEFECT: an AE adjustment layer was surfaced as an editable
+ * "color" placeholder. It reports much like a solid, so the classifier
+ * reasonably called it a uniform fill - but an adjustment layer renders none
+ * of its own colour; it only carries effects onto the layers beneath it. The
+ * client's template put two of them beside the two solids that really ARE the
+ * background and the borders, so the reviewer was asked to choose a colour
+ * for two layers where choosing one changes nothing on screen.
+ */
+describe("buildTemplateManifest - an adjustment layer is never a client slot", () => {
+  const uniformSolid = { isUniformSolidFill: true } as LayerFact["solidFill"];
+
+  function factsWithLayers(adjustmentLayer: boolean | null | undefined) {
+    const effectCarrier = layer({ name: "effect carrier", index: 1, layerKind: "AVLayer", solidFill: uniformSolid });
+    const realBackground = layer({ name: "background", index: 2, layerKind: "AVLayer", solidFill: uniformSolid });
+    return baseFacts({
+      compositions: [composition({ layers: [effectCarrier, realBackground] })],
+      layerFactsByCompositionAndIndex: new Map([
+        ["comp-1:1", { detail: adjustmentLayer === undefined ? {} : { adjustmentLayer } }]
+      ])
+    });
+  }
+
+  it("leaves out a layer AE itself reports as an adjustment layer", () => {
+    const manifest = buildTemplateManifest(factsWithLayers(true), fixedNow);
+    const names = manifest.scenes[0]?.placeholders.map((placeholder) => placeholder.layerName);
+    expect(names).toEqual(["background"]);
+  });
+
+  it("keeps a layer AE reports as NOT an adjustment layer", () => {
+    const manifest = buildTemplateManifest(factsWithLayers(false), fixedNow);
+    const names = manifest.scenes[0]?.placeholders.map((placeholder) => placeholder.layerName);
+    expect(names).toEqual(["effect carrier", "background"]);
+  });
+
+  it("keeps a layer the scan could not answer for - 'not reported' is never read as 'is one'", () => {
+    for (const unanswered of [null, undefined]) {
+      const manifest = buildTemplateManifest(factsWithLayers(unanswered), fixedNow);
+      const names = manifest.scenes[0]?.placeholders.map((placeholder) => placeholder.layerName);
+      expect(names).toEqual(["effect carrier", "background"]);
+    }
+  });
+
+  it("keeps every remaining placeholder's ID stable, since IDs hash the layer index and not its position", () => {
+    const withAdjustment = buildTemplateManifest(factsWithLayers(true), fixedNow);
+    const withoutAdjustment = buildTemplateManifest(factsWithLayers(false), fixedNow);
+    const background = (manifest: ReturnType<typeof buildTemplateManifest>) =>
+      manifest.scenes[0]?.placeholders.find((placeholder) => placeholder.layerName === "background")?.placeholderId;
+    expect(background(withAdjustment)).toBe(background(withoutAdjustment));
+  });
+
+  it("does not count an excluded adjustment layer as an unresolved/unknown item", () => {
+    const manifest = buildTemplateManifest(factsWithLayers(true), fixedNow);
+    expect(computeInspectionSummary(manifest).unknownItemCount).toBe(0);
+  });
+});

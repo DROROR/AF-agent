@@ -2492,6 +2492,64 @@ a.workflow-stepper__step:hover {
   margin-top: var(--space-2);
 }
 
+/* 2026-10-02: one section per composition the layers actually live in. A
+   single-master template keeps every real scene in a nested composition, so
+   without a heading the drawer is one flat list of identically-named
+   fieldsets ("Text A", "Text B", ...) and a reviewer cannot tell which scene
+   a field belongs to. */
+.edit-drawer-group-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.edit-drawer-group-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-5) 0 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.edit-drawer-group-heading__hint {
+  font-size: 0.76rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--color-text-faint);
+}
+
+/* The hex field, the native swatch and the "use the template's colour"
+   reset sit on one row - the swatch is a preview of the typed value, not a
+   second source of truth. */
+.edit-drawer-color {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.edit-drawer-color .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.edit-drawer-color__swatch {
+  flex: 0 0 auto;
+  inline-size: 2.5rem;
+  block-size: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
 /* Leftover template copy: shown whenever a mapping's text still matches the
    template's own wording, or differs from it only in formatting. Blocking and
    already-decided states are distinguished by the border colour alone, never

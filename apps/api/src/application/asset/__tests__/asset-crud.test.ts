@@ -240,7 +240,7 @@ describe("deleteAsset", () => {
     const uploaded = await upload(deps, deps.project.projectId);
     await deps.projectRepository.updateBrandInputs(
       deps.project.projectId,
-      { logoAssetId: uploaded.id, brandColors: [], textInstructions: null },
+      { logoAssetId: uploaded.id, brandColors: [], textInstructions: null, websiteUrl: null },
       fixedNow()
     );
 
@@ -262,10 +262,10 @@ describe("deleteAsset", () => {
     const uploaded = await upload(deps, deps.project.projectId);
     await deps.projectRepository.updateBrandInputs(
       deps.project.projectId,
-      { logoAssetId: uploaded.id, brandColors: [], textInstructions: null },
+      { logoAssetId: uploaded.id, brandColors: [], textInstructions: null, websiteUrl: null },
       fixedNow()
     );
-    await deps.projectRepository.updateBrandInputs(deps.project.projectId, { logoAssetId: null, brandColors: [], textInstructions: null }, fixedNow());
+    await deps.projectRepository.updateBrandInputs(deps.project.projectId, { logoAssetId: null, brandColors: [], textInstructions: null, websiteUrl: null }, fixedNow());
 
     await deleteAsset(
       { assetRepository: deps.assetRepository, assetStorage: deps.assetStorage, executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository },

@@ -44,6 +44,14 @@ export const NEXT_ACTION_IDS = [
   /** The real state has not loaded (or failed to load) - the UI must SAY it cannot tell, never guess. */
   "unknown",
   "createPlan",
+  /**
+   * 2026-10-02: the project has no files yet, so every per-placeholder asset
+   * dropdown in the edit drawer is necessarily empty. A POINTER, never a
+   * gate - the API approves a plan with no assets perfectly happily (a
+   * text-only edit is a real, legitimate use), so nothing here blocks
+   * anything. It only names the step that has to come first in practice.
+   */
+  "uploadFiles",
   "reviewScenes",
   "approveScenes",
   "startFirstPreview",
@@ -73,6 +81,8 @@ export interface NextActionInput {
   stateUnknown: boolean;
   hasPlan: boolean;
   planApproved: boolean;
+  /** Real assets in THIS project's own Asset Catalog. Zero means no placeholder can be given an image or video yet, whatever the scene review says. */
+  assetCount: number;
   /** Included (use=true) scenes that are not yet APPROVED, or still carry unresolvedReasons - i.e. scenes a human still has to look at. */
   scenesNeedingReview: number;
   /** Scenes marked use=true, regardless of approval state. Zero means the plan currently produces no video at all. */
@@ -111,6 +121,15 @@ export function resolveNextAction(input: NextActionInput): NextAction {
     return { id: "createPlan", tab: "scenes" };
   }
   if (!input.planApproved) {
+    // Files before scene review: with an empty Asset Catalog the drawer's
+    // asset dropdowns have nothing in them, so "settle every scene" is an
+    // instruction a client cannot actually carry out. Deliberately inside
+    // the not-yet-approved branch only - once a plan IS approved, the
+    // project has moved past content assignment and pointing back at
+    // uploads would be a step backwards.
+    if (input.assetCount === 0) {
+      return { id: "uploadFiles", tab: "assets" };
+    }
     // An included-scene count of zero is a real, reachable dead end (every
     // scene excluded): approving would produce nothing, so the honest next
     // action is still "go review the scenes", never "approve".

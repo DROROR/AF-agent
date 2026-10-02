@@ -17,6 +17,15 @@ export interface ScannedSlotLayer {
         trackMatteType?: string | null | undefined;
         trackMatteLayerIndex?: number | null | undefined;
         threeDLayer?: boolean | null | undefined;
+        /**
+         * AE's own adjustment-layer switch (2026-10-02). An adjustment layer
+         * renders none of its own content - it only carries effects onto the
+         * layers beneath it - so it is never a client slot, however much its
+         * footage record resembles a solid. Nullable on purpose: "not
+         * reported" must never be read as "is one" (build-manifest.ts
+         * excludes only on an explicit true).
+         */
+        adjustmentLayer?: boolean | null | undefined;
         parentLayerIndex?: number | null | undefined;
         hasTransformKeyframes?: boolean | null | undefined;
         inPointSeconds?: number | null | undefined;

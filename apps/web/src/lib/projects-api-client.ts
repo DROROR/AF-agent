@@ -21,6 +21,7 @@ import {
   type ListExecutionPlanRevisionsResponse,
   type ListMappingSuggestionsResponse,
   type MediaKind,
+  type ProjectBrandInputs,
   type ProjectDto,
   type ProjectResponse,
   type RejectMappingSuggestionResponse,
@@ -379,6 +380,32 @@ export async function fetchWorkMap(projectId: string): Promise<ApiResult<WorkMap
 }
 
 /** Replaces the whole entry list as one new revision - baseRevision 0 means "no work map exists yet, create the first one" (mirrors updateExecutionPlan's own optimistic-concurrency shape). */
+/**
+ * PATCH /api/projects/:projectId/brand-inputs - replaces the client's whole
+ * brand-inputs object. 2026-10-02: the API route shipped with the
+ * brand-inputs phase but nothing in the dashboard ever called it, so a
+ * client had no way to record their own website or describe their business.
+ *
+ * Replaces, never merges - the server's own documented contract. Callers
+ * therefore send the complete object, including the fields they are not
+ * changing, or those fields are cleared.
+ */
+export async function updateProjectBrandInputs(projectId: string, brandInputs: ProjectBrandInputs): Promise<ApiResult<ProjectDto>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/brand-inputs`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(brandInputs)
+  });
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = projectDtoSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected project contract" };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 export async function updateWorkMap(
   projectId: string,
   baseRevision: number,

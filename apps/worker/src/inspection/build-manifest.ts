@@ -68,7 +68,26 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
       // A disabled or guide layer never renders, so it is never a client slot
       // (real Mixkit case: CONTROLS in Main_Comp is both). Filtering keeps
       // every other top-level placeholder's ID unchanged - IDs hash the index.
-      const renderedLayers = composition.layers.filter((layer) => layer.enabled !== false && layer.guideLayer !== true);
+      //
+      // REAL 2026-10-02 DEFECT, third clause: an ADJUSTMENT layer was offered
+      // as an editable "color" placeholder. AE reports one much like a solid,
+      // so classifyPlaceholder reasonably called it a uniform fill - but an
+      // adjustment layer renders none of its own colour; it exists only to
+      // carry effects onto the layers beneath it. The client's template
+      // surfaced two of them ("Sharpen", "Noise") beside the two solids that
+      // ARE the background and borders, so a reviewer was asked to pick a
+      // colour for two layers where picking one changes nothing on screen.
+      //
+      // `adjustmentLayer` is an AE fact from the project-wide scan, never a
+      // name guess, and it is excluded ONLY on an explicit `true`: the fact is
+      // nullable, and reading "not reported" as "is an adjustment layer" would
+      // silently drop real placeholders whenever the scan could not answer.
+      const renderedLayers = composition.layers.filter(
+        (layer) =>
+          layer.enabled !== false &&
+          layer.guideLayer !== true &&
+          facts.layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${layer.index}`)?.detail?.adjustmentLayer !== true
+      );
       const placeholders: Placeholder[] = renderedLayers.map((layer) => {
         const classification = classifyPlaceholder(layer);
         if (classification.placeholderType === "unknown") {

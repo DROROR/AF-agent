@@ -349,7 +349,12 @@ export function NewProjectWizard(): ReactElement {
       return;
     }
     clearPendingJobDraft();
-    window.location.href = `/projects/${result.data.projectId}`;
+    // 2026-10-02: a brand-new project has no assets, so every per-scene asset
+    // dropdown in the edit drawer is necessarily empty. Landing on the project
+    // overview sent the client straight to scene review with nothing to
+    // assign; Files is the one step that must come first.
+    // Previously: window.location.href = `/projects/${result.data.projectId}`;
+    window.location.href = `/projects/${result.data.projectId}/assets`;
   }
 
   return (
