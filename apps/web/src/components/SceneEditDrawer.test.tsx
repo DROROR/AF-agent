@@ -934,6 +934,70 @@ describe("SceneEditDrawer - colour", () => {
     expect(screen.queryByLabelText("Colour")).toBeNull();
   });
 
+  // 2026-10-02: a Color Control effect CAN be set inside a nested
+  // composition, so it gets the picker - seeded with the template's own colour.
+  it("offers the picker for a NESTED Color Control, showing the template's own colour, and saves the choice", async () => {
+    colorSetup({}, { layerPath: ["outer", "inner"], colorControl: { effectIndex: 2, effectName: "Titles", currentColorHex: "#AA5500" } });
+    const onClose = vi.fn();
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    const colorInput = (await screen.findByLabelText("Colour")) as HTMLInputElement;
+    expect(screen.getByText(/The template uses #AA5500 here/)).not.toBeNull();
+    expect((screen.getByLabelText("Pick a colour") as HTMLInputElement).value.toUpperCase()).toBe("#AA5500");
+    // Nothing is claimed as chosen until a person chooses.
+    expect(colorInput.value).toBe("");
+    // A colour takes neither a file nor text.
+    expect(screen.queryByLabelText("Asset")).toBeNull();
+    expect(screen.queryByLabelText("Text")).toBeNull();
+    expect(screen.queryByLabelText("Asset timestamp (seconds)")).toBeNull();
+
+    fireEvent.change(colorInput, { target: { value: "#1A2B3C" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(savedOperations()).toContainEqual({ type: "SET_BRAND_COLOR", scenePlanId: "s1", mappingId: "mapping-1", colorHex: "#1A2B3C" });
+  });
+
+  // 2026-10-02: every layer used to show a file picker, a text box and a timestamp.
+  it("a text layer offers its text box only, and an image slot its file picker only", async () => {
+    const scenes = [
+      sceneFixture({
+        id: "s1",
+        mappings: [
+          mappingFixture({ id: "m-text", manifestPlaceholderId: "ph-text", placeholderName: "Headline", placeholderClassification: { value: "text", source: "MANIFEST", evidence: [] } }),
+          mappingFixture({ id: "m-image", manifestPlaceholderId: "ph-image", placeholderName: "Screen", text: null, placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] } })
+        ]
+      })
+    ];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: manifestFixture([
+            placeholderFixture({ placeholderId: "ph-text", layerName: "Headline" }),
+            placeholderFixture({ placeholderId: "ph-image", layerName: "Screen", placeholderType: "image", originalText: undefined })
+          ])
+        }
+      }
+    });
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("Headline");
+    expect(screen.getAllByLabelText("Text")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Asset")).toHaveLength(1);
+    expect(screen.queryByLabelText("Asset timestamp (seconds)")).toBeNull();
+    expect(screen.getByText("Picture")).not.toBeNull();
+  });
+
   it("clears a colour the plan already holds with CLEAR_BRAND_COLOR", async () => {
     colorSetup({ colorHex: "#112233" });
     const onClose = vi.fn();

@@ -11,6 +11,15 @@ export interface ScannedSlotLayer {
   /** AE's own switch for this layer. False means nothing it contains renders at all. */
   enabled?: boolean | undefined;
   footage?: { hasVideo?: boolean; isStill?: boolean; isSolid?: boolean; widthPx?: number | null; heightPx?: number | null } | null | undefined;
+  /** The layer's own name and effects, in After Effects' order - what a colour control is found from (build-manifest.ts). */
+  layerName?: string | undefined;
+  effects?:
+    | readonly {
+        name: string;
+        matchName: string;
+        colorControl?: { red: number; green: number; blue: number; animated: boolean; hasExpression: boolean } | undefined;
+      }[]
+    | undefined;
   detail?:
     | {
         hasTrackMatte?: boolean | null | undefined;

@@ -27,6 +27,7 @@ import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { useLocale } from "./LocaleProvider";
 import { SlotReviewPanel, type SlotReviewChoice } from "./SlotReviewPanel";
+import { fieldsForLayerKind, type MappingFieldVisibility } from "../lib/mapping-field-visibility";
 import { groupMappingsByLayerPath, placeholderGroupPathLabel } from "../lib/scene-placeholder-groups";
 
 /** Every real asset kind maps to the closest real placeholderType MAP_ASSET requires; a non-visual kind (AUDIO/DOCUMENT/OTHER) is honestly "unknown" rather than a fabricated visual type. */
@@ -259,6 +260,22 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
     return null;
   }
 
+  /** The template's own colour for a Color Control placeholder - null for any other layer, and when inspection could not read it. Its presence is also what says a NESTED colour can be set (SET_COLOR_CONTROL reaches nested layers; a solid's fill cannot). */
+  function colorControlFor(mappingId: string): { currentColorHex: string | null } | null {
+    const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
+    if (!mapping || mapping.manifestPlaceholderId === null) {
+      return null;
+    }
+    for (const manifestScene of project?.manifest.scenes ?? []) {
+      for (const placeholder of manifestScene.placeholders) {
+        if (placeholder.placeholderId === mapping.manifestPlaceholderId) {
+          return placeholder.colorControl ? { currentColorHex: placeholder.colorControl.currentColorHex } : null;
+        }
+      }
+    }
+    return null;
+  }
+
   /**
    * The manifest's own classification value for this mapping. "color" is the
    * only value for which a colour field may be offered at all - the same gate
@@ -266,6 +283,16 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
    */
   function classificationFor(mappingId: string): string | null {
     return scene!.mappings.find((candidate) => candidate.id === mappingId)?.placeholderClassification.value ?? null;
+  }
+
+  /** What this layer's section offers - decided by the layer's own kind, see mapping-field-visibility.ts. */
+  function fieldsFor(mappingId: string): MappingFieldVisibility {
+    const original = scene!.mappings.find((candidate) => candidate.id === mappingId);
+    return fieldsForLayerKind(classificationFor(mappingId), {
+      hasAsset: (original?.selectedAssetId ?? null) !== null,
+      hasText: (original?.text ?? "") !== "",
+      hasTimestamp: (original?.assetTimestamp ?? null) !== null
+    });
   }
 
   /** Assessed with the SAME pure function the backend gate uses, against the text currently typed in the form - so the warning tracks what the reviewer is actually about to save. */
@@ -617,7 +644,16 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
               </h3>
             )}
             <fieldset className="edit-drawer-form">
-            <legend>{mapping.label}</legend>
+            <legend>
+              {mapping.label}
+              {/* What this layer takes, in a word - the layer's own name ("White Solid 2") rarely says. */}
+              {(() => {
+                const kind = classificationFor(mapping.mappingId);
+                const kindLabel = kind === null ? undefined : (t.projectWorkspace.editDrawer.layerKindLabels as Record<string, string | undefined>)[kind];
+                return kindLabel === undefined ? null : <span className="edit-drawer-kind">{kindLabel}</span>;
+              })()}
+            </legend>
+            {fieldsFor(mapping.mappingId).asset ? (
             <Field label={t.projectWorkspace.editDrawer.assetLabel} htmlFor={`mapping-asset-${mapping.mappingId}`} hint={t.projectWorkspace.editDrawer.assetHint}>
               <Select
                 id={`mapping-asset-${mapping.mappingId}`}
@@ -636,10 +672,14 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                 ))}
               </Select>
             </Field>
+            ) : null}
+            {fieldsFor(mapping.mappingId).text ? (
             <Field label={t.projectWorkspace.editDrawer.textLabel} htmlFor={`mapping-text-${mapping.mappingId}`} hint={t.projectWorkspace.editDrawer.textHint}>
               <Input
                 id={`mapping-text-${mapping.mappingId}`}
                 value={mapping.text}
+                /* The template's own wording, shown faintly so the reviewer sees what this line replaces. */
+                placeholder={templateTextFor(mapping.mappingId).text ?? templateTextFor(mapping.mappingId).preview ?? undefined}
                 onChange={(event) => {
                   const next = [...mappings];
                   next[index] = { ...mapping, text: event.target.value };
@@ -647,6 +687,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                 }}
               />
             </Field>
+            ) : null}
             {(() => {
               if (classificationFor(mapping.mappingId) !== "color") {
                 return null;
@@ -655,9 +696,11 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
               // the worker refuses SET_BRAND_COLOR through a nested target
               // (see build-manifest.ts decideNestedLayer), so a field here
               // would promise an edit that can never run.
-              if ((manifestLayerPathFor(mapping.mappingId) ?? []).length > 0) {
+              const colorControl = colorControlFor(mapping.mappingId);
+              if (colorControl === null && (manifestLayerPathFor(mapping.mappingId) ?? []).length > 0) {
                 return <p className="field__hint">{t.projectWorkspace.editDrawer.colorNestedUnsupported}</p>;
               }
+              const templateColor = colorControl?.currentColorHex ?? null;
               const setColor = (value: string): void => {
                 const next = [...mappings];
                 next[index] = { ...mapping, colorHex: value };
@@ -667,7 +710,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                 <Field
                   label={t.projectWorkspace.editDrawer.colorLabel}
                   htmlFor={`mapping-color-${mapping.mappingId}`}
-                  hint={t.projectWorkspace.editDrawer.colorHint}
+                  hint={templateColor === null ? t.projectWorkspace.editDrawer.colorHint : t.projectWorkspace.editDrawer.colorControlHint(templateColor)}
                 >
                   <div className="edit-drawer-color">
                     <Input
@@ -684,7 +727,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                          empty or partial value shows black WITHOUT the form
                          state claiming black was chosen - only a real change
                          event writes a colour. */
-                      value={/^#[0-9A-Fa-f]{6}$/.test(mapping.colorHex) ? mapping.colorHex : "#000000"}
+                      value={/^#[0-9A-Fa-f]{6}$/.test(mapping.colorHex) ? mapping.colorHex : (templateColor ?? "#000000")}
                       onChange={(event) => setColor(event.target.value)}
                     />
                     {mapping.colorHex === "" ? null : (
@@ -846,6 +889,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                 />
               );
             })()}
+            {fieldsFor(mapping.mappingId).timestamp ? (
             <Field label={t.projectWorkspace.editDrawer.assetTimestampLabel} htmlFor={`mapping-timestamp-${mapping.mappingId}`}>
               <Input
                 id={`mapping-timestamp-${mapping.mappingId}`}
@@ -860,6 +904,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                 }}
               />
             </Field>
+            ) : null}
             </fieldset>
           </div>
         ))}

@@ -70,6 +70,14 @@ export function isMappingResolved(mapping: PlaceholderMapping, instructions: str
   if (mappingHasContentDecision(mapping)) {
     return true;
   }
+  // A colour nobody chose is the template's own colour - a complete answer,
+  // never a pending one. 2026-10-02: once inspection surfaced every colour
+  // control a template exposes (six per scene on the real one), demanding a
+  // decision on each would have put dozens of "still needs a decision" items
+  // between the client and an approval, for values that are already right.
+  if (mapping.placeholderClassification.value === "color") {
+    return true;
+  }
   const input = {
     placeholderName: mapping.placeholderName,
     currentClassification: mapping.placeholderClassification.value,

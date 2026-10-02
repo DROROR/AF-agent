@@ -31,7 +31,18 @@ const effectFactSchema = z
   .object({
     name: z.string(),
     matchName: z.string(),
-    enabled: z.boolean()
+    enabled: z.boolean(),
+    /** Only on a Color Control effect, and only when its value could be read: the colour it ships with (0-1 per channel) and whether a fixed colour can be set on it at all. Absent on a response from an older worker build. */
+    colorControl: z
+      .object({
+        red: z.number(),
+        green: z.number(),
+        blue: z.number(),
+        animated: z.boolean(),
+        hasExpression: z.boolean()
+      })
+      .strict()
+      .optional()
   })
   .strict();
 

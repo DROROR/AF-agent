@@ -1560,3 +1560,47 @@ picture.
   never be invented. A file is still left out rather than guessed.
 
 **Unproven:** the new prompt on a real run.
+
+## 2026-10-02 - A mockup template with no phone screen to fill and no colour to change
+
+**User report, on the client's own requirement:** "what if this scene is a mockup and I only
+want to put an image in it, and change a colour? The client wants to change anything in
+any scene - an image option where there is an image, text where there is text, both where
+both, and colour where a colour is detected. He has to put screenshots in the mockups."
+
+**Evidence (the stored inspection of project `fe32ffac-...`, read back and rebuilt
+offline - After Effects was not involved):** 28 placeholders, of which 24 text, 2
+colour, 1 image, 1 video. Not one phone screen and not one scene colour.
+
+**Cause 1 - phone screens.** Each of the template's ten phone screens is its own
+composition: one solid the size of the screen plus two drawn shapes over it. The
+screen-card rule required a composition of only text and solids, so the shapes
+disqualified it; the shapes and the solid were then each dropped as structural. Two of
+the ten also sit in their scene as plain 3D layers with no matte.
+**Fix:** a card is also recognised when it is built only of solids and drawn shapes and is
+either shown through a matte, or has a frame of its own size (not the scene's) filled by
+its solid. A composition holding text keeps the original rule, so no editable text is newly
+hidden as a guide label.
+
+**Cause 2 - colours.** Each scene keeps its text, dot, circle and element colours on a
+layer of six Color Control effects. Inspection recognised a colour only as a solid layer's
+own fill, the worker could only recolour a solid, and only in the scene's own composition.
+**Fix:** the scan reads each Color Control's value; each one that is not animated and not
+expression-driven becomes a colour placeholder carrying its effect position, name and
+current colour; a new worker operation, SET_COLOR_CONTROL, sets it through a nested chain
+and re-checks the effect's type and name before writing.
+
+**Result on the same stored inspection:** 85 placeholders, the original 28 unchanged by
+id; every scene card now offers its 2-3 texts, 1-3 phone screens and 5-6 colours.
+
+**Rules changed with it:**
+- A colour nobody chose is the template's own colour and never blocks approval.
+- Colours are never sent to the assistant for suggestions.
+- The edit drawer offers each layer what its kind can hold: text for text, a file for a
+  picture, a file and a moment for video, a picker for a colour.
+
+**Unproven until a worker update is installed and the template re-inspected:** the colour
+read in the scan, SET_COLOR_CONTROL, and placing a screenshot in a phone screen, on real
+After Effects. A phone screen's verdict comes out "flat card, not confident", so a person
+confirms it when choosing its picture. The scene background (a gradient effect) is still
+not offered as a colour.

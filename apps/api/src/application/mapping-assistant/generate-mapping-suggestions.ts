@@ -237,6 +237,11 @@ export async function generateMappingSuggestions(
         ...match,
         ...(isResolvedNoOp(match) ? { status: "RESOLVED" } : {})
       });
+    } else if (bundle.currentClassification === "color") {
+      // A colour is chosen by a person, never proposed - and a template can
+      // expose dozens of them (six controls per scene on a real one). Sending
+      // each to the assistant bought nothing but a longer, costlier call.
+      continue;
     } else {
       unresolvedBundles.push(bundle);
     }

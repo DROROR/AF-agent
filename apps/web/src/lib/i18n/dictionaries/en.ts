@@ -1053,6 +1053,8 @@ export const en = {
       colorLabel: "Colour",
       colorSwatchLabel: "Pick a colour",
       colorHint: "Only solid-colour layers can be recoloured. Clear the field to leave the template's own colour untouched.",
+      layerKindLabels: { text: "Text", image: "Picture", logo: "Logo", phone_screen: "Phone screen", video: "Video", color: "Colour" },
+      colorControlHint: (templateColor: string): string => `The template uses ${templateColor} here. Pick a colour to change it, or leave it empty to keep the template's.`,
       colorClearAction: "Use the template's colour",
       colorNestedUnsupported:
         "This colour layer sits inside a nested composition, which cannot be recoloured yet - the template's own colour is kept.",

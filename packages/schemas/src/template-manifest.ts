@@ -175,6 +175,27 @@ export const placeholderSchema = z.object({
   slotFingerprint: slotFingerprintSchema.optional(),
   /** The narrower fingerprint of the chain an edit traverses plus this slot's own geometry - recomputed live immediately before any mutation (see computeSlotMutationFingerprint). */
   slotMutationFingerprint: slotFingerprintSchema.optional(),
+  /**
+   * Present when this colour is ONE "Color Control" effect on the layer, not
+   * the layer's own fill. A template author adds such an effect precisely so
+   * a colour can be changed in one place - the template's own colour
+   * interface. `effectIndex` is the effect's position on the layer (After
+   * Effects' 1-based order) and `effectName` the author's name for it; the
+   * worker re-checks both against the live project before it writes, so an
+   * edit never lands on a different effect. `currentColorHex` is what the
+   * template shipped with, for showing beside the picker - null when it
+   * could not be read.
+   */
+  colorControl: z
+    .object({
+      effectIndex: z.number().int().positive(),
+      effectName: z.string(),
+      currentColorHex: z
+        .string()
+        .regex(/^#[0-9A-F]{6}$/)
+        .nullable()
+    })
+    .optional(),
   dimensions: dimensionsSchema.nullable(),
   startTimeSeconds: z.number().nullable(),
   durationSeconds: z.number().nullable(),

@@ -4081,6 +4081,16 @@ a.workflow-stepper__step:hover {
   background: var(--color-surface-sunken);
 }
 
+.edit-drawer-kind {
+  margin-inline-start: 0.5rem;
+  padding: 0.0625rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
 .scene-card__review-layer {
   margin: 0 0 0.125rem;
   font-weight: 600;

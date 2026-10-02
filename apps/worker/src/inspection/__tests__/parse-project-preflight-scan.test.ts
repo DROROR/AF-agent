@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { boundLayerInventory, isThirdPartyEffectMatchName, parseProjectPreflightScan } from "../parse-project-preflight-scan.js";
 
-function layer(layerIndex: number, layerName: string, effects: { name: string; matchName: string; enabled: boolean }[]) {
+function layer(
+  layerIndex: number,
+  layerName: string,
+  effects: { name: string; matchName: string; enabled: boolean; colorControl?: { red: number; green: number; blue: number; animated: boolean; hasExpression: boolean } }[]
+) {
   return { layerIndex, layerName, enabled: true, effects };
 }
 
@@ -25,6 +29,19 @@ describe("isThirdPartyEffectMatchName", () => {
 });
 
 describe("parseProjectPreflightScan", () => {
+  // 2026-10-02: the scan now reads each Color Control's value, so inspection can offer it as an editable colour.
+  it("carries a Color Control's own colour and whether a fixed colour can be set on it", () => {
+    const colorControl = { red: 1, green: 0.5, blue: 0, animated: false, hasExpression: true };
+    const result = parseProjectPreflightScan({
+      ok: true,
+      compositionCount: 1,
+      compositions: [composition(2, 210, "Part", [layer(1, "Controls", [{ name: "Titles", matchName: "ADBE Color Control", enabled: true, colorControl }])])]
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.evidence.layerFactsByCompositionAndIndex.get("comp-210:1")?.effects[0]?.colorControl).toEqual(colorControl);
+  });
+
   it("derives distinct, sorted third-party matchNames plus real affected-composition evidence, ignoring native effects entirely", () => {
     const result = parseProjectPreflightScan({
       ok: true,

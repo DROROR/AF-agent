@@ -587,8 +587,25 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         ...logoFit(mapping)
       });
       approvedMappingIds.push(mapping.id);
+    } else if (classification === "color" && placeholder.colorControl !== undefined) {
+      // A Color Control effect - the template author's own colour interface.
+      // Unlike a solid's fill it CAN be reached through a nested chain, and
+      // the worker re-checks the effect's position and name before writing.
+      if (colorHex === null) {
+        return { ok: false, reason: `Mapping "${mapping.id}" is classified as "color" but has no colorHex set` };
+      }
+      operations.push({
+        type: "SET_COLOR_CONTROL",
+        manifestPlaceholderId: placeholder.placeholderId,
+        layerIndex: manifestNestedTarget === null ? placeholder.layerIndex : null,
+        nestedTarget: manifestNestedTarget,
+        effectIndex: placeholder.colorControl.effectIndex,
+        effectName: placeholder.colorControl.effectName,
+        colorHex
+      });
+      approvedMappingIds.push(mapping.id);
     } else if (classification === "color") {
-      // Nested color placeholders are never emitted by inspection (see
+      // Nested SOLID color placeholders are never emitted by inspection (see
       // build-manifest.ts decideNestedLayer), but this path must not trust
       // that: SET_BRAND_COLOR has no nested form, so recoloring "layer N"
       // here would hit the scene's own layer N.

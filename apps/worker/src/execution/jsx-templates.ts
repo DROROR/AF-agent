@@ -968,6 +968,57 @@ function buildSetBrandColorScript(aeProjectItemIndex: number, compositionName: s
 }
 
 /**
+ * Sets ONE Color Control effect - the colour interface a template's own
+ * author built (see setColorControlOperationSchema). The effect is addressed
+ * by its position on the layer and re-checked before anything is written: it
+ * must still BE a Color Control and still carry the name the plan was
+ * approved against, so a colour never lands on whatever else now sits there.
+ * An animated colour or one driven by an expression is refused rather than
+ * overwritten - setting a value there would either destroy the animation or
+ * change nothing on screen.
+ */
+function buildSetColorControlBody(op: Extract<SceneEditOperation, { type: "SET_COLOR_CONTROL" }>): string {
+  const rgbaLiteral = JSON.stringify([...hexToUnitRgb(op.colorHex), 1]);
+  const effectIndexLiteral = String(op.effectIndex);
+  const effectNameLiteral = JSON.stringify(op.effectName);
+  return withTargetLayerUnlocked(`
+        var __effectGroup = null;
+        try { __effectGroup = __layer.property("ADBE Effect Parade"); } catch (__effectGroupError) { __effectGroup = null; }
+        var __effect = null;
+        if (__effectGroup && __effectGroup.numProperties >= ${effectIndexLiteral}) {
+          try { __effect = __effectGroup.property(${effectIndexLiteral}); } catch (__effectLookupError) { __effect = null; }
+        }
+        if (__effect === null) {
+          __result = JSON.stringify({ ok: false, failureReason: "effect ${effectIndexLiteral} was not found on the target layer - the template has changed since it was inspected" });
+        } else if (__effect.matchName !== "ADBE Color Control") {
+          __result = JSON.stringify({ ok: false, failureReason: "effect ${effectIndexLiteral} on the target layer is not a Color Control (found " + __effect.matchName + ") - refusing to set a colour on a different effect" });
+        } else if (__effect.name !== ${effectNameLiteral}) {
+          __result = JSON.stringify({ ok: false, failureReason: "effect ${effectIndexLiteral} on the target layer is named " + JSON.stringify(__effect.name) + ", expected " + JSON.stringify(${effectNameLiteral}) + " - refusing to set a colour on a different control" });
+        } else {
+          var __colorProperty = __effect.property(1);
+          if (__colorProperty.numKeys > 0) {
+            __result = JSON.stringify({ ok: false, failureReason: "this colour is animated with keyframes - refusing to replace an animation with one fixed colour" });
+          } else if (__colorProperty.expressionEnabled === true) {
+            __result = JSON.stringify({ ok: false, failureReason: "this colour is driven by an expression - setting a value on it would change nothing on screen" });
+          } else {
+            var __previousControlColor = __colorProperty.value;
+            __colorProperty.setValue(${rgbaLiteral});
+            __result = JSON.stringify({ ok: true, previousValue: __previousControlColor, resultingValue: ${rgbaLiteral} });
+          }
+        }`);
+}
+
+function buildSetColorControlScript(aeProjectItemIndex: number, compositionName: string, op: Extract<SceneEditOperation, { type: "SET_COLOR_CONTROL" }>): FixedJsxScript {
+  if (op.nestedTarget !== null) {
+    return wrapNestedScript("SET_COLOR_CONTROL", buildSetColorControlBody(op), op.nestedTarget);
+  }
+  if (op.layerIndex === null) {
+    throw new Error("SET_COLOR_CONTROL operation has neither layerIndex nor nestedTarget set");
+  }
+  return withTargets(wrapScript("SET_COLOR_CONTROL", buildSetColorControlBody(op)), aeProjectItemIndex, compositionName, op.layerIndex) as FixedJsxScript;
+}
+
+/**
  * Builds the native 1080x1920 Reels composition for one scene (2026-08-29
  * closure requirement, section 1) - a comp-level operation, so it does NOT
  * use `wrapScript`'s per-layer-target boilerplate (there is no single
@@ -2574,7 +2625,28 @@ export function buildScanProjectPreflightScript(startItemIndex = 1, endItemIndex
             if (__effectsGroup) {
               for (var __e = 1; __e <= __effectsGroup.numProperties; __e++) {
                 var __eff = __effectsGroup.property(__e);
-                __effects.push({ name: __eff.name, matchName: __eff.matchName, enabled: __eff.enabled });
+                var __effectEntry = { name: __eff.name, matchName: __eff.matchName, enabled: __eff.enabled };
+                // A Color Control is the template author's own colour
+                // interface: its current value, and whether it is animated
+                // or expression-driven, decide whether a client can be
+                // offered it. Read-only, and a failed read simply leaves the
+                // entry without the fact - never fails the scan.
+                if (__eff.matchName === "ADBE Color Control") {
+                  try {
+                    var __controlProperty = __eff.property(1);
+                    var __controlValue = __controlProperty.value;
+                    __effectEntry.colorControl = {
+                      red: __controlValue[0],
+                      green: __controlValue[1],
+                      blue: __controlValue[2],
+                      animated: __controlProperty.numKeys > 0,
+                      hasExpression: __controlProperty.expressionEnabled === true
+                    };
+                  } catch (__controlReadError) {
+                    // left without the fact
+                  }
+                }
+                __effects.push(__effectEntry);
               }
             }
           } catch (__effectsError) {
@@ -2749,6 +2821,8 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildSetDurationScript(aeProjectItemIndex, compositionName, operation);
     case "SET_BRAND_COLOR":
       return buildSetBrandColorScript(aeProjectItemIndex, compositionName, operation);
+    case "SET_COLOR_CONTROL":
+      return buildSetColorControlScript(aeProjectItemIndex, compositionName, operation);
     case "BUILD_REELS_COMPOSITION":
       return buildBuildReelsCompositionScript(aeProjectItemIndex, compositionName, operation);
     case "BUILD_HORIZONTAL_COMPOSITION":

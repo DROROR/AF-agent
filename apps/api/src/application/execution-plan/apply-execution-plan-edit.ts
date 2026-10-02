@@ -387,7 +387,12 @@ function applyExecutionPlanEditRaw(
           reason: `Mapping "${operation.mappingId}" is not classified as "color" - SET_BRAND_COLOR only applies to color-classified placeholders`
         };
       }
-      const nestedColorRefusal = refuseNestedManifestTarget(currentManifest, scene, target.manifestPlaceholderId, "SET_BRAND_COLOR");
+      // A Color Control effect is set by SET_COLOR_CONTROL, which CAN reach a
+      // layer inside nested compositions - only a solid layer's own fill is
+      // still limited to the scene's own composition.
+      const nestedColorRefusal = isColorControlPlaceholder(currentManifest, scene, target.manifestPlaceholderId)
+        ? null
+        : refuseNestedManifestTarget(currentManifest, scene, target.manifestPlaceholderId, "SET_BRAND_COLOR");
       if (nestedColorRefusal) {
         return nestedColorRefusal;
       }
@@ -594,6 +599,14 @@ export function applyExecutionPlanEdit(
  * the dispatch-time guard still refuses independently - this is the earlier,
  * friendlier of two checks, never the only one.
  */
+function isColorControlPlaceholder(currentManifest: TemplateManifest | undefined, scene: ScenePlanEntry, manifestPlaceholderId: string | null): boolean {
+  if (!currentManifest || manifestPlaceholderId === null) {
+    return false;
+  }
+  const manifestScene = currentManifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
+  return manifestScene?.placeholders.find((p) => p.placeholderId === manifestPlaceholderId)?.colorControl !== undefined;
+}
+
 function refuseNestedManifestTarget(
   currentManifest: TemplateManifest | undefined,
   scene: ScenePlanEntry,

@@ -755,6 +755,17 @@ describe("nested manifest placeholders - edit-time refusal", () => {
     expect(result.reason).toMatch(/SET_BRAND_COLOR can only target/);
   });
 
+  // 2026-10-02: a Color Control effect is set by SET_COLOR_CONTROL, which
+  // reaches nested layers - so its colour is accepted wherever it lives.
+  it("accepts a colour for a nested Color Control placeholder", () => {
+    const colorScene = scene({ mappings: [mapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] } })] });
+    const manifest = manifestWith({ colorControl: { effectIndex: 2, effectName: "Titles", currentColorHex: "#FF0000" } });
+    const result = applyExecutionPlanEdit([colorScene], { type: "SET_BRAND_COLOR", scenePlanId: "scene-1", mappingId: "mapping-1", colorHex: "#112233" }, fixedNow, manifest);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.scenePlans[0]?.mappings[0]?.colorHex).toBe("#112233");
+  });
+
   // The backstop at edit time too: a placeholder from another composition
   // whose chain was stripped is still recognised as nested.
   it("still refuses when the nested placeholder's chain was stripped - its composition alone proves it is not top-level", () => {

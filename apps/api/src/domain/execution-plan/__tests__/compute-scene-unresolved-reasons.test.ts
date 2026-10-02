@@ -79,6 +79,13 @@ describe("isMappingResolved", () => {
     expect(isMappingResolved(s.mappings[0]!, s.instructions)).toBe(false);
   });
 
+  // 2026-10-02: a template can expose dozens of colours (six controls per
+  // scene on a real one). One nobody chose is the template's own colour.
+  it("a colour with nothing chosen IS resolved - the template's own colour is a complete answer, whatever the layer is called", () => {
+    const color = mapping({ placeholderName: "Text accent", placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] } });
+    expect(isMappingResolved(color, null)).toBe(true);
+  });
+
   it("a content mapping IS resolved once it has a real accepted asset/text", () => {
     const s = scene({ mappings: [mapping({ text: "Real headline" })] });
     expect(isMappingResolved(s.mappings[0]!, s.instructions)).toBe(true);

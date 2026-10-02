@@ -29,6 +29,7 @@ export const SCENE_EDIT_OPERATION_TYPES = [
   "SET_TIME_REMAP_FREEZE",
   "SET_DURATION",
   "SET_BRAND_COLOR",
+  "SET_COLOR_CONTROL",
   "BUILD_REELS_COMPOSITION",
   "BUILD_HORIZONTAL_COMPOSITION"
 ] as const;
@@ -154,6 +155,30 @@ const setBrandColorOperationSchema = z
   .strict();
 
 /**
+ * Sets ONE "Color Control" effect on a layer - the colour interface a
+ * template's own author built (2026-10-02: a real app-promo template keeps
+ * each scene's text, dot, circle and element colours on such effects, and
+ * SET_BRAND_COLOR, which recolours a solid layer's own fill, could reach none
+ * of them). Unlike SET_BRAND_COLOR it can target a layer inside nested
+ * compositions, with the same either-or of layerIndex/nestedTarget SET_TEXT
+ * uses. The worker refuses unless the effect at `effectIndex` IS a Color
+ * Control still carrying `effectName` - an approved colour never lands on
+ * whatever else now sits at that position.
+ */
+const setColorControlOperationSchema = z
+  .object({
+    type: z.literal("SET_COLOR_CONTROL"),
+    manifestPlaceholderId: z.string().min(1),
+    layerIndex: z.number().int().positive().nullable(),
+    nestedTarget: z.array(resolvedNestedTargetStepSchema).min(1).nullable(),
+    effectIndex: z.number().int().positive(),
+    effectName: z.string(),
+    /** #RRGGBB only - never a named color, never a raw AE color-array literal from the caller. */
+    colorHex: z.string().regex(/^#[0-9a-fA-F]{6}$/, "colorHex must be #RRGGBB")
+  })
+  .strict();
+
+/**
  * ONE layer's explicit, human-reviewed reposition/scale target within the
  * new Reels composition BUILD_REELS_COMPOSITION creates (2026-08-29
  * closure requirement, section 1: "layout values must come from
@@ -255,6 +280,7 @@ export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setTimeRemapFreezeOperationSchema,
   setDurationOperationSchema,
   setBrandColorOperationSchema,
+  setColorControlOperationSchema,
   buildReelsCompositionOperationSchema,
   buildHorizontalCompositionOperationSchema
 ]);
@@ -325,6 +351,7 @@ export const sceneEditOperationIntentSchema = z.discriminatedUnion("type", [
   setTimeRemapFreezeOperationSchema,
   setDurationOperationSchema,
   setBrandColorOperationSchema,
+  setColorControlOperationSchema,
   buildReelsCompositionOperationSchema,
   buildHorizontalCompositionOperationSchema
 ]);

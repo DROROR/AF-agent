@@ -905,6 +905,8 @@ export const he: Dictionary = {
       colorLabel: "צבע",
       colorSwatchLabel: "בחרו צבע",
       colorHint: "רק שכבות בצבע אחיד ניתנות לצביעה מחדש. נקו את השדה כדי להשאיר את הצבע של התבנית.",
+      layerKindLabels: { text: "טקסט", image: "תמונה", logo: "לוגו", phone_screen: "מסך טלפון", video: "וידאו", color: "צבע" },
+      colorControlHint: (templateColor: string): string => `התבנית משתמשת כאן ב-${templateColor}. בחרו צבע כדי לשנות, או השאירו ריק כדי לשמור על צבע התבנית.`,
       colorClearAction: "השתמשו בצבע של התבנית",
       colorNestedUnsupported:
         "שכבת הצבע הזו נמצאת בתוך קומפוזיציה מקוננת, שלא ניתן לצבוע מחדש כרגע - הצבע של התבנית נשמר.",

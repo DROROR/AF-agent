@@ -226,6 +226,59 @@ describe("buildOperationScript", () => {
     expect(script).toContain("app.endUndoGroup();");
   });
 
+  describe("SET_COLOR_CONTROL", () => {
+    const op: SceneEditOperation = {
+      type: "SET_COLOR_CONTROL",
+      manifestPlaceholderId: "ph-1",
+      layerIndex: 4,
+      nestedTarget: null,
+      effectIndex: 3,
+      effectName: 'Text "A"',
+      colorHex: "#FF8000"
+    };
+
+    it("re-checks the effect's type and name before writing, and writes the colour as a 0-1 RGBA value", () => {
+      const script = buildOperationScript(2, COMP_NAME, op);
+      expect(script).toContain('__layer.property("ADBE Effect Parade")');
+      expect(script).toContain("__effectGroup.property(3)");
+      expect(script).toContain('__effect.matchName !== "ADBE Color Control"');
+      expect(script).toContain(`__effect.name !== ${JSON.stringify('Text "A"')}`);
+      expect(script).toContain(`__colorProperty.setValue(${JSON.stringify([1, 128 / 255, 0, 1])})`);
+    });
+
+    it("refuses an animated or expression-driven colour instead of overwriting it", () => {
+      const script = buildOperationScript(2, COMP_NAME, op);
+      expect(script.indexOf("__colorProperty.numKeys > 0")).toBeLessThan(script.indexOf("__colorProperty.setValue("));
+      expect(script.indexOf("__colorProperty.expressionEnabled === true")).toBeLessThan(script.indexOf("__colorProperty.setValue("));
+    });
+
+    it("runs inside an undo group that is always closed, and restores a locked layer's lock", () => {
+      const script = buildOperationScript(2, COMP_NAME, op);
+      expect(script).toContain("app.beginUndoGroup(");
+      expect(script).toMatch(/finally\s*\{\s*app\.endUndoGroup\(\);/);
+      expect(script).toContain("__layer.locked = true");
+    });
+
+    it("reaches a layer inside nested compositions by composition id, hop by hop", () => {
+      const script = buildOperationScript(2, COMP_NAME, {
+        ...op,
+        layerIndex: null,
+        nestedTarget: [
+          { compositionId: "comp-40", layerIndex: 7, aeProjectItemIndex: 9 },
+          { compositionId: "comp-41", layerIndex: 1, aeProjectItemIndex: 10 }
+        ]
+      });
+      expect(script).toContain("__stepCandidate.id === 40");
+      expect(script).toContain("__stepCandidate.id === 41");
+      expect(script).toContain("__comp.layer(1)");
+      expect(script).toContain("__colorProperty.setValue(");
+    });
+
+    it("is a syntactically valid function body", () => {
+      expect(() => new Function("args", buildOperationScript(2, COMP_NAME, op))).not.toThrow();
+    });
+  });
+
   it("the returned value is a real JS string at runtime despite the branded type", () => {
     const op: SceneEditOperation = { type: "SET_LAYER_VISIBILITY", manifestPlaceholderId: "ph-1", layerIndex: 1, visible: true };
     const script = buildOperationScript(0, COMP_NAME, op);

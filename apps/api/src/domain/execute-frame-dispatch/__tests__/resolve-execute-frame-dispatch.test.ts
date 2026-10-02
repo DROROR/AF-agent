@@ -631,17 +631,108 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.payload.operations).toEqual([{ type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 2, colorHex: "#1A2B3C" }]);
   });
 
-  it("fails closed when a mapping is classified as color but has no colorHex set - no fabricated default", () => {
+  // Was "fails closed ... no colorHex set". Since 2026-10-02 an unchosen colour
+  // is the template's own colour - a complete answer (isMappingResolved) - so
+  // it is left alone. Still never a fabricated default: no colour operation
+  // is produced for it at all.
+  it("leaves a colour nobody chose exactly as the template has it - no operation, no fabricated default", () => {
     const result = resolveExecuteFrameDispatch(
       baseInput({
         currentPlan: validPlan({
-          scenePlans: [validScene({ mappings: [textMapping({ placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] } })] })]
+          scenePlans: [
+            validScene({
+              mappings: [textMapping(), textMapping({ id: "mapping-color", placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] }, text: null })]
+            })
+          ]
         })
       })
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toContain("colorHex");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 2, nestedTarget: null, text: "Approved Headline" }]);
+    expect(result.payload.approvedMappingIds).toEqual(["mapping-1"]);
+  });
+
+  describe("a Color Control effect (the template author's own colour interface)", () => {
+    /** comp-1 (the scene) holds a nested composition comp-9 whose layer 1 carries the control. */
+    function manifestWithColorControl(nested: boolean): TemplateManifest {
+      const base = validManifest();
+      const scene = base.scenes[0]!;
+      return {
+        ...base,
+        compositions: [
+          ...base.compositions,
+          { compositionId: "comp-9", aeProjectItemIndex: 8, name: "Part", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-1"] }
+        ],
+        scenes: [
+          {
+            ...scene,
+            placeholders: [
+              ...scene.placeholders,
+              {
+                placeholderId: "ph-color",
+                displayLabel: null,
+                compositionId: nested ? "comp-9" : "comp-1",
+                layerName: "Controls \u203A Titles",
+                layerIndex: nested ? 1 : 6,
+                layerPath: nested ? ["Part"] : [],
+                nestedTarget: nested ? [{ compositionId: "comp-9", layerIndex: 1 }] : null,
+                placeholderType: "color",
+                editable: true,
+                sourceType: "AVLayer",
+                colorControl: { effectIndex: 3, effectName: "Titles", currentColorHex: "#FF0000" },
+                dimensions: null,
+                startTimeSeconds: null,
+                durationSeconds: null,
+                evidence: { source: "read_directly", reason: "the layer carries a Color Control effect" }
+              }
+            ]
+          }
+        ]
+      };
+    }
+    const colorMapping = (colorHex: string | null): PlaceholderMapping =>
+      textMapping({ id: "mapping-color", manifestPlaceholderId: "ph-color", placeholderName: "Controls \u203A Titles", placeholderClassification: { value: "color", source: "MANIFEST", evidence: [] }, text: null, colorHex });
+
+    it("inside a nested composition: SET_COLOR_CONTROL through the resolved chain, naming the effect's position and name", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({ currentProjectManifest: manifestWithColorControl(true), currentPlan: validPlan({ scenePlans: [validScene({ mappings: [colorMapping("#1A2B3C")] })] }) })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        {
+          type: "SET_COLOR_CONTROL",
+          manifestPlaceholderId: "ph-color",
+          layerIndex: null,
+          nestedTarget: [{ compositionId: "comp-9", layerIndex: 1, aeProjectItemIndex: 8 }],
+          effectIndex: 3,
+          effectName: "Titles",
+          colorHex: "#1A2B3C"
+        }
+      ]);
+      expect(result.payload.approvedMappingIds).toEqual(["mapping-color"]);
+    });
+
+    it("in the scene's own composition: the same operation with a plain layer index and no chain", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({ currentProjectManifest: manifestWithColorControl(false), currentPlan: validPlan({ scenePlans: [validScene({ mappings: [colorMapping("#1A2B3C")] })] }) })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations).toEqual([
+        { type: "SET_COLOR_CONTROL", manifestPlaceholderId: "ph-color", layerIndex: 6, nestedTarget: null, effectIndex: 3, effectName: "Titles", colorHex: "#1A2B3C" }
+      ]);
+    });
+
+    it("left unchosen beside a real edit: no colour operation at all", () => {
+      const result = resolveExecuteFrameDispatch(
+        baseInput({ currentProjectManifest: manifestWithColorControl(true), currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping(), colorMapping(null)] })] }) })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.operations.map((operation) => operation.type)).toEqual(["SET_TEXT"]);
+    });
   });
 
   it("resolves SET_LAYER_VISIBILITY/SET_TIME_REMAP_FREEZE/SET_LAYER_DURATION as independent overrides, additional to the mapping's own primary (text) operation", () => {

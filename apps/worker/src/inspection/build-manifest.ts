@@ -58,6 +58,7 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
   const unknownItems: TemplateManifest["unknownItems"] = [];
   const compositionById = new Map(facts.compositions.map((c) => [c.compositionId, c]));
   const maskedCompositionIds = collectMaskedCompositionIds(facts.compositions, compositionById);
+  const scannedLayersByComposition = indexScannedLayersByComposition(facts.layerFactsByCompositionAndIndex);
 
   const scenes: Scene[] = facts.compositions
     .filter((c) => !c.isNestedOnlyReferenced)
@@ -129,8 +130,18 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
           unknownItems,
           facts.projectSha256,
           facts.compositions,
-          facts.layerFactsByCompositionAndIndex
-        )
+          facts.layerFactsByCompositionAndIndex,
+          scannedLayersByComposition
+        ),
+        // The scene's OWN colour controls, after everything that existed
+        // before them so no earlier placeholder moves.
+        ...buildColorControlPlaceholders({
+          sceneCompositionId: composition.compositionId,
+          composition,
+          layerPath: [],
+          chainToParent: null,
+          scannedLayers: scannedLayersByComposition.get(composition.compositionId) ?? []
+        })
       );
 
       return {
@@ -284,17 +295,66 @@ function collectMaskedCompositionIds(
  * the client's image replaces - so it is ONE image slot, targeting the
  * bottom-most solid. Requiring the matte keeps an ordinary title card (text
  * over a background solid, not shown through a matte) a text slot.
+ *
+ * REAL 2026-10-02 MISS (a ten-phone app promo): every phone's screen is its
+ * own composition holding one solid the size of the screen plus two drawn
+ * shapes laid over it as decoration. Because of the shapes it matched nothing
+ * here, both shapes and the solid were then dropped as structural, and the
+ * template was reported with no phone screen to fill at all - the one thing a
+ * mockup template exists for. Two of those screens also sit in their scene
+ * as plain 3D layers with no matte. So a card is recognised in two more
+ * shapes, each still an AE fact and never a name:
+ *  - shown through a matte, and built only of solids and drawn shapes;
+ *  - not matted, but built only of solids and drawn shapes, with a solid
+ *    covering the whole composition, and a frame that is not the scene's own
+ *    size - a composition the size of the picture is a background, one of
+ *    another size is something placed INTO the picture.
+ * A composition holding text keeps the original rule unchanged, so no text a
+ * client could edit is newly hidden as a guide label.
  */
-function findScreenCardSlot(composition: CompositionFact, maskedCompositionIds: ReadonlySet<string>): LayerFact | null {
-  if (!maskedCompositionIds.has(composition.compositionId)) {
-    return null;
-  }
+function findScreenCardSlot(
+  composition: CompositionFact,
+  maskedCompositionIds: ReadonlySet<string>,
+  scene: CompositionFact,
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>
+): LayerFact | null {
   // Filling a card raises the media to the top of its composition. Any matte
   // wiring inside would be broken by that reorder, so such a composition is
   // never treated as a card.
   if (composition.layers.some((layer) => layer.trackMatte?.isTrackMatte === true || layer.trackMatte?.hasTrackMatte === true)) {
     return null;
   }
+  // The same reorder would bury anything a nested composition draws there.
+  if (composition.precompChildren.some((child) => child.enabled !== false)) {
+    return maskedCompositionIds.has(composition.compositionId) ? findTextAndSolidCard(composition) : null;
+  }
+  const rendered = composition.layers.filter(
+    (layer) => layer.enabled !== false && layer.guideLayer !== true && layer.trackMatte?.isTrackMatte !== true
+  );
+  const solids = rendered.filter((layer) => layer.solidFill?.isUniformSolidFill === true && layer.footage === null);
+  if (solids.length === 0) {
+    return null;
+  }
+  const bottomSolid = solids.reduce((bottom, candidate) => (candidate.index > bottom.index ? candidate : bottom));
+  const masked = maskedCompositionIds.has(composition.compositionId);
+
+  if (masked && rendered.every((layer) => layer.layerKind === "TextLayer" || solids.includes(layer))) {
+    return bottomSolid;
+  }
+  if (!rendered.every((layer) => layer.layerKind === "ShapeLayer" || solids.includes(layer))) {
+    return null;
+  }
+  if (masked) {
+    return bottomSolid;
+  }
+  const solidSize = layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${bottomSolid.index}`)?.footage;
+  const solidFillsComposition = solidSize?.widthPx === composition.widthPx && solidSize.heightPx === composition.heightPx;
+  const isScenesOwnSize = composition.widthPx === scene.widthPx && composition.heightPx === scene.heightPx;
+  return solidFillsComposition && !isScenesOwnSize ? bottomSolid : null;
+}
+
+/** The original card rule, kept for a matted composition that also holds nested compositions: only text and uniform solids among its own layers. */
+function findTextAndSolidCard(composition: CompositionFact): LayerFact | null {
   const rendered = composition.layers.filter(
     (layer) => layer.enabled !== false && layer.guideLayer !== true && layer.trackMatte?.isTrackMatte !== true
   );
@@ -442,7 +502,9 @@ function collectNestedPlaceholders(
   /** Every composition, so a slot's HOSTS can be found wherever in the graph they live (Stage 4). */
   allCompositions: readonly CompositionFact[],
   /** The project-wide scan, for the geometry/matte/animation facts a slot verdict is built from. */
-  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>,
+  /** The same scan grouped by composition - where colour controls are found (see buildColorControlPlaceholders). */
+  scannedLayersByComposition: ReadonlyMap<string, readonly ScannedCompositionLayer[]>
 ): Placeholder[] {
   const placeholders: Placeholder[] = [];
   const seenLayers = new Set<string>();
@@ -469,7 +531,7 @@ function collectNestedPlaceholders(
       ...composition.precompChildren.map((child) => ({ index: child.layerIndex, layer: null, child }))
     ].sort((a, b) => a.index - b.index);
     const layersByIndex = new Map(composition.layers.map((layer) => [layer.index, layer]));
-    const screenCard = findScreenCardSlot(composition, maskedCompositionIds);
+    const screenCard = findScreenCardSlot(composition, maskedCompositionIds, scene, layerFactsByCompositionAndIndex);
 
     for (const entry of entries) {
       if (entry.child !== null) {
@@ -531,6 +593,18 @@ function collectNestedPlaceholders(
         })
       );
     }
+
+    // A composition is walked once per scene, so its colour controls are
+    // listed once however many parents share it.
+    placeholders.push(
+      ...buildColorControlPlaceholders({
+        sceneCompositionId: scene.compositionId,
+        composition,
+        layerPath: [...layerPath],
+        chainToParent,
+        scannedLayers: scannedLayersByComposition.get(composition.compositionId) ?? []
+      })
+    );
   };
 
   const descend = (
@@ -587,6 +661,113 @@ function collectNestedPlaceholders(
     descend(child, [], [], new Set([scene.compositionId]), 1);
   }
 
+  return placeholders;
+}
+
+interface ScannedCompositionLayer {
+  layerIndex: number;
+  scanned: ScannedSlotLayer;
+}
+
+/**
+ * The project-wide scan regrouped by composition. Needed because a colour
+ * control very often sits on a null, guide or adjustment layer - layers
+ * CompositionFact.layers deliberately leaves out as never being content.
+ */
+function indexScannedLayersByComposition(
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>
+): Map<string, ScannedCompositionLayer[]> {
+  const byComposition = new Map<string, ScannedCompositionLayer[]>();
+  for (const [key, scanned] of layerFactsByCompositionAndIndex) {
+    const separator = key.lastIndexOf(":");
+    const layerIndex = Number(key.slice(separator + 1));
+    if (separator <= 0 || !Number.isInteger(layerIndex)) {
+      continue;
+    }
+    const compositionId = key.slice(0, separator);
+    const layers = byComposition.get(compositionId) ?? [];
+    layers.push({ layerIndex, scanned });
+    byComposition.set(compositionId, layers);
+  }
+  for (const layers of byComposition.values()) {
+    layers.sort((a, b) => a.layerIndex - b.layerIndex);
+  }
+  return byComposition;
+}
+
+const COLOR_CONTROL_MATCH_NAME = "ADBE Color Control";
+
+function unitChannelToHex(value: number): string {
+  const clamped = Math.min(1, Math.max(0, value));
+  return Math.round(clamped * 255)
+    .toString(16)
+    .padStart(2, "0")
+    .toUpperCase();
+}
+
+/**
+ * One editable colour per Color Control effect found in a composition.
+ *
+ * REAL 2026-10-02 MISS: a client asked where to choose the colour of a
+ * scene's text and elements, and the answer was nowhere - the template keeps
+ * them on a "COLOR_CONTROL" layer carrying six Color Control effects per
+ * scene, and inspection only ever recognised a colour as a solid layer's own
+ * fill. A Color Control effect exists for exactly one reason: its author
+ * wants that colour changed in one place. It is identified by After Effects'
+ * own effect type, never by the layer's or the effect's name.
+ *
+ * Left out, because a fixed colour cannot honestly be set there: a control
+ * that is animated with keyframes, one driven by an expression, and one whose
+ * value the scan could not read (an older worker build).
+ *
+ * The layer carrying the controls may itself be a guide, null, adjustment or
+ * switched-off layer - it renders nothing either way; expressions elsewhere
+ * read its values.
+ */
+function buildColorControlPlaceholders(args: {
+  sceneCompositionId: string;
+  composition: CompositionFact;
+  layerPath: string[];
+  /** The precomp hops above this composition - null for the scene's own composition. */
+  chainToParent: readonly NestedTargetStep[] | null;
+  scannedLayers: readonly ScannedCompositionLayer[];
+}): Placeholder[] {
+  const placeholders: Placeholder[] = [];
+  for (const { layerIndex, scanned } of args.scannedLayers) {
+    (scanned.effects ?? []).forEach((effect, position) => {
+      const control = effect.colorControl;
+      if (effect.matchName !== COLOR_CONTROL_MATCH_NAME || control === undefined || control.animated || control.hasExpression) {
+        return;
+      }
+      // After Effects numbers a layer's effects from 1, in this same order.
+      const effectIndex = position + 1;
+      const layerName = scanned.layerName ?? `layer ${layerIndex}`;
+      placeholders.push({
+        placeholderId: deterministicId(["color-control", args.sceneCompositionId, args.composition.compositionId, String(layerIndex), String(effectIndex)]),
+        displayLabel: null,
+        compositionId: args.composition.compositionId,
+        layerName: `${layerName} \u203A ${effect.name}`,
+        layerIndex,
+        layerPath: args.layerPath,
+        nestedTarget: args.chainToParent === null ? null : [...args.chainToParent, { compositionId: args.composition.compositionId, layerIndex }],
+        placeholderType: "color",
+        editable: true,
+        sourceType: scanned.kind ?? null,
+        colorControl: {
+          effectIndex,
+          effectName: effect.name,
+          currentColorHex: `#${unitChannelToHex(control.red)}${unitChannelToHex(control.green)}${unitChannelToHex(control.blue)}`
+        },
+        dimensions: null,
+        startTimeSeconds: null,
+        durationSeconds: null,
+        evidence: {
+          source: "read_directly",
+          reason: "the layer carries a Color Control effect - a colour the template's own author exposed for changing"
+        }
+      });
+    });
+  }
   return placeholders;
 }
 
