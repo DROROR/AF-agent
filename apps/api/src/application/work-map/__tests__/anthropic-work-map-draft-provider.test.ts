@@ -167,7 +167,12 @@ describe("AnthropicWorkMapDraftProvider - with a website", () => {
   it("passes the website through to the model, since web fetch only reads URLs already in the conversation", async () => {
     const create = vi.fn().mockResolvedValue(planToolUse());
     await providerWith(create).draftWorkMap(draftInput({ brandInputs: brandInputs("https://example.com/app") }));
-    expect(create.mock.calls[0]?.[0].messages[0].content).toContain("https://example.com/app");
+    // Stated on its own in plain text, not only inside the JSON blob - the
+    // fetch tool refused an address it could find only there (2026-10-02).
+    const blocks = create.mock.calls[0]?.[0].messages[0].content as Array<{ type: string; text: string }>;
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]!.text).toContain("https://example.com/app");
+    expect(blocks[1]!.text.endsWith("\nhttps://example.com/app")).toBe(true);
   });
 
   it("a cut-off answer is reported as too long - never passed on as a plan (real failure 2026-10-02)", async () => {

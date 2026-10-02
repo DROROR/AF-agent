@@ -207,7 +207,18 @@ export class AnthropicWorkMapDraftProvider implements AiWorkMapProvider {
       toolChoice = { type: "auto" };
     }
 
-    const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
+    // Real failure, 2026-10-02: four website reads, four `url_not_in_prior_context`.
+    // The address was only inside the JSON blob, and the fetch tool will
+    // only read an address it recognises as given in the conversation. It is
+    // now also stated on its own, in plain text, exactly as the client gave it.
+    // Was: [{ role: "user", content: userContent }]
+    const websiteUrl = allowedDomain !== null ? (input.brandInputs?.websiteUrl ?? null) : null;
+    const messages: Anthropic.MessageParam[] = [
+      {
+        role: "user",
+        content: websiteUrl === null ? userContent : [{ type: "text", text: userContent }, { type: "text", text: `The client's website, to read with web_fetch. Use exactly this address:\n${websiteUrl}` }]
+      }
+    ];
     let lastResponse: Anthropic.Message | null = null;
     // Real gap, 2026-10-02: the AI wrote "Website fetch failed" into its own
     // notes and nothing in our log said why. Codes only, never page content.

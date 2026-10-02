@@ -106,6 +106,26 @@ function PlanProgressOverlay({ elapsedSeconds }: { elapsedSeconds: number }): Re
   );
 }
 
+type VideoLanguage = "en" | "he" | "asWritten";
+
+const VIDEO_LANGUAGE_KEY_PREFIX = "dyo.aiPlanVideoLanguage.";
+
+/** Appended to what the client asked for. Plain English on purpose - read by the model, never shown to a person. */
+const VIDEO_LANGUAGE_REQUEST: Record<VideoLanguage, string> = {
+  en: "Write every on-screen text in English, whatever language these instructions or the business description are written in.",
+  he: "Write every on-screen text in Hebrew, whatever language these instructions or the business description are written in.",
+  asWritten: "Write the on-screen text in the same language the client wrote in."
+};
+
+function readVideoLanguage(projectId: string): VideoLanguage {
+  try {
+    const stored = window.localStorage.getItem(`${VIDEO_LANGUAGE_KEY_PREFIX}${projectId}`);
+    return stored === "he" || stored === "asWritten" || stored === "en" ? stored : "en";
+  } catch {
+    return "en";
+  }
+}
+
 const INSTRUCTIONS_DRAFT_KEY_PREFIX = "dyo.aiPlanDraft.";
 
 /** Storage can be unavailable (private window, blocked site data) - then the draft is simply not remembered, never an error. */
@@ -188,6 +208,19 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   // How long the last finished call really took - shown above the plan.
   const [lastPlanSeconds, setLastPlanSeconds] = useState<number | null>(null);
   const [nothingToPlanFrom, setNothingToPlanFrom] = useState(false);
+  // The language of the words that will appear IN the video. Real surprise,
+  // 2026-10-02: the business description was typed in Roman Urdu, so the
+  // plan's on-screen lines came back in Roman Urdu. What a person types to
+  // the assistant and what the video says are separate choices.
+  const [videoLanguage, setVideoLanguageState] = useState<VideoLanguage>(() => readVideoLanguage(project.project.projectId));
+  function setVideoLanguage(next: VideoLanguage): void {
+    setVideoLanguageState(next);
+    try {
+      window.localStorage.setItem(`${VIDEO_LANGUAGE_KEY_PREFIX}${project.project.projectId}`, next);
+    } catch {
+      // Not remembered - nothing else changes.
+    }
+  }
   const instructionsRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -329,7 +362,8 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
     // A website or a business description is enough to plan from: the
     // description box is then optional, and this plain request stands in.
     // const result = await createAiDraft(instructions.trim());
-    const result = await createAiDraft(instructions.trim() === "" ? DEFAULT_PLAN_REQUEST : instructions.trim());
+    const request = instructions.trim() === "" ? DEFAULT_PLAN_REQUEST : instructions.trim();
+    const result = await createAiDraft(`${request}\n\n${VIDEO_LANGUAGE_REQUEST[videoLanguage]}`);
     setLastPlanSeconds(Math.round((Date.now() - startedAt) / 1000));
     setIsCreatingPlan(false);
     if (result.ok) {
@@ -408,6 +442,13 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             disabled={isCreatingPlan}
             onChange={(event) => setInstructions(event.target.value)}
           />
+        </Field>
+        <Field label={t.workMapTab.ai.videoLanguageLabel} htmlFor="work-map-ai-video-language" hint={t.workMapTab.ai.videoLanguageHint}>
+          <Select id="work-map-ai-video-language" value={videoLanguage} disabled={isCreatingPlan} onChange={(event) => setVideoLanguage(event.target.value as VideoLanguage)}>
+            <option value="en">{t.workMapTab.ai.videoLanguageEnglish}</option>
+            <option value="he">{t.workMapTab.ai.videoLanguageHebrew}</option>
+            <option value="asWritten">{t.workMapTab.ai.videoLanguageAsWritten}</option>
+          </Select>
         </Field>
         <div className="edit-drawer-actions">
           <Button variant="secondary" disabled={isCreatingPlan} onClick={() => setViewMode("manualForm")}>

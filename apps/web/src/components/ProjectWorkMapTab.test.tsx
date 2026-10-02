@@ -610,6 +610,8 @@ describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructi
       await screen.findByText("Your Video Plan");
       const draft = calls.find((call) => call.url.includes("/work-map/ai-draft"));
       expect((draft?.body as { instructions: string }).instructions).toMatch(/Plan a promo video for this business/);
+      // English on screen unless the client chooses otherwise - never whatever language they happened to type in.
+      expect((draft?.body as { instructions: string }).instructions).toMatch(/Write every on-screen text in English/);
       // And the user is told how long it really took.
       expect(screen.getByText(/This plan took \d+:\d\d to write\./)).not.toBeNull();
     });
@@ -661,5 +663,28 @@ describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructi
       expect(((await screen.findByLabelText("Describe your video")) as HTMLTextAreaElement).value).toBe("Keep this.");
       window.localStorage.clear();
     });
+  });
+
+  it("the client chooses the language of the on-screen text, separately from the language they type in (real surprise 2026-10-02)", async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    stubFetchByUrl(
+      {
+        [`/api/projects/${PROJECT_ID}/work-map/ai-draft`]: { status: 201, body: { workMap: workMapFixture({ revision: 1 }, [workMapEntryFixture({ id: "wm-1", sourceCompositionId: "c1", desiredText: "Hello" })]) } },
+        [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: null } },
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+        [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [] } },
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+      },
+      calls
+    );
+    renderWorkMap();
+    fireEvent.change(await screen.findByLabelText("Describe your video"), { target: { value: "ek chota promo" } });
+    fireEvent.change(screen.getByLabelText("Language of the text in the video"), { target: { value: "he" } });
+    fireEvent.click(screen.getByRole("button", { name: "Claude — Create Video Plan" }));
+
+    await screen.findByText("Your Video Plan");
+    const sent = (calls.find((call) => call.url.includes("/work-map/ai-draft"))?.body as { instructions: string }).instructions;
+    expect(sent.startsWith("ek chota promo")).toBe(true);
+    expect(sent).toMatch(/Write every on-screen text in Hebrew/);
   });
 });

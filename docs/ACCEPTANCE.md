@@ -1452,3 +1452,22 @@ loading state with a progress bar and the time taken.
   running clock. The bar fills over the 90 seconds a real call has taken and waits at
   95% until the answer arrives - it never shows finished early.
 - The plan view states how long the plan took to write.
+
+## 2026-10-02 - First layer-level plan: 9 of 12 rows reach a layer; website read refused for a reason of our own
+
+Third real run on `fe32ffac-...` (revision 2): 109.5s, 12 raw / 12 valid rows, 9 with a
+`targetPlaceholderId`. Simple Mode showed them grouped per composition as intended.
+
+**Correction to the earlier entry.** The website read was not failing because the
+site blocks automated readers. The log added in `c042389` shows
+`websiteFetchAttempts: 4`, all `url_not_in_prior_context`: the fetch tool refused the
+address because it appeared only inside the JSON blob of the request. Fixed by also
+stating the address on its own in plain text. The site does answer 403 to a plain
+request from this server, so the next attempt may still fail - with a different code,
+which will now be visible. **A successful read is still unobserved.**
+
+**On-screen text came back in Roman Urdu** because the business description was typed
+in it. Added a "Language of the text in the video" choice (English by default, Hebrew,
+or as written), sent with the request.
+
+**Still unproven:** plan -> Match Your Content -> Scenes fields, on a real run.
