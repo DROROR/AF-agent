@@ -125,6 +125,8 @@ export interface LayerPlanRow {
   entry: WorkMapEntry;
   layerName: string;
   kind: string;
+  /** What the untouched template says on this layer - the "before" beside the plan's "after". Null for a non-text layer or a manifest that did not capture it. */
+  currentText: string | null;
 }
 
 /** Every layer row for one composition - one card on screen. */
@@ -152,7 +154,8 @@ export function groupLayerPlanEntries(entries: WorkMapEntry[], manifest: Templat
       continue;
     }
     const group = groups.get(placeholder.compositionId) ?? { compositionId: placeholder.compositionId, compositionName: nameById.get(placeholder.compositionId) ?? placeholder.compositionId, rows: [] };
-    group.rows.push({ entry, layerName: placeholder.layerName, kind: placeholder.placeholderType });
+    const currentText = typeof placeholder.originalText === "string" && placeholder.originalText.trim() !== "" ? placeholder.originalText : null;
+    group.rows.push({ entry, layerName: placeholder.layerName, kind: placeholder.placeholderType, currentText });
     groups.set(placeholder.compositionId, group);
   }
   const natural = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });

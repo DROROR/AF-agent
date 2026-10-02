@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { UpdateWorkMapRequest, WorkMap } from "@dyo/schemas";
+import type { UpdateWorkMapRequest, WorkMap, WorkMapAiSummary } from "@dyo/schemas";
 import { StaleWorkMapRevisionError } from "../../errors/app-error.js";
 import type { WorkMapRepository } from "../../domain/work-map/types.js";
 import { toWorkMapDto } from "./work-map-dto-mapper.js";
@@ -20,7 +20,7 @@ export interface UpdateWorkMapDeps {
  * cross-project/existence check happens at the point intent actually
  * becomes an instruction - MAP_ASSET on the execution plan.
  */
-export async function updateWorkMap(deps: UpdateWorkMapDeps, projectId: string, request: UpdateWorkMapRequest): Promise<WorkMap> {
+export async function updateWorkMap(deps: UpdateWorkMapDeps, projectId: string, request: UpdateWorkMapRequest, aiSummary?: WorkMapAiSummary | null): Promise<WorkMap> {
   const current = await deps.workMapRepository.findCurrentByProjectId(projectId);
   const currentRevision = current?.revision ?? 0;
   if (currentRevision !== request.baseRevision) {
@@ -30,7 +30,9 @@ export async function updateWorkMap(deps: UpdateWorkMapDeps, projectId: string, 
   const now = deps.now();
   const entries = request.entries.map((entry) => ({ ...entry, id: entry.id ?? randomUUID() }));
   const created = await deps.workMapRepository.createRevision(
-    { id: randomUUID(), projectId, revision: currentRevision + 1, entries },
+    // A hand edit (no summary passed) keeps what the assistant last
+    // reported - editing one row does not un-read the website.
+    { id: randomUUID(), projectId, revision: currentRevision + 1, entries, aiSummary: aiSummary === undefined ? (current?.aiSummary ?? null) : aiSummary },
     now
   );
   return toWorkMapDto(created);

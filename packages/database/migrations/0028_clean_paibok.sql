@@ -1,0 +1,1 @@
+ALTER TABLE "project_work_maps" ADD COLUMN "ai_summary" jsonb;

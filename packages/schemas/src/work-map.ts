@@ -49,11 +49,34 @@ export const workMapEntrySchema = z
   .strict();
 export type WorkMapEntry = z.infer<typeof workMapEntrySchema>;
 
+/**
+ * What the assistant read and concluded while writing a plan - shown to the
+ * client next to the plan so "the AI did something" is something they can
+ * actually see and check (real complaint, 2026-10-02: the plan appeared with
+ * no sign of what had been read or used).
+ *
+ * `websiteRead` is decided by this system from the fetch tool's own results,
+ * never taken from the model's say-so. The remaining fields are the model's
+ * own summary of the business, and are shown as exactly that.
+ */
+export const workMapAiSummarySchema = z.object({
+  websiteUrl: z.string().nullable(),
+  websiteRead: z.enum(["READ", "FAILED", "NOT_GIVEN"]),
+  productName: z.string().min(1).nullable(),
+  tagline: z.string().min(1).nullable(),
+  features: z.array(z.string().min(1)).max(12),
+  tone: z.string().min(1).nullable(),
+  notes: z.string().min(1).nullable()
+});
+export type WorkMapAiSummary = z.infer<typeof workMapAiSummarySchema>;
+
 export const workMapSchema = z.object({
   id: z.string().min(1),
   projectId: z.string().uuid(),
   revision: z.number().int().positive(),
   entries: z.array(workMapEntrySchema),
+  /** Null/absent for a plan written by hand, or written before this field existed. */
+  aiSummary: workMapAiSummarySchema.nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

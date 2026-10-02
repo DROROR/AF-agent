@@ -88,7 +88,8 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
 
     await screen.findByText("Your Video Plan");
     // Real asset filename, never the raw asset UUID, in the default view.
-    expect(screen.getByText("login-demo.mp4")).not.toBeNull();
+    // Named in the plan itself AND in the "Your files" list above it.
+    expect(screen.getAllByText("login-demo.mp4").length).toBeGreaterThan(0);
     // The raw asset id is never in the DEFAULT (non-advanced) content -
     // <details> content exists in the DOM even collapsed, so this checks
     // the visible row cell specifically, not the whole document.
@@ -154,7 +155,8 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
     // secondary metadata, never the heading itself.
     expect(screen.getByText("Main Scene")).not.toBeNull();
     expect(screen.getByText(/Template composition: Scene 01/)).not.toBeNull();
-    expect(screen.getByText("login-demo.mp4")).not.toBeNull();
+    // Named in the plan itself AND in the "Your files" list above it.
+    expect(screen.getAllByText("login-demo.mp4").length).toBeGreaterThan(0);
     expect(screen.getByText("Hello world")).not.toBeNull();
     // The raw asset id is never in the DEFAULT (non-advanced) content -
     // <details> content exists in the DOM even collapsed, so this checks
@@ -368,9 +370,13 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    const heading = screen.getByRole("heading", { level: 3 });
-    expect(heading.textContent).toBe("Main Scene");
-    expect(heading.textContent).not.toContain("!Render");
+    // The page now has other level-3 headings too ("What the assistant
+    // used") - the scene card's own title is still "Main Scene", and no
+    // heading anywhere carries the raw composition name.
+    expect(screen.getByRole("heading", { level: 3, name: "Main Scene" })).not.toBeNull();
+    for (const heading of screen.getAllByRole("heading")) {
+      expect(heading.textContent).not.toContain("!Render");
+    }
     expect(screen.getByText(/Template composition: !Render/)).not.toBeNull();
   });
 
@@ -445,17 +451,17 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    expect(screen.getByText("Approving this plan unlocks Match Your Content.")).not.toBeNull();
-    const approveButton = screen.getByRole("button", { name: "Approve AI Plan" });
+    expect(screen.getByText(/Nothing is final yet\./)).not.toBeNull();
+    const approveButton = screen.getByRole("button", { name: "Continue to Scenes" });
     fireEvent.click(approveButton);
 
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
     });
-    expect(screen.queryByRole("button", { name: "Approve AI Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue to Scenes" })).toBeNull();
     expect((screen.getByRole("link", { name: "Continue to Match Your Content" }) as HTMLAnchorElement).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/scenes`);
     // Once approved, the "unlocks Match Your Content" helper no longer applies.
-    expect(screen.queryByText("Approving this plan unlocks Match Your Content.")).toBeNull();
+    expect(screen.queryByText(/Nothing is final yet\./)).toBeNull();
   });
 
   it("shows 'Continue to Match Your Content' immediately, never a duplicate 'Approve AI Plan' button, when a plan already exists", async () => {
@@ -464,7 +470,7 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
 
     await screen.findByText("Your Video Plan");
     expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Approve AI Plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue to Scenes" })).toBeNull();
   });
 });
 

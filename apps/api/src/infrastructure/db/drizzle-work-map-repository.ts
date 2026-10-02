@@ -8,6 +8,7 @@ function toDomain(row: ProjectWorkMapRow): WorkMapRecord {
     projectId: row.projectId,
     revision: row.revision,
     entries: row.entries,
+    aiSummary: row.aiSummary ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -24,6 +25,7 @@ export class DrizzleWorkMapRepository implements WorkMapRepository {
         projectId: revisionRow.projectId,
         revision: revisionRow.revision,
         entries: revisionRow.entries,
+        aiSummary: revisionRow.aiSummary ?? null,
         createdAt: now,
         updatedAt: now
       })

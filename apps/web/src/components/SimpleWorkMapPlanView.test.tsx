@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { WorkMapEntry } from "@dyo/schemas";
-import { PlanCard } from "./SimpleWorkMapPlanView";
+import type { AssetDto, WorkMapAiSummary, WorkMapEntry } from "@dyo/schemas";
+import { AiPlanSummaryPanel, LayerPlanCard, PlanCard } from "./SimpleWorkMapPlanView";
+import { assetFixture } from "../test-utils/execution-plan-fixtures";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 
 afterEach(() => {
@@ -89,5 +90,77 @@ describe("PlanCard - real scene thumbnail vs. honest unavailable state (never a 
     expect(screen.getByRole("heading", { name: "Part 2" })).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Main Scene" })).toBeNull();
     expect(screen.queryByText(/Template composition:/)).toBeNull();
+  });
+});
+
+describe("the plan shows what the assistant did (real complaint 2026-10-02: nothing showed what was read or used)", () => {
+  const summary = (overrides: Partial<WorkMapAiSummary> = {}): WorkMapAiSummary => ({
+    websiteUrl: "https://example.com/",
+    websiteRead: "READ",
+    productName: "Acme",
+    tagline: "Fast and safe",
+    features: ["Results", "Slips"],
+    tone: "official",
+    notes: null,
+    ...overrides
+  });
+  const logo = assetFixture({ id: "a-logo", originalFilename: "logo.png", mediaKind: "LOGO" }) as unknown as AssetDto;
+  const clip = assetFixture({ id: "a-clip", originalFilename: "demo.mp4", mediaKind: "VIDEO", mimeType: "video/mp4" }) as unknown as AssetDto;
+
+  it("says the website was read, and what was understood from it", () => {
+    renderWithLocale(<AiPlanSummaryPanel aiSummary={summary()} assets={[]} usedAssetIds={new Set()} projectId="p1" />);
+    expect(screen.getByText("✓ Read your website: https://example.com/")).not.toBeNull();
+    expect(screen.getByText("Acme")).not.toBeNull();
+    expect(screen.getByText("Fast and safe")).not.toBeNull();
+    expect(screen.getByText("Results")).not.toBeNull();
+    expect(screen.getByText("official")).not.toBeNull();
+  });
+
+  it("says plainly when the website could not be read - never implies it was", () => {
+    renderWithLocale(<AiPlanSummaryPanel aiSummary={summary({ websiteRead: "FAILED" })} assets={[]} usedAssetIds={new Set()} projectId="p1" />);
+    expect(screen.getByText(/Could not read your website \(https:\/\/example\.com\/\)/)).not.toBeNull();
+    expect(screen.queryByText(/✓ Read your website/)).toBeNull();
+  });
+
+  it("says nothing about a website when none was given", () => {
+    renderWithLocale(<AiPlanSummaryPanel aiSummary={summary({ websiteRead: "NOT_GIVEN", websiteUrl: null })} assets={[]} usedAssetIds={new Set()} projectId="p1" />);
+    expect(screen.queryByText(/website/i)).toBeNull();
+  });
+
+  it("shows the client's own files as real pictures, each marked used or not used", () => {
+    renderWithLocale(<AiPlanSummaryPanel aiSummary={null} assets={[logo, clip]} usedAssetIds={new Set(["a-logo"])} projectId="p1" />);
+    const picture = screen.getByRole("img", { name: "logo.png" }) as HTMLImageElement;
+    expect(picture.src).toContain("/api/projects/p1/assets/a-logo/file");
+    // A video is named, never given a broken picture.
+    expect(screen.queryByRole("img", { name: "demo.mp4" })).toBeNull();
+    expect(screen.getByText("Used in this plan")).not.toBeNull();
+    expect(screen.getByText("Not used")).not.toBeNull();
+  });
+
+  it("renders nothing at all for a hand-written plan with no files - no empty box", () => {
+    const { container } = renderWithLocale(<AiPlanSummaryPanel aiSummary={null} assets={[]} usedAssetIds={new Set()} projectId="p1" />);
+    expect(container.querySelector(".ai-used")).toBeNull();
+  });
+
+  it("a text layer shows what the template said beside what it will say", () => {
+    const group = {
+      compositionId: "c1",
+      compositionName: "Part 1",
+      rows: [{ entry: entry({ id: "r1", desiredText: "Acme" }), layerName: "Headline", kind: "text", currentText: "YOUR TITLE" }]
+    };
+    renderWithLocale(<LayerPlanCard group={group} assetById={new Map()} projectId="p1" />);
+    expect(screen.getByText("Template says:")).not.toBeNull();
+    expect(screen.getByText("YOUR TITLE")).not.toBeNull();
+    expect(screen.getByText("Acme").tagName).toBe("STRONG");
+  });
+
+  it("an image layer shows the chosen file as a picture", () => {
+    const group = {
+      compositionId: "c1",
+      compositionName: "Part 1",
+      rows: [{ entry: entry({ id: "r1", desiredAssetId: "a-logo" }), layerName: "Screen", kind: "image", currentText: null }]
+    };
+    renderWithLocale(<LayerPlanCard group={group} assetById={new Map([["a-logo", logo]])} projectId="p1" />);
+    expect((screen.getByRole("img", { name: "logo.png" }) as HTMLImageElement).src).toContain("/assets/a-logo/file");
   });
 });

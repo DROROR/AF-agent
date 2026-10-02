@@ -1199,6 +1199,17 @@ export const en = {
         summaryUnresolved: (n: number): string => `${n} unresolved item${n === 1 ? "" : "s"}`,
         noPlaceholdersNotice:
           "AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.",
+        usedTitle: "What the assistant used",
+        usedWebsiteRead: (url: string): string => `✓ Read your website: ${url}`,
+        usedWebsiteFailed: (url: string): string => `✗ Could not read your website (${url}). This plan uses only what you typed.`,
+        usedNameLabel: "Name",
+        usedTaglineLabel: "Tagline",
+        usedFeaturesLabel: "Features it found",
+        usedToneLabel: "Tone",
+        usedFilesLabel: "Your files",
+        usedFileUsed: "Used in this plan",
+        usedFileNotUsed: "Not used",
+        layerWasLabel: "Template says:",
         layerPlanTitle: "What will change",
         layerPlanHint: "Each line is one layer of the template and what goes on it. You check and adjust these in the Scenes tab before anything is made.",
         thumbnailPlaceholder: "Scene preview not generated yet",
@@ -1220,10 +1231,15 @@ export const en = {
         aiNoteLabel: "AI note:",
         editPlanAction: "Edit Plan",
         askAiToImproveAction: "Ask AI to Improve",
-        approvePlanAction: "Approve AI Plan",
+        // Was "Approve AI Plan". Pressing it approves nothing about the video -
+        // it opens the Scenes step - and "approve" with no picture to look at
+        // read as signing off blind (real complaint, 2026-10-02).
+        // approvePlanAction: "Approve AI Plan",
+        approvePlanAction: "Continue to Scenes",
         approvingPlan: "Approving…",
         approvePlanFailedTitle: "Could not approve this plan",
-        approvePlanHelper: "Approving this plan unlocks Match Your Content.",
+        // approvePlanHelper: "Approving this plan unlocks Match Your Content.",
+        approvePlanHelper: "Nothing is final yet. Next you see every text and image in its place and can change it. The real preview is made after that, and you approve the video only once you have seen it.",
         continueToMappingAction: "Continue to Match Your Content"
       }
     },

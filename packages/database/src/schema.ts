@@ -22,6 +22,7 @@ import type {
   UserRole,
   WorkerCapability,
   WorkerStatus,
+  WorkMapAiSummary,
   WorkMapEntry
 } from "@dyo/schemas";
 
@@ -512,6 +513,8 @@ export const projectWorkMaps = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull(),
     entries: jsonb("entries").notNull().$type<WorkMapEntry[]>(),
+    /** What the assistant read and concluded for this revision - null for a hand-written plan. See workMapAiSummarySchema. */
+    aiSummary: jsonb("ai_summary").$type<WorkMapAiSummary | null>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },

@@ -8,7 +8,7 @@ import { uploadAsset } from "../../asset/upload-asset.js";
 import { InMemoryAssetStorage } from "../../asset/test-support/in-memory-asset-storage.js";
 import { InMemoryWorkMapRepository } from "../test-support/in-memory-work-map-repository.js";
 import { InMemorySceneEvidenceRepository } from "../../job/test-support/in-memory-scene-evidence-repository.js";
-import { compositionsWorthPlanning, generateAiWorkMapDraft, reconcileTargetPlaceholder } from "../generate-ai-work-map-draft.js";
+import { buildAiSummary, compositionsWorthPlanning, generateAiWorkMapDraft, reconcileTargetPlaceholder } from "../generate-ai-work-map-draft.js";
 import { WorkMapDraftNotConfiguredError, type AiWorkMapDraftInput, type AiWorkMapDraftResult, type AiWorkMapMetadata, type AiWorkMapProvider } from "../ai-work-map-provider.js";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError } from "../../../errors/app-error.js";
 
@@ -285,5 +285,39 @@ describe("compositionsWorthPlanning - which compositions the AI is asked to plan
     const deps = await setup(provider, singleMasterManifest());
     const workMap = await generateAiWorkMapDraft(deps, deps.project.projectId, "Make a promo.");
     expect(workMap.entries[0]).toMatchObject({ sourceCompositionId: "comp-part-b", targetPlaceholderId: "comp-part-b-Headline", desiredText: "Hello" });
+  });
+});
+
+describe("buildAiSummary - what the client is shown the assistant read (real complaint 2026-10-02)", () => {
+  const raw = { entries: [], businessSummary: { productName: " Acme ", tagline: "", features: ["Fast", "", 7, "Safe"], tone: "calm", notes: null } };
+
+  it("says the website was read only when a read really succeeded - never on the model's word", () => {
+    expect(buildAiSummary(raw, "https://example.com/", { attempts: 2, errorCodes: [] }).websiteRead).toBe("READ");
+    expect(buildAiSummary(raw, "https://example.com/", { attempts: 4, errorCodes: ["a", "b", "c", "d"] }).websiteRead).toBe("FAILED");
+    expect(buildAiSummary(raw, "https://example.com/", { attempts: 0, errorCodes: [] }).websiteRead).toBe("FAILED");
+    expect(buildAiSummary(raw, "https://example.com/", undefined).websiteRead).toBe("FAILED");
+    expect(buildAiSummary(raw, null, undefined).websiteRead).toBe("NOT_GIVEN");
+  });
+
+  it("takes the model's account field by field, dropping blanks and non-text", () => {
+    expect(buildAiSummary(raw, null, undefined)).toMatchObject({ productName: "Acme", tagline: null, features: ["Fast", "Safe"], tone: "calm", notes: null });
+  });
+
+  it("a response with no summary at all still yields a valid, empty one - never a failed plan", () => {
+    expect(buildAiSummary([], null, undefined)).toEqual({ websiteUrl: null, websiteRead: "NOT_GIVEN", productName: null, tagline: null, features: [], tone: null, notes: null });
+  });
+
+  it("is stored with the plan, and a later hand edit keeps it", async () => {
+    const provider = new StubAiWorkMapProvider({
+      businessSummary: { productName: "Acme", tagline: null, features: ["Fast"], tone: null, notes: null },
+      entries: [{ sourceCompositionId: "comp-login", targetPlaceholderId: null, sourceReference: null, desiredAssetId: null, desiredText: "Hi", assetTimestampSeconds: null, desiredDurationSeconds: null, instructions: null }]
+    });
+    const deps = await setup(provider);
+    const drafted = await generateAiWorkMapDraft(deps, deps.project.projectId, "Make a promo.");
+    expect(drafted.aiSummary).toMatchObject({ productName: "Acme", features: ["Fast"], websiteRead: "NOT_GIVEN" });
+
+    const { updateWorkMap } = await import("../update-work-map.js");
+    const edited = await updateWorkMap({ workMapRepository: deps.workMapRepository, now: fixedNow }, deps.project.projectId, { baseRevision: drafted.revision, entries: drafted.entries });
+    expect(edited.aiSummary).toMatchObject({ productName: "Acme" });
   });
 });

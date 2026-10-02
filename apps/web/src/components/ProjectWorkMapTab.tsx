@@ -485,7 +485,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
         {entries.length === 0 ? (
           <EmptyState title={t.workMapTab.emptyTitle} description={t.workMapTab.emptyDescription} />
         ) : isSimple ? (
-          <SimpleWorkMapPlanView manifest={project.manifest} entries={entries} assets={assets} onEditPlan={() => setViewMode("manualForm")} />
+          <SimpleWorkMapPlanView manifest={project.manifest} entries={entries} assets={assets} onEditPlan={() => setViewMode("manualForm")} aiSummary={workMap?.aiSummary ?? null} projectId={projectId} />
         ) : (
           <div className="work-map-plan-preview" role="table">
             <div className="work-map-plan-preview__header" role="row">

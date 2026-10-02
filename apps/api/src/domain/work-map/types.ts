@@ -1,10 +1,11 @@
-import type { WorkMapEntry } from "@dyo/schemas";
+import type { WorkMapAiSummary, WorkMapEntry } from "@dyo/schemas";
 
 export interface WorkMapRecord {
   id: string;
   projectId: string;
   revision: number;
   entries: WorkMapEntry[];
+  aiSummary?: WorkMapAiSummary | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -14,6 +15,7 @@ export interface NewWorkMapRevision {
   projectId: string;
   revision: number;
   entries: WorkMapEntry[];
+  aiSummary?: WorkMapAiSummary | null;
 }
 
 /** Append-only, same pattern as ExecutionPlanRepository: createRevision never overwrites a prior row. */

@@ -246,7 +246,7 @@ describe("a template whose content lives in nested compositions (real failure 20
     it("groups them by the layer's own composition, in natural name order, with the layer's real name", () => {
       const groups = groupLayerPlanEntries(layerEntries, singleMasterManifest());
       expect(groups.map((group) => group.compositionName)).toEqual(["Part 2", "Part 10"]);
-      expect(groups[0]!.rows).toEqual([{ entry: layerEntries[2], layerName: "Headline", kind: "text" }]);
+      expect(groups[0]!.rows).toEqual([{ entry: layerEntries[2], layerName: "Headline", kind: "text", currentText: null }]);
     });
 
     it("never shows a row as reaching a layer that is not in this template", () => {

@@ -1471,3 +1471,30 @@ in it. Added a "Language of the text in the video" choice (English by default, H
 or as written), sent with the request.
 
 **Still unproven:** plan -> Match Your Content -> Scenes fields, on a real run.
+
+## 2026-10-02 - The plan showed nothing of what the assistant had read or used
+
+**First successful website read observed:** run at revision 3 of `fe32ffac-...`,
+`websiteFetchAttempts: 2`, `websiteFetchErrorCodes: []`, 105.8s, on-screen text in
+English as chosen. The plain-text address fix (`7a8474d`) is what made it work.
+
+**User report:** "the data is fetched fine, but where is it? How does the user know
+what was fetched - logo, texts, details?" and "approve what, with no picture?"
+
+**Fix - the plan now presents what the assistant did:**
+- "What the assistant used": whether the website was read (decided from the fetch
+  tool's own outcome, never the model's word), the name, tagline, features and tone
+  it understood, and the client's uploaded files as real pictures, each marked used
+  or not used in the plan.
+- Each text layer shows the template's own wording struck through beside the new
+  line; each image layer shows the chosen file as a picture.
+- "Approve AI Plan" renamed "Continue to Scenes", with a line saying nothing is
+  final and the real preview comes before any approval of the video.
+- Stored as `project_work_maps.ai_summary` (migration 0028, one nullable column).
+  A hand edit keeps the summary.
+
+**Limits stated to the user:** the assistant does not fetch a logo or colours from
+the website (the fetch tool returns page text only); the logo is the uploaded file.
+No rendered frame exists at this step - a real picture of the video comes only from
+After Effects, after the Scenes step. Plans written before this change have no
+summary until created again.

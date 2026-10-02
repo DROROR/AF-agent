@@ -7,6 +7,7 @@ export function toWorkMapDto(record: WorkMapRecord): WorkMap {
     projectId: record.projectId,
     revision: record.revision,
     entries: record.entries,
+    aiSummary: record.aiSummary ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString()
   };

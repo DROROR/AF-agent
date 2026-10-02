@@ -1,4 +1,4 @@
-import { updateWorkMapRequestSchema, type TemplateManifest, type WorkMap } from "@dyo/schemas";
+import { updateWorkMapRequestSchema, type TemplateManifest, type WorkMap, type WorkMapAiSummary } from "@dyo/schemas";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError, ProjectNotFoundError } from "../../errors/app-error.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -43,6 +43,31 @@ const WORK_MAP_DRAFT_ENTRY_SCHEMA = updateWorkMapRequestSchema.shape.entries.ele
  * A manifest with no scenes and no placeholders at all falls back to every
  * composition - the previous behaviour - rather than sending nothing.
  */
+const nonEmpty = (value: unknown): string | null => (typeof value === "string" && value.trim() !== "" ? value.trim() : null);
+
+/**
+ * The summary shown to the client beside the plan. Whether the website was
+ * read is decided HERE, from the fetch tool's own outcomes - at least one
+ * read that did not fail - and never from anything the model wrote. The
+ * model's own account of the business is taken field by field, and anything
+ * malformed degrades to null/empty rather than failing a good plan.
+ */
+export function buildAiSummary(raw: unknown, websiteUrl: string | null, webFetch: { attempts: number; errorCodes: string[] } | undefined): WorkMapAiSummary {
+  const websiteRead = websiteUrl === null ? "NOT_GIVEN" : webFetch !== undefined && webFetch.attempts > webFetch.errorCodes.length ? "READ" : "FAILED";
+  const summary = typeof raw === "object" && raw !== null && "businessSummary" in raw ? (raw as { businessSummary: unknown }).businessSummary : null;
+  const fields = typeof summary === "object" && summary !== null ? (summary as Record<string, unknown>) : {};
+  const features = Array.isArray(fields.features) ? fields.features.map(nonEmpty).filter((value): value is string => value !== null).slice(0, 12) : [];
+  return {
+    websiteUrl,
+    websiteRead,
+    productName: nonEmpty(fields.productName),
+    tagline: nonEmpty(fields.tagline),
+    features,
+    tone: nonEmpty(fields.tone),
+    notes: nonEmpty(fields.notes)
+  };
+}
+
 /** Enough of a text layer's own wording for the AI to see how long a line the template was designed for - never the whole of a long paragraph. */
 const CURRENT_TEXT_PREVIEW_LENGTH = 120;
 
@@ -198,5 +223,6 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
   }
 
   const baseRevision = currentWorkMap?.revision ?? 0;
-  return updateWorkMap({ workMapRepository: deps.workMapRepository, now: deps.now }, projectId, { baseRevision, entries: validEntries });
+  const aiSummary = buildAiSummary(result.entries, project.brandInputs?.websiteUrl ?? null, result.metadata.webFetch);
+  return updateWorkMap({ workMapRepository: deps.workMapRepository, now: deps.now }, projectId, { baseRevision, entries: validEntries }, aiSummary);
 }

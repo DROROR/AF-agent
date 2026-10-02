@@ -3928,3 +3928,151 @@ a.workflow-stepper__step:hover {
   color: var(--color-text-muted);
   font-size: 0.875rem;
 }
+
+/* AI Plan - "What the assistant used" and before/after rows. */
+.ai-used {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: var(--color-surface-sunken);
+}
+
+.ai-used__title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.ai-used__website {
+  margin: 0 0 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.ai-used__website--read {
+  color: var(--color-positive-text);
+}
+
+.ai-used__website--failed {
+  color: var(--color-negative-text);
+}
+
+.ai-used__facts {
+  margin: 0 0 0.75rem;
+  display: grid;
+  gap: 0.375rem;
+}
+
+.ai-used__facts > div {
+  display: grid;
+  grid-template-columns: minmax(6rem, 22%) 1fr;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.ai-used__facts dt {
+  color: var(--color-text-muted);
+}
+
+.ai-used__facts dd {
+  margin: 0;
+}
+
+.ai-used__chips {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.ai-used__chips li {
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.ai-used__notes {
+  margin: 0 0 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.ai-used__files-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.ai-used__files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.ai-used__file {
+  width: 7.5rem;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.ai-used__file img,
+.ai-used__file-kind {
+  width: 100%;
+  height: 6rem;
+  object-fit: contain;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+}
+
+.ai-used__file-kind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.ai-used__file-name {
+  overflow-wrap: anywhere;
+}
+
+.ai-used__badge {
+  color: var(--color-text-faint);
+}
+
+.ai-used__badge--used {
+  color: var(--color-positive-text);
+  font-weight: 600;
+}
+
+.layer-plan-card__row dd {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.layer-plan-card__was {
+  color: var(--color-text-faint);
+  text-decoration: line-through;
+  font-size: 0.8125rem;
+}
+
+.layer-plan-card__was-label {
+  text-decoration: none;
+  display: inline-block;
+}
+
+.layer-plan-card__thumb {
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: contain;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  background: var(--color-surface-sunken);
+}

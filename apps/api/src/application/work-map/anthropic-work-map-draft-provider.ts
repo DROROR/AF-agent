@@ -61,6 +61,19 @@ export function webFetchAllowedDomain(websiteUrl: string): string | null {
 export const WORK_MAP_DRAFT_SCHEMA = {
   type: "object",
   properties: {
+    businessSummary: {
+      type: "object",
+      description: "What you understood about the client's business from their own words and, if you read it, their website. State only what was actually written there - null or an empty list where nothing was.",
+      properties: {
+        productName: { type: ["string", "null"], description: "The product or business name as the client or their site states it." },
+        tagline: { type: ["string", "null"], description: "Their own tagline or one-line description, in their words." },
+        features: { type: "array", items: { type: "string" }, description: "Features or services they actually name. At most 8, each a few words." },
+        tone: { type: ["string", "null"], description: "Their tone in a few words, e.g. 'formal and official'." },
+        notes: { type: ["string", "null"], description: "One short sentence on anything the client should know, e.g. that the site had little usable text. Null if nothing." }
+      },
+      required: ["productName", "tagline", "features", "tone", "notes"],
+      additionalProperties: false
+    },
     entries: {
       type: "array",
       items: {
@@ -89,7 +102,10 @@ export const WORK_MAP_DRAFT_SCHEMA = {
       }
     }
   },
-  required: ["entries"],
+  // What the model understood about the business - shown to the client
+  // beside the plan. Required so it is always stated, with nulls/an empty
+  // list where nothing real was found rather than a guess.
+  required: ["entries", "businessSummary"],
   additionalProperties: false
 } as const;
 
