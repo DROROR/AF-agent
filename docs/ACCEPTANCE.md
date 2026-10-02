@@ -1393,3 +1393,32 @@ and left three scenes blank rather than invent features. **A successful website 
 has still never been observed** - it needs a test against a site that does not block
 automated requests. The provider now logs `websiteFetchAttempts` and
 `websiteFetchErrorCodes` so the reason is in our own log next time.
+
+## 2026-10-02 - The AI plan read well and reached no layer
+
+**User report:** eleven near-identical cards, no preview, and "is the Scenes tab not
+the same thing?" - the plan screen gave no sign of leading anywhere.
+
+**Root cause, read from code:** `buildEvidenceBundles` attached a Work Map row to a
+scene by `sourceCompositionId === scene.manifestCompositionId`. In a single-master
+template every mapping belongs to the one master scene, while the AI's rows named the
+nested compositions where the text and image layers actually sit. No row matched, so
+approving the plan and running "Match Your Content" would have carried none of the
+AI's text or its screenshot placement into the Scenes fields. A row also held one
+text per composition, so three text layers in one composition could not differ.
+
+**Fix:**
+- `workMapEntrySchema.targetPlaceholderId` (optional): a row may name one layer by
+  its stable manifest placeholderId.
+- The AI is given each layer's placeholderId, name, kind and current text, and
+  writes one row per layer. Ids it returns are checked against the manifest: an
+  unknown id is dropped, a real one has its composition corrected.
+- `buildEvidenceBundles` prefers the row naming a mapping's own layer, and a layer
+  row is never used as the scene's own row.
+- Simple Mode shows layer rows as one short card per composition (layer name ->
+  what goes on it) instead of one boilerplate card per row.
+
+**Not yet proven live:** the whole chain plan -> Match Your Content -> accepted
+suggestion -> Scenes field. Each link is unit-tested; no real run has been observed.
+Plans saved before this change carry no layer ids and must be created again.
+Colours are still not part of the AI's output.

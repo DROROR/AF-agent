@@ -31,7 +31,20 @@ export const workMapEntrySchema = z
     /** Seconds into the desired asset, if it's a video - client intent, not yet a confirmed execution instruction. */
     assetTimestampSeconds: z.number().nonnegative().nullable(),
     desiredDurationSeconds: z.number().positive().nullable(),
-    instructions: z.string().min(1).nullable()
+    instructions: z.string().min(1).nullable(),
+    /**
+     * The ONE editable layer this row is about, by its stable manifest
+     * placeholderId - or null/absent for a row about a whole scene.
+     *
+     * Real gap, 2026-10-02: a row could only name a composition, and was
+     * matched to a scene by that composition alone. A template whose text
+     * and image layers all live in nested compositions therefore had rows
+     * that reached no layer at all - the plan read well and changed
+     * nothing. A row naming its layer reaches exactly that layer, wherever
+     * in the nesting it sits. Optional so every Work Map written before
+     * this field existed still parses unchanged.
+     */
+    targetPlaceholderId: z.string().min(1).nullable().optional()
   })
   .strict();
 export type WorkMapEntry = z.infer<typeof workMapEntrySchema>;

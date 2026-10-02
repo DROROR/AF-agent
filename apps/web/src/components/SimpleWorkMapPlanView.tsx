@@ -2,7 +2,17 @@
 
 import type { ReactElement } from "react";
 import type { AssetDto, TemplateManifest, WorkMapEntry } from "@dyo/schemas";
-import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions, isTopLevelPlanEntry, orderPlanEntriesForSimpleMode } from "../lib/simple-work-map-plan";
+import {
+  computeSimpleAiPlanSummary,
+  filterWorkMapEntriesForSimpleMode,
+  groupLayerPlanEntries,
+  hasAnyEditablePlaceholder,
+  hasClientFacingInstructions,
+  isTopLevelPlanEntry,
+  orderPlanEntriesForSimpleMode,
+  sceneLevelPlanEntries,
+  type LayerPlanGroup
+} from "../lib/simple-work-map-plan";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./EmptyState";
@@ -135,6 +145,29 @@ export function PlanCard({ entry, index, total, sceneNameByCompositionId, assetB
   );
 }
 
+/**
+ * One composition's layer rows as a single short card: the layer's own
+ * name on the left, what goes on it on the right. Real complaint,
+ * 2026-10-02: eleven cards each repeating the same four-line "AI plans
+ * to" checklist and "Scene preview not generated yet" box buried the only
+ * lines that mattered. This card carries nothing but those lines.
+ */
+export function LayerPlanCard({ group, assetById }: { group: LayerPlanGroup; assetById: Map<string, AssetDto> }): ReactElement {
+  return (
+    <Card className="layer-plan-card">
+      <h4 className="layer-plan-card__title">{group.compositionName}</h4>
+      <dl className="layer-plan-card__rows">
+        {group.rows.map((row) => (
+          <div key={row.entry.id} className="layer-plan-card__row">
+            <dt>{row.layerName}</dt>
+            <dd>{row.entry.desiredText ?? resolveAssetLabel(row.entry, assetById) ?? row.entry.instructions ?? "—"}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
 export interface SimpleWorkMapPlanViewProps {
   manifest: TemplateManifest;
   entries: WorkMapEntry[];
@@ -160,7 +193,11 @@ export function SimpleWorkMapPlanView({ manifest, entries, assets, onEditPlan }:
   const sceneNameByCompositionId = new Map(manifest.compositions.map((composition) => [composition.compositionId, composition.name]));
   const assetById = new Map((assets ?? []).map((asset) => [asset.id, asset]));
   // const visibleEntries = filterWorkMapEntriesForSimpleMode(entries, manifest);
-  const visibleEntries = orderPlanEntriesForSimpleMode(filterWorkMapEntriesForSimpleMode(entries, manifest), manifest);
+  // Rows that name a layer are shown grouped, one short card per
+  // composition; only the remaining scene-level rows become full cards.
+  const layerGroups = groupLayerPlanEntries(entries, manifest);
+  // const visibleEntries = orderPlanEntriesForSimpleMode(filterWorkMapEntriesForSimpleMode(entries, manifest), manifest);
+  const visibleEntries = orderPlanEntriesForSimpleMode(filterWorkMapEntriesForSimpleMode(sceneLevelPlanEntries(entries, manifest), manifest), manifest);
   // "Scene N" numbering counts only real top-level scenes - a nested part
   // is titled by its own name and never takes a number.
   const topLevelEntries = visibleEntries.filter((entry) => isTopLevelPlanEntry(entry, manifest));
@@ -177,8 +214,22 @@ export function SimpleWorkMapPlanView({ manifest, entries, assets, onEditPlan }:
 
       {showNoPlaceholdersNotice ? <p className="plan-summary__notice">{s.noPlaceholdersNotice}</p> : null}
 
+      {layerGroups.length > 0 ? (
+        <section className="layer-plan">
+          <h3 className="layer-plan__title">{s.layerPlanTitle}</h3>
+          <p className="layer-plan__hint">{s.layerPlanHint}</p>
+          <div className="layer-plan__grid">
+            {layerGroups.map((group) => (
+              <LayerPlanCard key={group.compositionId} group={group} assetById={assetById} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {visibleEntries.length === 0 ? (
+        layerGroups.length > 0 ? null : (
         <EmptyState title={t.workMapTab.emptyTitle} description={t.workMapTab.emptyDescription} />
+        )
       ) : (
         <div className="plan-cards-grid">
           {visibleEntries.map((entry, index) => (

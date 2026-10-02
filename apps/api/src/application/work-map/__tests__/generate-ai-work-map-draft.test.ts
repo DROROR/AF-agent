@@ -8,7 +8,7 @@ import { uploadAsset } from "../../asset/upload-asset.js";
 import { InMemoryAssetStorage } from "../../asset/test-support/in-memory-asset-storage.js";
 import { InMemoryWorkMapRepository } from "../test-support/in-memory-work-map-repository.js";
 import { InMemorySceneEvidenceRepository } from "../../job/test-support/in-memory-scene-evidence-repository.js";
-import { compositionsWorthPlanning, generateAiWorkMapDraft } from "../generate-ai-work-map-draft.js";
+import { compositionsWorthPlanning, generateAiWorkMapDraft, reconcileTargetPlaceholder } from "../generate-ai-work-map-draft.js";
 import { WorkMapDraftNotConfiguredError, type AiWorkMapDraftInput, type AiWorkMapDraftResult, type AiWorkMapMetadata, type AiWorkMapProvider } from "../ai-work-map-provider.js";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError } from "../../../errors/app-error.js";
 
@@ -227,9 +227,12 @@ describe("compositionsWorthPlanning - which compositions the AI is asked to plan
 
   it("names each composition's own editable layers with their kind", () => {
     const byId = new Map(compositionsWorthPlanning(singleMasterManifest()).map((entry) => [entry.id, entry.editableLayers]));
-    expect(byId.get("comp-master")).toEqual(["Backdrop (color)"]);
-    expect(byId.get("comp-part-a")).toEqual(["Headline (text)", "Screenshot (image)"]);
-    expect(byId.get("comp-part-b")).toEqual(["Headline (text)"]);
+    expect(byId.get("comp-master")).toEqual([{ placeholderId: "comp-master-Backdrop", name: "Backdrop", kind: "color", currentText: null }]);
+    expect(byId.get("comp-part-a")).toEqual([
+      { placeholderId: "comp-part-a-Headline", name: "Headline", kind: "text", currentText: null },
+      { placeholderId: "comp-part-a-Screenshot", name: "Screenshot", kind: "image", currentText: null }
+    ]);
+    expect(byId.get("comp-part-b")).toEqual([{ placeholderId: "comp-part-b-Headline", name: "Headline", kind: "text", currentText: null }]);
   });
 
   it("keeps a scene that has no placeholders at all - it is still a scene the client can ask about", () => {
@@ -249,5 +252,38 @@ describe("compositionsWorthPlanning - which compositions the AI is asked to plan
     const deps = await setup(provider, singleMasterManifest());
     await generateAiWorkMapDraft(deps, deps.project.projectId, "Make a promo.");
     expect(provider.lastInput?.compositions.map((entry) => entry.id)).toEqual(["comp-master", "comp-part-a", "comp-part-b"]);
+  });
+
+  it("passes a text layer's own wording, cut to a short preview", () => {
+    const m = singleMasterManifest();
+    m.scenes[0]!.placeholders[1] = { ...m.scenes[0]!.placeholders[1]!, originalText: "x".repeat(500) };
+    const layer = compositionsWorthPlanning(m).find((entry) => entry.id === "comp-part-b")!.editableLayers[0]!;
+    expect(layer.currentText).toHaveLength(120);
+  });
+
+  describe("reconcileTargetPlaceholder - a row's claim to a layer is never taken on trust", () => {
+    const row = { sourceCompositionId: "comp-master", targetPlaceholderId: "comp-part-a-Headline" };
+
+    it("moves a row onto the composition its layer really sits in", () => {
+      expect(reconcileTargetPlaceholder(row, singleMasterManifest())).toEqual({ sourceCompositionId: "comp-part-a", targetPlaceholderId: "comp-part-a-Headline" });
+    });
+
+    it("drops an id that is not a layer of this template, keeping the row as a note", () => {
+      expect(reconcileTargetPlaceholder({ ...row, targetPlaceholderId: "invented" }, singleMasterManifest())).toEqual({ sourceCompositionId: "comp-master", targetPlaceholderId: null });
+    });
+
+    it("leaves a row that names no layer exactly as it was", () => {
+      const sceneRow = { sourceCompositionId: "comp-master", targetPlaceholderId: null };
+      expect(reconcileTargetPlaceholder(sceneRow, singleMasterManifest())).toBe(sceneRow);
+    });
+  });
+
+  it("a row naming a layer is stored with that layer's id and real composition", async () => {
+    const provider = new StubAiWorkMapProvider({
+      entries: [{ sourceCompositionId: "comp-master", targetPlaceholderId: "comp-part-b-Headline", sourceReference: null, desiredAssetId: null, desiredText: "Hello", assetTimestampSeconds: null, desiredDurationSeconds: null, instructions: null }]
+    });
+    const deps = await setup(provider, singleMasterManifest());
+    const workMap = await generateAiWorkMapDraft(deps, deps.project.projectId, "Make a promo.");
+    expect(workMap.entries[0]).toMatchObject({ sourceCompositionId: "comp-part-b", targetPlaceholderId: "comp-part-b-Headline", desiredText: "Hello" });
   });
 });

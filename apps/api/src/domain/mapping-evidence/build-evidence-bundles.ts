@@ -32,8 +32,12 @@ export function buildEvidenceBundles(input: BuildEvidenceBundlesInput): MappingE
       continue;
     }
 
+    // The row for the scene as a whole. A row that names one layer is never
+    // it, even when that layer sits directly in this scene's composition -
+    // otherwise one layer's text would be offered to every layer here.
+    // Was: input.workMap?.entries.find((entry) => entry.sourceCompositionId === scene.manifestCompositionId) ?? null;
     const workMapEntry =
-      input.workMap?.entries.find((entry) => entry.sourceCompositionId === scene.manifestCompositionId) ?? null;
+      input.workMap?.entries.find((entry) => entry.sourceCompositionId === scene.manifestCompositionId && (entry.targetPlaceholderId === undefined || entry.targetPlaceholderId === null)) ?? null;
     const sceneEvidence = sceneEvidenceByCompositionId.get(scene.manifestCompositionId) ?? null;
 
     const shared = {
@@ -63,8 +67,15 @@ export function buildEvidenceBundles(input: BuildEvidenceBundlesInput): MappingE
       if (mapping.selectedAssetId !== null) {
         continue;
       }
+      // A row that names THIS layer outranks the row for the scene as a
+      // whole - it is the more specific statement of what the client wants,
+      // and the only one that can reach a layer living in a nested
+      // composition (see workMapEntrySchema.targetPlaceholderId). No such
+      // row: the scene's own row, exactly as before.
+      const layerEntry = mapping.manifestPlaceholderId === null ? null : (input.workMap?.entries.find((entry) => entry.targetPlaceholderId === mapping.manifestPlaceholderId) ?? null);
       bundles.push({
         ...shared,
+        ...(layerEntry !== null ? { workMapEntry: layerEntry } : {}),
         mappingId: mapping.id,
         manifestPlaceholderId: mapping.manifestPlaceholderId,
         placeholderName: mapping.placeholderName,

@@ -9,11 +9,19 @@ export interface AiWorkMapMetadata {
   webFetch?: { attempts: number; errorCodes: string[] };
 }
 
+/** One layer a client can change: its stable id (what a plan row must copy to reach it), its own name, its kind, and the template's current text when it is a text layer. */
+export interface AiEditableLayer {
+  placeholderId: string;
+  name: string;
+  kind: string;
+  currentText: string | null;
+}
+
 export interface AiWorkMapDraftInput {
   /** The client's own free-text description of what they want - the only field here that is not already-structured project data. */
   instructions: string;
-  /** Only the compositions worth an entry (see compositionsWorthPlanning). `editableLayers` names the layers a client can really change there, e.g. "Text A (text)". */
-  compositions: Array<{ id: string; name: string; editableLayers?: string[] }>;
+  /** Only the compositions worth an entry (see compositionsWorthPlanning), each with the layers a client can really change there. */
+  compositions: Array<{ id: string; name: string; editableLayers?: AiEditableLayer[] }>;
   candidateAssets: Array<{ id: string; originalFilename: string; label: string | null; mediaKind: string }>;
   /** The project's current Work Map entries, if any - context only, never silently reused verbatim (the model still returns a complete new set). */
   existingEntries: WorkMapEntry[];

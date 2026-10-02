@@ -1021,6 +1021,8 @@ export const he: Dictionary = {
         summaryUnresolved: (n: number): string => `${n} פריטים לא פתורים`,
         noPlaceholdersNotice:
           "הבינה המלאכותית בדקה את התבנית הזו אך לא זיהתה פלייסהולדרים ניתנים לעריכה סטנדרטיים. DYO יכולה לשמר את האנימציה והמבנה המקונן המקוריים, אך החלפות אוטומטיות יבוצעו רק כאשר מיפוי בטוח מאושר.",
+        layerPlanTitle: "מה ישתנה",
+        layerPlanHint: "כל שורה היא שכבה אחת בתבנית ומה שיופיע בה. בודקים ומתקנים אותן בלשונית הסצנות לפני שמשהו נוצר.",
         thumbnailPlaceholder: "תצוגת הסצנה טרם נוצרה",
         sceneTitleMain: "הסצנה הראשית",
         sceneTitleNumbered: (n: number): string => `סצנה ${n}`,

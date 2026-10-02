@@ -70,6 +70,10 @@ export const WORK_MAP_DRAFT_SCHEMA = {
             type: ["string", "null"],
             description: "Copy verbatim from the real compositions list you were given. Null only if truly no matching scene exists."
           },
+          targetPlaceholderId: {
+            type: ["string", "null"],
+            description: "The ONE editable layer this row changes: copy its placeholderId verbatim from that composition's editableLayers. Null only for a row that is a note about a whole composition and changes no layer."
+          },
           sourceReference: { type: ["string", "null"], description: "A short human label for this row, e.g. the scene's own name. Never an empty string." },
           desiredAssetId: {
             type: ["string", "null"],
@@ -80,7 +84,7 @@ export const WORK_MAP_DRAFT_SCHEMA = {
           desiredDurationSeconds: { type: ["number", "null"], description: "Positive number of seconds when provided; otherwise null." },
           instructions: { type: ["string", "null"], description: "Any extra layout/branding notes for this scene. Null if none. Never an empty string." }
         },
-        required: ["sourceCompositionId", "sourceReference", "desiredAssetId", "desiredText", "assetTimestampSeconds", "desiredDurationSeconds", "instructions"],
+        required: ["sourceCompositionId", "targetPlaceholderId", "sourceReference", "desiredAssetId", "desiredText", "assetTimestampSeconds", "desiredDurationSeconds", "instructions"],
         additionalProperties: false
       }
     }
@@ -89,13 +93,17 @@ export const WORK_MAP_DRAFT_SCHEMA = {
   additionalProperties: false
 } as const;
 
-const SYSTEM_PROMPT = `You are a video-planning assistant for a deterministic After Effects automation system. A real client described what they want, in their own words. You translate that into a structured Work Map: one entry per real template scene (composition), naming which real asset (if any) and text (if any) the client wants there. A human reviews and can edit every entry before anything is applied - nothing you return is ever applied automatically.
+const SYSTEM_PROMPT = `You are a video-planning assistant for a deterministic After Effects automation system. A real client described what they want, in their own words. You translate that into a structured Work Map: one entry per editable layer the client wants changed, naming the real asset or the text that belongs on that layer. A human reviews and can edit every entry before anything is applied - nothing you return is ever applied automatically.
 
 Hard rules, never violated:
 - You ONLY ever call the ${TOOL_NAME} tool with structured entries. You never write prose, JSX, shell commands, file paths, or render instructions anywhere in your response.
 - Every sourceCompositionId you propose MUST be copied verbatim from the "compositions" list you were given - never invent one.
 - Every desiredAssetId you propose MUST be copied verbatim from the "candidateAssets" id field you were given - never invent one, never reuse an id for content it clearly does not match.
-- Each composition lists its "editableLayers" - the layers a person can really change there, with their kind (text, image, video, color). Only propose text for a composition that has a text layer, and only propose an asset for one that has an image or video layer. A composition with no editable layers of the kind needed gets null.
+- Each composition lists its "editableLayers" - the layers a person can really change there. Each has a placeholderId, its own name, its kind (text, image, video, logo, phone_screen, color) and, for text, the template's currentText.
+- Write ONE entry PER LAYER you want changed, not one per composition. Set targetPlaceholderId to that layer's placeholderId, copied verbatim, and sourceCompositionId to the composition that lists it. A composition with three text layers that should all change gets three entries, each with its own desiredText.
+- desiredText only on a layer whose kind is text. desiredAssetId only on a layer whose kind is image, video, logo or phone_screen. Never both on the same entry. Never propose anything for a color layer - colours are chosen by a person.
+- Keep each desiredText about as long as that layer's currentText: the template was designed around that length, and a much longer line will not fit.
+- Leave a layer out entirely when it should stay as the template has it, or when you have nothing real to put there. Do not write an entry just to say a layer is unchanged.
 - If the client's instructions do not clearly indicate what belongs in a scene, leave desiredAssetId and desiredText as null for that scene rather than guessing - a null/empty entry is far better than a wrong one, and the client can always fill it in themselves. This matters most for structural template elements (camera layers, masks, phone-frame artwork, decorative shapes, backgrounds) - never assign real content to these unless the client's own instructions clearly call for it.
 - You have no ability to execute code, access the filesystem, control a real application, or take any action beyond returning this one structured tool call. Do not claim otherwise in any field.`;
 

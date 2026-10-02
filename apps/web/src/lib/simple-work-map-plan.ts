@@ -119,3 +119,52 @@ export function orderPlanEntriesForSimpleMode(entries: WorkMapEntry[], manifest:
 export function hasClientFacingInstructions(entry: WorkMapEntry): boolean {
   return entry.instructions !== null && entry.instructions.trim() !== "";
 }
+
+/** One layer the plan changes, with the manifest's own facts about that layer. */
+export interface LayerPlanRow {
+  entry: WorkMapEntry;
+  layerName: string;
+  kind: string;
+}
+
+/** Every layer row for one composition - one card on screen. */
+export interface LayerPlanGroup {
+  compositionId: string;
+  compositionName: string;
+  rows: LayerPlanRow[];
+}
+
+/**
+ * The rows that name a real layer (targetPlaceholderId), grouped by the
+ * composition that layer sits in and put in natural name order - so the
+ * client reads "Part 1: headline, subtitle; Part 2: ..." instead of one
+ * card per row. A row whose id is not a placeholder of this template is
+ * left out here and stays an ordinary scene-level row (see
+ * sceneLevelPlanEntries) - never shown as though it reached a layer.
+ */
+export function groupLayerPlanEntries(entries: WorkMapEntry[], manifest: TemplateManifest): LayerPlanGroup[] {
+  const placeholderById = new Map(manifest.scenes.flatMap((scene) => scene.placeholders.map((placeholder) => [placeholder.placeholderId, placeholder] as const)));
+  const nameById = new Map(manifest.compositions.map((composition) => [composition.compositionId, composition.name]));
+  const groups = new Map<string, LayerPlanGroup>();
+  for (const entry of entries) {
+    const placeholder = entry.targetPlaceholderId ? placeholderById.get(entry.targetPlaceholderId) : undefined;
+    if (!placeholder) {
+      continue;
+    }
+    const group = groups.get(placeholder.compositionId) ?? { compositionId: placeholder.compositionId, compositionName: nameById.get(placeholder.compositionId) ?? placeholder.compositionId, rows: [] };
+    group.rows.push({ entry, layerName: placeholder.layerName, kind: placeholder.placeholderType });
+    groups.set(placeholder.compositionId, group);
+  }
+  const natural = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  const ordered = [...groups.values()].sort((a, b) => natural(a.compositionName, b.compositionName));
+  for (const group of ordered) {
+    group.rows.sort((a, b) => natural(a.layerName, b.layerName));
+  }
+  return ordered;
+}
+
+/** Every row that is NOT shown as a layer row by groupLayerPlanEntries - the scene-level rows, in their given order. */
+export function sceneLevelPlanEntries(entries: WorkMapEntry[], manifest: TemplateManifest): WorkMapEntry[] {
+  const shownAsLayer = new Set(groupLayerPlanEntries(entries, manifest).flatMap((group) => group.rows.map((row) => row.entry.id)));
+  return entries.filter((entry) => !shownAsLayer.has(entry.id));
+}

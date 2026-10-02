@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Composition, TemplateManifest, WorkMapEntry } from "@dyo/schemas";
-import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions, isTopLevelPlanEntry, orderPlanEntriesForSimpleMode } from "./simple-work-map-plan";
+import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, groupLayerPlanEntries, hasClientFacingInstructions, isTopLevelPlanEntry, orderPlanEntriesForSimpleMode, sceneLevelPlanEntries } from "./simple-work-map-plan";
 
 function composition(overrides: Partial<Composition> = {}): Composition {
   return {
@@ -233,5 +233,34 @@ describe("a template whose content lives in nested compositions (real failure 20
     expect(isTopLevelPlanEntry(entry({ sourceCompositionId: "master" }), m)).toBe(true);
     expect(isTopLevelPlanEntry(entry({ sourceCompositionId: "part-2" }), m)).toBe(false);
     expect(isTopLevelPlanEntry(entry({ sourceCompositionId: null }), m)).toBe(true);
+  });
+
+  describe("rows that name a layer", () => {
+    const layerEntries = [
+      entry({ id: "r-10", sourceCompositionId: "part-10", targetPlaceholderId: "part-10-Headline", desiredText: "Ten" }),
+      entry({ id: "r-note", sourceCompositionId: "master", instructions: "A note about the whole video" }),
+      entry({ id: "r-2", sourceCompositionId: "part-2", targetPlaceholderId: "part-2-Headline", desiredText: "Two" }),
+      entry({ id: "r-ghost", sourceCompositionId: "part-2", targetPlaceholderId: "no-such-layer", desiredText: "Lost" })
+    ];
+
+    it("groups them by the layer's own composition, in natural name order, with the layer's real name", () => {
+      const groups = groupLayerPlanEntries(layerEntries, singleMasterManifest());
+      expect(groups.map((group) => group.compositionName)).toEqual(["Part 2", "Part 10"]);
+      expect(groups[0]!.rows).toEqual([{ entry: layerEntries[2], layerName: "Headline", kind: "text" }]);
+    });
+
+    it("never shows a row as reaching a layer that is not in this template", () => {
+      const shown = groupLayerPlanEntries(layerEntries, singleMasterManifest()).flatMap((group) => group.rows.map((row) => row.entry.id));
+      expect(shown).not.toContain("r-ghost");
+    });
+
+    it("leaves every other row as a scene-level row, so nothing is shown twice or dropped", () => {
+      expect(sceneLevelPlanEntries(layerEntries, singleMasterManifest()).map((e) => e.id)).toEqual(["r-note", "r-ghost"]);
+    });
+
+    it("a plan with no layer rows groups to nothing - an older plan is shown exactly as before", () => {
+      expect(groupLayerPlanEntries(entries, singleMasterManifest())).toEqual([]);
+      expect(sceneLevelPlanEntries(entries, singleMasterManifest())).toEqual(entries);
+    });
   });
 });

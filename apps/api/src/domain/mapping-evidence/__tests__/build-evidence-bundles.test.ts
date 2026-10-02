@@ -151,4 +151,55 @@ describe("buildEvidenceBundles", () => {
     expect(bundles[0]?.userInstructions).toBe("Use the client's own hero shot");
     expect(bundles[0]?.brandInputs?.logoAssetId).toBe("asset-7");
   });
+
+  describe("a Work Map row that names one layer (real gap 2026-10-02)", () => {
+    const row = (overrides: Record<string, unknown>) => ({
+      id: "e",
+      sourceCompositionId: "comp-1",
+      sourceReference: null,
+      desiredAssetId: null,
+      desiredText: null,
+      assetTimestampSeconds: null,
+      desiredDurationSeconds: null,
+      instructions: null,
+      ...overrides
+    });
+    const workMapOf = (entries: ReturnType<typeof row>[]) => ({ entries }) as unknown as Parameters<typeof buildEvidenceBundles>[0]["workMap"];
+    const twoLayers = scene({
+      manifestCompositionId: "comp-1",
+      mappings: [mapping({ id: "m-a", manifestPlaceholderId: "ph-a" }), mapping({ id: "m-b", manifestPlaceholderId: "ph-b" })]
+    });
+
+    it("reaches exactly its own layer, even when the row sits on a nested composition the scene is not", () => {
+      const bundles = buildEvidenceBundles({
+        scenePlans: [twoLayers],
+        assets: [],
+        workMap: workMapOf([row({ id: "e-a", sourceCompositionId: "nested-7", targetPlaceholderId: "ph-a", desiredText: "For A" })]),
+        brandInputs: null
+      });
+      expect(bundles.find((bundle) => bundle.mappingId === "m-a")?.workMapEntry?.desiredText).toBe("For A");
+      expect(bundles.find((bundle) => bundle.mappingId === "m-b")?.workMapEntry).toBeNull();
+    });
+
+    it("is never mistaken for the scene's own row - one layer's text is not offered to its neighbours", () => {
+      const bundles = buildEvidenceBundles({
+        scenePlans: [twoLayers],
+        assets: [],
+        workMap: workMapOf([row({ id: "e-a", sourceCompositionId: "comp-1", targetPlaceholderId: "ph-a", desiredText: "For A" })]),
+        brandInputs: null
+      });
+      expect(bundles.find((bundle) => bundle.mappingId === "m-b")?.workMapEntry).toBeNull();
+    });
+
+    it("outranks the scene's own row for its layer; other layers keep the scene's row as before", () => {
+      const bundles = buildEvidenceBundles({
+        scenePlans: [twoLayers],
+        assets: [],
+        workMap: workMapOf([row({ id: "e-scene", desiredText: "Whole scene" }), row({ id: "e-a", targetPlaceholderId: "ph-a", desiredText: "For A" })]),
+        brandInputs: null
+      });
+      expect(bundles.find((bundle) => bundle.mappingId === "m-a")?.workMapEntry?.id).toBe("e-a");
+      expect(bundles.find((bundle) => bundle.mappingId === "m-b")?.workMapEntry?.id).toBe("e-scene");
+    });
+  });
 });

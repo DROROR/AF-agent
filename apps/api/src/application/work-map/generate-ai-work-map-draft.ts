@@ -5,7 +5,7 @@ import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.
 import type { ProjectRepository } from "../../domain/project/types.js";
 import type { WorkMapRepository } from "../../domain/work-map/types.js";
 import type { SceneEvidenceRepository } from "../../domain/scene-evidence/types.js";
-import type { AiWorkMapProvider } from "./ai-work-map-provider.js";
+import type { AiEditableLayer, AiWorkMapProvider } from "./ai-work-map-provider.js";
 import { updateWorkMap } from "./update-work-map.js";
 
 /** Same structural logging seam as MappingSuggestionsFunnelLogger (generate-mapping-suggestions.ts) - optional, counts/metadata only, never raw content. */
@@ -43,14 +43,42 @@ const WORK_MAP_DRAFT_ENTRY_SCHEMA = updateWorkMapRequestSchema.shape.entries.ele
  * A manifest with no scenes and no placeholders at all falls back to every
  * composition - the previous behaviour - rather than sending nothing.
  */
-export function compositionsWorthPlanning(manifest: TemplateManifest): Array<{ id: string; name: string; editableLayers: string[] }> {
-  const editableLayersByComposition = new Map<string, string[]>();
+/** Enough of a text layer's own wording for the AI to see how long a line the template was designed for - never the whole of a long paragraph. */
+const CURRENT_TEXT_PREVIEW_LENGTH = 120;
+
+/**
+ * A plan row may name one layer (targetPlaceholderId). The AI is told to
+ * copy that id verbatim, and this never takes its word for it: an id that
+ * is not a real placeholder of this template is dropped to null (the row
+ * stays, as a note about its composition), and a real one has its
+ * composition corrected to the layer's own, so a row can never claim a
+ * layer while pointing at a different composition.
+ */
+export function reconcileTargetPlaceholder<T extends { sourceCompositionId: string | null; targetPlaceholderId?: string | null | undefined }>(entry: T, manifest: TemplateManifest): T {
+  if (entry.targetPlaceholderId === undefined || entry.targetPlaceholderId === null) {
+    return entry;
+  }
+  for (const scene of manifest.scenes) {
+    const placeholder = scene.placeholders.find((candidate) => candidate.placeholderId === entry.targetPlaceholderId);
+    if (placeholder) {
+      return { ...entry, sourceCompositionId: placeholder.compositionId };
+    }
+  }
+  return { ...entry, targetPlaceholderId: null };
+}
+
+export function compositionsWorthPlanning(manifest: TemplateManifest): Array<{ id: string; name: string; editableLayers: AiEditableLayer[] }> {
+  const editableLayersByComposition = new Map<string, AiEditableLayer[]>();
   const sceneCompositionIds = new Set<string>();
   for (const scene of manifest.scenes) {
     sceneCompositionIds.add(scene.compositionId);
     for (const placeholder of scene.placeholders) {
       const layers = editableLayersByComposition.get(placeholder.compositionId) ?? [];
-      layers.push(`${placeholder.layerName} (${placeholder.placeholderType})`);
+      // Was a bare "Text A (text)" label - enough to know a slot exists, not
+      // enough for a plan row to say WHICH slot it means.
+      // layers.push(`${placeholder.layerName} (${placeholder.placeholderType})`);
+      const currentText = typeof placeholder.originalText === "string" && placeholder.originalText.trim() !== "" ? placeholder.originalText.slice(0, CURRENT_TEXT_PREVIEW_LENGTH) : null;
+      layers.push({ placeholderId: placeholder.placeholderId, name: placeholder.layerName, kind: placeholder.placeholderType, currentText });
       editableLayersByComposition.set(placeholder.compositionId, layers);
     }
   }
@@ -140,7 +168,7 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
   for (const rawEntry of rawEntries) {
     const parsed = WORK_MAP_DRAFT_ENTRY_SCHEMA.safeParse(rawEntry);
     if (parsed.success) {
-      validEntries.push(parsed.data);
+      validEntries.push(reconcileTargetPlaceholder(parsed.data, project.manifest));
     } else {
       rejectedCount += 1;
     }

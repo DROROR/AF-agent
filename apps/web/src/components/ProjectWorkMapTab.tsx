@@ -29,6 +29,8 @@ interface RowForm {
   assetTimestampSeconds: string;
   desiredDurationSeconds: string;
   instructions: string;
+  /** Carried through untouched - the manual form has no field for it, and saving a row must never silently detach it from the layer it was written for. */
+  targetPlaceholderId?: string | null;
 }
 
 function emptyRow(): RowForm {
@@ -52,7 +54,8 @@ function toRowForm(entry: WorkMapEntry): RowForm {
     desiredText: entry.desiredText ?? "",
     assetTimestampSeconds: entry.assetTimestampSeconds !== null ? String(entry.assetTimestampSeconds) : "",
     desiredDurationSeconds: entry.desiredDurationSeconds !== null ? String(entry.desiredDurationSeconds) : "",
-    instructions: entry.instructions ?? ""
+    instructions: entry.instructions ?? "",
+    ...(entry.targetPlaceholderId !== undefined ? { targetPlaceholderId: entry.targetPlaceholderId } : {})
   };
 }
 
@@ -67,7 +70,8 @@ function toEntry(row: RowForm): Omit<WorkMapEntry, "id"> & { id?: string } {
     desiredText: row.desiredText.trim() === "" ? null : row.desiredText.trim(),
     assetTimestampSeconds: trimmedTimestamp === "" ? null : Number(trimmedTimestamp),
     desiredDurationSeconds: trimmedDuration === "" ? null : Number(trimmedDuration),
-    instructions: row.instructions.trim() === "" ? null : row.instructions.trim()
+    instructions: row.instructions.trim() === "" ? null : row.instructions.trim(),
+    ...(row.targetPlaceholderId !== undefined ? { targetPlaceholderId: row.targetPlaceholderId } : {})
   };
 }
 

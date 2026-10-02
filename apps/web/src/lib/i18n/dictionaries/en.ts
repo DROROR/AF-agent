@@ -1181,6 +1181,8 @@ export const en = {
         summaryUnresolved: (n: number): string => `${n} unresolved item${n === 1 ? "" : "s"}`,
         noPlaceholdersNotice:
           "AI inspected this template but did not detect standard editable placeholders. DYO can preserve the original animation and nested structure, but automatic replacements will only be made where a safe mapping is confirmed.",
+        layerPlanTitle: "What will change",
+        layerPlanHint: "Each line is one layer of the template and what goes on it. You check and adjust these in the Scenes tab before anything is made.",
         thumbnailPlaceholder: "Scene preview not generated yet",
         sceneTitleMain: "Main Scene",
         sceneTitleNumbered: (n: number): string => `Scene ${n}`,
