@@ -1545,3 +1545,18 @@ Effects never writes it, the wait will not help and the reason shown will say so
 **Also:** the plan screen's "1 main scene, 76 supporting nested compositions" line was
 removed (nothing a client can act on); a file's name was read out twice beside its
 picture.
+
+## 2026-10-02 - Screenshots of the Scenes tab: empty tall cards, a suggestion with nothing in it, half the scenes with no line
+
+**Seen on the live screen (release `a3194f4`):**
+- One card with a long review list made every other card in its row a tall empty box
+  (grid items stretched). Fix: cards are as tall as their own content.
+- A suggestion about what KIND of layer something is showed two buttons under nothing.
+  Fix: it now says what is proposed.
+- The plan wrote lines for four scenes of eight; the other four would have kept the
+  template's sample wording. The prompt told the model to leave a layer out when it had
+  "nothing real to put there". Fix: every text layer of every scene gets a line from the
+  client's own material; known facts may be restated, a new feature, number or claim may
+  never be invented. A file is still left out rather than guessed.
+
+**Unproven:** the new prompt on a real run.

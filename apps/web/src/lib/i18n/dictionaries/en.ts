@@ -1363,6 +1363,7 @@ export const en = {
     reviewQueueEmptyDescription: "Nothing needs your input right now.",
     currentTextLabel: (text: string): string => `Text currently: "${text}"`,
     suggestedTextLabel: (text: string): string => `Claude suggests: "${text}"`,
+    suggestedKindLabel: (kind: string): string => `Claude suggests treating this layer as: ${kind}`,
     keepOriginalAction: "Keep original",
     useSuggestionAction: "Use suggestion",
     useAllSuggestionsAction: (n: number): string => `Use all ${n} suggestions`,

@@ -3168,6 +3168,10 @@ a.workflow-stepper__step:hover {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--space-4);
+  /* Each card is as tall as its own content. Stretched (the grid default),
+     one card with a long review list made every other card in its row a
+     tall empty box. */
+  align-items: start;
 }
 
 .scene-card {

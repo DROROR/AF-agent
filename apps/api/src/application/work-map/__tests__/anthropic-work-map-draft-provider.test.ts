@@ -83,6 +83,18 @@ describe("AnthropicWorkMapDraftProvider - without a website, the request is unch
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  // Real complaint, 2026-10-02: the plan wrote lines for four scenes of
+  // eight and left the rest showing the template's own sample wording.
+  it("asks for a line on every scene's text layers, and still forbids inventing facts", async () => {
+    const create = vi.fn().mockResolvedValue(planToolUse());
+    await providerWith(create).draftWorkMap(draftInput());
+
+    const system: string = create.mock.calls[0]?.[0].system;
+    expect(system).toContain("EVERY text layer of EVERY scene");
+    expect(system).toContain("Never invent a feature, a number, a price");
+    expect(system).not.toContain("when you have nothing real to put there");
+  });
+
   it("treats a brand-inputs object with no website the same way", async () => {
     const create = vi.fn().mockResolvedValue(planToolUse());
     await providerWith(create).draftWorkMap(draftInput({ brandInputs: brandInputs(null) }));

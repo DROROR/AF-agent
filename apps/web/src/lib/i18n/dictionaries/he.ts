@@ -1195,6 +1195,7 @@ export const he: Dictionary = {
     reviewQueueEmptyDescription: "שום דבר לא דורש את הקלט שלכם כרגע.",
     currentTextLabel: (text: string): string => `הטקסט כרגע: "${text}"`,
     suggestedTextLabel: (text: string): string => `Claude מציע: "${text}"`,
+    suggestedKindLabel: (kind: string): string => `Claude מציע להתייחס לשכבה הזו כאל: ${kind}`,
     keepOriginalAction: "השארת המקור",
     useSuggestionAction: "שימוש בהצעה",
     useAllSuggestionsAction: (n: number): string => `שימוש בכל ${n} ההצעות`,

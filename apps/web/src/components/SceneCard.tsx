@@ -276,6 +276,10 @@ export function SceneCard({
                   ) : (
                     <img src={assetFileUrl(projectId, suggestedAsset.id)} alt="" className="scene-card__review-thumb" />
                   )
+                ) : suggestion.suggestedClassification ? (
+                  // A proposal about what KIND of layer this is carries no
+                  // text and no file - it rendered as two buttons under nothing.
+                  <p className="scene-card__review-suggested">{t.simpleScenes.suggestedKindLabel(suggestion.suggestedClassification)}</p>
                 ) : null}
                 <div className="scene-card__review-actions">
                   <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={() => onRejectSuggestion(suggestion)}>
