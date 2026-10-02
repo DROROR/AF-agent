@@ -1169,3 +1169,123 @@ accepted as empty, and the 2026-08-30 directory-path rejection still holding.
 **Not fixed by this.** The client's worker still runs a build from before the
 slicing fix — its last attempt was 2026-09-28 11:21, and `3d419d6` landed at
 15:18. It needs the current worker package before it can inspect anything.
+
+## 2026-10-02 — the mapping screen the client reached was unusable
+
+The client got through intake and reached scene mapping for the first time
+(*"finally I got there, so I can see the mapping now"*), then asked two
+questions: where to choose the background and element colour, and where to
+change text and images. Both questions were symptoms. Six separate defects,
+found by comparing the client's own run against an identical one here.
+
+### 1. The client's mapping was EMPTY, and no screen said so
+
+`DESKTOP-A629N4N` inspected the same template at 05:31 and the job
+**SUCCEEDED** — with nothing in it. Side by side against FAHADNAKASH on the
+same `.aep`:
+
+| | client worker | this machine |
+|---|---|---|
+| compositions | 77 | 77 |
+| **editable placeholders** | **0** | **30** |
+| **unresolved/unknown items** | **261** | **0** |
+| footage referenced | 0 | 27 |
+| required fonts | 0 | 3 |
+
+That is exactly the signature `3d419d6` fixed, and exactly what
+`DYO-Worker-Update-3d419d6.zip`'s own release note describes: *"a large
+template could be inspected successfully and come back looking empty."* The
+client's worker has never had that build. **This is why the client could not
+find any field to change text, images or colour: there were no placeholders
+on their screen at all.** Carried over from the 2026-09-29 entry still
+unresolved, now with the client's own numbers attached.
+
+### 2. Thirty fields, twenty-three of them labelled "Text A"/"Text B"/"Text C"
+
+This template is a single-master build: `!MAIN` is the only non-nested
+composition, and every real scene is a precomp. Inspection handled that
+correctly — `collectNestedPlaceholders` attributed all 30 nested placeholders
+to the one scene it found, and the manifest recorded each one's true
+composition in `layerPath`:
+
+```
+Scene_01..Scene_06, Scene_08   Text A, Text B, Text C   (3 each)
+Scene_07                       Text A, Text B
+Transition_scene_05            flare.mov                (video)
+Scene_08 > Image_08 > Your_image   Dark Gray Solid 2    (image)
+!MAIN                          BLACK, Borders, Noise, Sharpen, watermark
+```
+
+The **drawer** was the defect: it rendered all 30 as one flat list, so a
+reviewer saw "Text A" eight times with nothing to tell them which scene each
+belonged to. Fixed in the UI only, reading the `layerPath` the manifest
+already recorded — no worker, manifest or plan change, and no placeholder or
+mapping ID moved.
+
+### 3. A scene with nothing to edit opened a drawer that looked broken
+
+76 of the 77 scene plans carry zero mappings, and every one of them still
+offered an **Edit** button. Opening one produced a drawer containing only
+*Final duration* and *Instructions / notes* — which is what happened during
+this session's own walkthrough, and reads as a broken screen rather than as
+"there is nothing here". It now says so plainly.
+
+### 4. Colour had a complete backend and no input
+
+`SET_BRAND_COLOR` / `CLEAR_BRAND_COLOR`, the mapping's own canonical
+`colorHex`, the `placeholderClassification === "color"` dispatch gate and the
+worker's own `buildSetBrandColorScript` had all shipped. `grep -rn
+"SET_BRAND_COLOR" apps/web/src` returned nothing: the feature was complete and
+unreachable. The client's question had no answer because no screen existed.
+
+Now offered for any mapping the **manifest itself** classified `color`, the
+same gate the executor applies. A nested colour layer deliberately gets an
+explanation instead of a picker — `decideNestedLayer` already refuses to emit
+one, because `SET_BRAND_COLOR` cannot target a nested layer, so a field there
+would promise an edit that can never run.
+
+### 5. `Noise` and `Sharpen` were offered as colours to choose
+
+Both are **adjustment layers**. AE reports one much like a solid, so
+`classifyPlaceholder` reasonably called them uniform fills — but an adjustment
+layer renders none of its own colour; it only carries effects onto what is
+beneath it. They sat beside `BLACK` and `Borders`, which genuinely ARE this
+template's background and borders, so the reviewer was asked to pick a colour
+for two layers where picking one changes nothing.
+
+Excluded on AE's own `adjustmentLayer` fact, never a name guess, and only on
+an explicit `true` — the fact is nullable, and reading "not reported" as "is
+one" would silently drop real placeholders whenever the project-wide scan
+could not answer. **Existing projects keep the old list until re-inspected.**
+
+### 6. A new project opened on scene review with no files to assign
+
+Creating a project landed on the overview, and the next action pointed
+straight at *"settle every scene"* while the Asset Catalog was empty — so
+every asset dropdown in the drawer was empty too, and the instruction could
+not be carried out. Creation now lands on **Files**, and the next action names
+the upload step while a project has no assets. A pointer, not a gate: the API
+approves a plan with no assets, and a text-only edit is a legitimate use.
+
+### Also delivered: the website the AI had no way to read
+
+The client's stated intent was to hand the assistant their website and have it
+draft from their own wording and colours. Checked against the requirements
+first: `docs/MASTER_PLAN.md` and `docs/PHASES.md` contain no mention of
+*website*, *url* or *scrape* — only "client brand colors/typography". This was
+a new request, not an unmet requirement, and it is recorded as such.
+
+It also could not have worked as asked: the draft call was a plain messages
+request with one forced local tool, so a URL in the payload was inert, and
+nothing in the dashboard ever wrote `brandInputs` at all. Now `websiteUrl` is
+validated to a real public http(s) address and the provider offers
+Anthropic's server-side web fetch allowlisted to exactly that host — so the
+fetch happens on Anthropic's infrastructure, not from this API process.
+Without a website the request is byte-for-byte the one always sent.
+
+**Still open after this entry.** Only 1 candidate scene is discovered for a
+template that plainly contains eight, so every scene remains one card; the
+template offers a single image slot (`Your_image`), which is thin for a
+service built on putting app screenshots into device mockups; and client
+audio is still design-only (`docs/AUDIO-DESIGN.md`) — a template's own music
+renders, the client's own does not.
