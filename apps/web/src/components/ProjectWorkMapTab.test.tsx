@@ -17,6 +17,7 @@ import {
 } from "../test-utils/execution-plan-fixtures";
 
 afterEach(() => {
+  window.localStorage.clear();
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -576,5 +577,37 @@ describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructi
     expect(document.body.textContent).toContain("main-scene");
     expect(document.body.textContent).toContain("nested-0");
     expect(document.body.textContent).toContain("nested-49");
+  });
+
+  describe("an empty description must look empty (real confusion, seen twice 2026-10-02)", () => {
+    it("says why the button is off, and stops saying it once something is typed", async () => {
+      window.localStorage.clear();
+      stubWorkspace({ status: 200, body: { workMap: null } });
+      renderWorkMap();
+      const textarea = await screen.findByLabelText("Describe your video");
+      expect(screen.getByText(/Write what you want in the box above first/)).not.toBeNull();
+      fireEvent.change(textarea, { target: { value: "A short promo." } });
+      expect(screen.queryByText(/Write what you want in the box above first/)).toBeNull();
+    });
+
+    it("the box's own placeholder is an instruction, never a made-up request that reads as already typed", async () => {
+      window.localStorage.clear();
+      stubWorkspace({ status: 200, body: { workMap: null } });
+      renderWorkMap();
+      const textarea = (await screen.findByLabelText("Describe your video")) as HTMLTextAreaElement;
+      expect(textarea.placeholder).toBe("Type here what the video should show…");
+      expect(textarea.value).toBe("");
+    });
+
+    it("what was typed survives a refresh (a fresh mount)", async () => {
+      window.localStorage.clear();
+      stubWorkspace({ status: 200, body: { workMap: null } });
+      renderWorkMap();
+      fireEvent.change(await screen.findByLabelText("Describe your video"), { target: { value: "Keep this." } });
+      cleanup();
+      renderWorkMap();
+      expect(((await screen.findByLabelText("Describe your video")) as HTMLTextAreaElement).value).toBe("Keep this.");
+      window.localStorage.clear();
+    });
   });
 });

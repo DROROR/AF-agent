@@ -75,6 +75,29 @@ function toEntry(row: RowForm): Omit<WorkMapEntry, "id"> & { id?: string } {
   };
 }
 
+const INSTRUCTIONS_DRAFT_KEY_PREFIX = "dyo.aiPlanDraft.";
+
+/** Storage can be unavailable (private window, blocked site data) - then the draft is simply not remembered, never an error. */
+function readInstructionsDraft(projectId: string): string {
+  try {
+    return window.localStorage.getItem(`${INSTRUCTIONS_DRAFT_KEY_PREFIX}${projectId}`) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeInstructionsDraft(projectId: string, value: string): void {
+  try {
+    if (value === "") {
+      window.localStorage.removeItem(`${INSTRUCTIONS_DRAFT_KEY_PREFIX}${projectId}`);
+    } else {
+      window.localStorage.setItem(`${INSTRUCTIONS_DRAFT_KEY_PREFIX}${projectId}`, value);
+    }
+  } catch {
+    // Not remembered - nothing else changes.
+  }
+}
+
 export function ProjectWorkMapTab(): ReactElement | null {
   const { project } = useProjectWorkspaceContext();
 
@@ -111,7 +134,14 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
   const [rows, setRows] = useState<RowForm[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [instructions, setInstructions] = useState("");
+  // const [instructions, setInstructions] = useState("");
+  // What the client typed is kept in this browser per project, so a
+  // refresh (every deploy asks for one) no longer silently empties it.
+  const [instructions, setInstructionsState] = useState(() => readInstructionsDraft(project.project.projectId));
+  function setInstructions(next: string): void {
+    setInstructionsState(next);
+    writeInstructionsDraft(project.project.projectId, next);
+  }
   // The client's own website and business description. Seeded from the
   // project's already-persisted brand inputs, so they are typed once and
   // come back on every later visit.
@@ -300,7 +330,7 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             onChange={(event) => setAboutClient(event.target.value)}
           />
         </Field>
-        <Field label={t.workMapTab.ai.textareaLabel} htmlFor="work-map-ai-instructions">
+        <Field label={t.workMapTab.ai.textareaLabel} htmlFor="work-map-ai-instructions" hint={t.workMapTab.ai.exampleHint}>
           <textarea
             id="work-map-ai-instructions"
             className="input"
@@ -323,6 +353,8 @@ function WorkMapPanel({ project }: { project: ProjectResponse }): ReactElement {
             onClick={() => void handleCreatePlan()}
           />
         </div>
+        {/* A disabled button with no stated reason is a dead end - say why. */}
+        {instructions.trim() === "" ? <p className="field__hint">{t.workMapTab.ai.needDescription}</p> : null}
       </Card>
     );
   }

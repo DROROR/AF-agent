@@ -1422,3 +1422,18 @@ text per composition, so three text layers in one composition could not differ.
 suggestion -> Scenes field. Each link is unit-tested; no real run has been observed.
 Plans saved before this change carry no layer ids and must be created again.
 Colours are still not part of the AI's output.
+
+## 2026-10-02 - "Create Video Plan" looked pressed and did nothing
+
+**User report:** pressed the AI button, it stayed disabled, nothing shown for minutes.
+**Fact:** the API received no request for the project after 15:37:10 - no
+`brand-inputs` PATCH and no `ai-draft` POST. Nothing was running.
+
+**Cause:** the description box was empty. Its placeholder was a four-line example
+written as a real request, so the box looked filled, and the description is lost on
+every refresh (each deploy asks for one). The disabled button gave no reason. This
+happened twice in one day.
+
+**Fix:** the placeholder is now a plain instruction and the example moved under the
+box as a hint; a line beside the disabled button says the description is missing; the
+typed description is kept per project in the browser so a refresh no longer empties it.

@@ -1153,8 +1153,15 @@ export const en = {
       aboutClientHint: "Saved with the project, so you only type it once.",
       savingDetails: "Saving your details…",
       saveDetailsFailedTitle: "Could not save your website and business details",
-      placeholder:
-        "Use the login screen recording first, then show checkout.\nKeep the original template animations.\nUse our logo at the end.\nKeep the final video around 20 seconds.",
+      // Was a four-line example. It read exactly like something already
+      // typed, so an empty box looked full and the button stayed disabled
+      // with no visible reason (seen twice, 2026-10-02). The example now
+      // lives in exampleHint, under the box.
+      // placeholder:
+      //   "Use the login screen recording first, then show checkout.\nKeep the original template animations.\nUse our logo at the end.\nKeep the final video around 20 seconds.",
+      placeholder: "Type here what the video should show…",
+      exampleHint: "Example: Use the login screen first, then show checkout. Our logo at the end. About 20 seconds.",
+      needDescription: "Write what you want in the box above first - then this button works.",
       createPlanAction: "Create Video Plan",
       creatingPlan: "Creating your plan…",
       addDetailsManually: "Add details manually",
