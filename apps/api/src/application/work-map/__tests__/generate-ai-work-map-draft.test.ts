@@ -8,7 +8,7 @@ import { uploadAsset } from "../../asset/upload-asset.js";
 import { InMemoryAssetStorage } from "../../asset/test-support/in-memory-asset-storage.js";
 import { InMemoryWorkMapRepository } from "../test-support/in-memory-work-map-repository.js";
 import { InMemorySceneEvidenceRepository } from "../../job/test-support/in-memory-scene-evidence-repository.js";
-import { generateAiWorkMapDraft } from "../generate-ai-work-map-draft.js";
+import { compositionsWorthPlanning, generateAiWorkMapDraft } from "../generate-ai-work-map-draft.js";
 import { WorkMapDraftNotConfiguredError, type AiWorkMapDraftInput, type AiWorkMapDraftResult, type AiWorkMapMetadata, type AiWorkMapProvider } from "../ai-work-map-provider.js";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError } from "../../../errors/app-error.js";
 
@@ -111,8 +111,8 @@ describe("generateAiWorkMapDraft - AI-first Work Map (video-planning UX simplifi
 
     expect(provider.lastInput?.instructions).toBe("Use the login recording.");
     expect(provider.lastInput?.compositions).toEqual([
-      { id: "comp-login", name: "Login Screen" },
-      { id: "comp-checkout", name: "Checkout" }
+      { id: "comp-login", name: "Login Screen", editableLayers: [] },
+      { id: "comp-checkout", name: "Checkout", editableLayers: [] }
     ]);
     expect(provider.lastInput?.candidateAssets).toEqual([{ id: asset.id, originalFilename: "login-demo.mp4", label: null, mediaKind: "VIDEO" }]);
   });
@@ -169,5 +169,85 @@ describe("generateAiWorkMapDraft - AI-first Work Map (video-planning UX simplifi
     expect(second.revision).toBe(2);
     expect(provider.lastInput?.existingEntries).toHaveLength(1);
     expect(provider.lastInput?.existingEntries[0]?.sourceReference).toBe("Updated");
+  });
+});
+
+describe("compositionsWorthPlanning - which compositions the AI is asked to plan (real failure 2026-10-02)", () => {
+  type Placeholder = TemplateManifest["scenes"][number]["placeholders"][number];
+  type Composition = TemplateManifest["compositions"][number];
+
+  function composition(compositionId: string, name: string, nested: boolean): Composition {
+    return { compositionId, aeProjectItemIndex: 1, name, widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: nested, parentCompositionIds: [] };
+  }
+
+  function placeholder(compositionId: string, layerName: string, placeholderType: Placeholder["placeholderType"]): Placeholder {
+    return { placeholderId: `${compositionId}-${layerName}`, displayLabel: null, compositionId, layerName, layerIndex: 1, layerPath: [], placeholderType, editable: true, sourceType: null, dimensions: null, startTimeSeconds: 0, durationSeconds: 5, evidence: { source: "read_directly", reason: "test fixture" } };
+  }
+
+  /** One master composition, everything else nested inside it - the shape that broke. */
+  function singleMasterManifest(): TemplateManifest {
+    const base = manifest();
+    return {
+      ...base,
+      compositions: [
+        composition("comp-master", "Master", false),
+        composition("comp-wipe", "Wipe", true),
+        composition("comp-part-a", "Part A", true),
+        composition("comp-matte", "Matte", true),
+        composition("comp-part-b", "Part B", true)
+      ],
+      scenes: [
+        {
+          sceneId: "scene-master",
+          displayName: null,
+          compositionId: "comp-master",
+          originalOrderIndex: 0,
+          startTimeSeconds: 0,
+          durationSeconds: 5,
+          placeholders: [
+            placeholder("comp-master", "Backdrop", "color"),
+            placeholder("comp-part-b", "Headline", "text"),
+            placeholder("comp-part-a", "Headline", "text"),
+            placeholder("comp-part-a", "Screenshot", "image")
+          ]
+        }
+      ]
+    };
+  }
+
+  it("leaves out nested compositions that hold nothing a client can change", () => {
+    const ids = compositionsWorthPlanning(singleMasterManifest()).map((entry) => entry.id);
+    expect(ids).not.toContain("comp-wipe");
+    expect(ids).not.toContain("comp-matte");
+  });
+
+  it("keeps the scene itself and every composition that directly holds an editable layer, in manifest order", () => {
+    expect(compositionsWorthPlanning(singleMasterManifest()).map((entry) => entry.id)).toEqual(["comp-master", "comp-part-a", "comp-part-b"]);
+  });
+
+  it("names each composition's own editable layers with their kind", () => {
+    const byId = new Map(compositionsWorthPlanning(singleMasterManifest()).map((entry) => [entry.id, entry.editableLayers]));
+    expect(byId.get("comp-master")).toEqual(["Backdrop (color)"]);
+    expect(byId.get("comp-part-a")).toEqual(["Headline (text)", "Screenshot (image)"]);
+    expect(byId.get("comp-part-b")).toEqual(["Headline (text)"]);
+  });
+
+  it("keeps a scene that has no placeholders at all - it is still a scene the client can ask about", () => {
+    expect(compositionsWorthPlanning(manifest())).toEqual([
+      { id: "comp-login", name: "Login Screen", editableLayers: [] },
+      { id: "comp-checkout", name: "Checkout", editableLayers: [] }
+    ]);
+  });
+
+  it("falls back to every composition when the manifest has no scenes, rather than sending nothing", () => {
+    const empty = { ...singleMasterManifest(), scenes: [] };
+    expect(compositionsWorthPlanning(empty)).toHaveLength(5);
+  });
+
+  it("the provider receives the reduced list, not the whole project", async () => {
+    const provider = new StubAiWorkMapProvider({ entries: [{ sourceCompositionId: "comp-part-a", sourceReference: null, desiredAssetId: null, desiredText: "Hello", assetTimestampSeconds: null, desiredDurationSeconds: null, instructions: null }] });
+    const deps = await setup(provider, singleMasterManifest());
+    await generateAiWorkMapDraft(deps, deps.project.projectId, "Make a promo.");
+    expect(provider.lastInput?.compositions.map((entry) => entry.id)).toEqual(["comp-master", "comp-part-a", "comp-part-b"]);
   });
 });

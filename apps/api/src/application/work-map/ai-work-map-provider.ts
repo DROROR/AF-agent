@@ -10,7 +10,8 @@ export interface AiWorkMapMetadata {
 export interface AiWorkMapDraftInput {
   /** The client's own free-text description of what they want - the only field here that is not already-structured project data. */
   instructions: string;
-  compositions: Array<{ id: string; name: string }>;
+  /** Only the compositions worth an entry (see compositionsWorthPlanning). `editableLayers` names the layers a client can really change there, e.g. "Text A (text)". */
+  compositions: Array<{ id: string; name: string; editableLayers?: string[] }>;
   candidateAssets: Array<{ id: string; originalFilename: string; label: string | null; mediaKind: string }>;
   /** The project's current Work Map entries, if any - context only, never silently reused verbatim (the model still returns a complete new set). */
   existingEntries: WorkMapEntry[];

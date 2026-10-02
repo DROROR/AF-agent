@@ -169,4 +169,10 @@ describe("AnthropicWorkMapDraftProvider - with a website", () => {
     await providerWith(create).draftWorkMap(draftInput({ brandInputs: brandInputs("https://example.com/app") }));
     expect(create.mock.calls[0]?.[0].messages[0].content).toContain("https://example.com/app");
   });
+
+  it("a cut-off answer is reported as too long - never passed on as a plan (real failure 2026-10-02)", async () => {
+    const create = vi.fn().mockResolvedValue({ ...planToolUse(), stop_reason: "max_tokens" });
+    await expect(providerWith(create).draftWorkMap(draftInput())).rejects.toThrow(/too long to finish/);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 });

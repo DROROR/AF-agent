@@ -3,7 +3,10 @@ import { parseHttpWebsiteUrl } from "@dyo/schemas";
 import type { AiWorkMapDraftInput, AiWorkMapDraftResult, AiWorkMapMetadata, AiWorkMapProvider } from "./ai-work-map-provider.js";
 
 const TOOL_NAME = "propose_work_map_entries";
-const MAX_TOKENS = 8000;
+// Was 8000 - a real plan for a larger template was cut off mid-answer
+// (2026-10-02, stop_reason "max_tokens", zero usable entries).
+// const MAX_TOKENS = 8000;
+const MAX_TOKENS = 16000;
 
 /**
  * The client's own website, read by Anthropic's server-side web-fetch tool
@@ -92,6 +95,7 @@ Hard rules, never violated:
 - You ONLY ever call the ${TOOL_NAME} tool with structured entries. You never write prose, JSX, shell commands, file paths, or render instructions anywhere in your response.
 - Every sourceCompositionId you propose MUST be copied verbatim from the "compositions" list you were given - never invent one.
 - Every desiredAssetId you propose MUST be copied verbatim from the "candidateAssets" id field you were given - never invent one, never reuse an id for content it clearly does not match.
+- Each composition lists its "editableLayers" - the layers a person can really change there, with their kind (text, image, video, color). Only propose text for a composition that has a text layer, and only propose an asset for one that has an image or video layer. A composition with no editable layers of the kind needed gets null.
 - If the client's instructions do not clearly indicate what belongs in a scene, leave desiredAssetId and desiredText as null for that scene rather than guessing - a null/empty entry is far better than a wrong one, and the client can always fill it in themselves. This matters most for structural template elements (camera layers, masks, phone-frame artwork, decorative shapes, backgrounds) - never assign real content to these unless the client's own instructions clearly call for it.
 - You have no ability to execute code, access the filesystem, control a real application, or take any action beyond returning this one structured tool call. Do not claim otherwise in any field.`;
 
@@ -218,6 +222,13 @@ export class AnthropicWorkMapDraftProvider implements AiWorkMapProvider {
 
       if (response.stop_reason === "refusal") {
         throw new AiWorkMapDraftProviderError("Anthropic declined to respond to this request (safety refusal)");
+      }
+
+      // A cut-off answer can still carry a tool_use block, but its input is
+      // only whatever was written before the limit - never a plan to trust.
+      // Saying so plainly beats reporting "nothing usable" with no reason.
+      if (response.stop_reason === "max_tokens") {
+        throw new AiWorkMapDraftProviderError("The plan was too long to finish in one answer. Ask for fewer scenes, or describe the video more briefly, and try again.");
       }
 
       const toolUse = response.content.find((block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME);

@@ -1332,3 +1332,40 @@ following the stepper's link. It is now a Simple Mode tab, placed between
 Files and Scenes where it falls in the guided flow, and labelled **AI Plan**,
 the name the stepper already uses for the same step. Only Render Settings and
 Revisions remain Advanced-only.
+
+## 2026-10-02 - First real "website" AI plan failed: 504 after 60s, and an answer cut off at the output limit
+
+**What the user saw.** Project `fe32ffac-c600-4cbd-b4a0-3fe7be1f413d`, AI Plan tab,
+website + business description + instructions filled in, "Create Video Plan" pressed:
+`Could not create a video plan - Request failed (504)`.
+
+**What actually happened** (dyo-api log, request `req-22y`, 14:52:24 -> 14:53:54):
+`providerDurationMs: 89773`, `providerStopReason: "max_tokens"`, `providerOutputTokens: 8249`,
+`compositionCount: 77`, `rawEntryCount: 0`, final status 422.
+
+Two separate defects:
+
+1. **Every composition was offered to the AI as a scene.** This template has one
+   candidate scene and 76 nested compositions; all 77 were sent, the AI began an
+   entry for each, and the answer hit `MAX_TOKENS = 8000` part-way through. The
+   truncated tool input yielded zero entries. Fixed: `compositionsWorthPlanning`
+   sends only compositions that are a scene or directly hold an editable layer,
+   and names those layers with their kind. `MAX_TOKENS` raised to 16000, and a
+   `max_tokens` stop is now reported as "too long" instead of a silent empty plan.
+2. **nginx cut the request at 60 seconds.** Only `mapping-suggestions/generate`
+   had the 210s location; `work-map/ai-draft` fell through to the general 60s
+   one, so the browser got a bare 504 while dyo-api was still working. Fixed in
+   `deploy/nginx/ae-agent.dyocourses.com.conf`. **The live nginx file needs this
+   applied by hand with sudo - it is NOT applied by the deploy script.**
+
+**Not yet proven:** that a website is actually read and its wording used. The one
+real attempt never produced a plan, so that remains unverified until the next run.
+
+**Known gaps against what the client asked for**, unchanged by this fix: the plan
+carries one text per composition (not one per text layer) and has no colour
+field, so website colours are not picked up.
+
+Also seen the same day: the wizard showed "ae-mcp bridge: Online" while two
+inspections failed with `AE_NOT_CONNECTED` (`ae_health` -> `connected: false`).
+The displayed status reflects the MCP process, not a live After Effects
+heartbeat. Recorded, not fixed.

@@ -1,4 +1,4 @@
-import { updateWorkMapRequestSchema, type WorkMap } from "@dyo/schemas";
+import { updateWorkMapRequestSchema, type TemplateManifest, type WorkMap } from "@dyo/schemas";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError, ProjectNotFoundError } from "../../errors/app-error.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -25,6 +25,44 @@ export interface GenerateAiWorkMapDraftDeps {
 }
 
 const WORK_MAP_DRAFT_ENTRY_SCHEMA = updateWorkMapRequestSchema.shape.entries.element;
+
+/**
+ * Real production failure, 2026-10-02: a single-master template has ONE
+ * candidate scene and 76 nested compositions, and every one of the 77 was
+ * being handed to the AI as "a scene to plan". It dutifully began an entry
+ * for each, the answer ran into the output limit part-way through, and the
+ * client got "Could not create a video plan" after a 90-second wait.
+ *
+ * Only two kinds of composition are worth an entry: one the inspection
+ * itself called a scene, and one that directly holds a layer the client can
+ * actually change. Everything else is the template's own plumbing
+ * (transitions, mattes, precomposed shapes) - nothing a client can ask for
+ * lives there. Manifest order is kept, and each composition says which
+ * editable layers it holds so the plan can be written against real slots.
+ *
+ * A manifest with no scenes and no placeholders at all falls back to every
+ * composition - the previous behaviour - rather than sending nothing.
+ */
+export function compositionsWorthPlanning(manifest: TemplateManifest): Array<{ id: string; name: string; editableLayers: string[] }> {
+  const editableLayersByComposition = new Map<string, string[]>();
+  const sceneCompositionIds = new Set<string>();
+  for (const scene of manifest.scenes) {
+    sceneCompositionIds.add(scene.compositionId);
+    for (const placeholder of scene.placeholders) {
+      const layers = editableLayersByComposition.get(placeholder.compositionId) ?? [];
+      layers.push(`${placeholder.layerName} (${placeholder.placeholderType})`);
+      editableLayersByComposition.set(placeholder.compositionId, layers);
+    }
+  }
+
+  const relevant = manifest.compositions.filter((composition) => sceneCompositionIds.has(composition.compositionId) || editableLayersByComposition.has(composition.compositionId));
+  const chosen = relevant.length > 0 ? relevant : manifest.compositions;
+  return chosen.map((composition) => ({
+    id: composition.compositionId,
+    name: composition.name,
+    editableLayers: editableLayersByComposition.get(composition.compositionId) ?? []
+  }));
+}
 
 /** Never trusts the provider's own response shape - a non-array/non-object `entries` degrades to an empty list here rather than throwing. */
 function extractRawEntries(raw: unknown): unknown[] {
@@ -80,10 +118,14 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
   // is expected, never required.
   const compatibleEvidence = plan ? await deps.sceneEvidenceRepository.listCompatibleByProject(projectId, plan.sourceProjectSha256) : [];
 
+  const compositions = compositionsWorthPlanning(project.manifest);
+
   const providerStart = Date.now();
   const result = await deps.aiWorkMapProvider.draftWorkMap({
     instructions,
-    compositions: project.manifest.compositions.map((composition) => ({ id: composition.compositionId, name: composition.name })),
+    // Was every composition in the project - see compositionsWorthPlanning.
+    // compositions: project.manifest.compositions.map((composition) => ({ id: composition.compositionId, name: composition.name })),
+    compositions,
     candidateAssets: assets.map((asset) => ({ id: asset.id, originalFilename: asset.originalFilename, label: asset.label, mediaKind: asset.mediaKind })),
     existingEntries: currentWorkMap?.entries ?? [],
     brandInputs: project.brandInputs,
@@ -108,6 +150,7 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
     {
       projectId,
       compositionCount: project.manifest.compositions.length,
+      plannedCompositionCount: compositions.length,
       candidateAssetCount: assets.length,
       providerDurationMs,
       providerStopReason: result.metadata.stopReason,
