@@ -2,7 +2,7 @@
 
 import type { ReactElement } from "react";
 import type { AssetDto, TemplateManifest, WorkMapEntry } from "@dyo/schemas";
-import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions } from "../lib/simple-work-map-plan";
+import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions, isTopLevelPlanEntry, orderPlanEntriesForSimpleMode } from "../lib/simple-work-map-plan";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./EmptyState";
@@ -45,9 +45,16 @@ export interface PlanCardProps {
    */
   previewUrl: string | null;
   onEditPlan: () => void;
+  /**
+   * Set for a nested composition shown because it holds editable content:
+   * the card is then titled with the composition's own name instead of an
+   * ordinal, and the redundant "Template composition:" line is dropped.
+   * Omitted for a real top-level scene, which keeps "Main Scene"/"Scene N".
+   */
+  nestedPartName?: string;
 }
 
-export function PlanCard({ entry, index, total, sceneNameByCompositionId, assetById, previewUrl, onEditPlan }: PlanCardProps): ReactElement {
+export function PlanCard({ entry, index, total, sceneNameByCompositionId, assetById, previewUrl, onEditPlan, nestedPartName }: PlanCardProps): ReactElement {
   const { t } = useLocale();
   const s = t.workMapTab.planPreview.simple;
   // The raw AE composition name ("!Render", "Pre-comp 3", ...) is real,
@@ -59,14 +66,15 @@ export function PlanCard({ entry, index, total, sceneNameByCompositionId, assetB
   // exactly filterWorkMapEntriesForSimpleMode's isNestedOnlyReferenced
   // check, unchanged).
   const compositionName = resolveSceneName(entry, sceneNameByCompositionId, t.workMapTab.planPreview.noContent);
-  const displayTitle = total === 1 ? s.sceneTitleMain : s.sceneTitleNumbered(index + 1);
+  // const displayTitle = total === 1 ? s.sceneTitleMain : s.sceneTitleNumbered(index + 1);
+  const displayTitle = nestedPartName ?? (total === 1 ? s.sceneTitleMain : s.sceneTitleNumbered(index + 1));
   const assetLabel = resolveAssetLabel(entry, assetById);
 
   return (
     <Card className="plan-card">
       <div className="plan-card__header">
         <h3>{displayTitle}</h3>
-        <p className="plan-card__composition-name">{s.templateCompositionLabel(compositionName)}</p>
+        {nestedPartName === undefined ? <p className="plan-card__composition-name">{s.templateCompositionLabel(compositionName)}</p> : null}
       </div>
 
       {previewUrl ? (
@@ -151,7 +159,11 @@ export function SimpleWorkMapPlanView({ manifest, entries, assets, onEditPlan }:
 
   const sceneNameByCompositionId = new Map(manifest.compositions.map((composition) => [composition.compositionId, composition.name]));
   const assetById = new Map((assets ?? []).map((asset) => [asset.id, asset]));
-  const visibleEntries = filterWorkMapEntriesForSimpleMode(entries, manifest);
+  // const visibleEntries = filterWorkMapEntriesForSimpleMode(entries, manifest);
+  const visibleEntries = orderPlanEntriesForSimpleMode(filterWorkMapEntriesForSimpleMode(entries, manifest), manifest);
+  // "Scene N" numbering counts only real top-level scenes - a nested part
+  // is titled by its own name and never takes a number.
+  const topLevelEntries = visibleEntries.filter((entry) => isTopLevelPlanEntry(entry, manifest));
   const summary = computeSimpleAiPlanSummary(manifest);
   const showNoPlaceholdersNotice = !hasAnyEditablePlaceholder(manifest);
 
@@ -173,8 +185,13 @@ export function SimpleWorkMapPlanView({ manifest, entries, assets, onEditPlan }:
             <PlanCard
               key={entry.id}
               entry={entry}
-              index={index}
-              total={visibleEntries.length}
+              // index={index}
+              // total={visibleEntries.length}
+              index={isTopLevelPlanEntry(entry, manifest) ? topLevelEntries.indexOf(entry) : index}
+              total={topLevelEntries.length}
+              {...(isTopLevelPlanEntry(entry, manifest)
+                ? {}
+                : { nestedPartName: sceneNameByCompositionId.get(entry.sourceCompositionId ?? "") ?? entry.sourceReference ?? t.workMapTab.planPreview.noContent })}
               sceneNameByCompositionId={sceneNameByCompositionId}
               assetById={assetById}
               // No real scene frame is available before an execution plan

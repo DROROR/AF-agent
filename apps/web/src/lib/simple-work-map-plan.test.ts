@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Composition, TemplateManifest, WorkMapEntry } from "@dyo/schemas";
-import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions } from "./simple-work-map-plan";
+import { computeSimpleAiPlanSummary, filterWorkMapEntriesForSimpleMode, hasAnyEditablePlaceholder, hasClientFacingInstructions, isTopLevelPlanEntry, orderPlanEntriesForSimpleMode } from "./simple-work-map-plan";
 
 function composition(overrides: Partial<Composition> = {}): Composition {
   return {
@@ -155,5 +155,83 @@ describe("hasClientFacingInstructions", () => {
         entry({ sourceCompositionId: "nested-1", desiredAssetId: null, desiredText: null, instructions: "No uploaded assets available to map." })
       )
     ).toBe(true);
+  });
+});
+
+describe("a template whose content lives in nested compositions (real failure 2026-10-02)", () => {
+  type Placeholder = TemplateManifest["scenes"][number]["placeholders"][number];
+
+  function placeholder(compositionId: string, layerName: string, editable = true): Placeholder {
+    return {
+      placeholderId: `${compositionId}-${layerName}`,
+      displayLabel: null,
+      compositionId,
+      layerName,
+      layerIndex: 1,
+      layerPath: [],
+      placeholderType: "text",
+      editable,
+      sourceType: null,
+      dimensions: null,
+      startTimeSeconds: 0,
+      durationSeconds: 4,
+      evidence: { source: "read_directly", reason: "test fixture" }
+    };
+  }
+
+  /** One master; "part-2" and "part-10" hold editable text; "matte" holds nothing; "locked" holds only a non-editable layer. */
+  function singleMasterManifest(): TemplateManifest {
+    return manifest({
+      compositions: [
+        composition({ compositionId: "master", name: "Master", isNestedOnlyReferenced: false }),
+        composition({ compositionId: "part-10", name: "Part 10", isNestedOnlyReferenced: true }),
+        composition({ compositionId: "matte", name: "Matte", isNestedOnlyReferenced: true }),
+        composition({ compositionId: "part-2", name: "Part 2", isNestedOnlyReferenced: true }),
+        composition({ compositionId: "locked", name: "Locked", isNestedOnlyReferenced: true })
+      ],
+      scenes: [
+        {
+          sceneId: "scene-master",
+          displayName: null,
+          compositionId: "master",
+          originalOrderIndex: 0,
+          startTimeSeconds: 0,
+          durationSeconds: 4,
+          placeholders: [placeholder("part-10", "Headline"), placeholder("part-2", "Headline"), placeholder("locked", "Frame", false)]
+        }
+      ]
+    });
+  }
+
+  const entries = [
+    entry({ id: "e-10", sourceCompositionId: "part-10" }),
+    entry({ id: "e-matte", sourceCompositionId: "matte" }),
+    entry({ id: "e-master", sourceCompositionId: "master" }),
+    entry({ id: "e-2", sourceCompositionId: "part-2" }),
+    entry({ id: "e-locked", sourceCompositionId: "locked" })
+  ];
+
+  it("shows a nested composition that directly holds editable content", () => {
+    const ids = filterWorkMapEntriesForSimpleMode(entries, singleMasterManifest()).map((e) => e.id);
+    expect(ids).toContain("e-2");
+    expect(ids).toContain("e-10");
+  });
+
+  it("still hides a nested composition with nothing editable in it", () => {
+    const ids = filterWorkMapEntriesForSimpleMode(entries, singleMasterManifest()).map((e) => e.id);
+    expect(ids).not.toContain("e-matte");
+    expect(ids).not.toContain("e-locked");
+  });
+
+  it("puts the real scene first, then nested parts in natural name order", () => {
+    const m = singleMasterManifest();
+    expect(orderPlanEntriesForSimpleMode(filterWorkMapEntriesForSimpleMode(entries, m), m).map((e) => e.id)).toEqual(["e-master", "e-2", "e-10"]);
+  });
+
+  it("tells a real scene from a nested part, and treats free-text intent as top-level", () => {
+    const m = singleMasterManifest();
+    expect(isTopLevelPlanEntry(entry({ sourceCompositionId: "master" }), m)).toBe(true);
+    expect(isTopLevelPlanEntry(entry({ sourceCompositionId: "part-2" }), m)).toBe(false);
+    expect(isTopLevelPlanEntry(entry({ sourceCompositionId: null }), m)).toBe(true);
   });
 });

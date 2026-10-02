@@ -71,4 +71,23 @@ describe("PlanCard - real scene thumbnail vs. honest unavailable state (never a 
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByText("Scene preview not generated yet")).not.toBeNull();
   });
+
+  it("a nested part is titled with its own name, not numbered as a scene (real failure 2026-10-02)", () => {
+    renderWithLocale(
+      <PlanCard
+        entry={entry()}
+        index={3}
+        total={1}
+        sceneNameByCompositionId={sceneNameByCompositionId}
+        assetById={assetById}
+        previewUrl={null}
+        onEditPlan={() => {}}
+        nestedPartName="Part 2"
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Part 2" })).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Main Scene" })).toBeNull();
+    expect(screen.queryByText(/Template composition:/)).toBeNull();
+  });
 });

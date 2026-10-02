@@ -156,6 +156,8 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
       providerStopReason: result.metadata.stopReason,
       providerInputTokens: result.metadata.inputTokens,
       providerOutputTokens: result.metadata.outputTokens,
+      websiteFetchAttempts: result.metadata.webFetch?.attempts ?? null,
+      websiteFetchErrorCodes: result.metadata.webFetch?.errorCodes ?? null,
       rawEntryCount: rawEntries.length,
       validEntryCount: validEntries.length,
       rejectedEntryCount: rejectedCount

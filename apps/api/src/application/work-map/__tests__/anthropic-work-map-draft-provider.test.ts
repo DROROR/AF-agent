@@ -175,4 +175,23 @@ describe("AnthropicWorkMapDraftProvider - with a website", () => {
     await expect(providerWith(create).draftWorkMap(draftInput())).rejects.toThrow(/too long to finish/);
     expect(create).toHaveBeenCalledTimes(1);
   });
+
+  it("reports how many times the website was read and why a read failed - codes only", async () => {
+    const failedRead = { type: "web_fetch_tool_result", tool_use_id: "srv_1", content: { type: "web_fetch_tool_error", error_code: "url_not_accessible" } };
+    const goodRead = { type: "web_fetch_tool_result", tool_use_id: "srv_2", content: { type: "web_fetch_result", url: "https://example.com/", content: {} } };
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce(message("pause_turn", [failedRead]))
+      .mockResolvedValueOnce({ ...planToolUse(), content: [goodRead, ...planToolUse().content] });
+
+    const result = await providerWith(create).draftWorkMap(draftInput({ brandInputs: brandInputs("https://example.com/") }));
+
+    expect(result.metadata.webFetch).toEqual({ attempts: 2, errorCodes: ["url_not_accessible"] });
+  });
+
+  it("says nothing about website reads when no website was given", async () => {
+    const create = vi.fn().mockResolvedValue(planToolUse());
+    const result = await providerWith(create).draftWorkMap(draftInput());
+    expect(result.metadata.webFetch).toBeUndefined();
+  });
 });

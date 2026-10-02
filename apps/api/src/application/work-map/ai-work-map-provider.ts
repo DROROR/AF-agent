@@ -5,6 +5,8 @@ export interface AiWorkMapMetadata {
   stopReason: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** How many times the website was read, and the error code of each read that failed (e.g. "url_not_accessible"). Codes only - never page content. Absent when no website was given. */
+  webFetch?: { attempts: number; errorCodes: string[] };
 }
 
 export interface AiWorkMapDraftInput {

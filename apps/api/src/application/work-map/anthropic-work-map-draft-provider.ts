@@ -201,6 +201,9 @@ export class AnthropicWorkMapDraftProvider implements AiWorkMapProvider {
 
     const messages: Anthropic.MessageParam[] = [{ role: "user", content: userContent }];
     let lastResponse: Anthropic.Message | null = null;
+    // Real gap, 2026-10-02: the AI wrote "Website fetch failed" into its own
+    // notes and nothing in our log said why. Codes only, never page content.
+    const webFetch = { attempts: 0, errorCodes: [] as string[] };
 
     for (let turn = 0; turn < MAX_TURNS; turn += 1) {
       let response: Anthropic.Message;
@@ -219,6 +222,7 @@ export class AnthropicWorkMapDraftProvider implements AiWorkMapProvider {
         );
       }
       lastResponse = response;
+      recordWebFetchOutcomes(response, webFetch);
 
       if (response.stop_reason === "refusal") {
         throw new AiWorkMapDraftProviderError("Anthropic declined to respond to this request (safety refusal)");
@@ -233,7 +237,7 @@ export class AnthropicWorkMapDraftProvider implements AiWorkMapProvider {
 
       const toolUse = response.content.find((block): block is Anthropic.ToolUseBlock => block.type === "tool_use" && block.name === TOOL_NAME);
       if (toolUse) {
-        return { entries: toolUse.input, metadata: metadataOf(response) };
+        return { entries: toolUse.input, metadata: { ...metadataOf(response), ...(allowedDomain !== null ? { webFetch } : {}) } };
       }
 
       // A server tool mid-task: send the turn back verbatim to continue it.
@@ -248,6 +252,21 @@ export class AnthropicWorkMapDraftProvider implements AiWorkMapProvider {
     throw new AiWorkMapDraftProviderError(
       `Anthropic did not return a ${TOOL_NAME} tool call (stop_reason: ${lastResponse?.stop_reason ?? "none"})`
     );
+  }
+}
+
+/** Counts each website read in this turn and keeps the error code of any that failed. Reads the block shape defensively - an unfamiliar shape is counted as an attempt with no code, never thrown on. */
+function recordWebFetchOutcomes(response: Anthropic.Message, webFetch: { attempts: number; errorCodes: string[] }): void {
+  for (const block of response.content as unknown as Array<{ type?: string; content?: { type?: string; error_code?: unknown } }>) {
+    if (block.type !== "web_fetch_tool_result") {
+      continue;
+    }
+    webFetch.attempts += 1;
+    // A failed read carries an error_code; a successful one carries the
+    // page. Keyed on the code itself rather than the error block's type name.
+    if (typeof block.content?.error_code === "string") {
+      webFetch.errorCodes.push(block.content.error_code);
+    }
   }
 }
 

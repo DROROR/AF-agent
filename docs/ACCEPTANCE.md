@@ -1369,3 +1369,27 @@ Also seen the same day: the wizard showed "ae-mcp bridge: Online" while two
 inspections failed with `AE_NOT_CONNECTED` (`ae_health` -> `connected: false`).
 The displayed status reflects the MCP process, not a live After Effects
 heartbeat. Recorded, not fixed.
+
+## 2026-10-02 - AI plan succeeded with 11 rows, Simple Mode showed one card
+
+Second real attempt on project `fe32ffac-c600-4cbd-b4a0-3fe7be1f413d`, after `21a4f97`
+and the nginx change: `plannedCompositionCount: 11` (was 77), `providerDurationMs: 86838`,
+`stop_reason: tool_use`, 11 raw / 11 valid / 0 rejected entries. The 86.8s duration
+confirms the 210s nginx location was necessary, not precautionary.
+
+**Defect: ten of the eleven rows were invisible.** `filterWorkMapEntriesForSimpleMode`
+hid every nested-only composition. In a single-master template that is where every
+scene's text and image live, so the user saw one "Main Scene" card saying "No editable
+text detected" while the stored plan held the app name, three feature lines and the
+screenshot placement. Fixed: a nested composition that directly holds an editable
+placeholder is shown, titled by its own name; nested compositions with nothing
+editable stay hidden.
+
+**Website read: failed, and not because of this system.** The AI's own notes say
+"Website fetch failed". The site used for the test answers HTTP 403 with a Cloudflare
+"Attention Required" page to a plain request from this server as well, i.e. it blocks
+automated readers. The AI behaved as instructed: it used only the client's own words
+and left three scenes blank rather than invent features. **A successful website read
+has still never been observed** - it needs a test against a site that does not block
+automated requests. The provider now logs `websiteFetchAttempts` and
+`websiteFetchErrorCodes` so the reason is in our own log next time.
