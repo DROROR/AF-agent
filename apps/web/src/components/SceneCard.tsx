@@ -174,8 +174,16 @@ export function SceneCard({
   const { t } = useLocale();
   const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
   // const mapping = primaryMapping(realScene);
-  const mapping = primaryMapping(shownMappings);
-  const asset = mapping?.selectedAssetId ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null) : null;
+  // REAL 2026-10-04 DEFECT: a scene holding a phone screen AND texts read
+  // "No asset assigned yet" with its screenshot assigned, because the file
+  // and the text were both read off ONE "primary" layer - whichever came
+  // first. A scene's picture and its wording live on different layers, so
+  // each fact is taken from the first layer that actually has it.
+  // const mapping = primaryMapping(shownMappings);
+  // const asset = mapping?.selectedAssetId ? ((assets ?? []).find((a) => a.id === mapping.selectedAssetId) ?? null) : null;
+  const mapping = shownMappings.find((m) => m.text) ?? primaryMapping(shownMappings);
+  const assetMapping = shownMappings.find((m) => m.selectedAssetId) ?? null;
+  const asset = assetMapping ? ((assets ?? []).find((a) => a.id === assetMapping.selectedAssetId) ?? null) : null;
   // 2026-09-28, real client session: a 77-composition template surfaced 30
   // structural layers (a border overlay, a "Sharpen" adjustment layer, a
   // black fade solid) as editable placeholders. Claude examined each, said in

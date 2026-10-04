@@ -137,3 +137,56 @@ describe("SceneCard - a failed preview can be tried again where the failure is s
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });
+
+/**
+ * REAL 2026-10-04: after the whole plan was applied, every scene with a phone
+ * screen and texts still read "No asset assigned yet".
+ */
+function mappingFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "mapping-1",
+    manifestPlaceholderId: "ph-1",
+    placeholderName: "Layer",
+    placeholderClassification: { value: null, source: "MANIFEST", evidence: ["unknown"] },
+    selectedAssetId: null,
+    selectedAssetType: null,
+    text: null,
+    assetTimestamp: null,
+    colorHex: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
+    mappingSource: "MANIFEST",
+    confidence: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+describe("SceneCard - a scene's picture and wording are read from the layers that hold them", () => {
+  it("shows the assigned file and the text when they sit on different layers, whichever comes first", () => {
+    const text = mappingFixture({ id: "m-text", text: "Headline", selectedAssetId: null });
+    const picture = mappingFixture({ id: "m-picture", text: null, selectedAssetId: "asset-1" });
+    const scene = realScene({ mappings: [text, picture] as never, unresolvedReasons: [], approvalState: "READY_FOR_APPROVAL" });
+    renderWithLocale(
+      <SceneCard
+        projectId={PROJECT_ID}
+        realScene={scene}
+        assets={[{ id: "asset-1", label: "screenshot", originalFilename: "s.png", mimeType: "image/png" } as never]}
+        previewEntry={READY_PREVIEW}
+        pendingSuggestions={[]}
+        suggestionsBusy={false}
+        onEdit={() => {}}
+        onRegeneratePreview={() => {}}
+        onAcceptSuggestion={() => {}}
+        onRejectSuggestion={() => {}}
+      />
+    );
+    expect(screen.getByText("screenshot")).not.toBeNull();
+    expect(screen.getAllByText("Headline").length).toBeGreaterThan(0);
+    expect(screen.queryByText("No asset assigned yet")).toBeNull();
+  });
+});
