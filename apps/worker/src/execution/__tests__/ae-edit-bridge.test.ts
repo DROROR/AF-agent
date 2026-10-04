@@ -239,7 +239,8 @@ describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-
       bridge.slowOpenPollIntervalMs = 0;
       return { bridge, scripts };
     }
-    const opened = (path: string): MutationCallResult => ({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: path, openedName: "working-copy.aep" } }) });
+    // Exactly what the read-only "what is open" script returns - including `dirty`, which an open's own result never carries.
+    const opened = (path: string): MutationCallResult => ({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: path, openedName: "working-copy.aep", dirty: false } }) });
 
     it("the open times out, AE finishes meanwhile: the next question finds the working copy open", async () => {
       const { bridge, scripts } = sequenceBridge([timeout, timeout, opened(WORKING_COPY_PATH)]);

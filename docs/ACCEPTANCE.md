@@ -1940,3 +1940,21 @@ copy open AND reports unsaved edits. Otherwise - another project, none, a clean 
 bridge that cannot say - it starts again from the first operation on the copy from disk.
 A job whose every operation completed is untouched by this. Not yet run on real After
 Effects.
+
+## 2026-10-04 - The first real execution of this template succeeded; a regenerate then failed on a defect introduced the same day
+
+**Job `c821d01e` (session `398816c4`, worker `593d773`):** 37 of 37 operations, preview
+captured at 14.54 s and uploaded; session at AWAITING_PREVIEW_APPROVAL. The frame, opened
+from the server's own storage: the phone screens hold the client's screenshot (the
+gradient is gone), the three texts are the plan's, and the brand line is on the credit
+layer. Two things in it are for a person to judge and were reported as such: the middle
+of three panels shows the screenshot mirrored, and the border colour is the one saved in
+the plan.
+
+**Then "Regenerate First Preview" failed:** "open-project script's result did not match
+the expected {openedPath, openedName} shape ... Unrecognized key 'dirty'". The open had
+run past 30 s; the new slow-open poll asked what was open, got the right answer - and
+passed the whole answer, `dirty` included, to a strict check written for an open's own
+result. A successful slow open was reported as a failure. The poll's unit test had used a
+fixture without `dirty`, which is why it passed. Fixed: only the two fields are passed on,
+and the fixture now has the real answer's shape.

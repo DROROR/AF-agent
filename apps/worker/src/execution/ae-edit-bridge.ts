@@ -271,7 +271,15 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
     for (let attempt = 1; !outcome.ok && outcome.failureReason.includes("[AE_TIMEOUT]") && attempt <= this.slowOpenPolls; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, this.slowOpenPollIntervalMs));
       const asked = await this.runScript(buildDescribeOpenProjectScript());
-      if (asked.ok || !asked.failureReason.includes("[AE_TIMEOUT]")) {
+      if (asked.ok) {
+        // REAL 2026-10-04 FAILURE, same day this poll was added: the "what is
+        // open" answer also carries `dirty`, and it was handed on whole to a
+        // strict {openedPath, openedName} check - so a slow open that had
+        // actually SUCCEEDED was reported as "did not match the expected
+        // shape". Only the two fields an open reports are passed on.
+        const described = (asked.resultingValue ?? {}) as { openedPath?: unknown; openedName?: unknown };
+        outcome = { ok: true, resultingValue: { openedPath: described.openedPath ?? null, ...(described.openedName !== undefined ? { openedName: described.openedName } : {}) } };
+      } else if (!asked.failureReason.includes("[AE_TIMEOUT]")) {
         outcome = asked;
       }
     }
