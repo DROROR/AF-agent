@@ -148,26 +148,26 @@ describe("SlotBulkReview", () => {
     setup({ status: 200, body: { preview: null } });
     renderReview();
 
-    await screen.findByText("2 pictures need you to look before approving");
-    expect(screen.getByRole("button", { name: "Show me all 2 in After Effects" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /right as assigned/ })).toBeNull();
+    await screen.findByText("Check where your 2 pictures will appear");
+    expect(screen.getByRole("button", { name: "Show me all 2 spots" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /in the right place/ })).toBeNull();
   });
 
   it("a frame taken when the slot is not on screen is not evidence - still no confirm button", async () => {
     setup({ status: 200, body: { preview: frame("evidence/f.png", 0, "m-a") } });
     renderReview();
 
-    await screen.findByText("2 pictures need you to look before approving");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show me all 2 in After Effects" })).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /right as assigned/ })).toBeNull();
+    await screen.findByText("Check where your 2 pictures will appear");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show me all 2 spots" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /in the right place/ })).toBeNull();
   });
 
   it("REAL 2026-10-04: the scene's own preview, not captured for any slot, is not shown as a slot's evidence even when its moment is inside the window", async () => {
     setup({ status: 200, body: { preview: frame("evidence/scene.png", 2, null) } });
     renderReview();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Show me all 2 in After Effects" })).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /right as assigned/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show me all 2 spots" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /in the right place/ })).toBeNull();
   });
 
   it("with a frame captured for the slot on screen, one press records the decision naming that frame - and only for that slot", async () => {
@@ -175,7 +175,7 @@ describe("SlotBulkReview", () => {
     setup({ status: 200, body: { preview: frame("evidence/shown.png", 2, "m-a") } }, calls);
     renderReview();
 
-    fireEvent.click(await screen.findByRole("button", { name: "I looked - it is right as assigned" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Yes - it is in the right place" }));
 
     await waitFor(() => {
       const edit = calls.find((call) => call.url.endsWith("/execution-plan") && call.method !== "GET" && call.body !== null);

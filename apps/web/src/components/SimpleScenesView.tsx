@@ -276,7 +276,9 @@ export function SimpleScenesView(): ReactElement {
         <p>
           {scenesApproved
             ? t.simpleScenes.scenesApprovedHint
-            : allReady
+            : allProposals.length > 0
+              ? t.simpleScenes.usePlanFirstHint
+              : allReady
               ? t.simpleScenes.allScenesReadyHint
               : !reviewsReady
                 ? t.simpleScenes.scenesNotReadyHint

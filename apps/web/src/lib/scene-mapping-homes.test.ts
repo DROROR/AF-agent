@@ -6,7 +6,7 @@ import { resolveSceneMappingHomes } from "./scene-mapping-homes";
 /**
  * Real complaint, 2026-10-02: a single-master template put all 28 layers
  * and all 28 suggestions on the master's one card, while each of the
- * master's parts said "No content matching required".
+ * master's parts said "Nothing to change here".
  */
 
 type Placeholder = TemplateManifest["scenes"][number]["placeholders"][number];

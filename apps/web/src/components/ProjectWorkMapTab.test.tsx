@@ -507,7 +507,7 @@ describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructi
   }
 
   const MAIN_SCENE_NOTE = "Primary/main scene - the final render comp. Preserve original structure, timing, transitions and nested compositions exactly as built. No candidate assets were provided, so no asset/text substitutions are made here.";
-  const NESTED_NOTE = "No uploaded assets available to map. Keep original template content unchanged.";
+  const NESTED_NOTE = "No uploaded assets available to map. Keep the template's template content unchanged.";
 
   function fiftyOneEntriesAllWithInstructionsOnly() {
     return [

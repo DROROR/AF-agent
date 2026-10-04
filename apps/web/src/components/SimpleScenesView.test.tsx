@@ -187,9 +187,9 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       ]
     });
     renderView();
-    await screen.findByText('Claude suggests: "New headline"');
-    expect(screen.queryByRole("button", { name: "Keep original" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Use suggestion" })).not.toBeNull();
+    await screen.findByText('Suggested: "New headline"');
+    expect(screen.queryByRole("button", { name: "Keep the template's" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Use this" })).not.toBeNull();
   });
 
   // REAL 2026-10-04: a plan already read on the AI Plan tab had to be taken
@@ -203,7 +203,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       ]
     });
     renderView();
-    fireEvent.click(await screen.findByRole("button", { name: "Use the whole plan (2)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use everything from my plan (2)" }));
 
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
@@ -217,7 +217,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     stubWorkspace({ suggestions: [] });
     renderView();
     await screen.findAllByText("App Features");
-    expect(screen.queryByRole("button", { name: /Use the whole plan/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Use everything from my plan/ })).toBeNull();
   });
 
   // 2026-09-28, real client session: a 77-composition template surfaced 30
@@ -247,12 +247,12 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     // Never silent - the reason Claude gave is on screen.
     await screen.findByText("'Borders' is a decorative overlay layer, not a content slot.");
     // And not a decision: nothing is proposed, so no review queue, no buttons.
-    expect(screen.queryByText("Needs your review")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Use suggestion" })).toBeNull();
+    expect(screen.queryByText("Suggested for this scene")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use this" })).toBeNull();
     // Exactly one action for the whole set, never one per finding - and it
     // must exist, or an unresolved suggestion would keep Approve Scenes
     // disabled forever with no way to clear it.
-    expect(screen.queryByRole("button", { name: "Agree - leave it as the template has it" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "OK - leave it as it is" })).not.toBeNull();
   });
 
   it("never renders a RESOLVED (structural, no-op) suggestion as a review item - only genuinely PENDING content decisions reach this view", async () => {
@@ -268,7 +268,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     });
     renderView();
     await screen.findByRole("heading", { name: "App Features" });
-    expect(screen.queryByText("Needs your review")).toBeNull();
+    expect(screen.queryByText("Suggested for this scene")).toBeNull();
   });
 
   it("shows Original (AE) and Planned previews side by side when both exist - Before/After (point M.4)", async () => {
@@ -305,7 +305,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     });
     renderView();
     await screen.findByText("After Effects preview");
-    expect(screen.queryByText("Planned preview — not yet rendered in After Effects")).not.toBeNull();
+    expect(screen.queryByText("A rough sketch - the real picture is made at Preview")).not.toBeNull();
     expect(screen.getAllByText("Track every workout").length).toBeGreaterThan(0);
   });
 
@@ -440,7 +440,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     renderView();
     await screen.findByRole("heading", { name: "App Features" });
 
-    await screen.findByText("This scene changed since this preview was captured - it may no longer match. Generate a new preview to see the current result.");
+    await screen.findByText("You changed this scene, so this picture is from before your change. The new one is made at Preview.");
     await screen.findByText("Updating previews for scenes you just changed - this only takes a moment, no action needed.");
     expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
   });

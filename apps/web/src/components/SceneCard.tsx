@@ -62,6 +62,9 @@ function deriveCardStatus(
 // function primaryMapping(realScene: RealScene) {
 //   return realScene.scenePlan.mappings.find((m) => m.selectedAssetId || m.text) ?? realScene.scenePlan.mappings[0] ?? null;
 // }
+/** Layer kinds that hold a picture or a clip - shown to a client as "Picture", never by the template's layer name. */
+const PICTURE_KINDS: ReadonlySet<string> = new Set(["image", "video", "logo", "phone_screen"]);
+
 function primaryMapping(mappings: readonly PlaceholderMapping[]) {
   return mappings.find((m) => m.selectedAssetId || m.text) ?? mappings[0] ?? null;
 }
@@ -230,16 +233,17 @@ export function SceneCard({
           <dt>{t.simpleScenes.textLabel}</dt>
           <dd>{mapping?.text ?? (status === "noChangeNeeded" ? t.simpleScenes.originalTextPreserved : t.simpleScenes.noTextLabel)}</dd>
         </div>
-        <div>
-          <dt>{t.simpleScenes.durationLabel}</dt>
-          <dd>
-            {realScene.scenePlan.finalDuration !== null
-              ? t.simpleScenes.durationSeconds(realScene.scenePlan.finalDuration)
-              : status === "noChangeNeeded"
-                ? t.simpleScenes.originalTimingPreserved
-                : t.simpleScenes.durationUnset}
-          </dd>
-        </div>
+        {/* A length nobody set is the template's own and needs no line of its own. */}
+        {realScene.scenePlan.finalDuration !== null || status === "noChangeNeeded" ? (
+          <div>
+            <dt>{t.simpleScenes.durationLabel}</dt>
+            <dd>
+              {realScene.scenePlan.finalDuration !== null
+                ? t.simpleScenes.durationSeconds(realScene.scenePlan.finalDuration)
+                : t.simpleScenes.originalTimingPreserved}
+            </dd>
+          </div>
+        ) : null}
       </dl>
 
       {previewEntry.errorMessage ? (
@@ -280,7 +284,17 @@ export function SceneCard({
             const target = shownMappings.find((m) => m.id === suggestion.mappingId) ?? null;
             return (
               <div key={suggestion.id} className="scene-card__review-item">
-                {target?.placeholderName ? <p className="scene-card__review-layer">{target.placeholderName}</p> : null}
+                {/*
+                  2026-10-04: a picture's layer is named by whoever built the
+                  template ("White Solid 2") and says nothing to a client. A
+                  picture is called a picture; a text layer keeps its name,
+                  which is how several texts in one scene are told apart.
+                */}
+                {target?.placeholderName ? (
+                  <p className="scene-card__review-layer">
+                    {PICTURE_KINDS.has(target.placeholderClassification?.value ?? "") ? t.simpleScenes.screenLabel : target.placeholderName}
+                  </p>
+                ) : null}
                 {suggestion.suggestedText ? (
                   <>
                     {/* <p className="scene-card__review-current">{t.simpleScenes.currentTextLabel(mapping?.text ?? "")}</p> */}

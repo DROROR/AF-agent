@@ -49,16 +49,16 @@ function renderCard(scene: RealScene, previewEntry: ScenePreviewEntry = READY_PR
  * unchanged.
  */
 describe("SceneCard - zero-mapping resolved scenes show 'kept as original' copy (live QA Blocker 3 fix)", () => {
-  it("a genuinely resolved, zero-mapping scene shows 'No content matching required' and 'Original content kept' / 'Original text preserved' / 'Original timing preserved'", () => {
+  it("a genuinely resolved, zero-mapping scene shows 'Nothing to change here' and 'Original content kept' / 'Original text preserved' / 'Original timing preserved'", () => {
     const scene = realScene({ mappings: [], unresolvedReasons: [], approvalState: "READY_FOR_APPROVAL" });
     renderCard(scene);
 
-    expect(screen.getByText("No content matching required")).not.toBeNull();
+    expect(screen.getByText("Nothing to change here")).not.toBeNull();
     expect(screen.getByText("Original content kept")).not.toBeNull();
     expect(screen.getByText("Original text preserved")).not.toBeNull();
     expect(screen.getByText("Original timing preserved")).not.toBeNull();
-    expect(screen.queryByText("No asset assigned yet")).toBeNull();
-    expect(screen.queryByText("No text set")).toBeNull();
+    expect(screen.queryByText("No picture chosen")).toBeNull();
+    expect(screen.queryByText("Template's own text")).toBeNull();
     expect(screen.queryByText("Not set yet")).toBeNull();
     expect(screen.queryByText("Needs your choice")).toBeNull();
   });
@@ -93,10 +93,11 @@ describe("SceneCard - zero-mapping resolved scenes show 'kept as original' copy 
     renderCard(scene);
 
     expect(screen.getByText("Needs your choice")).not.toBeNull();
-    expect(screen.getByText("No asset assigned yet")).not.toBeNull();
-    expect(screen.getByText("No text set")).not.toBeNull();
-    expect(screen.getByText("Not set yet")).not.toBeNull();
-    expect(screen.queryByText("No content matching required")).toBeNull();
+    expect(screen.getByText("No picture chosen")).not.toBeNull();
+    expect(screen.getByText("Template's own text")).not.toBeNull();
+    // A length nobody set is the template's own - it no longer takes a line.
+    expect(screen.queryByText("Not set yet")).toBeNull();
+    expect(screen.queryByText("Nothing to change here")).toBeNull();
     expect(screen.queryByText("Original content kept")).toBeNull();
   });
 
@@ -109,7 +110,7 @@ describe("SceneCard - zero-mapping resolved scenes show 'kept as original' copy 
     renderCard(scene);
 
     expect(screen.getByText("Needs your choice")).not.toBeNull();
-    expect(screen.queryByText("No content matching required")).toBeNull();
+    expect(screen.queryByText("Nothing to change here")).toBeNull();
     expect(screen.queryByText("Original content kept")).toBeNull();
   });
 
@@ -140,7 +141,7 @@ describe("SceneCard - a failed preview can be tried again where the failure is s
 
 /**
  * REAL 2026-10-04: after the whole plan was applied, every scene with a phone
- * screen and texts still read "No asset assigned yet".
+ * screen and texts still read "No picture chosen".
  */
 function mappingFixture(overrides: Record<string, unknown> = {}) {
   return {
@@ -187,6 +188,6 @@ describe("SceneCard - a scene's picture and wording are read from the layers tha
     );
     expect(screen.getByText("screenshot")).not.toBeNull();
     expect(screen.getAllByText("Headline").length).toBeGreaterThan(0);
-    expect(screen.queryByText("No asset assigned yet")).toBeNull();
+    expect(screen.queryByText("No picture chosen")).toBeNull();
   });
 });

@@ -265,11 +265,15 @@ export function SlotBulkReview(): ReactElement | null {
     <Card className="slot-bulk-review">
       <h3>{t.simpleScenes.slotBulk.title(pending.length)}</h3>
       <p>{t.simpleScenes.slotBulk.description}</p>
-      <ul className="slot-bulk-review__reasons">
-        {reasons.map((reason) => (
-          <li key={reason}>{reason}</li>
-        ))}
-      </ul>
+      {/* The findings in the system's own words stay one press away: a client reads the sentence above, a reviewer who wants the detail opens this. */}
+      <details className="advanced-details">
+        <summary>{t.simpleScenes.slotBulk.whyToggle}</summary>
+        <ul className="slot-bulk-review__reasons">
+          {reasons.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      </details>
 
       {ready.length > 0 ? (
         <div className="slot-bulk-review__grid">
