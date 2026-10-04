@@ -1,6 +1,6 @@
 import { HeroicSwanMcpClient } from "../inspection/heroic-swan-mcp-client.js";
-import { waitForCapturedFrame, type CapturedFrameWaitOptions } from "../inspection/wait-for-captured-frame.js";
-import { parseCaptureFrame } from "../inspection/parse-mcp-shapes.js";
+import { type CapturedFrameWaitOptions } from "../inspection/wait-for-captured-frame.js";
+import { captureStill } from "../inspection/capture-still.js";
 
 /**
  * Real preview-frame capture for EXECUTE_FRAME, reusing the SAME
@@ -91,24 +91,19 @@ export class HeroicSwanPreviewCapture implements PreviewCapture {
     }
 
     try {
-      const result = await client.callTool("ae_capture_frame", { comp_index: aeProjectItemIndex, time: timestampSeconds }, this.callTimeoutMs);
-      if (!result.ok) {
-        return { ok: false, reason: `ae_capture_frame failed: ${result.error.message}` };
-      }
-      const parsed = parseCaptureFrame(result.content);
-      if (!parsed.ok) {
-        return { ok: false, reason: `ae_capture_frame response did not match the confirmed shape: ${parsed.reason}` };
-      }
-      // Verified independently via this worker's own filesystem stat
-      // call - never trusted from AE's self-report alone (matches the
-      // scene-evidence inspector's own "actual verified image existence").
-      // Waited for, because ae-mcp returns the path before AE has finished
-      // writing a heavy still - see wait-for-captured-frame.ts.
-      const captured = await waitForCapturedFrame(parsed.value.path, this.capturedFrameWait);
+      // The worker's own capture, to a path it chose - see capture-still.ts
+      // (2026-10-04). Verified by this worker's own filesystem read, and
+      // waited for whatever happened to the call that asked for it.
+      const captured = await captureStill(client, {
+        aeProjectItemIndex,
+        timestampSeconds,
+        callTimeoutMs: this.callTimeoutMs,
+        ...(this.capturedFrameWait !== undefined ? { capturedFrameWait: this.capturedFrameWait, ...(this.capturedFrameWait.timeoutMs !== undefined ? { waitAfterFailedCallMs: this.capturedFrameWait.timeoutMs } : {}) } : {})
+      });
       if (!captured.ok) {
         return { ok: false, reason: captured.reason };
       }
-      return { ok: true, path: parsed.value.path, bytes: captured.bytes, timestampSeconds };
+      return { ok: true, path: captured.path, bytes: captured.bytes, timestampSeconds };
     } finally {
       await client.close();
     }

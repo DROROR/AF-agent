@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,6 +70,14 @@ async function writeFakeServer(
     openBehavior?: "opens" | "wrongProject";
     /** When set, every ae_run_jsx call appends "OPEN" or "RESOLVE" (or "OTHER") to this file - proves ordering and exactly-once opening from the spawned process's own real input. */
     jsxCallLogFile?: string;
+    /**
+     * How After Effects behaves for the worker's own still-capture script
+     * (2026-10-04, capture-still.ts). Default "writes": the PNG appears at
+     * the path the worker chose. "refuses": AE itself reports the capture
+     * failed. "neverWrites": the call answers but no file ever appears.
+     * "callFailsButWrites": the call is lost, and AE writes the picture anyway.
+     */
+    stillCapture?: "writes" | "refuses" | "neverWrites" | "callFailsButWrites";
   } = {}
 ): Promise<void> {
   const targetProjectPath = sourceProjectPath;
@@ -151,6 +160,21 @@ async function writeFakeServer(
     // test in this file keeps exercising the SAME composition identity
     // it always did - no behavior change for any of them.
     const jsxCode = String(args && args.code);
+    if (jsxCode.indexOf("saveFrameToPng") !== -1) {
+      calls.push("still_capture");
+      const stillMode = ${JSON.stringify(options.stillCapture ?? "writes")};
+      const stillPath = JSON.parse(jsxCode.match(/new File\\(("(?:[^"\\\\]|\\\\.)*")\\)/)[1]);
+      if (stillMode === "refuses") {
+        return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: false, failureReason: "saveFrameToPng failed: simulated" }) }) }] };
+      }
+      if (stillMode === "writes" || stillMode === "callFailsButWrites") {
+        require("node:fs").writeFileSync(stillPath, Buffer.from([1, 2, 3, 4]));
+      }
+      if (stillMode === "callFailsButWrites") {
+        return { isError: true, content: [{ type: "text", text: "[AE_TIMEOUT] simulated lost call" }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ result: JSON.stringify({ ok: true, compositionName: "Text 01" }) }) }] };
+    }
     // Stage 3: the safe-inspection wrapper's own fixed scripts are logged as
     // "SAFE" so a test asserting the INSPECTION's own call order stays about
     // that, not about the wrapper's bookkeeping (which has its own tests).
@@ -722,48 +746,43 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(result.response.layers).toHaveLength(0);
   });
 
-  it("captures and independently verifies a real preview file on disk (image-embedded shape)", async () => {
-    const previewPath = join(dir, "Text_01_preview.png");
-    await writeFile(previewPath, Buffer.from([1, 2, 3, 4]));
-    await writeFakeServer(dir, { captureShape: "image", previewFilePath: previewPath });
+  // The preview is the worker's OWN still capture to a path it chose
+  // (capture-still.ts, 2026-10-04) - never ae-mcp's ae_capture_frame tool,
+  // which lost its connection on every still of a heavy composition.
+  const previewInspector = (wait = { timeoutMs: 300, pollIntervalMs: 50 }) =>
+    new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir, previewsDirectory: join(dir, "previews"), capturedFrameWait: wait });
 
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    const result = (await inspector.inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
+  it("captures a still to a path the worker chose and verifies it on disk itself", async () => {
+    await writeFakeServer(dir, {});
+    const result = (await previewInspector().inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");
-    expect(result.response.preview).not.toBeNull();
-    expect(result.response.preview?.path).toBe(previewPath);
-    expect(result.response.preview?.bytes).toBe(4);
     expect(result.response.previewFailureReason).toBeNull();
+    expect(result.response.preview?.bytes).toBe(4);
+    expect(result.response.preview?.path.startsWith(join(dir, "previews"))).toBe(true);
+    expect(existsSync(result.response.preview!.path)).toBe(true);
   });
 
-  it("captures and independently verifies a real preview file on disk (fallback shape)", async () => {
-    const previewPath = join(dir, "Text_01_preview_fallback.png");
-    await writeFile(previewPath, Buffer.from([1, 2, 3, 4, 5]));
-    await writeFakeServer(dir, { captureShape: "fallback", previewFilePath: previewPath });
+  it("REAL 2026-10-04: the call is lost but After Effects writes the picture anyway - the preview is still delivered", async () => {
+    await writeFakeServer(dir, { stillCapture: "callFailsButWrites" });
+    const result = (await previewInspector().inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
 
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    const result = (await inspector.inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
-
-    expect(result.kind).toBe("evidence");
-    expect(result.response.preview?.bytes).toBe(5);
+    expect(result.response.previewFailureReason).toBeNull();
+    expect(result.response.preview?.bytes).toBe(4);
   });
 
-  it("reports previewFailureReason (never a fabricated preview) when the capture tool errors", async () => {
-    await writeFakeServer(dir, { captureShape: "none" });
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    const result = (await inspector.inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
+  it("reports previewFailureReason (never a fabricated preview) when After Effects itself refuses the capture", async () => {
+    await writeFakeServer(dir, { stillCapture: "refuses" });
+    const result = (await previewInspector().inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");
     expect(result.response.preview).toBeNull();
-    expect(result.response.previewFailureReason).toMatch(/ae_capture_frame failed/);
+    expect(result.response.previewFailureReason).toMatch(/saveFrameToPng failed/);
   });
 
-  it("reports previewFailureReason when the captured file does not actually exist on disk - never trusts AE's self-report alone", async () => {
-    await writeFakeServer(dir, { captureShape: "image", previewFilePath: join(dir, "does-not-exist.png") });
-    // A captured frame is waited for (wait-for-captured-frame.ts) - kept short here, the real window is 30 s.
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir, capturedFrameWait: { timeoutMs: 300, pollIntervalMs: 50 } });
-    const result = (await inspector.inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
+  it("reports previewFailureReason when no file ever appears on disk - never trusts AE's self-report alone", async () => {
+    await writeFakeServer(dir, { stillCapture: "neverWrites" });
+    const result = (await previewInspector().inspect(baseRequest({ previewTimestampSeconds: 2 }))) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");
     expect(result.response.preview).toBeNull();
@@ -771,9 +790,8 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
   });
 
   it("never attempts a preview capture when previewTimestampSeconds is not requested", async () => {
-    await writeFakeServer(dir, { captureShape: "none" });
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    const result = (await inspector.inspect(baseRequest())) as SceneEvidenceSuccess;
+    await writeFakeServer(dir, { stillCapture: "refuses" });
+    const result = (await previewInspector().inspect(baseRequest())) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");
     expect(result.response.preview).toBeNull();
@@ -781,32 +799,25 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
   });
 
   it("live QA Blocker 2 fix: a zero-placeholder scene (layerIndices: []) still reaches a real, independently-verified frame capture - layer evidence and frame capture are genuinely independent", async () => {
-    const previewPath = join(dir, "Text_01_no_placeholders.png");
-    await writeFile(previewPath, Buffer.from([1, 2, 3, 4, 5, 6]));
-    await writeFakeServer(dir, { captureShape: "image", previewFilePath: previewPath });
-
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    const result = (await inspector.inspect(baseRequest({ layerIndices: [], previewTimestampSeconds: 0 }))) as SceneEvidenceSuccess;
+    await writeFakeServer(dir, {});
+    const result = (await previewInspector().inspect(baseRequest({ layerIndices: [], previewTimestampSeconds: 0 }))) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");
     expect(result.response.layers).toEqual([]);
-    expect(result.response.preview).not.toBeNull();
-    expect(result.response.preview?.path).toBe(previewPath);
-    expect(result.response.preview?.bytes).toBe(6);
+    expect(result.response.preview?.bytes).toBe(4);
     expect(result.response.previewFailureReason).toBeNull();
     // Exact composition identity is still verified even with no layers requested.
     expect(result.response.compositionName).toBe("Text 01");
   });
 
-  it("live QA Blocker 2 fix: a zero-placeholder scene still reports an honest capture failure (never a fabricated preview) when ae_capture_frame itself fails", async () => {
-    await writeFakeServer(dir, { captureShape: "none" });
-    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });
-    const result = (await inspector.inspect(baseRequest({ layerIndices: [], previewTimestampSeconds: 0 }))) as SceneEvidenceSuccess;
+  it("live QA Blocker 2 fix: a zero-placeholder scene still reports an honest capture failure (never a fabricated preview) when the capture itself fails", async () => {
+    await writeFakeServer(dir, { stillCapture: "refuses" });
+    const result = (await previewInspector().inspect(baseRequest({ layerIndices: [], previewTimestampSeconds: 0 }))) as SceneEvidenceSuccess;
 
     expect(result.kind).toBe("evidence");
     expect(result.response.layers).toEqual([]);
     expect(result.response.preview).toBeNull();
-    expect(result.response.previewFailureReason).toMatch(/ae_capture_frame failed/);
+    expect(result.response.previewFailureReason).toMatch(/saveFrameToPng failed/);
   });
 
   it("fails honestly, without spawning a process, when AE_MCP_PATH is not configured", async () => {

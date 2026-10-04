@@ -11,9 +11,13 @@ import {
 } from "@dyo/schemas";
 import { HeroicSwanMcpClient, type McpChildTerminationLogger } from "./heroic-swan-mcp-client.js";
 import type { SceneEvidenceInspector, SceneEvidenceResult } from "./scene-evidence-inspector.js";
-import { parseCaptureFrame, parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
+import { parseCompositionDetail, parseLayerDetail } from "./parse-mcp-shapes.js";
 import { hashSourceProject } from "./hash-source-project.js";
-import { waitForCapturedFrame, type CapturedFrameWaitOptions } from "./wait-for-captured-frame.js";
+import { type CapturedFrameWaitOptions } from "./wait-for-captured-frame.js";
+import { captureStill } from "./capture-still.js";
+
+/** One still of a heavy composition takes longer than an inspection read; above the bridge's own 30 s so its specific error surfaces. */
+export const SCENE_PREVIEW_CAPTURE_CALL_TIMEOUT_MS = 60_000;
 import { withDisposableProject } from "./disposable-project.js";
 import {
   buildDescribeCompositionSummaryScript,
@@ -300,6 +304,7 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
   private readonly jobExecutionRegistry: JobExecutionRegistry | undefined;
   private readonly openProjectOptions: OpenProjectOptions | undefined;
   private readonly capturedFrameWait: CapturedFrameWaitOptions | undefined;
+  private readonly previewsDirectory: string | undefined;
 
   constructor(config: {
     aeMcpPath: string | undefined;
@@ -311,8 +316,11 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
     openProjectOptions?: OpenProjectOptions;
     /** Test-only override for how long a captured frame is waited for on disk - production uses wait-for-captured-frame.ts's real constants. */
     capturedFrameWait?: CapturedFrameWaitOptions;
+    /** Test-only: where the worker's own still capture writes - production uses capture-still.ts's default. */
+    previewsDirectory?: string;
   }) {
     this.capturedFrameWait = config.capturedFrameWait;
+    this.previewsDirectory = config.previewsDirectory;
     this.aeMcpPath = config.aeMcpPath;
     this.logger = config.logger;
     this.jobExecutionRegistry = config.jobExecutionRegistry;
@@ -508,34 +516,21 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
       let preview: ScenePreview | null = null;
       let previewFailureReason: string | null = null;
       if (request.previewTimestampSeconds !== null) {
-        const captureResult = await client.callTool("ae_capture_frame", {
-          comp_index: effectiveAeProjectItemIndex,
-          time: request.previewTimestampSeconds
+        // The worker's own capture, to a path it chose - see capture-still.ts
+        // (2026-10-04): ae-mcp's ae_capture_frame tool lost its connection on
+        // every still of a heavy composition. The file is verified by this
+        // worker's own filesystem read, never from AE's self-report.
+        const captured = await captureStill(client, {
+          aeProjectItemIndex: effectiveAeProjectItemIndex,
+          timestampSeconds: request.previewTimestampSeconds,
+          callTimeoutMs: SCENE_PREVIEW_CAPTURE_CALL_TIMEOUT_MS,
+          ...(this.capturedFrameWait !== undefined ? { capturedFrameWait: this.capturedFrameWait, ...(this.capturedFrameWait.timeoutMs !== undefined ? { waitAfterFailedCallMs: this.capturedFrameWait.timeoutMs } : {}) } : {}),
+          ...(this.previewsDirectory !== undefined ? { previewsDirectory: this.previewsDirectory } : {})
         });
-        if (!captureResult.ok) {
-          previewFailureReason = `ae_capture_frame failed: ${captureResult.error.message}`;
+        if (captured.ok) {
+          preview = { timestampSeconds: request.previewTimestampSeconds, path: captured.path, bytes: captured.bytes };
         } else {
-          const parsedCapture = parseCaptureFrame(captureResult.content);
-          if (!parsedCapture.ok) {
-            previewFailureReason = `ae_capture_frame response did not match either confirmed shape: ${parsedCapture.reason}`;
-          } else {
-            // Verified independently via this worker's own filesystem
-            // stat call (worker and ae-mcp are co-located on the same
-            // Windows machine) - never trusted from AE's self-report
-            // alone. "actual verified image existence" (Phase 7B section 7).
-            // Waited for, because ae-mcp returns the path before AE has
-            // finished writing a heavy still - see wait-for-captured-frame.ts.
-            const captured = await waitForCapturedFrame(parsedCapture.value.path, this.capturedFrameWait);
-            if (captured.ok) {
-              preview = {
-                timestampSeconds: request.previewTimestampSeconds,
-                path: parsedCapture.value.path,
-                bytes: captured.bytes
-              };
-            } else {
-              previewFailureReason = captured.reason;
-            }
-          }
+          previewFailureReason = captured.reason;
         }
       }
 

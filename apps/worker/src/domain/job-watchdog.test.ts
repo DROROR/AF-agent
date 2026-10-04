@@ -133,7 +133,7 @@ describe("deriveWatchdogBudgetMs", () => {
     expect(budget).toBe(150_000);
   });
 
-  it("adds one more call's worth of budget when a preview capture is requested", () => {
+  it("adds the still capture's real worst case when a preview is requested (2026-10-04: its own call budget plus the wait for a picture AE may still be writing)", () => {
     const withoutPreview = deriveWatchdogBudgetMs({
       operation: "INSPECT_SCENE_EVIDENCE",
       payload: { layerIndices: [1, 2, 3], previewTimestampSeconds: null }
@@ -142,7 +142,7 @@ describe("deriveWatchdogBudgetMs", () => {
       operation: "INSPECT_SCENE_EVIDENCE",
       payload: { layerIndices: [1, 2, 3], previewTimestampSeconds: 2 }
     });
-    expect(withPreview).toBe((withoutPreview ?? 0) + 30_000); // one extra call * 2x margin
+    expect(withPreview).toBe((withoutPreview ?? 0) + (60_000 + 120_000) * 2); // (capture call + wait after a lost call) * 2x margin
   });
 
   it("matches the real 2026-09-04 incident's own shape (16 layers, no preview): a job stuck 20+ minutes vastly exceeds this budget", () => {

@@ -1736,6 +1736,59 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
 }
 
 /**
+ * Saves ONE still of a composition to a path THIS WORKER chose (2026-10-04).
+ *
+ * REAL INCIDENT: every preview of a template's heavy master composition
+ * failed with "ae_capture_frame failed: MCP error -32000: Connection closed"
+ * - four attempts in a row, while eight lighter compositions of the same
+ * project captured fine. The ae-mcp `ae_capture_frame` tool waits for the
+ * PNG and sends it back inline as base64; its process ended during exactly
+ * the stills that are slow and large, and because the file name was chosen
+ * inside After Effects, a frame AE went on to write could not even be found.
+ *
+ * This script is the same host call that tool makes - `saveFrameToPng`, then
+ * the composition's own current time put back - with two differences: the
+ * output path is passed in, so the worker can wait for the file whatever
+ * happens to the call that asked for it, and nothing is sent back but a
+ * small status. It writes one new PNG and never saves or changes the
+ * project. No undo group: a still render must not run inside one
+ * (CLAUDE.md Safety Rule 4), and nothing here is a project mutation.
+ */
+export function buildCaptureStillScript(aeProjectItemIndex: number, timeSeconds: number, outputPath: string): FixedJsxScript {
+  if (!Number.isInteger(aeProjectItemIndex) || aeProjectItemIndex < 1) {
+    throw new Error(`buildCaptureStillScript: aeProjectItemIndex must be a positive integer, got ${String(aeProjectItemIndex)}`);
+  }
+  if (!Number.isFinite(timeSeconds) || timeSeconds < 0) {
+    throw new Error(`buildCaptureStillScript: timeSeconds must be a finite, non-negative number, got ${String(timeSeconds)}`);
+  }
+  const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
+  try {
+    var __item = null;
+    try { __item = app.project.item(${String(aeProjectItemIndex)}); } catch (__lookupError) { __item = null; }
+    if (!(__item instanceof CompItem)) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${String(aeProjectItemIndex)} + " did not resolve to a composition in this project" });
+    } else {
+      var __file = new File(${JSON.stringify(outputPath)});
+      var __previousTime = __item.time;
+      try {
+        try { __item.openInViewer(); } catch (__viewerError) {}
+        __item.time = ${String(timeSeconds)};
+        __item.saveFrameToPng(${String(timeSeconds)}, __file);
+        __result = JSON.stringify({ ok: true, compositionName: __item.name });
+      } catch (__saveError) {
+        __result = JSON.stringify({ ok: false, failureReason: "saveFrameToPng failed: " + (__saveError && __saveError.toString ? __saveError.toString() : String(__saveError)) });
+      } finally {
+        try { __item.time = __previousTime; } catch (__restoreError) {}
+      }
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * Preview Timing Analysis (live QA, 2026-09-09): also reads `layer.stretch`
  * (real, standard AE DOM property, percent - default 100) and
  * `layer.timeRemapEnabled` (real, standard AVLayer DOM property) for every

@@ -1,6 +1,7 @@
 import type { JobDto } from "@dyo/schemas";
 import { executeJob, type JobDispatcherDeps, type JobExecutionResult } from "./job-dispatcher.js";
 import type { JobExecutionRegistry } from "../runtime/job-execution-registry.js";
+import { CAPTURE_WAIT_AFTER_FAILED_CALL_MS } from "../inspection/capture-still.js";
 
 export interface JobWatchdogLogger {
   info: (meta: Record<string, unknown>, message: string) => void;
@@ -9,6 +10,8 @@ export interface JobWatchdogLogger {
 
 /** Must match heroic-swan-mcp-client.ts's own DEFAULT_TIMEOUT_MS - the per-call bound every plain (non-retried) ae_get_layer/ae_get_composition/ae_capture_frame call in heroic-swan-scene-evidence-inspector.ts is already subject to. */
 export const WATCHDOG_PER_CALL_TIMEOUT_MS = 15_000;
+/** Must match heroic-swan-scene-evidence-inspector.ts's own SCENE_PREVIEW_CAPTURE_CALL_TIMEOUT_MS. */
+export const WATCHDOG_PREVIEW_CAPTURE_CALL_TIMEOUT_MS = 60_000;
 /** Same bound as an ordinary MCP call - connect() performs the initialize handshake under this client's own timeoutMs. */
 export const WATCHDOG_CONNECT_TIMEOUT_MS = 15_000;
 /**
@@ -48,8 +51,14 @@ export function deriveWatchdogBudgetMs(job: Pick<JobDto, "operation" | "payload"
   const payload = job.payload as { layerIndices?: unknown; previewTimestampSeconds?: unknown } | null | undefined;
   const layerCount = Array.isArray(payload?.layerIndices) ? payload.layerIndices.length : 0;
   const hasPreviewCapture = Boolean(payload) && "previewTimestampSeconds" in (payload as object) && payload?.previewTimestampSeconds !== null;
-  const callCount = 1 /* ae_get_composition */ + layerCount + (hasPreviewCapture ? 1 : 0);
-  const worstCaseMs = WATCHDOG_CONNECT_TIMEOUT_MS + callCount * WATCHDOG_PER_CALL_TIMEOUT_MS;
+  const callCount = 1 /* ae_get_composition */ + layerCount;
+  // The preview is the worker's own still capture (capture-still.ts,
+  // 2026-10-04): one script call with its own budget, then - if that call
+  // did not answer - a bounded wait for the picture After Effects may still
+  // be writing. Counted at its real worst case, or this watchdog would cut
+  // off exactly the heavy stills that capture exists to survive.
+  const previewWorstCaseMs = hasPreviewCapture ? WATCHDOG_PREVIEW_CAPTURE_CALL_TIMEOUT_MS + CAPTURE_WAIT_AFTER_FAILED_CALL_MS : 0;
+  const worstCaseMs = WATCHDOG_CONNECT_TIMEOUT_MS + callCount * WATCHDOG_PER_CALL_TIMEOUT_MS + previewWorstCaseMs;
   return worstCaseMs * WATCHDOG_SAFETY_MARGIN_MULTIPLIER;
 }
 

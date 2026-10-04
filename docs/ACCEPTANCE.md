@@ -1672,3 +1672,27 @@ reported as succeeded and can be turned into a project.
 this template" and will not create a project from an inspection whose job result carries
 no layer inventory (the worker attaches it only when the project-wide scan completed).
 Project `new2` was created from the failed inspection before this and holds 5 placeholders.
+
+## 2026-10-04 - Every preview of a heavy master composition failed: "ae_capture_frame failed: Connection closed"
+
+**Seen live (worker `a094d62`, project `cc0c91a0`):** four attempts in a row for the
+template's master composition, and two more on 2026-10-02, all ended with
+`ae_capture_frame failed: MCP error -32000: Connection closed`, while the eight scene
+compositions of the same project captured normally. One attempt on 2026-10-02 had
+succeeded, with a 9 MB still.
+
+**What is known:** -32000 is the MCP connection ending, not a request timeout (-32001).
+The worker log shows the worker did not end the ae-mcp process itself and its watchdog did
+not fire (jobs ended in about 20 s; the budget was 90 s). The `ae_capture_frame` tool waits
+for the PNG and returns it inline as base64. **What is not known:** why the ae-mcp process
+ends - its stderr is not kept.
+
+**Fix (does not depend on the cause):** the worker no longer uses that tool. It runs its
+own fixed, read-only script - the same `saveFrameToPng` host call, composition time put
+back afterwards, no undo group - writing to a path the worker chose, and then looks for
+the file itself whether the call answered, timed out or lost its connection (up to 120 s
+after a lost call). Only After Effects itself reporting a failure ends the wait early.
+Used for the scene preview and for the executed-frame preview. The scene-preview watchdog
+budget now counts the capture at its real worst case.
+
+**Not yet run on real After Effects.**
