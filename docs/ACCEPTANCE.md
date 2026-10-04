@@ -1862,3 +1862,33 @@ item with a colour and which draws none of it.
 **Fix:** a layer that draws nothing is not a blocker - an adjustment layer, a guide layer,
 a null, a layer used as a track matte, a layer not on screen at the moment checked, or one
 fully transparent then. Not yet run on real After Effects.
+
+## 2026-10-04 - A slot was refused as "structure has changed" by this job's own earlier edit
+
+**How it was found:** by running the approved plan's own 37 operations on the QA worker in
+shadow sessions (new session ids, the project's real payload), so that nothing in the
+reviewer's session was touched. First run: 7 operations applied on real After Effects -
+two colours, three texts, a screenshot into a phone screen and a logo, all for the first
+time - and the eighth, a screenshot for another scene, was refused: "this slot's structure
+has changed since the plan was approved".
+
+**Isolated by three further runs:** that operation alone - applied. After the screenshot
+of the neighbouring scene - applied. After the LOGO operation - refused, same digest every
+time. With the worker changed to state the live facts: the first hop of the refused slot's
+chain is a layer whose scale read 104.73 %, on a layer the scan had recorded as keyframed.
+
+**Cause:** the mutation fingerprint holds each hop's scale and rotation as `.value` - the
+value at the composition's current time. For an animated hop that is a moving number, and
+this job's own earlier edit had moved the time. The check ran immediately before each
+slot's own edit, so it compared the approved template with a project the job had already
+changed.
+
+**Fix:** every slot of the job is checked once, on a fresh start, before the first edit -
+the working copy as opened is the thing "is this still the approved template?" is about.
+A resume does not re-read a project this session has itself edited; its source stays
+pinned by hash. Still true and not addressed here: a fingerprint that includes an animated
+value depends on the time stored in the project file.
+
+**During these runs:** the ae-mcp bridge inside After Effects stopped answering (health
+check: "No live bridge heartbeat") while the dashboard went on showing it ONLINE from a
+cached probe. Restarting After Effects restored it. Cause not known.

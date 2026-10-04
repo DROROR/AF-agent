@@ -1048,6 +1048,75 @@ describe("executeSceneEdit", () => {
       expect(seen[0]?.nestedTarget).toEqual([{ compositionId: "comp-1", aeProjectItemIndex: 1, layerIndex: 2 }]);
     });
 
+    /**
+     * REAL 2026-10-04 FAILURE (shadow runs 5aa73b49 / 535f5eea / 6e0bf0c2):
+     * the check ran before EACH slot's own edit, so a later slot was compared
+     * with a project this same job had already edited - and refused, because
+     * a hop's animated scale is read at the composition's current time and an
+     * earlier edit had moved it. Alone, the same operation passed.
+     */
+    it("checks EVERY slot before the first edit - never one slot against a project this job has already edited", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const order: string[] = [];
+      const bridge = new FakeAeEditBridge((operation) => {
+        order.push(`apply:${operation.type}`);
+        return alwaysSucceed(operation);
+      });
+      const chain = (compositionId: string) => [{ compositionId, aeProjectItemIndex: 5, layerIndex: 1 }];
+      const result = await executeSceneEdit(
+        {
+          workRoot: join(root, "work-root"),
+          aeEditBridge: bridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          verifySlotStructure: async ({ nestedTarget }) => {
+            order.push(`verify:${nestedTarget[0]?.compositionId}`);
+            return { ok: true as const };
+          },
+          now: () => new Date()
+        },
+        makeRequest({
+          sourceProjectPath: sourcePath,
+          sourceProjectSha256: sourceSha,
+          operations: [
+            mapFootage({ layerIndex: null, nestedTarget: chain("comp-first") }),
+            mapFootage({ layerIndex: null, nestedTarget: chain("comp-second") })
+          ]
+        })
+      );
+
+      expect(result.failureReason).toBeNull();
+      expect(order).toEqual(["verify:comp-first", "verify:comp-second", "apply:MAP_FOOTAGE", "apply:MAP_FOOTAGE"]);
+    });
+
+    it("a later slot that no longer matches stops the job before ANY operation is applied", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      let seen = 0;
+      const result = await executeSceneEdit(
+        {
+          workRoot: join(root, "work-root"),
+          aeEditBridge: bridge,
+          previewCapture: new FakePreviewCapture(REAL_PREVIEW),
+          uploadPreview: async () => ({ ok: true as const }),
+          persistCheckpoint: async () => ({ ok: true as const }),
+          resolveOperation: defaultResolveOperation,
+          verifySlotStructure: async () => {
+            seen += 1;
+            return seen === 2 ? { ok: false as const, reason: "structure changed" } : { ok: true as const };
+          },
+          now: () => new Date()
+        },
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, operations: [mapFootage(), mapFootage({ layerIndex: 3 })] })
+      );
+
+      expect(result.failureReason).toMatch(/operation 1 \(MAP_FOOTAGE\) refused: structure changed/);
+      expect(result.operationsCompleted).toEqual([]);
+      expect(bridge.calls).toHaveLength(0);
+    });
+
     it("does not re-check an operation the plan carried no fingerprint for - and still applies it", async () => {
       let called = 0;
       const { result, bridge } = await run(mapFootage({ expectedSlotFingerprint: undefined }), async () => {

@@ -305,6 +305,59 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   }
   let effectiveAeProjectItemIndex = resolvedIndex.resolved ? resolvedIndex.aeProjectItemIndex : request.aeProjectItemIndex;
 
+  // STAGE 4 - EVERY SLOT IS CHECKED BEFORE ANYTHING IS CHANGED. For each slot
+  // edit carrying an approved structural fingerprint, the chain's live
+  // structure is re-read and its digest recomputed; a layer inserted, a host
+  // reparented, a matte changed, a slot resized fails the job closed rather
+  // than editing something that is no longer what was approved.
+  //
+  // REAL 2026-10-04 FAILURE (shadow runs 5aa73b49, 535f5eea, 6e0bf0c2): this
+  // check used to run immediately before EACH slot's own edit. On a template
+  // whose scenes are placed by a layer with an ANIMATED scale, the eighth
+  // operation was refused - "structure has changed since the plan was
+  // approved" - straight after an earlier operation of the same job had
+  // placed a logo elsewhere. Nothing in that slot's chain had been touched:
+  // the fingerprint holds a hop's scale as its value at the composition's
+  // current time, and the job's own earlier edit had moved that time. Alone,
+  // the same operation passed.
+  //
+  // The question the check answers is "is this still the template that was
+  // approved?", and that is a question about the working copy AS OPENED -
+  // before this job's own edits, which are the one thing known to change it.
+  // So all of them are asked once, up front, on a fresh start. A resume
+  // carries on in a project this same session opened, verified and has since
+  // edited; re-reading it would compare the approved template with this
+  // job's own work, and its source is pinned by hash throughout.
+  if (startsFresh && deps.verifySlotStructure) {
+    for (const [index, intent] of request.operations.entries()) {
+      if (intent.type !== "MAP_FOOTAGE" || !intent.expectedSlotFingerprint) {
+        continue;
+      }
+      // A slot in the scene's own composition is a one-hop chain: the same
+      // check, not a skipped one, because a top-level layer's structure can
+      // move exactly as easily as a nested one's.
+      const chain =
+        intent.nestedTarget ??
+        (intent.layerIndex === null
+          ? null
+          : [{ compositionId: request.manifestCompositionId, aeProjectItemIndex: effectiveAeProjectItemIndex, layerIndex: intent.layerIndex }]);
+      if (chain === null) {
+        continue;
+      }
+      const recheck = await deps.verifySlotStructure({ nestedTarget: chain, expected: intent.expectedSlotFingerprint });
+      if (!recheck.ok) {
+        checkpoint = markFailed(checkpoint, `operation ${index} (MAP_FOOTAGE) refused: ${recheck.reason}`, deps.now());
+        return finish({
+          sourceProjectSha256: workingCopy.sourceProjectSha256,
+          workingProjectPath: workingCopy.workingProjectPath,
+          workingProjectSha256: workingCopy.workingProjectSha256,
+          previewFramePath: null,
+          previewTimestampSeconds: null
+        });
+      }
+    }
+  }
+
   let pendingIndex = nextPendingOperationIndex(checkpoint, request.operations.length);
   while (pendingIndex !== null) {
     const intent = request.operations[pendingIndex];
@@ -360,34 +413,6 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       }
       if (reResolved.resolved) {
         effectiveAeProjectItemIndex = reResolved.aeProjectItemIndex;
-      }
-    }
-
-    // STAGE 4 - THE LAST CHECK BEFORE ANY CHANGE. For a slot edit carrying an
-    // approved structural fingerprint, re-read the chain's live structure and
-    // recompute the digest. A layer inserted, a host reparented, a matte
-    // changed, a slot resized - anything that moves the structure - fails the
-    // operation closed rather than editing something that is no longer what
-    // was approved.
-    if (operation.type === "MAP_FOOTAGE" && operation.expectedSlotFingerprint) {
-      // A slot in the scene's own composition is a one-hop chain: the same
-      // check, not a skipped one, because a top-level layer's structure can
-      // move exactly as easily as a nested one's.
-      const chain =
-        operation.nestedTarget ??
-        (operation.layerIndex === null
-          ? null
-          : [{ compositionId: request.manifestCompositionId, aeProjectItemIndex: effectiveAeProjectItemIndex, layerIndex: operation.layerIndex }]);
-      const recheck = chain === null ? null : await deps.verifySlotStructure?.({ nestedTarget: chain, expected: operation.expectedSlotFingerprint });
-      if (recheck && !recheck.ok) {
-        checkpoint = markFailed(checkpoint, `operation ${pendingIndex} (MAP_FOOTAGE) refused: ${recheck.reason}`, deps.now());
-        return finish({
-          sourceProjectSha256: workingCopy.sourceProjectSha256,
-          workingProjectPath: workingCopy.workingProjectPath,
-          workingProjectSha256: workingCopy.workingProjectSha256,
-          previewFramePath: null,
-          previewTimestampSeconds: null
-        });
       }
     }
 
