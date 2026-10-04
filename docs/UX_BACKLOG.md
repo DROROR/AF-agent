@@ -152,3 +152,19 @@ Seen on real screens of project `5db054f5` in Simple view, not inferred from cod
 - Project checklist names ("Review AI Plan", "Match Your Content") do not match the tab names.
 - "No, something is wrong" on the first frame does not lead to the picture that is wrong.
 - The Hebrew for everything added today is unreviewed.
+
+**Fixed in a second pass the same evening**
+- New project, second step, in plain words: "Editing computer", "A short name for this
+  template", "Where the template file is on the editing computer", "Connection to After
+  Effects", "Read the template".
+- Project checklist steps say what to do: Add your files / Make the AI plan / Read the AI plan /
+  Check the scenes / Check one frame / Watch the full video / Download the video.
+- Files: the SHA-256 line is Advanced-only.
+- A first frame that was not approved now says where a mirrored or sideways picture is fixed.
+
+**Deliberately not changed**
+- "Delete Project" stays at the top: the operator asked for that twice (see the comment in
+  ProjectWorkspaceShell.tsx).
+- The sidebar still lists Jobs / Workers / Approvals / Renders / Activity for everyone: it is
+  the operator's own navigation, and hiding it is their decision to make.
+- The Hebrew step names and wizard labels were left as they were; only English was reworded.

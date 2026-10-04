@@ -144,33 +144,33 @@ export const en = {
   },
   projectsNew: {
     title: "New project",
-    description: "Create a project by inspecting a real, plugin-free After Effects template on a connected Worker.",
+    description: "Name the project, then let your editing computer read the After Effects template it will use.",
     stepperLabel: "Project setup steps",
     steps: {
       details: "Project details",
-      template: "Inspect template"
+      template: "Read the template"
     },
     fields: {
       projectName: "Project name",
       projectNamePlaceholder: "e.g. Cognetica - Spring launch"
     },
     template: {
-      workerLabel: "Worker",
-      workerPlaceholder: "Select a connected Worker...",
+      workerLabel: "Editing computer",
+      workerPlaceholder: "Choose your editing computer...",
       noWorkersTitle: "No Worker reports the INSPECT_TEMPLATE capability",
       noWorkersDescription: "Register/update a Worker with this capability before creating a project - see Workers.",
       workerStatusLabel: "Worker status",
       aeStatusLabel: "After Effects",
-      mcpStatusLabel: "ae-mcp bridge",
-      templateIdLabel: "Template ID",
+      mcpStatusLabel: "Connection to After Effects",
+      templateIdLabel: "A short name for this template",
       templateIdPlaceholder: "e.g. white-app-promo-v1",
-      sourceProjectPathLabel: "Source project path (on the Worker machine)",
+      sourceProjectPathLabel: "Where the template file is on the editing computer",
       sourceProjectPathPlaceholder: "e.g. C:\\DYO-Agent\\copies\\template.aep",
       sourceProjectPathHint:
-        "Must be the full file path to a COPY of the .aep, never the original file or a folder - the path must end in .aep.",
+        "The full path to a COPY of the template file, ending in .aep - never the original file, and not a folder.",
       sourceProjectPathDisposableCopy:
         "That is a temporary inspection copy this system created, not your template. It is deleted automatically, so a project built on it would lose its source. Use the same path without the \".dyo-inspect-...\" part.",
-      inspectAction: "Inspect Template",
+      inspectAction: "Read the template",
       inspecting: "Dispatching…",
       statusQueued: "Queued on the Worker - waiting for it to pick this up.",
       statusClaimed: "Claimed by the Worker - starting shortly.",
@@ -193,7 +193,7 @@ export const en = {
       scanIncompleteTitle: "After Effects did not finish reading this template",
       scanIncompleteDescription: "The layers were not read, so nothing in this template could be offered for editing. Close any dialog open in After Effects, leave it alone, and press Inspect Template again.",
       createProjectFailedTitle: "Could not create the project",
-      retryAction: "Inspect again",
+      retryAction: "Read it again",
       previousInspectionCancelled: "The previous inspection was cancelled before it ran. You can inspect again."
     },
     stepNotAvailableTitle: "Not available",
@@ -450,13 +450,13 @@ export const en = {
       stepOfTotal: (current: number, total: number, title: string): string => `Step ${current} of ${total} — ${title}`,
       status: { complete: "Complete", inProgress: "Current", locked: "Locked", ready: "Ready" },
       steps: {
-        upload: { title: "Upload", description: "Your template and assets are uploaded and ready." },
-        tellClaude: { title: "AI Plan", description: "AI is planning how to use your template and content." },
-        reviewPlan: { title: "Review AI Plan", description: "Check the scenes, content, text and timing AI prepared for your video." },
-        sceneMappings: { title: "Match Your Content", description: "Review each scene's suggested content, then approve the plan to continue." },
-        firstPreview: { title: "First Preview", description: "Create a first designed frame and approve it before the rest of the video is built." },
-        finalPreview: { title: "Final Preview", description: "Review the finished scenes - order, text, assets, timing and branding - before rendering." },
-        render: { title: "Export Video", description: "Render the final Landscape and Reels videos and download them." }
+        upload: { title: "Add your files", description: "Your template and assets are uploaded and ready." },
+        tellClaude: { title: "Make the AI plan", description: "AI is planning how to use your template and content." },
+        reviewPlan: { title: "Read the AI plan", description: "Check the scenes, content, text and timing AI prepared for your video." },
+        sceneMappings: { title: "Check the scenes", description: "Review each scene's suggested content, then approve the plan to continue." },
+        firstPreview: { title: "Check one frame", description: "Create a first designed frame and approve it before the rest of the video is built." },
+        finalPreview: { title: "Watch the full video", description: "Review the finished scenes - order, text, assets, timing and branding - before rendering." },
+        render: { title: "Download the video", description: "Render the final Landscape and Reels videos and download them." }
       }
     },
     tabs: {
@@ -685,7 +685,7 @@ export const en = {
       /** Neutral on purpose: a session can stop for reasons other than a "no", and this must not put words in anyone's mouth. */
       frameRejectedTitle: "This frame was not approved",
       frameRejectedDescription:
-        "If the content is wrong, go back to Scenes and change it. If the picture was only taken at a bad moment, open \"Look at a different moment\" below.",
+        "If a text or picture is wrong, go back to Scenes and change it. If a picture is mirrored or sideways, open its scene with \"Change picture or text\" and answer \"Is the picture the wrong way round in the video?\". If the frame was only taken at a bad moment, open \"Look at a different moment\" below.",
       backToScenesAction: "Go back to Scenes",
       differentMomentToggle: "Look at a different moment",
       differentMomentHint: "Shows the same video at another point in time. Nothing in your video changes.",

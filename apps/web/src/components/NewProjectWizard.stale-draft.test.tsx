@@ -98,7 +98,7 @@ function renderWizard(): void {
   );
 }
 
-const inspectButton = () => screen.getByRole("button", { name: /Inspect Template|Inspect again/ }) as HTMLButtonElement;
+const inspectButton = () => screen.getByRole("button", { name: /Read the template|Read it again/ }) as HTMLButtonElement;
 
 describe("NewProjectWizard - stale draft for a CANCELLED inspection (production reproduction)", () => {
   it("renders the selected worker's real statuses from the exact production DTO", async () => {

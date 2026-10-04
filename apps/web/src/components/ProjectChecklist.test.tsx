@@ -158,7 +158,7 @@ describe("ProjectChecklist - one list, one live row", () => {
     // real state is: uploaded, planned, plan created - now review scenes.
     const current = list().querySelectorAll('[data-current="true"]');
     expect(current).toHaveLength(1);
-    expect(current[0]!.textContent).toContain("Match Your Content");
+    expect(current[0]!.textContent).toContain("Check the scenes");
 
     // Only the open row is clickable. Six rows of links were six more
     // places to guess at, which is what the old stepper offered.
@@ -256,8 +256,8 @@ describe("ProjectChecklist - never invents a step", () => {
     expect(list().textContent).not.toContain("Done");
     expect(list().textContent).not.toContain("of 7 done");
     // And none of the step names, which is what a guess would have printed.
-    expect(list().textContent).not.toContain("Match Your Content");
-    expect(list().textContent).not.toContain("First Preview");
+    expect(list().textContent).not.toContain("Check the scenes");
+    expect(list().textContent).not.toContain("Check one frame");
   });
 
   it("distinguishes 'still checking' from 'could not check' - calling a failure a slow load is its own small lie", async () => {

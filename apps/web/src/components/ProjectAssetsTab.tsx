@@ -17,6 +17,7 @@ import { Skeleton } from "./ui/Skeleton";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { useLocale } from "./LocaleProvider";
+import { useWorkspaceModeIfPresent } from "./WorkspaceModeProvider";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -145,6 +146,7 @@ function AssetCard({
   onDelete: () => Promise<{ ok: boolean; message?: string }>;
 }): ReactElement {
   const { t } = useLocale();
+  const isSimple = useWorkspaceModeIfPresent() === "simple";
   const [label, setLabel] = useState(asset.label ?? "");
   const [notes, setNotes] = useState(asset.notes ?? "");
   const [isSaving, setIsSaving] = useState(false);
@@ -198,12 +200,15 @@ function AssetCard({
             <dt>{t.assetsTab.uploadedLabel}</dt>
             <dd>{new Date(asset.uploadedAt).toLocaleString()}</dd>
           </div>
+          {/* A file's fingerprint is for support; in Simple view it is one more line nobody making a video reads. */}
+          {isSimple ? null : (
           <div>
             <dt>{t.assetsTab.shaLabel}</dt>
             <dd>
               <code>{asset.sha256.slice(0, 12)}</code>
             </dd>
           </div>
+          )}
         </dl>
         {saveError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={saveError} /> : null}
         <Field label={t.assetsTab.labelLabel} htmlFor={`asset-label-${asset.id}`}>

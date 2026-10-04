@@ -82,8 +82,8 @@ async function goToTemplateStep(): Promise<void> {
 async function selectWorkerAndFillTemplateFields(workerId = "44444444-4444-4444-4444-444444444444"): Promise<void> {
   await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
   fireEvent.change(screen.getByRole("combobox"), { target: { value: workerId } });
-  fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
-  fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), { target: { value: "/copies/t1.aep" } });
+  fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
+  fireEvent.change(screen.getByLabelText("Where the template file is on the editing computer"), { target: { value: "/copies/t1.aep" } });
 }
 
 describe("NewProjectWizard", () => {
@@ -101,11 +101,11 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
 
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(true);
 
     await selectWorkerAndFillTemplateFields();
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("does not enable inspection for a worker missing AE/MCP preconditions, even though it reports the capability", async () => {
@@ -119,7 +119,7 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
     await selectWorkerAndFillTemplateFields();
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("rejects a directory-only source path with no .aep filename - never enables Inspect Template (real production bug, 2026-08-30: C:\\DYO-Agent\\copy)", async () => {
@@ -128,13 +128,13 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
-    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+    fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
 
-    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+    fireEvent.change(screen.getByLabelText("Where the template file is on the editing computer"), {
       target: { value: "C:\\DYO-Agent\\copy" }
     });
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("rejects a real file path whose extension is not .aep - never enables Inspect Template", async () => {
@@ -143,13 +143,13 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
-    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+    fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
 
-    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+    fireEvent.change(screen.getByLabelText("Where the template file is on the editing computer"), {
       target: { value: "C:\\DYO-Agent\\copy\\notes.txt" }
     });
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("enables Inspect Template for a real, full .aep file path (case-insensitive extension)", async () => {
@@ -158,13 +158,13 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
-    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+    fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
 
-    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+    fireEvent.change(screen.getByLabelText("Where the template file is on the editing computer"), {
       target: { value: "C:\\DYO-Agent\\copy\\White App Promo.AEP" }
     });
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("enables Inspect Template for the QUOTED path Windows' own 'Copy as path' produces (real client failure, 2026-09-28)", async () => {
@@ -178,13 +178,13 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
-    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+    fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
 
-    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+    fireEvent.change(screen.getByLabelText("Where the template file is on the editing computer"), {
       target: { value: '"C:\\DYO-Agent\\copy\\Android_App_Promo_CC2014+.aep"' }
     });
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("enables Inspect Template for a path left with only the OPENING quote - the exact string the failed client job carried", async () => {
@@ -193,13 +193,13 @@ describe("NewProjectWizard", () => {
     await goToTemplateStep();
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
-    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+    fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
 
-    fireEvent.change(screen.getByLabelText("Source project path (on the Worker machine)"), {
+    fireEvent.change(screen.getByLabelText("Where the template file is on the editing computer"), {
       target: { value: '"C:\\DYO-Agent\\copy\\Android_App_Promo_CC2014+.aep' }
     });
 
-    expect(screen.getByRole("button", { name: "Inspect Template" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read the template" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("dispatches a real job, shows running progress, then the real completed result with source SHA - and lets the operator promote it into a real project", async () => {
@@ -298,7 +298,7 @@ describe("NewProjectWizard", () => {
     renderWizard();
     await goToTemplateStep();
     await selectWorkerAndFillTemplateFields();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
 
     await waitFor(() => expect(screen.getByText("Inspecting the real template on the Worker now...")).not.toBeNull(), { timeout: 5000 });
     // 2026-10-04: a five-minute inspection showed a shimmering bar over one
@@ -365,7 +365,7 @@ describe("NewProjectWizard", () => {
     renderWizard();
     await goToTemplateStep();
     await selectWorkerAndFillTemplateFields();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
 
     // Wait for the initial QUEUED render, then for the (real-timer) poll to
     // land the terminal SUCCEEDED+raw_capture job and the queued message to
@@ -418,10 +418,10 @@ describe("NewProjectWizard", () => {
     renderWizard();
     await goToTemplateStep();
     await selectWorkerAndFillTemplateFields();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
 
     await waitFor(() => expect(screen.getByText("bridge unreachable")).not.toBeNull(), { timeout: 5000 });
-    expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read it again" }).hasAttribute("disabled")).toBe(false);
   });
 
   /**
@@ -478,12 +478,12 @@ describe("NewProjectWizard", () => {
     renderWizard();
     await goToTemplateStep();
     await selectWorkerAndFillTemplateFields();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
 
     await waitFor(() => expect(screen.getByText(note)).not.toBeNull(), { timeout: 5000 });
     // The generic message stays: the note explains it, never replaces it.
     expect(screen.getByText("Template inspection could not produce a valid manifest.")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read it again" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("falls back to the generic message alone when a failed job carries no capture to explain it", async () => {
@@ -525,10 +525,10 @@ describe("NewProjectWizard", () => {
     renderWizard();
     await goToTemplateStep();
     await selectWorkerAndFillTemplateFields();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
 
     await waitFor(() => expect(screen.getByText("Template inspection could not produce a valid manifest.")).not.toBeNull(), { timeout: 5000 });
-    expect(screen.getByRole("button", { name: "Inspect again" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Read it again" }).hasAttribute("disabled")).toBe(false);
   });
 
   describe("real 2026-09-11 incident: a genuinely long-running INSPECT_TEMPLATE job (18 minutes, 51 compositions) exposed two bugs - a single transient poll failure permanently stopping all polling, and a page refresh discarding all knowledge of the in-flight/completed job", () => {
@@ -599,7 +599,7 @@ describe("NewProjectWizard", () => {
       renderWizard();
       await goToTemplateStep();
       await selectWorkerAndFillTemplateFields();
-      fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+      fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
 
       await waitFor(() => expect(screen.getByText("Inspecting the real template on the Worker now...")).not.toBeNull(), { timeout: 5000 });
       // Despite two consecutive transient poll failures in between, the
@@ -669,7 +669,7 @@ describe("NewProjectWizard", () => {
       renderWizard();
       await goToTemplateStep();
       await selectWorkerAndFillTemplateFields();
-      fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+      fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
       await waitFor(() => expect(screen.getByText("Inspecting the real template on the Worker now...")).not.toBeNull(), { timeout: 5000 });
 
       jobsPostCount = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
@@ -726,7 +726,7 @@ describe("NewProjectWizard", () => {
       renderWizard();
       await goToTemplateStep();
       await selectWorkerAndFillTemplateFields();
-      fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
+      fireEvent.click(screen.getByRole("button", { name: "Read the template" }));
       await waitFor(() => expect(screen.getByText("Inspection result")).not.toBeNull(), { timeout: 10000 });
 
       const jobsPostCountBeforeRefresh = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
@@ -768,15 +768,15 @@ describe("NewProjectWizard - a temporary inspection copy is refused, out loud", 
     await goToTemplateStep();
     await waitFor(() => expect(screen.getByRole("combobox")).not.toBeNull());
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "44444444-4444-4444-4444-444444444444" } });
-    fireEvent.change(screen.getByLabelText("Template ID"), { target: { value: "tmpl-1" } });
+    fireEvent.change(screen.getByLabelText("A short name for this template"), { target: { value: "tmpl-1" } });
   }
 
   function pathField(): HTMLElement {
-    return screen.getByLabelText("Source project path (on the Worker machine)");
+    return screen.getByLabelText("Where the template file is on the editing computer");
   }
 
   function inspectButton(): HTMLElement {
-    return screen.getByRole("button", { name: "Inspect Template" });
+    return screen.getByRole("button", { name: "Read the template" });
   }
 
   it("says what is wrong and what to use instead - never only a disabled button", async () => {

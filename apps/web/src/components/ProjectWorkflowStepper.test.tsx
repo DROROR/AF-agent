@@ -64,16 +64,16 @@ describe("ProjectWorkflowStepper", () => {
   it('shows "Step 2 of 7 — AI Plan" as current for a fresh project with no Work Map yet', async () => {
     stubWorkspace();
     renderStepper();
-    await screen.findByText("Step 2 of 7 — AI Plan");
+    await screen.findByText("Step 2 of 7 — Make the AI plan");
     screen.getByText("AI is planning how to use your template and content.");
   });
 
   it("locks every step after the current one - a locked step is never a clickable link", async () => {
     stubWorkspace();
     renderStepper();
-    await screen.findByText("Step 2 of 7 — AI Plan");
+    await screen.findByText("Step 2 of 7 — Make the AI plan");
 
-    const renderStep = screen.getByText("Export Video").closest("li");
+    const renderStep = screen.getByText("Download the video").closest("li");
     expect(renderStep?.querySelector("a")).toBeNull();
     expect(renderStep?.getAttribute("data-state")).toBe("locked");
   });
@@ -81,12 +81,12 @@ describe("ProjectWorkflowStepper", () => {
   it("marks Upload complete and shows a real link (not locked) for the current step", async () => {
     stubWorkspace();
     renderStepper();
-    await screen.findByText("Step 2 of 7 — AI Plan");
+    await screen.findByText("Step 2 of 7 — Make the AI plan");
 
-    const uploadStep = screen.getByText("Upload").closest("li");
+    const uploadStep = screen.getByText("Add your files").closest("li");
     expect(uploadStep?.getAttribute("data-state")).toBe("complete");
 
-    const tellClaudeStep = screen.getByText("AI Plan").closest("li");
+    const tellClaudeStep = screen.getByText("Make the AI plan").closest("li");
     expect(tellClaudeStep?.querySelector("a")).not.toBeNull();
   });
 
@@ -95,7 +95,7 @@ describe("ProjectWorkflowStepper", () => {
       [`/api/projects/${PROJECT_ID}/work-map`]: { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture()]) } }
     });
     renderStepper();
-    await screen.findByText("Step 4 of 7 — Match Your Content");
+    await screen.findByText("Step 4 of 7 — Check the scenes");
   });
 
   it("Scene Mappings only completes once the plan is APPROVED, not merely created", async () => {
@@ -105,7 +105,7 @@ describe("ProjectWorkflowStepper", () => {
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, [scene]), sceneTable: [] } }
     });
     renderStepper();
-    await screen.findByText("Step 5 of 7 — First Preview");
+    await screen.findByText("Step 5 of 7 — Check one frame");
   });
 
   it("real 2026-09-14 defect: an APPROVED plan whose included scene is still READY_FOR_APPROVAL stays on Match Your Content - never advances to First Preview with nothing executable", async () => {
@@ -115,7 +115,7 @@ describe("ProjectWorkflowStepper", () => {
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ status: "APPROVED" }, [scene]), sceneTable: [] } }
     });
     renderStepper();
-    await screen.findByText("Step 4 of 7 — Match Your Content");
+    await screen.findByText("Step 4 of 7 — Check the scenes");
   });
 
   it("Final Preview stays current (never complete) and Render stays locked once every scene is done but the complete preview has not been approved yet - client-handoff phase, 'real final preview approval gate'", async () => {
@@ -129,9 +129,9 @@ describe("ProjectWorkflowStepper", () => {
       }
     });
     renderStepper();
-    await screen.findByText("Step 6 of 7 — Final Preview");
+    await screen.findByText("Step 6 of 7 — Watch the full video");
 
-    const renderStep = screen.getByText("Export Video").closest("li");
+    const renderStep = screen.getByText("Download the video").closest("li");
     expect(renderStep?.getAttribute("data-state")).toBe("locked");
   });
 
@@ -147,7 +147,7 @@ describe("ProjectWorkflowStepper", () => {
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture()] } }
     });
     renderStepper();
-    await screen.findByText("Step 7 of 7 — Export Video");
+    await screen.findByText("Step 7 of 7 — Download the video");
   });
 });
 
@@ -167,21 +167,21 @@ describe("ProjectWorkflowStepper - visually distinct Complete/Current/Locked sta
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 404, body: { error: { code: "NOT_FOUND", message: "none", requestId: "r1" } } }
     });
     renderStepper();
-    await screen.findByText("Step 3 of 7 — Review AI Plan");
+    await screen.findByText("Step 3 of 7 — Read the AI plan");
 
-    const aiPlanItem = screen.getByText("AI Plan").closest("li")!;
+    const aiPlanItem = screen.getByText("Make the AI plan").closest("li")!;
     expect(aiPlanItem.getAttribute("data-state")).toBe("complete");
     // A checkmark icon (not a plain digit) marks the complete step.
     expect(aiPlanItem.querySelector(".workflow-stepper__marker svg")).not.toBeNull();
 
-    const reviewPlanItem = screen.getByText("Review AI Plan").closest("li")!;
+    const reviewPlanItem = screen.getByText("Read the AI plan").closest("li")!;
     expect(reviewPlanItem.getAttribute("data-state")).toBe("current");
     expect(reviewPlanItem.querySelector("a")).not.toBeNull();
     // CASE C: the current step's own status text is unmistakably "Current".
     const status = within(reviewPlanItem).getByText("Current");
     expect(status).not.toBeNull();
 
-    const matchContentItem = screen.getByText("Match Your Content").closest("li")!;
+    const matchContentItem = screen.getByText("Check the scenes").closest("li")!;
     expect(matchContentItem.getAttribute("data-state")).toBe("locked");
     expect(matchContentItem.querySelector("a")).toBeNull();
     // A lock icon (not a plain digit) marks the locked step.
@@ -194,12 +194,12 @@ describe("ProjectWorkflowStepper - visually distinct Complete/Current/Locked sta
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } }
     });
     renderStepper();
-    await screen.findByText("Step 4 of 7 — Match Your Content");
+    await screen.findByText("Step 4 of 7 — Check the scenes");
 
-    const reviewPlanItem = screen.getByText("Review AI Plan").closest("li")!;
+    const reviewPlanItem = screen.getByText("Read the AI plan").closest("li")!;
     expect(reviewPlanItem.getAttribute("data-state")).toBe("complete");
 
-    const matchContentItem = screen.getByText("Match Your Content").closest("li")!;
+    const matchContentItem = screen.getByText("Check the scenes").closest("li")!;
     expect(matchContentItem.getAttribute("data-state")).toBe("current");
     expect(matchContentItem.querySelector("a")).not.toBeNull();
     expect(within(matchContentItem).getByText("Current")).not.toBeNull();
