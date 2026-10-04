@@ -47,7 +47,9 @@ export function validateBrandRules(
     if (!hasLogo) {
       violations.push({
         rule: "LOGO_PRESENCE",
-        message: "No active scene has a logo-type asset mapped - CLAUDE.md requires the client/company logo to appear at least once in every video."
+        // Said to the person approving, in their terms (2026-10-04): the rule's
+        // source file means nothing to a client and told them nothing to do.
+        message: "Every DYO video must show the client's logo at least once, and no scene has a logo yet. Open a scene with Edit, choose your logo for one of its pictures, then approve again."
       });
     }
   }
@@ -58,7 +60,7 @@ export function validateBrandRules(
   if (!hasRequiredHebrewText) {
     violations.push({
       rule: "REQUIRED_HEBREW_TEXT",
-      message: `No active scene includes the required text "${config.requiredHebrewText}" - CLAUDE.md requires every video to include this Hebrew text.`
+      message: `Every DYO video must show the line "${config.requiredHebrewText}" somewhere, and no scene has it yet. Open a scene with Edit, put exactly that line on one of its texts, then approve again.`
     });
   }
 
