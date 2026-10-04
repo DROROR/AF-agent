@@ -435,6 +435,8 @@ function buildSlotEvidence(args: {
   layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>;
   /** A screen card IS its composition, placed by its hosts; every other footage slot is a layer carrying its own matte, 3D state and parent. */
   slotIsWholeComposition: boolean;
+  /** The scene this slot is being listed under - what a nested slot's on-screen moment is stated in. */
+  sceneCompositionId?: string;
 }): { facts: SlotStructuralFacts; semantics: SlotSemanticsResult; fingerprint: SlotFingerprint; mutationFingerprint: SlotFingerprint } {
   const { composition, layer, layerFactsByCompositionAndIndex } = args;
   const facts = buildSlotStructuralFacts({
@@ -444,7 +446,10 @@ function buildSlotEvidence(args: {
     compositions: args.allCompositions,
     layerFactsByCompositionAndIndex,
     hostDepth: args.depth,
-    slotIsWholeComposition: args.slotIsWholeComposition
+    slotIsWholeComposition: args.slotIsWholeComposition,
+    ...(args.sceneCompositionId !== undefined && args.chainToParent.length > 0
+      ? { sceneCompositionId: args.sceneCompositionId, chainFromScene: args.chainToParent }
+      : {})
   });
   // The chain this slot will actually be edited through - each hop read from
   // the same scan, so the live re-check before mutation compares like with
@@ -622,7 +627,8 @@ function collectNestedPlaceholders(
             depth,
             allCompositions,
             layerFactsByCompositionAndIndex,
-            slotIsWholeComposition: layer === screenCard
+            slotIsWholeComposition: layer === screenCard,
+            sceneCompositionId: scene.compositionId
           });
 
       placeholders.push(

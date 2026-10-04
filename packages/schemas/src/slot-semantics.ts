@@ -125,7 +125,20 @@ export const slotStructuralFactsSchema = z
      * visibility facts existed. `computeEffectiveVisibility` prefers the
      * per-host facts above and only falls back to this.
      */
-    visibleWindowSeconds: z.object({ startSeconds: z.number().nonnegative(), endSeconds: z.number().nonnegative() }).nullable().optional()
+    visibleWindowSeconds: z.object({ startSeconds: z.number().nonnegative(), endSeconds: z.number().nonnegative() }).nullable().optional(),
+    /**
+     * When a NESTED slot's content is running, in the timeline of the scene's
+     * own composition (2026-10-04). Present only for a slot none of whose
+     * hosts lives in that composition - every host window above is then
+     * measured in some nested composition's timeline, and none of them is a
+     * moment in the composition an evidence frame is rendered in. Absent in
+     * manifests written before it existed, and when the chain's timing could
+     * not be read.
+     */
+    sceneWindow: z
+      .object({ compositionId: z.string().min(1), startSeconds: z.number().nonnegative(), endSeconds: z.number().nonnegative() })
+      .strict()
+      .optional()
   })
   .strict();
 export type SlotStructuralFacts = z.infer<typeof slotStructuralFactsSchema>;
@@ -810,7 +823,7 @@ function visibleOpacityWindow(host: SlotHostFacts, window: { startSeconds: numbe
  * and calling it evidence.
  */
 export function computeEffectiveVisibility(
-  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">,
+  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds" | "sceneWindow">,
   /**
    * When given, ONLY hosts living in this composition are considered.
    *
@@ -831,6 +844,16 @@ export function computeEffectiveVisibility(
    */
   inCompositionId?: string
 ): { startSeconds: number; endSeconds: number } | null {
+  // A NESTED slot with a recorded scene window (2026-10-04, real defect - see
+  // build-slot-facts.ts computeSceneWindow): every host window below is in a
+  // nested composition's timeline, and the evidence frame is rendered in the
+  // scene's. The scene window is the only one of them that names a moment in
+  // the picture a reviewer is shown, so it is the answer both for whoever
+  // renders that composition and for the gate that checks the frame against it.
+  const sceneWindow = facts.sceneWindow;
+  if (sceneWindow !== undefined && sceneWindow.endSeconds > sceneWindow.startSeconds && (inCompositionId === undefined || inCompositionId === sceneWindow.compositionId)) {
+    return { startSeconds: sceneWindow.startSeconds, endSeconds: sceneWindow.endSeconds };
+  }
   let best: { startSeconds: number; endSeconds: number } | null = null;
   for (const host of facts.hosts ?? []) {
     if (host.enabled === false || host.inFrame === false) {
@@ -877,7 +900,7 @@ export function computeEffectiveVisibility(
  * or behind an animation - and a frame showing nothing proves nothing.
  */
 export function selectEvidenceFrameSeconds(
-  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds">,
+  facts: Pick<SlotStructuralFacts, "hosts" | "visibleWindowSeconds" | "sceneWindow">,
   /**
    * The composition the frame will actually be rendered in. Supplying it does
    * two things, and both matter - see computeEffectiveVisibility's own doc

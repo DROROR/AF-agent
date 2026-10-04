@@ -1308,8 +1308,10 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     // the slot-semantics gate reads (scale on both axes, rotation, and
     // whether the transform is keyframed at all), plus the five
     // effective-visibility facts an evidence frame's moment comes from
-    // (position and anchor on both axes, and the opacity keyframes).
-    expect(Object.keys(plain.detail)).toHaveLength(31);
+    // (position and anchor on both axes, and the opacity keyframes), plus the
+    // three timing facts that carry a nested slot's moment up into the scene's
+    // timeline (start time, stretch, and whether time is remapped).
+    expect(Object.keys(plain.detail)).toHaveLength(34);
     const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
     expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
   });

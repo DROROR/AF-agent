@@ -210,3 +210,52 @@ describe("moving footage laid over the picture in a lightening blending mode is 
     expect(typesOf([clip(1, "photo", true)], blended("SCREEN")).map(([, name]) => name)).toEqual(["photo"]);
   });
 });
+
+describe("a nested slot's on-screen moment is stated in the scene's own timeline", () => {
+  // master (60 s) places the scene part at 20 s; the part places the rig at 2 s;
+  // the rig places the card from its start. The card's solid runs 0-5 s.
+  const timing = (startTimeSeconds: number, inPointSeconds: number, outPointSeconds: number, extra: Record<string, unknown> = {}) => ({
+    kind: "AVLayer",
+    enabled: true,
+    detail: { startTimeSeconds, stretchPercent: 100, timeRemapEnabled: false, inPointSeconds, outPointSeconds, hasTrackMatte: false, ...extra }
+  });
+  const scannedChain = (overrides: Record<string, ScannedSlotLayer> = {}): Record<string, ScannedSlotLayer> => ({
+    [`${MASTER}:1`]: timing(20, 20, 30),
+    [`${SCENE}:9`]: timing(2, 2, 10),
+    [`${RIG}:1`]: timing(0, 0, 8, { hasTrackMatte: true }),
+    [`${CARD}:3`]: { kind: "AVLayer", enabled: true, footage: { isSolid: true, widthPx: 750, heightPx: 1334 }, detail: { inPointSeconds: 0, outPointSeconds: 5 } },
+    ...overrides
+  });
+  const slotOf = (scanned: Record<string, ScannedSlotLayer>) =>
+    placeholdersOf(facts(graph(portraitCard([shape(1, "a"), solid(3, "screen")]), true), scanned)).find((p) => p.placeholderType === "image");
+
+  it("carries the slot's window up every hop: 0-5 s in the card is 22-27 s in the scene", () => {
+    expect(slotOf(scannedChain())?.slotFacts?.sceneWindow).toEqual({ compositionId: MASTER, startSeconds: 22, endSeconds: 27 });
+  });
+
+  it("is cut by a placing layer's own in and out points", () => {
+    const window = slotOf(scannedChain({ [`${MASTER}:1`]: timing(20, 23, 25) }))?.slotFacts?.sceneWindow;
+    expect(window).toEqual({ compositionId: MASTER, startSeconds: 23, endSeconds: 25 });
+  });
+
+  it("follows a stretched layer, still cut by the layer above it", () => {
+    const stretched = { ...timing(2, 2, 20), detail: { ...timing(2, 2, 20).detail, stretchPercent: 200 } };
+    expect(slotOf(scannedChain({ [`${SCENE}:9`]: stretched }))?.slotFacts?.sceneWindow).toEqual({ compositionId: MASTER, startSeconds: 22, endSeconds: 30 });
+  });
+
+  it.each([
+    ["a time-remapped hop", { [`${SCENE}:9`]: timing(2, 2, 10, { timeRemapEnabled: true }) }],
+    ["a hop whose timing was never read", { [`${RIG}:1`]: { kind: "AVLayer", enabled: true, detail: { hasTrackMatte: true } } }],
+    ["a hop switched off", { [`${MASTER}:1`]: { ...timing(20, 20, 30), enabled: false } }]
+  ])("records nothing for %s - unknown is never a guessed moment", (_name, overrides) => {
+    const slot = slotOf(scannedChain(overrides as Record<string, ScannedSlotLayer>));
+    expect(slot).toBeDefined();
+    expect(slot?.slotFacts?.sceneWindow).toBeUndefined();
+  });
+
+  it("the manifest schema keeps it", () => {
+    const manifest = buildTemplateManifest(facts(graph(portraitCard([shape(1, "a"), solid(3, "screen")]), true), scannedChain()), () => new Date("2026-10-04T00:00:00.000Z"));
+    const parsed = templateManifestSchema.parse(manifest);
+    expect(parsed.scenes[0]?.placeholders.find((p) => p.placeholderType === "image")?.slotFacts?.sceneWindow?.startSeconds).toBe(22);
+  });
+});

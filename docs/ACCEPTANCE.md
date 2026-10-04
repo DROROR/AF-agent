@@ -1721,3 +1721,28 @@ revision 4). Also added: one press to take every proposed line of the plan; a sc
 reads its file and its text from the layers that hold them.
 
 **Not yet seen in a browser:** the bulk review itself.
+
+## 2026-10-04 - Ten slots, ten identical evidence frames of a scene none of them is in
+
+**Seen live (project `cc0c91a0`, the first run of the bulk picture review):** five frames
+came back and all five were the same picture. The database agreed: every slot's evidence
+frame was captured at 3.5 s of the master composition, and all files were byte-identical
+(9,086,945 bytes) - while the slots belong to scenes that run at 20-44 s.
+
+**Cause:** these slots sit five compositions below the master. Every host window the
+inspection recorded for them was measured inside a nested composition ("0 to 7 s"). With
+no host in the master's own timeline, the evidence moment fell back to that raw window and
+took its midpoint, for every slot alike. The one decision recorded before this was found
+(scene 01, plan revision 4) happened to be about the scene that 3.5 s really shows.
+
+**Fix:** the scan now reads each layer's start time, stretch and time-remap switch. For a
+nested slot with no host in the scene's own composition, inspection carries the slot
+layer's in/out window up every hop of its chain into the scene's timeline and records it
+as `sceneWindow`. The evidence moment and the gate that checks a captured frame both use
+that window. A time-remapped hop, a hop whose timing was not read, or a hop switched off
+records nothing - unknown is never a guessed moment. Manifests written before this behave
+exactly as before.
+
+**Needs:** this worker build and a new inspection (the stored scan carries no start
+times, so this could not be re-checked offline against the real template).
+**Not yet run on real After Effects.**

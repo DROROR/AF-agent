@@ -2728,6 +2728,12 @@ export function buildScanProjectPreflightScript(startItemIndex = 1, endItemIndex
             sourceCompositionId: __readNumberFact(function () { return __layer.source && __layer.source instanceof CompItem ? __layer.source.id : null; }),
             inPointSeconds: __readNumberFact(function () { return __layer.inPoint; }),
             outPointSeconds: __readNumberFact(function () { return __layer.outPoint; }),
+            // Where this layer's source sits in ITS composition's timeline
+            // (2026-10-04): what turns a moment inside a nested composition
+            // into a moment in the composition that places it.
+            startTimeSeconds: __readNumberFact(function () { return __layer.startTime; }),
+            stretchPercent: __readNumberFact(function () { return __layer.stretch; }),
+            timeRemapEnabled: __readBooleanFact(function () { return __layer.timeRemapEnabled; }),
             opacityAtInPoint: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Opacity").valueAtTime(__layer.inPoint, false); }),
             opacityKeyframeCount: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Opacity").numKeys; }),
             textPreview: __readStringFact(function () {

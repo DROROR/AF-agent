@@ -55,6 +55,10 @@ export interface ScannedSlotLayer {
         positionY?: number | null | undefined;
         anchorX?: number | null | undefined;
         anchorY?: number | null | undefined;
+        /** Layer timing in its own composition (2026-10-04). Unread stays undefined - unknown. */
+        startTimeSeconds?: number | null | undefined;
+        stretchPercent?: number | null | undefined;
+        timeRemapEnabled?: boolean | null | undefined;
       }
     | null
     | undefined;
@@ -97,6 +101,14 @@ export interface SlotFactsInput {
    * the structure, not only its composition's placements.
    */
   slotIsWholeComposition: boolean;
+  /**
+   * The scene's own composition and the precomp hops from it down to the
+   * slot's composition (each step: the layer, inside that step's composition,
+   * that places the next one). Given for a nested slot so the moment it is on
+   * screen can be stated in the SCENE's timeline - see computeSceneWindow.
+   */
+  sceneCompositionId?: string;
+  chainFromScene?: readonly { compositionId: string; layerIndex: number }[];
 }
 
 /** The scanned layer facts for one layer, or undefined when the scan has no entry for it. */
@@ -260,7 +272,82 @@ function visibilityFacts(
   };
 }
 
-/** Assembles the full structural picture of one slot, including every host that pulls it in. *//** Assembles the full structural picture of one slot, including every host that pulls it in. *//** Assembles the full structural picture of one slot, including every host that pulls it in. */
+type TimeWindow = { startSeconds: number; endSeconds: number };
+
+/**
+ * A window in a nested composition's timeline, as seen in the timeline of the
+ * composition whose layer places it. Null - unknown, never guessed - when
+ * that layer's timing was not read, when it is time-remapped (its time is
+ * then a curve, not an offset), or when nothing of the window survives the
+ * layer's own in and out points.
+ */
+function liftWindowThroughLayer(window: TimeWindow, placing: ScannedSlotLayer | undefined): TimeWindow | null {
+  const detail = placing?.detail;
+  if (!detail || placing.enabled === false || detail.timeRemapEnabled !== false) {
+    return null;
+  }
+  const { startTimeSeconds, stretchPercent, inPointSeconds, outPointSeconds } = detail;
+  if (typeof startTimeSeconds !== "number" || typeof stretchPercent !== "number" || !(stretchPercent > 0) || typeof inPointSeconds !== "number" || typeof outPointSeconds !== "number") {
+    return null;
+  }
+  const scale = stretchPercent / 100;
+  const startSeconds = Math.max(inPointSeconds, startTimeSeconds + window.startSeconds * scale);
+  const endSeconds = Math.min(outPointSeconds, startTimeSeconds + window.endSeconds * scale);
+  return endSeconds > startSeconds ? { startSeconds, endSeconds } : null;
+}
+
+/**
+ * WHEN A NESTED SLOT IS ON SCREEN, IN THE SCENE'S OWN TIMELINE (2026-10-04).
+ *
+ * REAL DEFECT: a template whose phone screens sit five compositions below
+ * its one master composition. Every host window the scan recorded for those
+ * slots was measured inside a nested composition ("0 to 7 s"), and the
+ * evidence frame - rendered in the master - was taken at 3.5 s for every one
+ * of them: ten slots from eight different scenes, ten identical pictures of
+ * the first scene. A reviewer asked to look at "the moment the slot is on
+ * screen" was shown a moment it is not.
+ *
+ * The slot layer's own in/out window is carried up one hop at a time: through
+ * each layer that places the composition below it, and finally through the
+ * scene's own layer that places the first hop. Timing only - opacity and
+ * position along the way are not followed - so this is the window the slot's
+ * content is running in, which is what a frame must fall inside to show it.
+ */
+function computeSceneWindow(input: SlotFactsInput): { compositionId: string; startSeconds: number; endSeconds: number } | null {
+  const chain = input.chainFromScene;
+  const sceneCompositionId = input.sceneCompositionId;
+  if (sceneCompositionId === undefined || chain === undefined || chain.length === 0) {
+    return null;
+  }
+  const slotDetail = scannedLayer(input, input.slotComposition.compositionId, input.slotLayerIndex)?.detail;
+  if (typeof slotDetail?.inPointSeconds !== "number" || typeof slotDetail.outPointSeconds !== "number" || !(slotDetail.outPointSeconds > slotDetail.inPointSeconds)) {
+    return null;
+  }
+  let window: TimeWindow | null = { startSeconds: Math.max(0, slotDetail.inPointSeconds), endSeconds: slotDetail.outPointSeconds };
+  for (let index = chain.length - 1; index >= 0 && window !== null; index -= 1) {
+    const step = chain[index]!;
+    window = liftWindowThroughLayer(window, scannedLayer(input, step.compositionId, step.layerIndex));
+  }
+  if (window === null) {
+    return null;
+  }
+  // The scene's own layer that places the first hop. Several placements of the
+  // same composition are tried in layer order and the first that shows any of
+  // the window is used - a fixed rule, so the answer never depends on scan order.
+  const scene = input.compositions.find((composition) => composition.compositionId === sceneCompositionId);
+  const placements = (scene?.precompChildren ?? [])
+    .filter((child) => child.sourceCompositionId === chain[0]!.compositionId)
+    .sort((a, b) => a.layerIndex - b.layerIndex);
+  for (const placement of placements) {
+    const lifted = liftWindowThroughLayer(window, scannedLayer(input, sceneCompositionId, placement.layerIndex));
+    if (lifted !== null) {
+      return { compositionId: sceneCompositionId, startSeconds: Math.max(0, lifted.startSeconds), endSeconds: lifted.endSeconds };
+    }
+  }
+  return null;
+}
+
+/** Assembles the full structural picture of one slot, including every host that pulls it in. */
 export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralFacts {
   const compositionById = new Map(input.compositions.map((composition) => [composition.compositionId, composition]));
   const slotLayer = input.slotComposition.layers.find((layer) => layer.index === input.slotLayerIndex);
@@ -381,6 +468,14 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
     hosts,
     reusedByHostCount: precompHostCount,
     transformedBounds,
-    visibleWindowSeconds
+    visibleWindowSeconds,
+    // Recorded only when no host lives in the scene's own composition: such a
+    // host already states its window in that timeline, opacity and all.
+    ...(input.sceneCompositionId !== undefined && !hosts.some((host) => host.compositionId === input.sceneCompositionId)
+      ? (() => {
+          const sceneWindow = computeSceneWindow(input);
+          return sceneWindow === null ? {} : { sceneWindow };
+        })()
+      : {})
   };
 }

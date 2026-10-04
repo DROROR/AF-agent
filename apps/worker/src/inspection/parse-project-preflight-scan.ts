@@ -100,7 +100,11 @@ const layerDetailSchema = z
     positionY: z.number().nullable().optional(),
     anchorX: z.number().nullable().optional(),
     anchorY: z.number().nullable().optional(),
-    opacityKeyframes: z.array(z.object({ timeSeconds: z.number(), valuePercent: z.number() }).strict()).nullable().optional()
+    opacityKeyframes: z.array(z.object({ timeSeconds: z.number(), valuePercent: z.number() }).strict()).nullable().optional(),
+    /** Layer timing in its own composition's timeline (2026-10-04) - what maps a moment in a nested composition to a moment in the one placing it. Optional: an older worker build does not report them, and they are then unknown. */
+    startTimeSeconds: z.number().nullable().optional(),
+    stretchPercent: z.number().nullable().optional(),
+    timeRemapEnabled: z.boolean().nullable().optional()
   })
   .strict();
 
