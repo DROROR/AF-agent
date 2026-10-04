@@ -87,12 +87,35 @@ export interface CompositionVerifier {
 }
 
 export class HeroicSwanCompositionVerifier implements CompositionVerifier {
+  /** Public so a test can shorten them; production uses these values. */
+  connectTimeoutMs = 60_000;
+  connectAttempts = 3;
+
   constructor(private readonly aeMcpPath: string) {}
 
   async verify(params: VerifyRenderCompositionParams): Promise<VerifyRenderCompositionResult> {
-    const client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath });
+    // REAL 2026-10-04 FAILURE (job 65b9faeb): a final render was refused in
+    // 20 s - "could not connect to ae-mcp: MCP error -32001: Request timed
+    // out" - on a machine still catching its breath after a 36-minute render
+    // (94% memory; a plain health check took 21 s a minute later and
+    // succeeded). The connect ran on the client's flat 15 s default and was
+    // tried once. Verification is read-only, so it is given the same patient
+    // connect the preview capture already has, and tried a bounded number of
+    // times with a fresh client each time.
+    let client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath, timeoutMs: this.connectTimeoutMs });
     try {
-      await client.connect();
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await client.connect();
+          break;
+        } catch (connectError) {
+          if (attempt >= this.connectAttempts) {
+            throw connectError;
+          }
+          await client.close();
+          client = new HeroicSwanMcpClient({ aeMcpPath: this.aeMcpPath, timeoutMs: this.connectTimeoutMs });
+        }
+      }
     } catch (error) {
       await client.close();
       return { ok: false, reason: `could not connect to ae-mcp: ${error instanceof Error ? error.message : String(error)}` };
