@@ -1766,3 +1766,24 @@ in the same way - a screenshot placed there would have rendered as the template'
 gradient. The rule now covers Fill, Gradient Ramp and 4-Colour Gradient: switched off,
 never deleted, verified afterwards, other effects untouched. Not yet run on real After
 Effects.
+
+## 2026-10-04 - A twenty-second network drop left a job claimed for good
+
+**Seen live (job `15ad8fab`, worker `a642149`):** a scene's preview never arrived; the card
+said "Preview is taking longer than expected".
+
+**Cause (worker log):** at 10:13:22 UTC a heartbeat could not reach the API; at 10:13:34
+the worker claimed the job; at 10:13:44 its one attempt to report the job RUNNING failed
+("Failed to reach .../report") and the cycle gave up. A claimed job is never handed out
+again, and the server reaps only jobs of a worker whose heartbeat is stale - this worker's
+was not. The job stayed CLAIMED and, with one job at a time, the queue stood still.
+
+**Done by hand:** after eight minutes the job was marked FAILED in the database with code
+`JOB_ORPHANED` and a message saying exactly that, the same change the server's own sweeper
+makes for an offline worker. Nothing else was touched.
+
+**Fix:** both status reports of a job - RUNNING and the final one - are retried with
+bounded backoff (six attempts, about a minute). A finished job whose result could not be
+delivered was lost in the same way. If a report still cannot be delivered, the worker
+fails whatever it left active on the server before it claims anything new, and keeps
+trying that on each heartbeat until it gets through. Not yet seen on a real network drop.

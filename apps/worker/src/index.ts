@@ -407,6 +407,17 @@ async function main(): Promise<void> {
   // One bounded claim/execute/report attempt per successful heartbeat -
   // never a separate tight polling loop, so job attempts are naturally
   // paced by HEARTBEAT_INTERVAL_MS with no blind retries.
+  // Set when a job cycle ended without delivering a status report (see
+  // job-cycle.ts, 2026-10-04): this worker may then have left a job claimed
+  // or running on the server that nothing here is working on any more.
+  let reconcileBeforeNextClaim = false;
+  const reconcile = (): Promise<void> =>
+    reconcileAbandonedJobs({
+      listActiveJobs: () => apiClient.listActiveJobs(credentials.workerId, credentials.workerToken),
+      reportJobStatus: (jobId, body) => apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
+      logger: workerLogger
+    }).then(() => undefined);
+
   const triggerJobCycle = (): void => {
     if (activeJobCyclePromise) {
       workerLogger.info({}, "job cycle already in progress - skipping this heartbeat's trigger");
@@ -423,6 +434,26 @@ async function main(): Promise<void> {
         {},
         "refusing to start a new job cycle - a previous job's owned MCP process could not be confirmed stopped; this worker needs to be restarted via the recovery script"
       );
+      return;
+    }
+    if (reconcileBeforeNextClaim) {
+      // No job cycle is running here, so any job the server still shows as
+      // active for this worker is one nobody is working on. It is failed
+      // honestly before anything new is claimed; if even that cannot be
+      // delivered, the flag stays set and it is tried again next heartbeat.
+      const reconcilePromise = reconcile()
+        .then(() => {
+          reconcileBeforeNextClaim = false;
+        })
+        .catch((error: unknown) => {
+          workerLogger.warn({ error: error instanceof Error ? error.message : String(error) }, "could not reconcile jobs left active by an undelivered report - will try again on the next heartbeat");
+        })
+        .finally(() => {
+          if (activeJobCyclePromise === reconcilePromise) {
+            activeJobCyclePromise = null;
+          }
+        });
+      activeJobCyclePromise = reconcilePromise;
       return;
     }
     const cyclePromise = runJobCycle({
@@ -494,7 +525,12 @@ async function main(): Promise<void> {
           jobExecutionRegistry,
           workerLogger
         ),
-      onEvent: (event) => logJobCycleEvent(workerLogger, event)
+      onEvent: (event) => {
+        if (event.type === "job_cycle_failed") {
+          reconcileBeforeNextClaim = true;
+        }
+        logJobCycleEvent(workerLogger, event);
+      }
     }).finally(() => {
       activeJobCyclePromise = null;
     });

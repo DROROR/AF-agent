@@ -129,9 +129,80 @@ describe("runJobCycle", () => {
         throw new Error("api down");
       },
       executeJob,
-      onEvent: (e) => events.push(e)
+      onEvent: (e) => events.push(e),
+      sleep: async () => {}
     });
     expect(executeJob).not.toHaveBeenCalled();
     expect(events.at(-1)).toEqual({ type: "job_cycle_failed", error: expect.any(Error) });
+  });
+
+  /**
+   * REAL 2026-10-04 INCIDENT: the network dropped for twenty seconds, the one
+   * attempt to report a claimed job RUNNING failed, and the job stayed
+   * CLAIMED until a person failed it by hand.
+   */
+  describe("a status report that does not get through is sent again", () => {
+    it("RUNNING fails twice, then lands: the job runs and its result is reported", async () => {
+      const reports: string[] = [];
+      const delays: number[] = [];
+      let failuresLeft = 2;
+      const events: { type: string }[] = [];
+      await runJobCycle({
+        claimNextJob: async () => ({ job: baseJob() }),
+        reportJobStatus: async (_jobId, body) => {
+          if (body.status === "RUNNING" && failuresLeft > 0) {
+            failuresLeft -= 1;
+            throw new Error("Failed to reach the API");
+          }
+          reports.push(body.status);
+          return baseJob();
+        },
+        executeJob: async () => ({ status: "SUCCEEDED", result: { ok: true } }) as never,
+        onEvent: (e) => events.push(e),
+        sleep: async (ms) => {
+          delays.push(ms);
+        }
+      });
+      expect(reports).toEqual(["RUNNING", "SUCCEEDED"]);
+      expect(delays).toEqual([2_000, 4_000]);
+      expect(events.at(-1)?.type).toBe("job_completed");
+    });
+
+    it("a finished job's result is sent again too - the work is not lost to one failed request", async () => {
+      const reports: string[] = [];
+      let finalFailuresLeft = 3;
+      await runJobCycle({
+        claimNextJob: async () => ({ job: baseJob() }),
+        reportJobStatus: async (_jobId, body) => {
+          if (body.status !== "RUNNING" && finalFailuresLeft > 0) {
+            finalFailuresLeft -= 1;
+            throw new Error("Failed to reach the API");
+          }
+          reports.push(body.status);
+          return baseJob();
+        },
+        executeJob: async () => ({ status: "SUCCEEDED", result: { ok: true } }) as never,
+        sleep: async () => {}
+      });
+      expect(reports).toEqual(["RUNNING", "SUCCEEDED"]);
+    });
+
+    it("gives up after its bounded attempts and says so - never an endless loop", async () => {
+      let attempts = 0;
+      const events: { type: string }[] = [];
+      await runJobCycle({
+        claimNextJob: async () => ({ job: baseJob() }),
+        reportJobStatus: async () => {
+          attempts += 1;
+          throw new Error("Failed to reach the API");
+        },
+        executeJob: vi.fn(),
+        onEvent: (e) => events.push(e),
+        reportRetry: { maxAttempts: 4, policy: { baseMs: 1, maxMs: 2 } },
+        sleep: async () => {}
+      });
+      expect(attempts).toBe(4);
+      expect(events.at(-1)?.type).toBe("job_cycle_failed");
+    });
   });
 });
