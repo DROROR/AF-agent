@@ -192,6 +192,34 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     expect(screen.queryByRole("button", { name: "Use suggestion" })).not.toBeNull();
   });
 
+  // REAL 2026-10-04: a plan already read on the AI Plan tab had to be taken
+  // again here one card at a time.
+  it("offers one press to use every proposed line of the plan, and sends them as one batch - a finding that proposes nothing is not in it", async () => {
+    stubWorkspace({
+      suggestions: [
+        mappingSuggestionFixture({ id: "s-1", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: "New headline" }),
+        mappingSuggestionFixture({ id: "s-2", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: "Second line" }),
+        mappingSuggestionFixture({ id: "s-3", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: null, reasoning: "nothing to change" })
+      ]
+    });
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Use the whole plan (2)" }));
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit | undefined][];
+      const batch = calls.find(([url, init]) => String(url).includes("mapping-suggestions") && init?.method === "POST");
+      expect(batch).toBeDefined();
+      expect((JSON.parse(batch![1]!.body as string) as { suggestionIds: string[] }).suggestionIds).toEqual(["s-1", "s-2"]);
+    });
+  });
+
+  it("shows no whole-plan button when nothing is proposed", async () => {
+    stubWorkspace({ suggestions: [] });
+    renderView();
+    await screen.findAllByText("App Features");
+    expect(screen.queryByRole("button", { name: /Use the whole plan/ })).toBeNull();
+  });
+
   // 2026-09-28, real client session: a 77-composition template surfaced 30
   // structural layers as editable placeholders. Claude examined each, said in
   // its reasoning that none is a content slot, and returned suggestions

@@ -1371,6 +1371,7 @@ export const en = {
     suggestedKindLabel: (kind: string): string => `Claude suggests treating this layer as: ${kind}`,
     keepOriginalAction: "Keep original",
     useSuggestionAction: "Use suggestion",
+    useWholePlanAction: (n: number): string => `Use the whole plan (${n})`,
     useAllSuggestionsAction: (n: number): string => `Use all ${n} suggestions`,
     findingsTitle: (count: number): string =>
       count === 1

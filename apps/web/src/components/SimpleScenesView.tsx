@@ -150,6 +150,9 @@ export function SimpleScenesView(): ReactElement {
   }
 
   const pending = (suggestions ?? []).filter((s) => s.status === "PENDING");
+  const allProposals = (suggestions ?? []).filter(
+    (s) => s.status === "PENDING" && (s.suggestedText !== null || s.suggestedAssetId !== null || s.suggestedClassification !== null)
+  );
   const pendingByScene = new Map<string, MappingSuggestion[]>();
   // Which card each layer is shown on - see resolveSceneMappingHomes.
   const homes = resolveSceneMappingHomes(project.manifest, realScenes);
@@ -301,6 +304,18 @@ export function SimpleScenesView(): ReactElement {
             disabled={isStale}
             onClick={() => void generate()}
           />
+        ) : null}
+        {/*
+          REAL 2026-10-04: a plan the client had already read and continued
+          from on the AI Plan tab had to be taken again here card by card -
+          eight presses for eight scenes. One press takes every line that
+          proposes something; each stays changeable on its card afterwards,
+          and nothing is approved by it - Approve Scenes is still its own step.
+        */}
+        {allProposals.length > 0 ? (
+          <Button variant="secondary" disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
+            {t.simpleScenes.useWholePlanAction(allProposals.length)}
+          </Button>
         ) : null}
         <Button
           variant="primary"

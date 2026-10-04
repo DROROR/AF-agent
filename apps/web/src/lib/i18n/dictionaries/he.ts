@@ -1203,6 +1203,7 @@ export const he: Dictionary = {
     suggestedKindLabel: (kind: string): string => `Claude מציע להתייחס לשכבה הזו כאל: ${kind}`,
     keepOriginalAction: "השארת המקור",
     useSuggestionAction: "שימוש בהצעה",
+    useWholePlanAction: (n: number): string => `שימוש בכל התוכנית (${n})`,
     useAllSuggestionsAction: (n: number): string => `שימוש בכל ${n} ההצעות`,
     findingsTitle: (count: number): string =>
       count === 1
