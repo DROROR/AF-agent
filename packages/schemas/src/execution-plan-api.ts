@@ -59,6 +59,33 @@ export const setRenderOutputConfigRequestSchema = z
 export type SetRenderOutputConfigRequest = z.infer<typeof setRenderOutputConfigRequestSchema>;
 
 /**
+ * GET .../execution-plan/render-outputs/:variant/suggestion (2026-10-04).
+ *
+ * A non-technical client was sent from the Preview tab to an Advanced screen
+ * to type two After Effects template names. Nothing here is invented: the
+ * composition is offered only when the template has exactly ONE master
+ * composition, and the two names are the ones the most recent other project
+ * inspected on the SAME worker is configured with - `basedOnProjectName`
+ * says which. Null when either half cannot be established; the full form is
+ * then shown instead. A suggestion configures nothing until a person takes it.
+ */
+export const renderOutputSuggestionResponseSchema = z
+  .object({
+    suggestion: z
+      .object({
+        manifestCompositionId: z.string().min(1),
+        compositionName: z.string().min(1),
+        renderSettingsTemplateName: z.string().min(1),
+        outputModuleTemplateName: z.string().min(1),
+        basedOnProjectName: z.string().min(1)
+      })
+      .strict()
+      .nullable()
+  })
+  .strict();
+export type RenderOutputSuggestionResponse = z.infer<typeof renderOutputSuggestionResponseSchema>;
+
+/**
  * POST /api/projects/:projectId/execution-plan/reconcile-readiness
  * (mapping-review propagation fix) - explicitly recomputes every scene's
  * `unresolvedReasons`/`approvalState` from its real, current mapping

@@ -36,6 +36,7 @@ import { updateExecutionPlan } from "../application/execution-plan/update-execut
 import { approveExecutionPlan } from "../application/execution-plan/approve-execution-plan.js";
 import { rejectExecutionPlan } from "../application/execution-plan/reject-execution-plan.js";
 import { reopenExecutionPlan } from "../application/execution-plan/reopen-execution-plan.js";
+import { suggestRenderOutputConfig } from "../application/execution-plan/suggest-render-output-config.js";
 import { setRenderOutputConfig } from "../application/execution-plan/set-render-output-config.js";
 import { reconcileExecutionPlanReadiness } from "../application/execution-plan/reconcile-execution-plan-readiness.js";
 import { getSceneEvidencePreviewMetadata, getSceneEvidencePreviewFile } from "../application/execution-plan/get-scene-evidence-preview.js";
@@ -270,6 +271,13 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
    * 1/2/3) - see set-render-output-config.ts for the full contract
    * (server-resolved composition identity, source-SHA staleness check).
    */
+  /** Read-only: what a render output could be set up with, nothing guessed - see suggest-render-output-config.ts. */
+  app.get("/api/projects/:projectId/execution-plan/render-outputs/:variant/suggestion", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId, variant } = renderOutputParamsSchema.parse(request.params);
+    reply.send(await suggestRenderOutputConfig({ executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository }, projectId, variant));
+  });
+
   app.put("/api/projects/:projectId/execution-plan/render-outputs/:variant", async (request, reply) => {
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId, variant } = renderOutputParamsSchema.parse(request.params);

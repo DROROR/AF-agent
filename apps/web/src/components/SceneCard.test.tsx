@@ -252,3 +252,27 @@ describe("SceneCard - a text nobody decided about can be kept as the template ha
     expect(screen.queryByText(/has not been decided/)).toBeNull();
   });
 });
+
+/**
+ * 2026-10-04: "Preview generating…" was a badge and nothing else - no sign
+ * that anything was moving, or for how long.
+ */
+describe("SceneCard - a preview being made says so, with a clock", () => {
+  it("a running preview shows a notice with elapsed time and says it appears by itself", () => {
+    renderCard(realScene(), { preview: null, state: "generating", isStale: false, errorMessage: null, hasFailed: false, startedAt: Date.now() - 23_000 });
+    const notice = screen.getByText("After Effects is making this preview…").closest(".busy-notice") as HTMLElement;
+    expect(notice.querySelector(".busy-notice__elapsed")).not.toBeNull();
+    expect(notice.textContent).toContain("It appears here by itself");
+  });
+
+  it("a preview waiting behind another says it is waiting its turn - and shows no clock, because nothing has started", () => {
+    renderCard(realScene(), { preview: null, state: "queued", isStale: false, errorMessage: null, hasFailed: false });
+    const notice = screen.getByText("Waiting its turn - previews are made one at a time.").closest(".busy-notice") as HTMLElement;
+    expect(notice.querySelector(".busy-notice__elapsed")).toBeNull();
+  });
+
+  it("a finished preview shows no notice at all", () => {
+    renderCard(realScene());
+    expect(document.querySelector(".busy-notice")).toBeNull();
+  });
+});

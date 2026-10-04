@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectPreviewTab } from "./ProjectPreviewTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
@@ -16,11 +16,33 @@ import {
   stubFetchByUrl
 } from "../test-utils/execution-plan-fixtures";
 
+// The complete-preview card reads the router: in Simple mode a final approval moves on to Export (2026-10-04).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() })
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
+
+/**
+ * 2026-10-04: Simple mode's Preview tab was rewritten for a non-technical
+ * client (one question per step, plain labels - see
+ * ProjectPreviewTab.simple.test.tsx). The incidents pinned in the two
+ * describes below are about the engine underneath - dispatch, polling,
+ * worker affinity, cache-busting - and about the operator's own wording
+ * ("Start execution", "Create Complete Preview"), which Advanced view keeps
+ * word for word. They therefore run in Advanced view; nothing they assert
+ * was changed.
+ */
+function useAdvancedView(): void {
+  beforeEach(() => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+  });
+}
 
 function renderPreview(): void {
   renderWithLocale(
@@ -35,6 +57,7 @@ function renderPreview(): void {
 }
 
 describe("ProjectPreviewTab", () => {
+  useAdvancedView();
   it("disables Start execution with an honest reason when no worker reports EXECUTE_FRAME", async () => {
     const scenes = [sceneFixture({ id: "s1", approvalState: "APPROVED", unresolvedReasons: [] })];
     stubFetchByUrl({
@@ -419,7 +442,8 @@ describe("ProjectPreviewTab", () => {
 
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
-      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      // GET /api/jobs is also read now (the job history, to find a job still running after a reload) - the dispatch is the POST.
+      const jobsCall = calls.find(([url, init]) => url === "/api/jobs" && init?.method === "POST");
       expect(jobsCall).toBeDefined();
       capturedBody = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
     });
@@ -501,6 +525,7 @@ describe("ProjectPreviewTab", () => {
  * click before the render step ever becomes reachable.
  */
 describe("ProjectPreviewTab - Final Preview", () => {
+  useAdvancedView();
   const SESSION_ID = "77777777-7777-7777-7777-777777777777";
   const WORKER_ID = "44444444-4444-4444-4444-444444444444";
 
@@ -640,7 +665,8 @@ describe("ProjectPreviewTab - Final Preview", () => {
     let body: Record<string, unknown> | null = null;
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
-      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      // GET /api/jobs is also read now (the job history, to find a job still running after a reload) - the dispatch is the POST.
+      const jobsCall = calls.find(([url, init]) => url === "/api/jobs" && init?.method === "POST");
       expect(jobsCall).toBeDefined();
       body = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
     });

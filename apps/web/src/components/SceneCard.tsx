@@ -7,6 +7,7 @@ import type { ScenePreviewEntry, ScenePreviewState } from "../lib/use-scene-prev
 import { assetFileUrl, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { BusyNotice } from "./ui/BusyNotice";
 import { useLocale } from "./LocaleProvider";
 import type { Tone } from "./StatusBadge";
 
@@ -156,6 +157,12 @@ export interface SceneCardProps {
   eyebrow?: string;
   /** Applies several suggestions in ONE request. Absent: no "use all" button is offered - several single accepts fired together would each carry the same plan revision and all but the first would be refused as stale. */
   onAcceptSuggestions?: (suggestions: MappingSuggestion[]) => void;
+  /**
+   * Draw this card's "use" buttons quieter, because the page's one primary
+   * action is somewhere else right now (2026-10-04: one primary button on
+   * screen at a time - see SimpleScenesView). They work exactly the same.
+   */
+  quietActions?: boolean;
 }
 
 /**
@@ -182,7 +189,8 @@ export function SceneCard({
   cardMappings,
   onAcceptSuggestions,
   eyebrow,
-  onKeepTemplateText
+  onKeepTemplateText,
+  quietActions = false
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
   const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
@@ -245,6 +253,19 @@ export function SceneCard({
 
       <PreviewBeforeAfter projectId={projectId} realScene={realScene} previewEntry={previewEntry} asset={asset} mappingText={mapping?.text ?? null} />
 
+      {/*
+        2026-10-04: "Preview generating…" was a badge and nothing else - no
+        sign that anything was moving, or for how long. A running preview
+        now says so with a clock; one waiting behind another says it is
+        waiting its turn (they are made one at a time), which is why its own
+        clock has not started.
+      */}
+      {previewEntry.state === "generating" ? (
+        <BusyNotice compact title={t.simpleScenes.previewBusy.generating} description={t.simpleScenes.previewBusy.generatingHint} startedAt={previewEntry.startedAt ?? null} />
+      ) : previewEntry.state === "queued" ? (
+        <BusyNotice compact title={t.simpleScenes.previewBusy.queued} />
+      ) : null}
+
       <dl className="scene-card__facts">
         <div>
           <dt>{t.simpleScenes.screenLabel}</dt>
@@ -293,7 +314,7 @@ export function SceneCard({
           <h4>{t.simpleScenes.reviewQueueTitle}</h4>
           {/* One press for the whole card - several suggestions each with their own pair of buttons is slow to get through. */}
           {proposals.length > 1 && onAcceptSuggestions ? (
-            <Button size="sm" variant="primary" disabled={suggestionsBusy} onClick={() => onAcceptSuggestions(proposals)}>
+            <Button size="sm" variant={quietActions ? "secondary" : "primary"} disabled={suggestionsBusy} onClick={() => onAcceptSuggestions(proposals)}>
               {t.simpleScenes.useAllSuggestionsAction(proposals.length)}
             </Button>
           ) : null}
@@ -337,7 +358,7 @@ export function SceneCard({
                   <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={() => onRejectSuggestion(suggestion)}>
                     {t.simpleScenes.keepOriginalAction}
                   </Button>
-                  <Button size="sm" variant="primary" disabled={suggestionsBusy} onClick={() => onAcceptSuggestion(suggestion)}>
+                  <Button size="sm" variant={quietActions ? "secondary" : "primary"} disabled={suggestionsBusy} onClick={() => onAcceptSuggestion(suggestion)}>
                     {t.simpleScenes.useSuggestionAction}
                   </Button>
                 </div>

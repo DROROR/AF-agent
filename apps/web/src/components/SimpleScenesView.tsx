@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type ReactElement } from "react";
 import type { MappingSuggestion } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
@@ -17,6 +18,7 @@ import { findPendingPictureSlots, SlotBulkReview } from "./SlotBulkReview";
 import { ScenesGuide, type GuideStep } from "./ScenesGuide";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { BusyNotice } from "./ui/BusyNotice";
 import { ClaudeActionButton } from "./ui/ClaudeActionButton";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
@@ -37,11 +39,14 @@ import { useLocale } from "./LocaleProvider";
 function Storyboard({
   projectId,
   realScenes,
-  previewQueue
+  previewQueue,
+  labels
 }: {
   projectId: string;
   realScenes: RealScene[];
   previewQueue: UseScenePreviewQueueResult;
+  /** What each scene is called for a person ("Scene 3", "The whole video") - the same labels the cards below carry. */
+  labels: ReadonlyMap<string, string>;
 }): ReactElement | null {
   const { t } = useLocale();
   if (realScenes.length === 0) {
@@ -51,13 +56,20 @@ function Storyboard({
     <Card className="storyboard">
       <div className="storyboard__header">
         <h3>{t.simpleScenes.storyboardTitle}</h3>
-        <Link href={`/projects/${projectId}`} className="btn btn--secondary btn--sm">
+        {/* 2026-10-04: pointed at the project's front page, where the complete preview used to live. It lives on the Preview tab. */}
+        <Link href={`/projects/${projectId}/preview`} className="btn btn--secondary btn--sm">
           {t.simpleScenes.playFullPreviewAction}
         </Link>
       </div>
       <div className="storyboard__strip">
         {realScenes.map((realScene) => (
-          <StoryboardThumb key={realScene.manifestCompositionId} projectId={projectId} realScene={realScene} preview={previewQueue.getEntry(realScene.scenePlan.id).preview} />
+          <StoryboardThumb
+            key={realScene.manifestCompositionId}
+            projectId={projectId}
+            realScene={realScene}
+            preview={previewQueue.getEntry(realScene.scenePlan.id).preview}
+            label={labels.get(realScene.scenePlan.id) ?? null}
+          />
         ))}
       </div>
     </Card>
@@ -67,20 +79,28 @@ function Storyboard({
 function StoryboardThumb({
   projectId,
   realScene,
-  preview
+  preview,
+  label
 }: {
   projectId: string;
   realScene: RealScene;
   preview: ReturnType<UseScenePreviewQueueResult["getEntry"]>["preview"];
+  label: string | null;
 }): ReactElement {
+  // 2026-10-04: the strip showed the template author's own names, which say
+  // nothing to a client, while the cards under it said "Scene 3". One name
+  // for one thing: the strip uses the card's label, and the template's name
+  // stays on hover for whoever needs to match it to After Effects. A part
+  // with no card label (nothing in it to change) keeps the only name it has.
+  const caption = label ?? realScene.sceneName;
   return (
-    <div className="storyboard__thumb">
+    <div className="storyboard__thumb" title={realScene.sceneName}>
       {preview ? (
-        <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={realScene.sceneName} />
+        <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={caption} />
       ) : (
         <div className="storyboard__thumb-placeholder" aria-hidden="true" />
       )}
-      <span>{realScene.sceneName}</span>
+      <span>{caption}</span>
     </div>
   );
 }
@@ -99,6 +119,7 @@ function StoryboardThumb({
  */
 export function SimpleScenesView(): ReactElement {
   const { t } = useLocale();
+  const router = useRouter();
   const { project, plan, approveScenes, isStale, createPlan, refetch, applyEdit } = useProjectWorkspaceContext();
   // 2026-09-28: Simple mode consumed suggestions but could never ASK for
   // them - `generate` lived only in MappingAssistantPanel, which Advanced
@@ -187,6 +208,14 @@ export function SimpleScenesView(): ReactElement {
   // isScenePreviewSettled for the real lock this prevents.
   const previewsReady = realScenes.every((scene) => isScenePreviewSettled(previewQueue.getEntry(scene.scenePlan.id)));
   const allReady = reviewsReady && previewsReady;
+  // For the "updating previews" notice: how many are settled, and since when
+  // the oldest one still running has been going.
+  const previewEntries = realScenes.map((scene) => previewQueue.getEntry(scene.scenePlan.id));
+  const previewsSettledCount = previewEntries.filter(isScenePreviewSettled).length;
+  const previewsBusySince = previewEntries.reduce<number | null>(
+    (earliest, entry) => (entry.startedAt != null && (earliest === null || entry.startedAt < earliest) ? entry.startedAt : earliest),
+    null
+  );
   // Approved means executable: the plan AND every included scene - exactly
   // what the Preview tab needs (see useProjectWorkspace's approveScenes).
   const usedScenes = plan.plan.scenePlans.filter((scene) => scene.use);
@@ -232,6 +261,17 @@ export function SimpleScenesView(): ReactElement {
       done: scenesApproved
     }
   ];
+
+  // ONE PRIMARY BUTTON (2026-10-04). "Use everything from my plan", "Yes -
+  // all are in the right place", every card's "Use this" and "Approve
+  // Scenes" could all be drawn at full weight at once, and the client had to
+  // work out which came first. The guide above already knows: the step it
+  // marks "now" is the one whose button is primary; the rest are still there
+  // and still work, drawn quieter. -1 means every step is done.
+  const currentGuideStep = guideSteps.findIndex((step) => !step.done);
+  const GUIDE_PLAN = 0;
+  const GUIDE_PICTURES = 1;
+  const GUIDE_LEFTOVER = 2;
 
   // What each card is called for a person (the template's own name stays
   // beneath it). A card whose scene also owns layers shown on OTHER cards is
@@ -354,7 +394,15 @@ export function SimpleScenesView(): ReactElement {
     setIsApproving(false);
     if (!result.ok) {
       setActionError(result.message ?? null);
+      return;
     }
+    // 2026-10-04: after a successful approval the page stayed exactly where
+    // it was, with the button now greyed out, and the client concluded the
+    // click had failed. The next step is on the Preview tab, so go there -
+    // the same route the tab itself links to. This view is only ever shown
+    // in Simple mode (ProjectScenesTab); Advanced keeps its own table and
+    // stays put. Only on success: a refusal stays here, where its reason is.
+    router.push(`/projects/${projectId}/preview`);
   }
 
   return (
@@ -362,7 +410,7 @@ export function SimpleScenesView(): ReactElement {
       {isStale ? <ErrorState title={t.projectWorkspace.staleRevisionTitle} description={t.projectWorkspace.staleRevisionDescription} /> : null}
       {actionError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} /> : null}
 
-      <Storyboard projectId={projectId} realScenes={realScenes} previewQueue={previewQueue} />
+      <Storyboard projectId={projectId} realScenes={realScenes} previewQueue={previewQueue} labels={cardLabels} />
 
       {suggestionsError ? (
         <ErrorState title={t.mappingAssistant.title} description={suggestionsError} />
@@ -402,12 +450,26 @@ export function SimpleScenesView(): ReactElement {
           and nothing is approved by it - Approve Scenes is still its own step.
         */}
         {allProposals.length > 0 ? (
-          <Button variant="secondary" disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
+          <Button variant={currentGuideStep === GUIDE_PLAN ? "primary" : "secondary"} disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
             {t.simpleScenes.useWholePlanAction(allProposals.length)}
           </Button>
         ) : null}
+        {/*
+          2026-10-04: with every decision made, "Approve Scenes" sat greyed
+          out behind one sentence while previews were re-made, and nothing
+          showed that anything was happening or how far along it was.
+        */}
+        {reviewsReady && !previewsReady && !scenesApproved ? (
+          <BusyNotice
+            compact
+            title={t.simpleScenes.previewBusy.updatingCount(previewsSettledCount, realScenes.length)}
+            description={t.simpleScenes.previewBusy.updatingHint}
+            startedAt={previewsBusySince}
+          />
+        ) : null}
+        {isApproving ? <BusyNotice compact title={t.simpleScenes.approvingScenes} description={t.simpleScenes.previewBusy.approvingHint} /> : null}
         <Button
-          variant="primary"
+          variant={currentGuideStep === guideSteps.length - 1 || currentGuideStep === -1 ? "primary" : "secondary"}
           disabled={scenesApproved || !allReady || isApproving || isStale}
           disabledReason={approveDisabledReason}
           onClick={() => void handleApprove()}
@@ -416,7 +478,7 @@ export function SimpleScenesView(): ReactElement {
         </Button>
       </Card>
 
-      <SlotBulkReview />
+      <SlotBulkReview isCurrentStep={currentGuideStep === GUIDE_PICTURES} sceneLabelFor={(slot) => cardLabels.get(homes.cardIdByMappingId.get(slot.mappingId) ?? slot.scenePlanId) ?? null} />
 
       {realScenes.length === 0 ? (
         <Card>
@@ -434,6 +496,7 @@ export function SimpleScenesView(): ReactElement {
               previewEntry={previewQueue.getEntry(realScene.scenePlan.id)}
               pendingSuggestions={pendingByScene.get(realScene.scenePlan.id) ?? []}
               suggestionsBusy={busySuggestionId !== null}
+              quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
               onEdit={() => {
@@ -479,6 +542,7 @@ export function SimpleScenesView(): ReactElement {
               previewEntry={previewQueue.getEntry(realScene.scenePlan.id)}
               pendingSuggestions={pendingByScene.get(realScene.scenePlan.id) ?? []}
               suggestionsBusy={busySuggestionId !== null}
+              quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
               onEdit={() => {

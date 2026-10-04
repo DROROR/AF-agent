@@ -187,3 +187,54 @@ describe("SlotBulkReview", () => {
     });
   });
 });
+
+/**
+ * 2026-10-04: the captions under each picture were the template author's own
+ * composition and layer names, which say nothing to a client, while the scene
+ * cards on the same page said "Scene 3".
+ */
+describe("SlotBulkReview - captions a client can read", () => {
+  function renderWithLabels(): void {
+    renderWithLocale(
+      <DashboardStatusProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <SlotBulkReview sceneLabelFor={() => "Scene 2"} />
+        </ProjectWorkspaceProvider>
+      </DashboardStatusProvider>
+    );
+  }
+
+  it("names a picture by the scene it is in, numbered when the scene holds several, and keeps the template's names on hover", async () => {
+    setup({ status: 200, body: { preview: frame("evidence/shown.png", 2, "m-a") } });
+    renderWithLabels();
+
+    await screen.findByRole("button", { name: "Yes - it is in the right place" });
+    const caption = document.querySelector(".slot-bulk-review__grid figcaption") as HTMLElement;
+    // Two pictures wait in this scene, so this one is numbered.
+    expect(caption.textContent).toBe("Picture 1 in Scene 2");
+    expect(caption.getAttribute("title")).toContain("\u203A");
+    expect((document.querySelector(".slot-bulk-review__grid img") as HTMLImageElement).alt).toBe("Picture 1 in Scene 2");
+  });
+
+  it("with no plain label to offer, falls back to the template's names exactly as before", async () => {
+    setup({ status: 200, body: { preview: frame("evidence/shown.png", 2, "m-a") } });
+    renderReview();
+
+    await screen.findByRole("button", { name: "Yes - it is in the right place" });
+    expect((document.querySelector(".slot-bulk-review__grid figcaption") as HTMLElement).textContent).toContain("\u203A");
+  });
+
+  it("only draws its button as the page's primary action when checking pictures is the current step", async () => {
+    setup({ status: 200, body: { preview: null } });
+    renderWithLocale(
+      <DashboardStatusProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <SlotBulkReview isCurrentStep={false} />
+        </ProjectWorkspaceProvider>
+      </DashboardStatusProvider>
+    );
+
+    const button = await screen.findByRole("button", { name: "Show me all 2 spots" });
+    expect(button.className).not.toContain("btn--primary");
+  });
+});

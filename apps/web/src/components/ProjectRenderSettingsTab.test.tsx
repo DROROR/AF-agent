@@ -227,7 +227,8 @@ describe("ProjectRenderSettingsTab - Look inside any part of the template", () =
     let capturedBody: Record<string, unknown> | null = null;
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
-      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      // The guidance reads GET /api/jobs (the job history) too since 2026-10-04 - the dispatch is the POST.
+      const jobsCall = calls.find(([url, init]) => url === "/api/jobs" && init?.method === "POST");
       expect(jobsCall).toBeDefined();
       capturedBody = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
     });
@@ -327,7 +328,8 @@ describe("ProjectRenderSettingsTab - Look inside any part of the template", () =
     let capturedBody: Record<string, unknown> | null = null;
     await waitFor(() => {
       const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
-      const jobsCall = calls.find(([url]) => url === "/api/jobs");
+      // The guidance reads GET /api/jobs (the job history) too since 2026-10-04 - the dispatch is the POST.
+      const jobsCall = calls.find(([url, init]) => url === "/api/jobs" && init?.method === "POST");
       expect(jobsCall).toBeDefined();
       capturedBody = JSON.parse(jobsCall![1].body as string) as Record<string, unknown>;
     });

@@ -12,6 +12,7 @@ import {
 import { PageHeader } from "./ui/PageHeader";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { BusyNotice } from "./ui/BusyNotice";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
@@ -19,7 +20,6 @@ import { StatusBadge } from "./StatusBadge";
 import { ErrorState } from "./ErrorState";
 import { explainJobError } from "../lib/explain-job-error";
 import { EmptyState } from "./EmptyState";
-import { Skeleton } from "./ui/Skeleton";
 import { useLocale } from "./LocaleProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { dispatchJob, fetchJobStatus, createProject } from "../lib/projects-api-client";
@@ -494,19 +494,28 @@ export function NewProjectWizard(): ReactElement {
                   </Button>
                 </div>
 
+                {/*
+                  2026-10-04: a template inspection runs for about five
+                  minutes, and all it showed was a shimmering bar over one
+                  line. It now says which stage it is at, how long it has been
+                  going (from the job's own start, so a reload does not reset
+                  the clock), and that the result arrives by itself.
+                */}
+                {isDispatching && !job ? <BusyNotice compact title={t.projectsNew.template.inspecting} /> : null}
                 {job && !TERMINAL_STATUSES.has(job.status) ? (
-                  <div className="overview-section">
-                    <Skeleton height="1.25rem" />
-                    <p>
-                      {job.status === "QUEUED"
+                  <BusyNotice
+                    title={
+                      job.status === "QUEUED"
                         ? t.projectsNew.template.statusQueued
                         : job.status === "CLAIMED"
                           ? t.projectsNew.template.statusClaimed
                           : job.status === "WAITING_FOR_ACTION"
                             ? t.projectsNew.template.statusWaiting
-                            : t.projectsNew.template.statusRunning}
-                    </p>
-                  </div>
+                            : t.projectsNew.template.statusRunning
+                    }
+                    description={t.projectsNew.template.inspectionBusyHint}
+                    startedAt={job.createdAt}
+                  />
                 ) : null}
 
                 {job?.status === "FAILED" ? (

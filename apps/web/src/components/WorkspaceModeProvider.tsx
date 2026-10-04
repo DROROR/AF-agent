@@ -70,3 +70,13 @@ export function useWorkspaceMode(): WorkspaceModeContextValue {
   }
   return context;
 }
+
+/**
+ * The mode when a provider is mounted, otherwise null - for the one caller
+ * that sits above individual tabs and must not throw where no mode exists
+ * (ProjectGuidanceProvider, 2026-10-04). Every screen that DISPLAYS by mode
+ * keeps using useWorkspaceMode above.
+ */
+export function useWorkspaceModeIfPresent(): WorkspaceMode | null {
+  return useContext(WorkspaceModeContext)?.mode ?? null;
+}

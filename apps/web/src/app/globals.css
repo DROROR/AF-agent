@@ -1351,6 +1351,110 @@ thead th {
   color: var(--color-text-muted);
 }
 
+/* "This is running" (BusyNotice, 2026-10-04) - the pending panel's own
+   visual language, with a turning mark and a clock, so a wait looks like the
+   rest of the product rather than like a new widget. */
+.busy-notice {
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  background: var(--color-surface-sunken);
+}
+
+.busy-notice--compact {
+  padding: var(--space-2) var(--space-3);
+  align-items: center;
+}
+
+.busy-notice__spinner {
+  color: var(--brand-accent-strong);
+  flex-shrink: 0;
+  margin-top: 2px;
+  animation: busy-notice-spin 1s linear infinite;
+}
+
+.busy-notice--compact .busy-notice__spinner {
+  margin-top: 0;
+}
+
+.busy-notice__body {
+  min-width: 0;
+}
+
+.busy-notice__title {
+  font-weight: 650;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.busy-notice__elapsed {
+  margin-inline-start: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.busy-notice__description {
+  margin: var(--space-1) 0 0;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+@keyframes busy-notice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .busy-notice__spinner {
+    animation: none;
+  }
+}
+
+/* The raw message behind "Technical details" (ProblemNotice): kept word for
+   word, wrapped, and never wider than the panel it explains. */
+.problem-notice__details {
+  align-self: stretch;
+  text-align: start;
+}
+
+.problem-notice__raw {
+  margin: var(--space-1) 0 0;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+}
+
+/* The tall (Reels) output on the Export tab in Simple mode: one closed line
+   across the page until someone wants it. */
+.export-tab__reels {
+  grid-column: 1 / -1;
+}
+
+.export-tab__reels > .overview-grid {
+  margin-top: var(--space-3);
+}
+
+/* The first designed frame, shown at the full width of its card in Simple
+   mode - it was a thumbnail, and the one question on the page is whether
+   this picture looks right. */
+.first-frame__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-block: 0.75rem;
+}
+
+.first-frame-card {
+  grid-column: 1 / -1;
+}
+
 /* ==========================================================================
    Modal / Drawer
    ========================================================================== */

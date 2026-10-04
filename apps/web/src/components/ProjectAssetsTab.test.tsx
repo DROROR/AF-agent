@@ -68,6 +68,52 @@ describe("ProjectAssetsTab", () => {
     await screen.findByText("new-upload.png");
   });
 
+  /**
+   * 2026-10-04: a video upload runs for minutes and the only sign of it was
+   * the button reading "Uploading…".
+   */
+  it("while a file is on its way, names it, runs a clock, and says to keep the page open", async () => {
+    let finishUpload: () => void = () => {};
+    const uploadGate = new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    });
+    const reply = (status: number, body: unknown) => ({ ok: status < 300, status, text: async () => JSON.stringify(body), json: async () => body });
+    let listed = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: { method?: string }) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/assets") && init?.method === "POST") {
+          await uploadGate;
+          listed = true;
+          return reply(201, { asset: assetFixture({ id: "asset-1", originalFilename: "long-video.mp4" }) });
+        }
+        if (url.endsWith("/assets")) {
+          return reply(200, { assets: listed ? [assetFixture({ id: "asset-1", originalFilename: "long-video.mp4" })] : [] });
+        }
+        if (url.endsWith("/execution-plan")) {
+          return reply(200, { plan: planFixture(), sceneTable: [] });
+        }
+        return reply(200, { project: projectDtoFixture(), manifest: manifestFixture() });
+      })
+    );
+
+    renderAssets();
+    await screen.findByText("No assets uploaded");
+    const fileInput = document.getElementById("asset-file-input") as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(["bytes"], "long-video.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    const notice = (await screen.findByText("Uploading long-video.mp4…")).closest(".busy-notice") as HTMLElement;
+    expect(notice.querySelector(".busy-notice__elapsed")).not.toBeNull();
+    expect(notice.textContent).toContain("Keep this page open");
+    // Cannot be submitted a second time while it runs.
+    expect((screen.getByRole("button", { name: "Uploading…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    finishUpload();
+    await waitFor(() => expect(document.querySelector(".busy-notice")).toBeNull());
+  });
+
   it("uses the danger button treatment for Delete and its confirm CTA, but never for Cancel (section J)", async () => {
     stubWorkspace({ status: 200, body: { assets: [assetFixture({ id: "asset-1", originalFilename: "keep-me.png" })] } });
     renderAssets();

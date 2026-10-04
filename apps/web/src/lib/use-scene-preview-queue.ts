@@ -30,6 +30,13 @@ export interface ScenePreviewEntry {
    * appears.)
    */
   hasFailed: boolean;
+  /**
+   * When the generation now running (or waiting its turn) for this scene
+   * began - what a "Preview generating… 0:23" clock counts from
+   * (2026-10-04: the card said "Preview generating…" with nothing showing
+   * that anything was moving). Null or absent whenever nothing is running.
+   */
+  startedAt?: number | null;
 }
 
 const CHECKING_ENTRY: ScenePreviewEntry = { preview: null, state: "checking", isStale: false, errorMessage: null, hasFailed: false };
@@ -137,7 +144,7 @@ export function useScenePreviewQueue(
         updateEntry(scenePlanId, { state: "idle", errorMessage: "No computer is online to generate this preview right now." });
         return;
       }
-      updateEntry(scenePlanId, { state: "generating", errorMessage: null, hasFailed: false });
+      updateEntry(scenePlanId, { state: "generating", errorMessage: null, hasFailed: false, startedAt: Date.now() });
       let dispatched = await dispatchJob({ operation: "INSPECT_SCENE_EVIDENCE", workerId: worker.workerId, projectId, scenePlanId });
       // maxConcurrency=1: the server refuses a second live preview job with
       // WORKER_BUSY while an earlier one (e.g. from a previous page run, or
@@ -155,7 +162,8 @@ export function useScenePreviewQueue(
         updateEntry(scenePlanId, {
           state: entriesRef.current.get(scenePlanId)?.preview ? "ready" : "idle",
           errorMessage: dispatched.message,
-          hasFailed: true
+          hasFailed: true,
+          startedAt: null
         });
         return;
       }
@@ -164,7 +172,8 @@ export function useScenePreviewQueue(
         updateEntry(scenePlanId, {
           state: entriesRef.current.get(scenePlanId)?.preview ? "ready" : "unavailable",
           errorMessage,
-          hasFailed: true
+          hasFailed: true,
+          startedAt: null
         });
       };
       let succeededPolls = 0;
@@ -174,7 +183,7 @@ export function useScenePreviewQueue(
         const result = await fetchSceneEvidencePreviewStatus(projectId, scenePlanId);
         if (runId !== runIdRef.current) return;
         if (result.ok && result.data && result.data.capturedAt !== previousCapturedAt) {
-          updateEntry(scenePlanId, { preview: result.data, state: "ready", isStale: false, errorMessage: null, hasFailed: false });
+          updateEntry(scenePlanId, { preview: result.data, state: "ready", isStale: false, errorMessage: null, hasFailed: false, startedAt: null });
           return;
         }
         // The preview job itself can end without ever producing a preview.

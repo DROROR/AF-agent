@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectExportTab } from "./ProjectExportTab";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
@@ -196,7 +196,146 @@ describe("ProjectExportTab", () => {
     // Final MVP polish item 3 (client status copy): a plain confirmation,
     // never the raw job id (Advanced's Render Settings tab still shows the
     // id for operator correlation with the Jobs/Queue page - unaffected).
-    await screen.findByText("Started - this will update automatically, no need to check again.");
+    //
+    // 2026-10-04: "Started - this will update automatically" was followed by
+    // nothing - the page never looked at the job again. The confirmation is
+    // now a running notice with a clock that replaces the button until the
+    // render ends, so it cannot be pressed a second time.
+    const notice = (await screen.findByText("Your final Landscape video is being made…")).closest(".busy-notice") as HTMLElement;
+    expect(notice.querySelector(".busy-notice__elapsed")).not.toBeNull();
+    expect(notice.textContent).not.toContain("77777777-7777-7777-7777-777777777777");
+    expect(screen.queryByRole("button", { name: "Render Landscape" })).toBeNull();
+  });
+
+  /**
+   * 2026-10-04: a render that failed looked exactly like one that was never
+   * started, and one that was running came back as a pressable button after
+   * a reload.
+   */
+  describe("a render is watched from the press until it ends", () => {
+    const workerId = "44444444-4444-4444-4444-444444444444";
+    const JOB_ID = "77777777-7777-7777-7777-777777777777";
+    const job = (status: string, error: { code: string; message: string } | null = null) => ({
+      job: {
+        jobId: JOB_ID,
+        workerId,
+        projectId: PROJECT_ID,
+        operation: "RENDER",
+        status,
+        payload: { variant: "LANDSCAPE" },
+        result: null,
+        error,
+        checkpoint: null,
+        createdAt: new Date().toISOString(),
+        claimedAt: null,
+        startedAt: null,
+        completedAt: null,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    const base = () => ({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [workerWithCapabilities(["RENDER"])] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(workerId) } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+
+    it("a reload while it is rendering shows the same running state for THAT output, found in the job history - never the button", async () => {
+      stubFetchByUrl({
+        ...base(),
+        "/api/jobs": {
+          status: 200,
+          body: {
+            jobs: [
+              {
+                jobId: JOB_ID,
+                operation: "RENDER",
+                status: "RUNNING",
+                workerId,
+                workerName: "worker-a",
+                projectId: PROJECT_ID,
+                projectName: "Test Project",
+                executionSessionId: null,
+                error: null,
+                createdAt: new Date(Date.now() - 65_000).toISOString(),
+                completedAt: null,
+                updatedAt: new Date().toISOString()
+              }
+            ]
+          }
+        },
+        [`/api/jobs/${JOB_ID}`]: { status: 200, body: job("RUNNING") }
+      });
+      renderTab();
+
+      const notice = (await screen.findByText("Your final Landscape video is being made…")).closest(".busy-notice") as HTMLElement;
+      await waitFor(() => expect(notice.querySelector(".busy-notice__elapsed")?.textContent).toMatch(/^1:0\d$/));
+      expect(screen.queryByRole("button", { name: "Render Landscape" })).toBeNull();
+      // The other output is not claimed to be rendering.
+      expect(screen.queryByText("Your final Reels video is being made…")).toBeNull();
+    });
+
+    it(
+      "says it can take 30 to 40 minutes, and the finished video turns up as a download just below - without a reload",
+      async () => {
+        stubFetchByUrl({
+          ...base(),
+          "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId, operation: "RENDER", status: "QUEUED", createdAt: new Date().toISOString() } },
+          [`/api/jobs/${JOB_ID}`]: { status: 200, body: job("SUCCEEDED") },
+          // Nothing rendered when the page opens; the finished video once the job has succeeded.
+          [`/api/projects/${PROJECT_ID}/render-artifacts`]: [
+            { status: 200, body: { artifacts: [] } },
+            { status: 200, body: { artifacts: [renderArtifactFixture()] } }
+          ]
+        });
+        renderTab();
+        const renderButton = await screen.findByRole("button", { name: "Render Landscape" });
+        await waitFor(() => expect((renderButton as HTMLButtonElement).disabled).toBe(false));
+        await screen.findByText("No renders yet");
+        fireEvent.click(renderButton);
+
+        const notice = (await screen.findByText("Your final Landscape video is being made…")).closest(".busy-notice") as HTMLElement;
+        expect(notice.textContent).toContain("A final video can take 30 to 40 minutes.");
+
+        const download = await screen.findByRole("link", { name: "Download" }, { timeout: 9_000 });
+        expect(download.getAttribute("href")).toContain(`/api/projects/${PROJECT_ID}/render-artifacts/`);
+        expect(screen.queryByText("No renders yet")).toBeNull();
+        expect(screen.queryByText("Your final Landscape video is being made…")).toBeNull();
+      },
+      12_000
+    );
+
+    it(
+      "a render that fails says so plainly, with the worker's own words behind Technical details, and gives the button back",
+      async () => {
+        const raw = "aerender exited with code 1: output module not found";
+        stubFetchByUrl({
+          ...base(),
+          "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId, operation: "RENDER", status: "QUEUED", createdAt: new Date().toISOString() } },
+          [`/api/jobs/${JOB_ID}`]: { status: 200, body: job("FAILED", { code: "INTERNAL_ERROR", message: raw }) }
+        });
+        renderTab();
+        const renderButton = await screen.findByRole("button", { name: "Render Landscape" });
+        await waitFor(() => expect((renderButton as HTMLButtonElement).disabled).toBe(false));
+        fireEvent.click(renderButton);
+
+        const alert = await screen.findByRole("alert", {}, { timeout: 9_000 });
+        expect(alert.textContent).toContain("Your final Landscape video could not be made");
+        expect(document.body.textContent).not.toContain("Could not dispatch this job");
+        const details = alert.querySelector("details") as HTMLDetailsElement;
+        expect(details.open).toBe(false);
+        expect(details.querySelector("pre")?.textContent).toBe(raw);
+        // The card no longer goes on saying "Started": the notice is gone and the way forward is named for what it does.
+        expect(screen.queryByText("Your final Landscape video is being made…")).toBeNull();
+        expect(screen.queryByText("Started - this will update automatically, no need to check again.")).toBeNull();
+        screen.getByRole("button", { name: "Try again" });
+      },
+      12_000
+    );
   });
 
   it("shows the real, downloadable Final Outputs list (the same authenticated artifact route Advanced's Render Settings tab uses)", async () => {
@@ -334,5 +473,78 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
     const button = screen.getAllByRole("button", { name: "Render Landscape" })[0]!;
     expect(button.getAttribute("aria-describedby")).toBeNull();
     expect(button.getAttribute("title")).toBeNull();
+  });
+});
+
+/**
+ * 2026-10-04, seen live: the Reels card and a "Reels master" setup form were
+ * drawn at full weight beside Landscape for a client with no interest in a
+ * tall video, and the list of finished videos sat at the foot of the page
+ * under both.
+ */
+describe("ProjectExportTab - Simple mode leads with the Landscape video", () => {
+  // An earlier case in this file leaves this device in Advanced view; every case here starts from the Simple default.
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  function stubExport(reels: unknown): void {
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: reels } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
+    });
+  }
+
+  it("keeps the tall version behind a closed disclosure when none is set up - still there, one press away", async () => {
+    stubExport(null);
+    renderTab();
+
+    const summary = await screen.findByText("Also make a tall version for phones");
+    const disclosure = summary.closest("details") as HTMLDetailsElement;
+    expect(disclosure.open).toBe(false);
+    // The same card and the same setup form, inside it - nothing was removed.
+    expect(disclosure.contains(screen.getByRole("button", { name: "Render Reels" }))).toBe(true);
+    // The Landscape video is not inside it.
+    expect(disclosure.contains(screen.getByRole("button", { name: "Render Landscape" }))).toBe(false);
+  });
+
+  it("puts the finished videos directly under the Landscape video, above the tall version", async () => {
+    stubExport(null);
+    renderTab();
+
+    const disclosure = (await screen.findByText("Also make a tall version for phones")).closest("details") as HTMLElement;
+    const landscape = screen.getByRole("button", { name: "Render Landscape" });
+    const outputs = document.querySelector(".final-outputs-card") as HTMLElement;
+    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(landscape.compareDocumentPosition(outputs) & FOLLOWING).toBeTruthy();
+    expect(outputs.compareDocumentPosition(disclosure) & FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the tall version in the open once one IS set up - it is not hidden from someone who asked for it", async () => {
+    stubExport(landscapeConfig({ manifestCompositionId: "comp-tall", compositionName: "Tall Master" }));
+    renderTab();
+
+    await screen.findByRole("button", { name: "Render Reels" });
+    expect(screen.queryByText("Also make a tall version for phones")).toBeNull();
+  });
+
+  it("Advanced view is unchanged: both outputs in the open, finished videos at the foot", async () => {
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubExport(null);
+    renderTab();
+
+    const reels = await screen.findByRole("button", { name: "Render Reels" });
+    await waitFor(() => expect(screen.queryByText("Also make a tall version for phones")).toBeNull());
+    const outputs = document.querySelector(".final-outputs-card") as HTMLElement;
+    expect(reels.compareDocumentPosition(outputs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

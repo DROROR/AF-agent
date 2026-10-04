@@ -39,6 +39,8 @@ beforeEach(() => {
   // renderWithLocale sets <html lang> and never restores it, so one Hebrew
   // case would otherwise make every later case in this file render Hebrew.
   document.documentElement.setAttribute("lang", "en");
+  // One case below switches this device to Advanced view; every other case is the Simple default.
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -66,6 +68,41 @@ function sessionFixture(overrides: Record<string, unknown> = {}) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides
+  };
+}
+
+const SESSION_ID = "22222222-2222-2222-2222-222222222222";
+const WORKING_SHA = "d".repeat(64);
+
+/** One live row of the caller's own job history - the same list the Jobs page shows. */
+function liveJobFixture(operation: "EXECUTE_FRAME" | "CREATE_PREVIEW") {
+  return {
+    jobId: "33333333-3333-3333-3333-333333333333",
+    operation,
+    status: "RUNNING",
+    workerId: "11111111-1111-1111-1111-111111111111",
+    workerName: "worker-a",
+    projectId: PROJECT_ID,
+    projectName: "Test Project",
+    executionSessionId: SESSION_ID,
+    error: null,
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function fullPreviewArtifactFixture() {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    projectId: PROJECT_ID,
+    executionSessionId: SESSION_ID,
+    workingProjectSha256: WORKING_SHA,
+    filename: "preview.mp4",
+    mimeType: "video/mp4",
+    byteSize: 100,
+    capturedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString()
   };
 }
 
@@ -178,13 +215,17 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     within(banner()).getByText("You are on the right tab");
   });
 
-  it("THE DEAD END, CLOSED: a fully-executed project with no Landscape master is sent to Export - a tab that is always in the nav and now holds the fix", async () => {
+  it("THE DEAD END, CLOSED (Advanced view): a fully-executed project with no Landscape master is sent to Export - a tab that is always in the nav and holds the fix", async () => {
     // This is exactly where the operator got stuck: every scene built, the
     // Export button permanently greyed out, and the only instruction in the
     // whole product was to switch to Advanced view and find a tab the nav
     // does not list. The setup form now lives on Export itself
     // (ProjectExportTab -> VariantConfigCard), so the instruction is an
     // action on a tab they can already see.
+    //
+    // 2026-10-04: this pointer is now Advanced-only - see the next test for
+    // what Simple mode says instead.
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubAll(executedProjectStubs());
     renderShell();
     await screen.findByText("Choose which part of the template is your finished video");
@@ -196,11 +237,83 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     expect(banner().textContent).not.toContain("Render Settings");
   });
 
-  it("moves on to the complete preview only once the Landscape master really is configured against the current template", async () => {
+  /**
+   * 2026-10-04: a client pressed "Create Complete Preview" and was told to go
+   * and configure the Landscape output on another tab. In Simple mode the
+   * Preview tab now does that itself (or shows the form in place), so the
+   * banner keeps them on the one path: Preview, make the full video.
+   */
+  it("Simple mode: the same project is sent to Preview to make the full video - the missing Landscape setup is handled there, not on another tab", async () => {
+    stubAll(executedProjectStubs());
+    renderShell();
+    await screen.findByText("Make the full video");
+
+    expect(within(banner()).getByRole("link", { name: "Go to Preview" }).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/preview`);
+    expect(banner().textContent).not.toContain("Choose which part of the template");
+    expect(banner().textContent).not.toContain("Render Settings");
+  });
+
+  it("asks for the full video to be made once everything is built, and for it to be watched only once there is one", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderShell();
-    await screen.findByText("Review the complete video");
+    await screen.findByText("Make the full video");
     expect(within(banner()).getByRole("link", { name: "Go to Preview" }).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/preview`);
+
+    cleanup();
+    stubAll({
+      ...executedProjectStubs({
+        renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null },
+        sessionOverrides: { latestWorkingProjectSha256: WORKING_SHA }
+      }),
+      [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
+        status: 200,
+        body: { artifact: fullPreviewArtifactFixture() }
+      }
+    });
+    renderShell();
+    await screen.findByText("Watch and approve the full video");
+  });
+
+  /**
+   * 2026-10-04, seen live: the banner said "Create the first preview - press
+   * Start execution" while the video was being built, and went on saying it
+   * with the finished first frame on screen. Each of these is a different
+   * real state and gets its own words.
+   */
+  it("follows the build and the complete preview while they run - a wait is named as a wait", async () => {
+    // A scene is being built, no frame yet.
+    stubAll({
+      ...executedProjectStubs({ sessionOverrides: { status: "PREPARING", firstPreviewApproved: false, completedScenePlanIds: [] } }),
+      "/api/jobs": { status: 200, body: { jobs: [liveJobFixture("EXECUTE_FRAME")] } }
+    });
+    renderShell();
+    await screen.findByText("Your video is being built");
+    expect(banner().textContent).not.toContain("Create the first preview");
+
+    // The frame is there and waiting for its answer.
+    cleanup();
+    stubAll(executedProjectStubs({ sessionOverrides: { status: "AWAITING_PREVIEW_APPROVAL", firstPreviewApproved: false } }));
+    renderShell();
+    await screen.findByText("Check the first frame");
+
+    // The complete preview is being made.
+    cleanup();
+    stubAll({
+      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }),
+      "/api/jobs": { status: 200, body: { jobs: [liveJobFixture("CREATE_PREVIEW")] } }
+    });
+    renderShell();
+    await screen.findByText("Your full video is being made");
+    expect(within(banner()).getByRole("link", { name: "Go to Preview" })).not.toBeNull();
+  });
+
+  it("a job history that cannot be read never blanks the banner - it falls back to the step that is true without it", async () => {
+    stubAll({
+      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }),
+      "/api/jobs": { status: 500, body: { error: { code: "INTERNAL", message: "boom", requestId: "r1" } } }
+    });
+    renderShell();
+    await screen.findByText("Make the full video");
   });
 
   it("treats a Landscape master configured against an OLDER template as not configured - never offers a render that cannot run", async () => {
@@ -236,12 +349,12 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
   it("renders the whole banner in Hebrew, with no English leaking through", async () => {
     stubAll(executedProjectStubs());
     renderShell("he");
-    await screen.findByText("בחירת החלק בתבנית שהוא הווידאו המוגמר שלכם");
+    await screen.findByText("יצירת הווידאו המלא");
 
     within(banner()).getByText("מה לעשות עכשיו");
-    within(banner()).getByRole("link", { name: "מעבר לייצוא" });
+    within(banner()).getByRole("link", { name: "מעבר לתצוגה מקדימה" });
     // The one phrase the English copy would have produced here.
-    expect(banner().textContent).not.toContain("Choose which part of the template");
+    expect(banner().textContent).not.toContain("Make the full video");
   });
 });
 
@@ -267,7 +380,7 @@ describe("Project wayfinding - locked tabs say what unlocks them", () => {
   it("stops calling Preview locked once the plan is approved with a genuinely executable scene, while Export stays locked on the real final-preview gate", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderShell();
-    await screen.findByText("Review the complete video");
+    await screen.findByText("Make the full video");
 
     expect(tabLink("Preview").getAttribute("data-locked")).toBeNull();
     expect(screen.queryByText("Locked until mappings are approved")).toBeNull();
@@ -287,7 +400,7 @@ describe("Project wayfinding - locked tabs say what unlocks them", () => {
   it("the tab bar no longer marks the next step itself - the banner alone names the tab and links to it", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderShell();
-    await screen.findByText("Review the complete video");
+    await screen.findByText("Make the full video");
 
     const nav = document.querySelector(".workspace-tabs") as HTMLElement;
     expect(nav.querySelectorAll('[data-next="true"]')).toHaveLength(0);
@@ -330,7 +443,7 @@ describe("Project wayfinding - never invents state", () => {
   it("the seven-chip stepper is gone from every page's chrome - it named a phase, never an action, and doubled the banner", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderShell();
-    await waitFor(() => expect(banner().textContent).toContain("Review the complete video"));
+    await waitFor(() => expect(banner().textContent).toContain("Make the full video"));
 
     expect(document.querySelector(".workflow-stepper")).toBeNull();
     expect(screen.queryByText(/^Step \d of 7/)).toBeNull();

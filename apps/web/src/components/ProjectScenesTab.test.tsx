@@ -16,6 +16,11 @@ import {
   stubFetchByUrl
 } from "../test-utils/execution-plan-fixtures";
 
+// SimpleScenesView moves to the Preview tab after a successful approval (2026-10-04), so it reads the router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() })
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

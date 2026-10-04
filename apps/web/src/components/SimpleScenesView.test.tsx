@@ -16,10 +16,17 @@ import {
   stubFetchByUrl
 } from "../test-utils/execution-plan-fixtures";
 
+// 2026-10-04: a successful "Approve Scenes" now moves to the Preview tab.
+const routerPush = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush })
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  routerPush.mockReset();
 });
 
 function mappingFixture(overrides: Record<string, unknown> = {}) {
@@ -224,7 +231,31 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       expect(now?.textContent).toContain("Put your plan on the scenes.");
       expect(now?.textContent).toContain('Press "Use everything from my plan (1)" below.');
     });
-    expect(screen.getByText("Scene 1")).toBeTruthy();
+    // The card's label - and, since later the same day, the storyboard
+    // strip's caption too, which used to show the template's own name.
+    expect(document.querySelector(".scene-card__eyebrow")?.textContent).toBe("Scene 1");
+    const thumb = document.querySelector(".storyboard__thumb") as HTMLElement;
+    expect(thumb.querySelector("span")?.textContent).toBe("Scene 1");
+    // The template's name is kept, on hover, for matching it to After Effects.
+    expect(thumb.getAttribute("title")).toBe("App Features");
+  });
+
+  /**
+   * 2026-10-04: "Use everything from my plan", every card's "Use this" and
+   * "Approve Scenes" were all drawn at full weight at once, and the client had
+   * to work out which came first.
+   */
+  it("draws ONE primary button - the one for the step the guide marks 'now'", async () => {
+    stubWorkspace({
+      suggestions: [mappingSuggestionFixture({ id: "s-1", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: "New headline" })]
+    });
+    renderView();
+    const wholePlan = await screen.findByRole("button", { name: "Use everything from my plan (1)" });
+
+    expect(wholePlan.className).toContain("btn--primary");
+    expect(screen.getByRole("button", { name: "Approve Scenes" }).className).not.toContain("btn--primary");
+    expect(screen.getByRole("button", { name: "Use this" }).className).not.toContain("btn--primary");
+    expect(document.querySelectorAll("button.btn--primary")).toHaveLength(1);
   });
 
   it("shows no whole-plan button when nothing is proposed", async () => {
@@ -835,6 +866,55 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         expect(sent[0]!.body).toEqual({ baseRevision: 3, operations: [{ type: "APPROVE_SCENE", scenePlanId: "scene-parent" }] });
         expect(sent[1]!.body).toEqual({ baseRevision: 4 });
         expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
+      },
+      20_000
+    );
+
+    /**
+     * 2026-10-04, seen live: after a successful approval the page stayed on
+     * Scenes with the button greyed out, and the client concluded the click
+     * had failed.
+     */
+    it(
+      "moves to the Preview tab once the approval has succeeded - and only then",
+      async () => {
+        stubApprovalFlow("DRAFT");
+        renderView();
+        await waitForApproveEnabled();
+        expect(routerPush).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
+
+        await waitFor(() => expect(routerPush).toHaveBeenCalledWith(`/projects/${PROJECT_ID}/preview`), { timeout: 10_000 });
+        expect(routerPush).toHaveBeenCalledTimes(1);
+      },
+      20_000
+    );
+
+    it(
+      "stays on Scenes, with the reason shown, when the approval is refused",
+      async () => {
+        stubWorkspace({
+          scenes: readyScenes(),
+          extra: {
+            [`/api/projects/${PROJECT_ID}/execution-plan`]: [
+              { status: 200, body: planBody("DRAFT", 3, "READY_FOR_APPROVAL") },
+              { status: 200, body: planBody("DRAFT", 4, "APPROVED") }
+            ],
+            [`/api/projects/${PROJECT_ID}/execution-plan/approve`]: {
+              status: 409,
+              body: { error: { code: "PRECONDITION_NOT_MET", message: "One text still carries the template's own wording", requestId: "r1" } }
+            },
+            [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: freshPreview("comp-parent")
+          }
+        });
+        renderView();
+        await waitForApproveEnabled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
+
+        await screen.findByText("One text still carries the template's own wording", {}, { timeout: 10_000 });
+        expect(routerPush).not.toHaveBeenCalled();
       },
       20_000
     );

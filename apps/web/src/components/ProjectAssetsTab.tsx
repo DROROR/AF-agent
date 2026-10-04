@@ -8,6 +8,7 @@ import { useProjectAssets } from "../lib/use-project-assets";
 import { assetFileUrl } from "../lib/projects-api-client";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
+import { BusyNotice, currentTimeMs } from "./ui/BusyNotice";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
@@ -40,6 +41,8 @@ function AssetsPanel({ projectId }: { projectId: string }): ReactElement {
   const { assets, isLoading, error, upload, update, remove } = useProjectAssets(projectId);
   const [uploadMediaKind, setUploadMediaKind] = useState<"" | "LOGO">("");
   const [isUploading, setIsUploading] = useState(false);
+  // Which file is on its way, and since when - for the "Uploading … 0:42" notice.
+  const [uploadInFlight, setUploadInFlight] = useState<{ fileName: string; startedAt: number } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,9 +53,11 @@ function AssetsPanel({ projectId }: { projectId: string }): ReactElement {
       return;
     }
     setIsUploading(true);
+    setUploadInFlight({ fileName: file.name, startedAt: currentTimeMs() });
     setUploadError(null);
     const result = await upload(file, uploadMediaKind === "LOGO" ? "LOGO" : undefined);
     setIsUploading(false);
+    setUploadInFlight(null);
     if (result.ok) {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -87,6 +92,14 @@ function AssetsPanel({ projectId }: { projectId: string }): ReactElement {
               <option value="LOGO">{t.assetsTab.mediaKind.LOGO}</option>
             </Select>
           </Field>
+          {/*
+            2026-10-04: a video upload runs for minutes and the only sign of
+            it was the button reading "Uploading…". It now names the file,
+            shows how long it has been going, and says to keep the page open.
+          */}
+          {uploadInFlight ? (
+            <BusyNotice title={t.assetsTab.uploadingFile(uploadInFlight.fileName)} description={t.assetsTab.uploadingHint} startedAt={uploadInFlight.startedAt} />
+          ) : null}
           <Button type="submit" variant="primary" disabled={isUploading}>
             {isUploading ? t.assetsTab.uploading : t.assetsTab.uploadAction}
           </Button>

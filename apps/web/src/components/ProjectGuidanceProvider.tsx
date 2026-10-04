@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, type ReactElement, type ReactNode } from "react";
+import { createContext, useContext, useEffect, type ReactElement, type ReactNode } from "react";
+import { useWorkspaceModeIfPresent } from "./WorkspaceModeProvider";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectStepperStatus } from "../lib/use-project-stepper-status";
 import { useProjectAssets } from "../lib/use-project-assets";
@@ -29,7 +30,19 @@ export interface ProjectGuidance {
    * own. See plan-edit-impact.ts and the 2026-09-27 incident behind it.
    */
   planEditImpact: PlanEditImpact;
+  /**
+   * Re-reads the session / jobs / complete-preview state this guidance is
+   * derived from. 2026-10-04: the Preview tab changes that state (a build
+   * finishes, a frame is approved) and this provider, which read it once on
+   * page load, went on naming the step before - "Create the first preview"
+   * under a first preview. Screens that change the state call this; nothing
+   * on screen is blanked while it re-reads.
+   */
+  refresh: () => void;
 }
+
+/** How often the guidance re-reads while something is being built or made, so the banner moves on by itself on whichever tab is open. */
+const IN_FLIGHT_REFRESH_INTERVAL_MS = 5_000;
 
 const ProjectGuidanceContext = createContext<ProjectGuidance | null>(null);
 
@@ -56,7 +69,21 @@ const ProjectGuidanceContext = createContext<ProjectGuidance | null>(null);
  */
 export function ProjectGuidanceProvider({ projectId, children }: { projectId: string; children: ReactNode }): ReactElement {
   const { project, plan } = useProjectWorkspaceContext();
-  const { workMap, session, renderArtifacts, isLoading, hasError, sessionKnown } = useProjectStepperStatus(projectId);
+  const { workMap, session, renderArtifacts, isLoading, hasError, sessionKnown, sceneBuildInFlight, fullPreviewInFlight, fullPreviewReady, refresh } =
+    useProjectStepperStatus(projectId);
+  // Only a mounted provider saying "simple" counts. With none (some tests,
+  // any future screen outside the workspace layout) the pre-2026-10-04
+  // pointers are kept exactly.
+  const isSimpleMode = useWorkspaceModeIfPresent() === "simple";
+
+  const somethingInFlight = sceneBuildInFlight || fullPreviewInFlight;
+  useEffect(() => {
+    if (!somethingInFlight) {
+      return;
+    }
+    const interval = setInterval(refresh, IN_FLIGHT_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [somethingInFlight, refresh]);
   // 2026-10-02: the Asset Catalog is now an input too, because "review every
   // scene" is not a carry-out-able instruction while every asset dropdown in
   // the edit drawer is empty. `assets` is null both while loading AND on a
@@ -115,7 +142,13 @@ export function ProjectGuidanceProvider({ projectId, children }: { projectId: st
     allScenesComplete,
     landscapeRenderConfigured,
     fullPreviewApproved: activeSession?.fullPreviewApproved ?? false,
-    hasRenderArtifact: (renderArtifacts?.length ?? 0) > 0
+    hasRenderArtifact: (renderArtifacts?.length ?? 0) > 0,
+    sceneBuildInFlight,
+    fullPreviewInFlight,
+    // Ready only counts for the session the rest of this guidance treats as
+    // live - never for a FAILED one.
+    fullPreviewReady: activeSession !== null && fullPreviewReady,
+    fullVideoSetupOnPreviewTab: isSimpleMode
   };
 
   const value: ProjectGuidance = {
@@ -136,7 +169,8 @@ export function ProjectGuidanceProvider({ projectId, children }: { projectId: st
       hasSession: session !== null,
       firstPreviewApproved: session?.firstPreviewApproved ?? false,
       fullPreviewApproved: session?.fullPreviewApproved ?? false
-    })
+    }),
+    refresh
   };
 
   return <ProjectGuidanceContext.Provider value={value}>{children}</ProjectGuidanceContext.Provider>;
@@ -148,4 +182,15 @@ export function useProjectGuidance(): ProjectGuidance {
     throw new Error("useProjectGuidance must be used within a ProjectGuidanceProvider");
   }
   return context;
+}
+
+const NO_GUIDANCE_TO_REFRESH = (): void => {};
+
+/**
+ * `refresh` for a screen that changes the state the guidance is derived from
+ * (see ProjectGuidance.refresh). Does nothing where no guidance is mounted,
+ * so a tab can be rendered on its own without one.
+ */
+export function useProjectGuidanceRefresh(): () => void {
+  return useContext(ProjectGuidanceContext)?.refresh ?? NO_GUIDANCE_TO_REFRESH;
 }

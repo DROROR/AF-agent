@@ -31,12 +31,14 @@ import {
   listRenderArtifactsResponseSchema,
   dispatchJobResponseSchema,
   getJobResponseSchema,
-  listJobsResponseSchema,
+  jobHistoryEntryDtoSchema,
   executionSessionResponseSchema,
   currentExecutionSessionResponseSchema,
   fullPreviewArtifactResponseSchema,
   sceneEvidencePreviewStatusResponseSchema,
+  renderOutputSuggestionResponseSchema,
   type RenderArtifactDto,
+  type RenderOutputSuggestionResponse,
   type RenderOutputVariant,
   type SetRenderOutputConfigRequest,
   type DispatchJobRequest,
@@ -44,6 +46,7 @@ import {
   type ExecutionSessionDto,
   type FullPreviewArtifactDto,
   type JobDto,
+  type JobHistoryEntryDto,
   type ListJobsResponse,
   type SceneEvidencePreviewDto
 } from "@dyo/schemas";
@@ -76,6 +79,9 @@ export const ASSET_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
  * in this file keeps the normal REQUEST_TIMEOUT_MS.
  */
 export const GENERATE_SUGGESTIONS_TIMEOUT_MS = 180_000;
+
+/** The caller's job history, plus how many rows could not be read and were left out (see fetchJobHistory). */
+export type JobHistoryResult = ListJobsResponse & { unreadableCount: number };
 
 export type ApiResult<T> =
   | { ok: true; data: T }
@@ -548,6 +554,30 @@ export async function setRenderOutputConfig(
   return { ok: true, data: parsed.data };
 }
 
+/**
+ * What a render output could be set up with, nothing guessed (2026-10-04) -
+ * see suggest-render-output-config.ts. `null` is a real answer ("there is
+ * nothing safe to offer; show the form"), not a failure. Read-only: taking
+ * the suggestion goes through setRenderOutputConfig above, the same call the
+ * form makes.
+ */
+export async function fetchRenderOutputSuggestion(
+  projectId: string,
+  variant: RenderOutputVariant
+): Promise<ApiResult<RenderOutputSuggestionResponse["suggestion"]>> {
+  const { status, json } = await request(
+    `/api/projects/${encodeURIComponent(projectId)}/execution-plan/render-outputs/${encodeURIComponent(variant)}/suggestion`
+  );
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = renderOutputSuggestionResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected render-output suggestion contract" };
+  }
+  return { ok: true, data: parsed.data.suggestion };
+}
+
 /** Real, persisted render-result metadata (render-delivery phase section 7/12) - only genuinely completed/validated artifacts, never a placeholder/fake card. */
 export async function fetchRenderArtifacts(projectId: string): Promise<ApiResult<RenderArtifactDto[]>> {
   const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/render-artifacts`);
@@ -639,16 +669,33 @@ export async function cancelQueuedJob(jobId: string): Promise<ApiResult<JobDto>>
  * resolved server-side (see list-jobs-for-user.ts) - no DB/curl access is
  * ever needed to understand what happened to a past job.
  */
-export async function fetchJobHistory(): Promise<ApiResult<ListJobsResponse>> {
+export async function fetchJobHistory(): Promise<ApiResult<JobHistoryResult>> {
   const { status, json } = await request(`/api/jobs`);
   if (status !== 200) {
     return toErrorResult(status, json);
   }
-  const parsed = listJobsResponseSchema.safeParse(json);
-  if (!parsed.success) {
+  // REAL 2026-10-04: the whole Jobs page read "Response did not match the
+  // expected job-history contract" because ONE row in the list could not be
+  // read. One unreadable row must not blank every other one - and since that
+  // day the Preview tab and the "what to do next" banner read this list too,
+  // to find a job still running after a reload. So the envelope is checked
+  // as before, each row is read on its own, the readable ones are returned,
+  // and the number that were not is reported rather than hidden.
+  const rows = json !== null && typeof json === "object" && Array.isArray((json as { jobs?: unknown }).jobs) ? (json as { jobs: unknown[] }).jobs : null;
+  if (rows === null) {
     return { ok: false, status, code: null, message: "Response did not match the expected job-history contract" };
   }
-  return { ok: true, data: parsed.data };
+  const jobs: JobHistoryEntryDto[] = [];
+  let unreadableCount = 0;
+  for (const row of rows) {
+    const parsed = jobHistoryEntryDtoSchema.safeParse(row);
+    if (parsed.success) {
+      jobs.push(parsed.data);
+    } else {
+      unreadableCount += 1;
+    }
+  }
+  return { ok: true, data: { jobs, unreadableCount } };
 }
 
 /**

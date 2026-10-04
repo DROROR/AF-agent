@@ -16,6 +16,7 @@ export const he: Dictionary = {
     no: "לא",
     never: "מעולם לא",
     close: "סגירה",
+    technicalDetails: "פרטים טכניים",
     unavailableFallback: "לא ניתן היה לטעון את נתוני לוח הבקרה.",
     staleNotice: (error) => `העדכונים בזמן אמת הושהו - מוצגים הנתונים האחרונים הידועים, מתבצע ניסיון חוזר… (${error})`,
     switchToTheme: (themeName) => `מעבר למצב ${themeName}`
@@ -168,6 +169,7 @@ export const he: Dictionary = {
       statusClaimed: "נאסף על ידי העובד - יתחיל בקרוב.",
       statusRunning: "בודק את התבנית האמיתית על העובד כעת...",
       statusWaiting: "ממתין לפעולה נדרשת לפני שניתן להמשיך.",
+      inspectionBusyHint: "קריאת תבנית לוקחת בדרך כלל כחמש דקות. השאירו את העמוד פתוח - התוצאה תופיע כאן בעצמה, ואין צורך ללחוץ על דבר.",
       inspectionFailedTitle: "הבדיקה נכשלה",
       resultTitle: "תוצאת הבדיקה",
       resultCompositions: "קומפוזיציות",
@@ -207,6 +209,8 @@ export const he: Dictionary = {
     historyTableCaption: "היסטוריית שיגור משימות",
     historyLoading: "טוען היסטוריית משימות…",
     historyUnavailableTitle: "היסטוריית המשימות אינה זמינה",
+    historyUnreadableRows: (n: number): string =>
+      n === 1 ? "משימה אחת לא ניתנה לקריאה ואינה מוצגת למטה. כל שאר המשימות מופיעות." : `${n} משימות לא ניתנו לקריאה ואינן מוצגות למטה. כל שאר המשימות מופיעות.`,
     historyEmptyTitle: "טרם שוגרו משימות",
     historyEmptyDescription: "משימות שתשגר מכל מקום בלוח הבקרה יופיעו כאן.",
     operationColumn: "פעולה",
@@ -281,7 +285,7 @@ export const he: Dictionary = {
     noProjectsDescription: "צרו פרויקט כדי לראות כאן את הרינדורים שלו לאחר שייווצרו.",
     loadErrorTitle: "לא ניתן היה לטעון רינדורים עבור פרויקט זה",
     emptyTitle: "אין עדיין רינדורים",
-    emptyDescription: "רינדורים שהושלמו ואומתו עבור פרויקט זה יופיעו כאן לאחר הפקתם.",
+    emptyDescription: "סרטונים מוגמרים של הפרויקט הזה יופיעו כאן בעצמם. כדי ליצור אחד, לחצו על רינדור בלשונית הייצוא של הפרויקט.",
     variantColumn: "וריאנט",
     variantLabel: { LANDSCAPE: "לרוחב", REELS: "Reels" },
     compositionColumn: "קומפוזיציה",
@@ -489,7 +493,8 @@ export const he: Dictionary = {
         },
         reviewScenes: {
           title: "בדיקת כל סצנה",
-          description: "פתחו את לשונית הסצנות והשלימו כל סצנה שמסומנת \"דרושה בחירה שלכם\". הכפתור \"אישור הסצנות\" יישאר מושבת עד שכל סצנה שנכללת תיבדק ולפחות סצנה אחת תיכלל."
+          description:
+            "פתחו את לשונית הסצנות ובצעו את הצעדים הממוספרים שבראש העמוד, לפי הסדר. הכפתור \"אישור הסצנות\" ייפתח כשכל סצנה שנכללת תושלם ולפחות סצנה אחת תיכלל."
         },
         approveScenes: {
           title: "אישור הסצנות",
@@ -498,24 +503,37 @@ export const he: Dictionary = {
         },
         startFirstPreview: {
           title: "יצירת התצוגה המקדימה הראשונה",
-          description: "פתחו את לשונית התצוגה המקדימה ולחצו על \"התחלת ביצוע\". After Effects בונה פריים מעוצב אחד שתוכלו לבדוק לפני ששאר הווידאו נבנה."
+          description: "פתחו את לשונית התצוגה המקדימה ולחצו על הכפתור שם. After Effects בונה את הווידאו ומציג לכם פריים אחד לבדיקה לפני שכל השאר נוצר."
         },
         approveFirstPreview: {
-          title: "אישור התצוגה המקדימה הראשונה",
-          description: "הפריים המעוצב הראשון שלכם ממתין בלשונית התצוגה המקדימה. לחצו על \"אישור התצוגה המקדימה\" כדי לבנות את שאר הסצנות, או על \"דחיית התצוגה המקדימה\" כדי לעצור כאן."
+          title: "בדיקת הפריים הראשון",
+          description:
+            "פריים אמיתי אחד מהווידאו שלכם ממתין בלשונית התצוגה המקדימה. הסתכלו עליו ואמרו אם הוא נראה נכון - שאר הווידאו נוצר רק אחרי שתאשרו."
         },
         executeRemainingScenes: {
           title: "בניית שאר הסצנות",
-          description: "פתחו את לשונית התצוגה המקדימה ולחצו על \"המשך ביצוע\" עד שכל סצנה מאושרת תיבנה."
+          description: "פתחו את לשונית התצוגה המקדימה ולחצו על הכפתור שם עד שכל סצנה מאושרת תיבנה."
+        },
+        buildingVideo: {
+          title: "הווידאו שלכם נבנה",
+          description: "After Effects עובד כעת על מחשב העריכה שלכם. אין צורך ללחוץ על דבר - לשונית התצוגה המקדימה תציג את התוצאה ברגע שתהיה מוכנה."
         },
         configureRenderOutput: {
           title: "בחירת החלק בתבנית שהוא הווידאו המוגמר שלכם",
           description:
             "פתחו את הייצוא. תחת \"לנדסקייפ\", בחרו את החלק בתבנית שהוא כל הווידאו המוגמר, מלאו את שני שמות ההגדרות של After Effects שקיבלתם מהעורך, ולחצו על שמירה. הרינדור יישאר מושבת עד שזה נשמר."
         },
+        makeFullVideo: {
+          title: "יצירת הווידאו המלא",
+          description: "הכול נבנה. פתחו את לשונית התצוגה המקדימה ובצעו את הצעד האחד שמוצג שם כדי ליצור את הווידאו המלא - זה לוקח כמה דקות."
+        },
+        waitForFullVideo: {
+          title: "הווידאו המלא שלכם בהכנה",
+          description: "זה לוקח כמה דקות. אין צורך ללחוץ על דבר - הווידאו יופיע בלשונית התצוגה המקדימה בעצמו כשיהיה מוכן."
+        },
         reviewFinalPreview: {
-          title: "בדיקת הווידאו המלא",
-          description: "פתחו את לשונית התצוגה המקדימה, לחצו על \"יצירת תצוגה מקדימה מלאה\", צפו בתוצאה ואז לחצו על \"אישור התצוגה המקדימה הסופית\". הייצוא נפתח רק אחרי האישור הזה."
+          title: "צפייה בווידאו המלא ואישורו",
+          description: "הווידאו המלא שלכם מוכן בלשונית התצוגה המקדימה. צפו בו ואז לחצו על \"אישור תצוגה מקדימה סופית\". הייצוא נפתח רק אחרי האישור הזה."
         },
         render: {
           title: "רינדור הווידאו הסופי",
@@ -590,6 +608,48 @@ export const he: Dictionary = {
     deletingAction: "מוחק…",
     deleteCancelAction: "ביטול",
     deleteFailedTitle: "לא ניתן היה למחוק את הפרויקט",
+    simplePreview: {
+      firstFrameTitle: "שלב 1 - בדיקת פריים אחד",
+      startIntro: "After Effects בונה את הווידאו על מחשב העריכה שלכם ומציג לכם קודם פריים אחד לבדיקה.",
+      startAction: "בנו את הווידאו שלי",
+      continueAction: "בנו את שאר הווידאו",
+      continueIntro: "הפריים הראשון אושר. את שאר הסצנות עדיין צריך לבנות.",
+      buildingTitle: "הווידאו שלכם נבנה…",
+      buildingDescription: "After Effects עובד כעת על מחשב העריכה שלכם. התוצאה תופיע כאן בעצמה - אין צורך ללחוץ על דבר.",
+      frameQuestion: "האם הפריים הזה נראה נכון?",
+      frameQuestionHint: "זהו פריים אמיתי אחד מהווידאו שלכם. אם התמונות, הטקסט והצבעים נראים נכון כאן, שאר הווידאו נוצר באותה צורה.",
+      frameYesAndMakeAction: "כן, צרו את הווידאו המלא",
+      frameYesAction: "כן, זה נראה נכון",
+      frameNoAction: "לא, משהו לא בסדר",
+      frameApprovedNote: "אמרתם שהפריים הזה נראה נכון.",
+      frameRejectedTitle: "הפריים הזה לא אושר",
+      frameRejectedDescription:
+        "אם התוכן שגוי, חזרו ללשונית הסצנות ושנו אותו. אם התמונה רק צולמה ברגע לא מוצלח, פתחו את \"הצגת רגע אחר\" למטה.",
+      backToScenesAction: "חזרה לסצנות",
+      differentMomentToggle: "הצגת רגע אחר",
+      differentMomentHint: "מציג את אותו וידאו בנקודת זמן אחרת. שום דבר בווידאו שלכם לא משתנה.",
+      tryAgainAction: "נסו שוב",
+      buildFailedTitle: "לא ניתן היה לבנות את הווידאו",
+      buildFailedDescription: "After Effects נעצר במהלך הבנייה. שום דבר ממה שהכנתם לא אבד. לחצו על \"נסו שוב\" - אם זה נעצר שוב, שלחו לתמיכה את הפרטים הטכניים שלמטה.",
+      startFailedTitle: "לא ניתן היה להתחיל את בניית הווידאו",
+      actionFailedTitle: "הפעולה לא הושלמה",
+      actionFailedDescription: "שום דבר לא השתנה. נסו שוב בעוד רגע - אם זה ממשיך לקרות, שלחו לתמיכה את הפרטים הטכניים שלמטה.",
+      workerBusy: "מחשב העריכה שלכם עסוק כרגע במשימה אחרת. המתינו דקה ונסו שוב.",
+      fullVideoTitle: "שלב 2 - הווידאו המלא שלכם",
+      fullVideoIntro: "צרו את הווידאו המלא כדי לצפות בו מההתחלה ועד הסוף לפני הייצוא הסופי.",
+      makeFullVideoAction: "צרו את הווידאו המלא שלי",
+      makingTitle: "הווידאו שלכם בהכנה…",
+      makingDescription: "זה לוקח בדרך כלל כמה דקות. הווידאו יופיע כאן בעצמו - אפשר לעזוב את העמוד ולחזור.",
+      suggestionLine: (compositionName: string, projectName: string): string =>
+        `הווידאו המלא ייווצר מתוך "${compositionName}", עם אותן הגדרות פלט כמו בפרויקט שלכם "${projectName}".`,
+      setupNeededTitle: "דרוש דבר אחד לפני שאפשר ליצור את הווידאו המלא",
+      setupNeededDescription: "בחרו איזה חלק בתבנית הוא הווידאו המוגמר כולו, מלאו את הטופס שלמטה ולחצו על שמירה. הכפתור ליצירת הווידאו יופיע מיד אחרי השמירה.",
+      fullVideoFailedTitle: "לא ניתן היה ליצור את הווידאו המלא",
+      fullVideoFailedDescription: "After Effects נעצר במהלך היצירה. שום דבר לא אבד. לחצו על \"נסו שוב\" - אם זה נעצר שוב, שלחו לתמיכה את הפרטים הטכניים שלמטה.",
+      fullVideoNotStartedTitle: "לא ניתן היה להתחיל את יצירת הווידאו המלא",
+      watchQuestion: "צפו בווידאו מההתחלה ועד הסוף. האם הוא מוכן?",
+      approvedNote: "אישרתם את הווידאו הזה. הצעד הבא נמצא בלשונית הייצוא."
+    },
     overview: {
       detailsToggle: "פרטי התוכנית (לתמיכה)",
       projectSection: "פרויקט",
@@ -839,6 +899,12 @@ export const he: Dictionary = {
     export: {
       description: "רינדור והורדה של סרטוני הלנדסקייפ והרילס הסופיים.",
       renderAction: (variantLabel: string): string => `רינדור ${variantLabel}`,
+      renderingTitle: (variantLabel: string): string => `הסרטון הסופי שלכם (${variantLabel}) בהכנה…`,
+      renderingDescription: "סרטון סופי יכול לקחת 30 עד 40 דקות. הסרטון המוגמר יופיע בעצמו ממש למטה, מוכן להורדה - אפשר לעזוב את העמוד ולחזור.",
+      reelsToggle: "ליצור גם גרסה אנכית לטלפונים",
+      renderFailedTitle: (variantLabel: string): string => `לא ניתן היה ליצור את הסרטון הסופי שלכם (${variantLabel})`,
+      renderFailedDescription: "מחשב העריכה שלכם נעצר לפני שהסרטון הושלם. שום דבר לא אבד. לחצו על \"נסו שוב\" - אם זה נעצר שוב, שלחו לתמיכה את הפרטים הטכניים שלמטה.",
+      renderNotStartedTitle: "לא ניתן היה להתחיל את יצירת הסרטון הסופי",
       notConfiguredTitle: "עדיין לא הוגדר",
       setUpBelowDescription: "צריך להגדיר את הפלט הזה פעם אחת לפני שאפשר לרנדר אותו. הטופס הקצר לכך נמצא ממש למטה.",
       notReadyTitle: "עדיין לא מוכן",
@@ -932,6 +998,8 @@ export const he: Dictionary = {
     mediaKindLogoHint: "תקף רק עבור קובץ תמונה - מסמן אותו כלוגו הלקוח/החברה.",
     uploadAction: "העלאה",
     uploading: "מעלה…",
+    uploadingFile: (fileName: string): string => `מעלה את ${fileName}…`,
+    uploadingHint: "וידאו גדול יכול לקחת כמה דקות. השאירו את העמוד פתוח - הקובץ יופיע ברשימה שלמטה ברגע שיעלה.",
     uploadFailedTitle: "לא ניתן היה להעלות את הקובץ הזה",
     emptyTitle: "לא הועלו נכסים",
     emptyDescription: "העלו כאן את התמונות, הסרטונים, הלוגואים, קבצי האודיו או המסמכים של הלקוח.",
@@ -1166,7 +1234,7 @@ export const he: Dictionary = {
   },
   simpleScenes: {
     emptyTitle: "אין עדיין סצנות",
-    emptyDescription: "הסצנות יופיעו כאן ברגע שתוכנית הסרטון שלכם תהיה מוכנה.",
+    emptyDescription: "הסצנות יופיעו כאן ברגע שתוכנית הסרטון שלכם תהיה קיימת. פתחו את לשונית \"תוכנית בינה מלאכותית\" כדי ליצור אותה.",
     status: {
       ready: "מוכן",
       needsChoice: "דורש את בחירתכם",
@@ -1194,7 +1262,7 @@ export const he: Dictionary = {
     plannedPreviewLabel: "סקיצה בלבד - התמונה האמיתית נוצרת בשלב התצוגה המקדימה",
     aePreviewLabel: "תצוגה מקדימה מ-After Effects",
     outdatedPreviewHint: "שיניתם את הסצנה, ולכן התמונה הזו היא מלפני השינוי. התמונה החדשה נוצרת בשלב התצוגה המקדימה.",
-    noPreviewYetHint: "אין עדיין תצוגה מקדימה. לחצו על \"תצוגה מקדימה של הסצנה\" כדי ליצור אחת מפרויקט ה-After Effects האמיתי.",
+    noPreviewYetHint: "אין עדיין תצוגה מקדימה. After Effects יוצר אותה אוטומטית - אין צורך ללחוץ על דבר.",
     previewErrorPrefix: "לא ניתן היה ליצור תצוגה מקדימה:",
     reviewQueueTitle: "הצעות לסצנה הזו",
     reviewQueueEmptyDescription: "שום דבר לא דורש את הקלט שלכם כרגע.",
@@ -1212,7 +1280,21 @@ export const he: Dictionary = {
       showing: (done: number, total: number): string => `After Effects מכין אותם… ${done} מתוך ${total}`,
       confirmAction: (n: number): string => (n === 1 ? "כן - היא במקום הנכון" : `כן - כל ${n} במקום הנכון`),
       saving: "שומר…",
-      hint: "אחת מהן לא נכונה? פתחו את הסצנה עם עריכה ושנו שם את התמונה."
+      hint: "אחת מהן לא נכונה? פתחו את הסצנה עם עריכה ושנו שם את התמונה.",
+      showingNow: (caption: string): string => `כעת: ${caption}. כל מקום לוקח כחצי דקה - הם מופיעים למעלה אחד אחד, ואין צורך ללחוץ על דבר.`,
+      pictureIn: (sceneLabel: string): string => `תמונה ב${sceneLabel}`,
+      pictureNumberIn: (n: number, sceneLabel: string): string => `תמונה ${n} ב${sceneLabel}`,
+      couldNotShow: (caption: string): string => `After Effects לא הצליח להציג את המקום הזה: ${caption}`,
+      couldNotSave: "לא ניתן היה לשמור את התשובה שלכם",
+      problemHint: "שום דבר לא השתנה. לחצו שוב על הכפתור - אם זה ממשיך לקרות, שלחו לתמיכה את הפרטים הטכניים שלמטה."
+    },
+    previewBusy: {
+      generating: "After Effects מכין את התצוגה המקדימה הזו…",
+      generatingHint: "היא תופיע כאן בעצמה - בדרך כלל בתוך דקה.",
+      queued: "ממתינה לתורה - התצוגות המקדימות נוצרות אחת אחת.",
+      updatingCount: (ready: number, total: number): string => `מעדכן תצוגות מקדימות… ${ready} מתוך ${total} מוכנות`,
+      updatingHint: "\"אישור הסצנות\" ייפתח בעצמו כשהן יסתיימו. אין צורך ללחוץ על דבר.",
+      approvingHint: "לשונית התצוגה המקדימה תיפתח בעצמה בעוד רגע."
     },
     guide: {
       heading: "מה עושים בעמוד הזה",

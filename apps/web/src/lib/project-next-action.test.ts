@@ -117,11 +117,62 @@ describe("resolveNextAction - the named action is the genuinely blocking one", (
     expect(result.tab).not.toBe("renderSettings");
   });
 
-  it("only asks for the complete preview once the Landscape master really is configured", () => {
+  it("only asks for the complete preview once the Landscape master really is configured - and to MAKE it, while there is nothing yet to review", () => {
     const result = resolveNextAction(
       input({ planApproved: true, executableSceneCount: 2, firstPreviewApproved: true, allScenesComplete: true, landscapeRenderConfigured: true })
     );
-    expect(result).toEqual({ id: "reviewFinalPreview", tab: "preview" });
+    // 2026-10-04: "review" used to cover making, watching and approving in
+    // one breath. With no complete preview in existence the true step is to
+    // make it.
+    expect(result).toEqual({ id: "makeFullVideo", tab: "preview" });
+  });
+
+  /**
+   * 2026-10-04, seen live: the banner said "Create the first preview - press
+   * Start execution" during the build and went on saying it under the
+   * finished first frame. These pin one answer per real state.
+   */
+  describe("follows a build and a complete preview while they run", () => {
+    const built = { planApproved: true, executableSceneCount: 2, firstPreviewApproved: true, allScenesComplete: true, landscapeRenderConfigured: true };
+
+    it("names a running scene build as a wait, before and after the first frame is approved", () => {
+      expect(resolveNextAction(input({ planApproved: true, executableSceneCount: 2, sceneBuildInFlight: true }))).toEqual({ id: "buildingVideo", tab: "preview" });
+      expect(resolveNextAction(input({ planApproved: true, executableSceneCount: 2, firstPreviewApproved: true, sceneBuildInFlight: true }))).toEqual({
+        id: "buildingVideo",
+        tab: "preview"
+      });
+    });
+
+    it("a frame waiting for its answer outranks a job in flight - there is something to look at right now", () => {
+      expect(
+        resolveNextAction(input({ planApproved: true, executableSceneCount: 2, awaitingFirstPreviewApproval: true, sceneBuildInFlight: true }))
+      ).toEqual({ id: "approveFirstPreview", tab: "preview" });
+    });
+
+    it("make -> wait -> watch and approve -> Export, one fact at a time", () => {
+      expect(resolveNextAction(input(built)).id).toBe("makeFullVideo");
+      expect(resolveNextAction(input({ ...built, fullPreviewInFlight: true })).id).toBe("waitForFullVideo");
+      expect(resolveNextAction(input({ ...built, fullPreviewReady: true }))).toEqual({ id: "reviewFinalPreview", tab: "preview" });
+      // Regenerating a video that already exists is still a wait.
+      expect(resolveNextAction(input({ ...built, fullPreviewReady: true, fullPreviewInFlight: true })).id).toBe("waitForFullVideo");
+      expect(resolveNextAction(input({ ...built, fullPreviewReady: true, fullPreviewApproved: true }))).toEqual({ id: "render", tab: "export" });
+    });
+
+    it("never claims a wait or a result it was not told about - absent means no", () => {
+      expect(resolveNextAction(input({ planApproved: true, executableSceneCount: 2 })).id).toBe("startFirstPreview");
+      expect(resolveNextAction(input(built)).id).toBe("makeFullVideo");
+    });
+
+    it("Simple mode keeps a missing Landscape setup on the Preview tab, where it is now handled; Advanced still points at Export", () => {
+      const unconfigured = { ...built, landscapeRenderConfigured: false };
+      expect(resolveNextAction(input({ ...unconfigured, fullVideoSetupOnPreviewTab: true }))).toEqual({ id: "makeFullVideo", tab: "preview" });
+      expect(resolveNextAction(input({ ...unconfigured, fullVideoSetupOnPreviewTab: false }))).toEqual({ id: "configureRenderOutput", tab: "export" });
+      // Once the complete preview is approved, a missing or stale setup blocks the render itself - Export holds that form in both views.
+      expect(resolveNextAction(input({ ...unconfigured, fullPreviewApproved: true, fullVideoSetupOnPreviewTab: true }))).toEqual({
+        id: "configureRenderOutput",
+        tab: "export"
+      });
+    });
   });
 
   it("only sends anyone to Export after the real fullPreviewApproved gate, and reports 'done' once an artifact exists", () => {
@@ -143,6 +194,8 @@ describe("resolveNextAction - the named action is the genuinely blocking one", (
       { awaitingFirstPreviewApproval: false, firstPreviewApproved: true },
       { allScenesComplete: true },
       { landscapeRenderConfigured: true },
+      { fullPreviewInFlight: true },
+      { fullPreviewInFlight: false, fullPreviewReady: true },
       { fullPreviewApproved: true },
       { hasRenderArtifact: true }
     ];
@@ -159,6 +212,8 @@ describe("resolveNextAction - the named action is the genuinely blocking one", (
       "approveFirstPreview",
       "executeRemainingScenes",
       "configureRenderOutput",
+      "makeFullVideo",
+      "waitForFullVideo",
       "reviewFinalPreview",
       "render",
       "done"

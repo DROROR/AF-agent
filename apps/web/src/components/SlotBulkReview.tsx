@@ -15,6 +15,8 @@ import { dispatchJob, fetchJobStatus, fetchSceneEvidencePreviewStatus, sceneEvid
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { Button } from "./ui/Button";
+import { BusyNotice, currentTimeMs } from "./ui/BusyNotice";
+import { ProblemNotice } from "./ui/ProblemNotice";
 import { Card } from "./ui/Card";
 import { useLocale } from "./LocaleProvider";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
@@ -140,15 +142,36 @@ export function findPendingPictureSlots(
   return slots;
 }
 
-export function SlotBulkReview(): ReactElement | null {
+export function SlotBulkReview({
+  sceneLabelFor,
+  isCurrentStep = true
+}: {
+  /**
+   * Whether checking the pictures is the step the page's guide marks "now".
+   * Only then is this box's button drawn as the page's primary action
+   * (2026-10-04: one primary button on screen at a time). It works the same
+   * either way.
+   */
+  isCurrentStep?: boolean;
+  /**
+   * What the scene a picture sits in is called for a person ("Scene 3",
+   * "The whole video") - the same labels the scene cards carry. 2026-10-04:
+   * the captions here were the template author's own composition and layer
+   * names, which say nothing to a client. Absent, or null for a slot: the
+   * template's names, as before.
+   */
+  sceneLabelFor?: (slot: PendingSlot) => string | null;
+} = {}): ReactElement | null {
   const { t } = useLocale();
   const { project, plan, applyEdit, isStale } = useProjectWorkspaceContext();
   const { data: dashboardStatus } = useDashboardStatusContext();
   const projectId = project?.project.projectId ?? "";
   const { assets } = useProjectAssets(projectId);
   const [previews, setPreviews] = useState<Record<string, SceneEvidencePreviewDto | null>>({});
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; current: string; startedAt: number } | null>(null);
+  // `plain` is said to the person; `raw` is the worker's or server's own
+  // sentence, kept word for word behind "Technical details".
+  const [error, setError] = useState<{ title: string; raw: string | null } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const cancelledRef = useRef(false);
 
@@ -188,6 +211,32 @@ export function SlotBulkReview(): ReactElement | null {
   const ready = showable.filter((slot) => showsTheSlot(previews[slot.mappingId], slot));
   const missing = showable.filter((slot) => !showsTheSlot(previews[slot.mappingId], slot));
   const reasons = [...new Set(pending.flatMap((slot) => slot.reasons))];
+
+  // The caption a person reads under each picture. Several pictures in one
+  // scene are numbered, so two captions never read the same.
+  const captions = new Map<string, string>();
+  const perSceneTotals = new Map<string, number>();
+  for (const slot of pending) {
+    const sceneLabel = sceneLabelFor?.(slot) ?? null;
+    if (sceneLabel !== null) {
+      perSceneTotals.set(sceneLabel, (perSceneTotals.get(sceneLabel) ?? 0) + 1);
+    }
+  }
+  const perSceneSeen = new Map<string, number>();
+  for (const slot of pending) {
+    const sceneLabel = sceneLabelFor?.(slot) ?? null;
+    if (sceneLabel === null) {
+      captions.set(slot.mappingId, slot.label);
+      continue;
+    }
+    const position = (perSceneSeen.get(sceneLabel) ?? 0) + 1;
+    perSceneSeen.set(sceneLabel, position);
+    captions.set(
+      slot.mappingId,
+      (perSceneTotals.get(sceneLabel) ?? 1) > 1 ? t.simpleScenes.slotBulk.pictureNumberIn(position, sceneLabel) : t.simpleScenes.slotBulk.pictureIn(sceneLabel)
+    );
+  }
+  const captionOf = (slot: PendingSlot): string => captions.get(slot.mappingId) ?? slot.label;
 
   async function captureOne(slot: PendingSlot): Promise<string | null> {
     const worker = resolveProjectWorker(dashboardStatus?.workers ?? null, "INSPECT_SCENE_EVIDENCE", project?.project.sourceWorkerId ?? null);
@@ -239,19 +288,24 @@ export function SlotBulkReview(): ReactElement | null {
   }
 
   async function handleShowAll(): Promise<void> {
+    if (progress !== null) {
+      return;
+    }
     setError(null);
     const queue = [...missing];
-    setProgress({ done: 0, total: queue.length });
+    const startedAt = currentTimeMs();
     for (const [index, slot] of queue.entries()) {
+      // Named before it starts, so the notice says which picture is being
+      // prepared right now - "3 of 14" alone did not say anything was moving.
+      setProgress({ done: index, total: queue.length, current: captionOf(slot), startedAt });
       const problem = await captureOne(slot);
       if (cancelledRef.current) {
         return;
       }
       if (problem !== null) {
-        setError(`${slot.label}: ${problem}`);
+        setError({ title: t.simpleScenes.slotBulk.couldNotShow(captionOf(slot)), raw: problem });
         break;
       }
-      setProgress({ done: index + 1, total: queue.length });
     }
     setProgress(null);
   }
@@ -269,7 +323,7 @@ export function SlotBulkReview(): ReactElement | null {
     const result = await applyEdit(operations);
     setIsSaving(false);
     if (!result.ok) {
-      setError(result.message ?? null);
+      setError({ title: t.simpleScenes.slotBulk.couldNotSave, raw: result.message ?? null });
     }
   }
 
@@ -295,24 +349,35 @@ export function SlotBulkReview(): ReactElement | null {
             <figure key={slot.mappingId}>
               <img
                 src={`${sceneEvidencePreviewFileUrl(projectId, slot.scenePlanId, slot.mappingId)}&v=${encodeURIComponent(previews[slot.mappingId]?.storageKey ?? "")}`}
-                alt={slot.label}
+                alt={captionOf(slot)}
               />
-              <figcaption>{slot.label}</figcaption>
+              {/* The template's own names stay on hover, for matching a picture to After Effects. */}
+              <figcaption title={slot.label}>{captionOf(slot)}</figcaption>
             </figure>
           ))}
         </div>
       ) : null}
 
-      {error ? <p className="scene-card__error">{error}</p> : null}
+      {error ? <ProblemNotice title={error.title} description={t.simpleScenes.slotBulk.problemHint} technicalDetails={error.raw} /> : null}
+
+      {progress !== null ? (
+        <BusyNotice
+          title={t.simpleScenes.slotBulk.showing(progress.done, progress.total)}
+          description={t.simpleScenes.slotBulk.showingNow(progress.current)}
+          startedAt={progress.startedAt}
+        />
+      ) : null}
+      {isSaving ? <BusyNotice compact title={t.simpleScenes.slotBulk.saving} /> : null}
 
       <div className="overview-actions">
-        {missing.length > 0 ? (
-          <Button variant="secondary" disabled={busy || isStale} onClick={() => void handleShowAll()}>
-            {progress !== null ? t.simpleScenes.slotBulk.showing(progress.done, progress.total) : t.simpleScenes.slotBulk.showAllAction(missing.length)}
+        {/* Not drawn while it runs: the notice above is the state, and there is nothing to press twice. */}
+        {missing.length > 0 && progress === null ? (
+          <Button variant={isCurrentStep && ready.length === 0 ? "primary" : "secondary"} disabled={busy || isStale} onClick={() => void handleShowAll()}>
+            {t.simpleScenes.slotBulk.showAllAction(missing.length)}
           </Button>
         ) : null}
         {ready.length > 0 ? (
-          <Button variant="primary" disabled={busy || isStale} onClick={() => void handleConfirm()}>
+          <Button variant={isCurrentStep ? "primary" : "secondary"} disabled={busy || isStale} onClick={() => void handleConfirm()}>
             {isSaving ? t.simpleScenes.slotBulk.saving : t.simpleScenes.slotBulk.confirmAction(ready.length)}
           </Button>
         ) : null}

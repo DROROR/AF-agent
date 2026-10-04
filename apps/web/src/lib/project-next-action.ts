@@ -57,7 +57,17 @@ export const NEXT_ACTION_IDS = [
   "startFirstPreview",
   "approveFirstPreview",
   "executeRemainingScenes",
+  /**
+   * 2026-10-04: a scene is being built on the editing computer right now.
+   * The banner used to keep saying "press Start execution" for the whole
+   * build, and after it - a wait is a real state and gets its own words.
+   */
+  "buildingVideo",
   "configureRenderOutput",
+  /** 2026-10-04: everything is built and the first frame is approved, but no complete preview of the current work exists - split out of reviewFinalPreview, which used to mean "make it, watch it AND approve it" in one breath. */
+  "makeFullVideo",
+  /** 2026-10-04: the complete preview is being made right now - minutes during which nothing on screen used to change, so people pressed the button again. */
+  "waitForFullVideo",
   "reviewFinalPreview",
   "render",
   "done"
@@ -106,6 +116,26 @@ export interface NextActionInput {
   /** The session's own persisted fullPreviewApproved flag - the same gate resolve-render-dispatch.ts enforces server-side. */
   fullPreviewApproved: boolean;
   hasRenderArtifact: boolean;
+  /**
+   * The four below were added 2026-10-04, when the banner was seen saying
+   * "Create the first preview - press Start execution" with the finished
+   * first frame on screen under it. All optional, all read as "no" when
+   * absent: a caller that cannot tell must not claim a wait or a result.
+   *
+   * A scene-building job for this project is live (queued, claimed or
+   * running) in the same job history the Jobs page lists.
+   */
+  sceneBuildInFlight?: boolean;
+  /** A complete-preview job for the current session is live in that same job history. */
+  fullPreviewInFlight?: boolean;
+  /** A complete preview exists AND was made from the session's current working copy - the same freshness rule the Preview tab's own card applies before showing a video. */
+  fullPreviewReady?: boolean;
+  /**
+   * Simple mode: the Preview tab sets the Landscape output up by itself, or
+   * asks for it right there, so an unconfigured output is not a separate
+   * step on another tab. Advanced keeps the pointer at Export, as before.
+   */
+  fullVideoSetupOnPreviewTab?: boolean;
 }
 
 /**
@@ -171,26 +201,48 @@ export function resolveNextAction(input: NextActionInput): NextAction {
     return { id: "reviewScenes", tab: "scenes" };
   }
   if (!input.firstPreviewApproved) {
-    return { id: input.awaitingFirstPreviewApproval ? "approveFirstPreview" : "startFirstPreview", tab: "preview" };
+    // A frame waiting for a decision outranks a job in flight: the person
+    // has something to look at right now, whatever else is running.
+    if (input.awaitingFirstPreviewApproval) {
+      return { id: "approveFirstPreview", tab: "preview" };
+    }
+    return { id: input.sceneBuildInFlight ? "buildingVideo" : "startFirstPreview", tab: "preview" };
   }
   if (!input.allScenesComplete) {
-    return { id: "executeRemainingScenes", tab: "preview" };
-  }
-  // THE DEAD END, now closed. Without a LANDSCAPE master the Export tab's
-  // render button is permanently disabled, and the only form that could set
-  // one lived on Render Settings - a tab the normal (Simple) nav does not
-  // list at all. The instruction therefore used to be "switch to Advanced
-  // view and open Render Settings", which is a request to understand the
-  // app's structure, not an action. That exact form is now rendered inline
-  // on the Export tab whenever the output it belongs to is unconfigured or
-  // stale (ProjectExportTab -> VariantConfigCard, the very same component,
-  // not a copy), so the next action points at a tab that is always in the
-  // nav and contains its own fix.
-  if (!input.landscapeRenderConfigured) {
-    return { id: "configureRenderOutput", tab: "export" };
+    return { id: input.sceneBuildInFlight ? "buildingVideo" : "executeRemainingScenes", tab: "preview" };
   }
   if (!input.fullPreviewApproved) {
-    return { id: "reviewFinalPreview", tab: "preview" };
+    if (input.fullPreviewInFlight) {
+      return { id: "waitForFullVideo", tab: "preview" };
+    }
+    if (input.fullPreviewReady) {
+      return { id: "reviewFinalPreview", tab: "preview" };
+    }
+    // THE DEAD END, now closed. Without a LANDSCAPE master the Export tab's
+    // render button is permanently disabled, and the only form that could set
+    // one lived on Render Settings - a tab the normal (Simple) nav does not
+    // list at all. The instruction therefore used to be "switch to Advanced
+    // view and open Render Settings", which is a request to understand the
+    // app's structure, not an action. That exact form is now rendered inline
+    // on the Export tab whenever the output it belongs to is unconfigured or
+    // stale (ProjectExportTab -> VariantConfigCard, the very same component,
+    // not a copy), so the next action points at a tab that is always in the
+    // nav and contains its own fix.
+    //
+    // 2026-10-04: in Simple mode the Preview tab now takes that step on
+    // itself (it either knows the answer or shows the same form in place),
+    // because a client was sent from "Create Complete Preview" to another
+    // tab to type After Effects template names.
+    if (!input.landscapeRenderConfigured && !input.fullVideoSetupOnPreviewTab) {
+      return { id: "configureRenderOutput", tab: "export" };
+    }
+    return { id: "makeFullVideo", tab: "preview" };
+  }
+  // The complete preview is approved but the output it would render from is
+  // missing or stale (the template was re-inspected since): Export holds the
+  // form for exactly that case.
+  if (!input.landscapeRenderConfigured) {
+    return { id: "configureRenderOutput", tab: "export" };
   }
   if (!input.hasRenderArtifact) {
     return { id: "render", tab: "export" };

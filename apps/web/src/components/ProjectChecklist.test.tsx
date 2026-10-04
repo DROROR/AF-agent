@@ -179,7 +179,9 @@ describe("ProjectChecklist - one list, one live row", () => {
   it("counts only genuinely finished steps - progress is read from persisted facts, never from pages visited", async () => {
     stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
     renderChecklist();
-    await screen.findByText("Review the complete video");
+    // 2026-10-04: with nothing made yet the step is "make it" - "review" is
+    // only said once there is a video to review.
+    await screen.findByText("Make the full video");
 
     // Upload, AI plan, review plan, scene mappings, first preview - five.
     // The final preview is NOT approved and nothing is rendered.

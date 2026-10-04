@@ -15,31 +15,104 @@ with the commit, so the list is also the record.
 - "Leave it as the template has it" is a recorded decision; an undecided text asks a plain
   question (`9f8d71f`).
 - Brand-rule refusals say what to do instead of naming an internal file (`31e4f03`).
+- **After Approve Scenes the page moves to the Preview tab** (Simple mode, on success only;
+  a refusal stays on Scenes with its reason) (uncommitted, 2026-10-04).
+- **Preview tab, Simple mode, rebuilt as two steps with one question each** (uncommitted,
+  2026-10-04):
+  - Step 1 shows the first frame large and asks "Does this frame look right?" with yes / no.
+    Yes is the approval click and then starts the full video by itself.
+  - The full video is not offered at all before the first frame is approved.
+  - "Preview at (seconds)", "Regenerate First Preview" and "Analyze Preview Timing" sit
+    behind a closed "Look at a different moment" disclosure.
+  - The engineering progress count, the "ready to render" status line and the "Started"
+    hint are gone from Simple (all still in Advanced).
+- **Making the full video says it is being made** (uncommitted, 2026-10-04): the button is
+  replaced by "Your video is being made… 2:15" from the press until the video is there; the
+  page watches the job and shows the video by itself; a reload finds the running job in the
+  job history; the server's "already has a live CREATE_PREVIEW job" is read as "already being
+  made", never shown as an error.
+- **The Landscape output is never a trip to another tab** (uncommitted, 2026-10-04): Simple
+  mode takes the server's suggestion (the template's only master composition + the names
+  another project on the same editing computer is set up with), says so in one line, and
+  saves it when "Make my full video" is pressed. With no suggestion the same setup form is
+  shown in place.
+- **Failures say what failed, truthfully** (uncommitted, 2026-10-04): "The video could not
+  be built" / "The full video could not be made" / "The Landscape video could not be
+  rendered", one plain sentence, the worker's own message word for word behind a closed
+  "Technical details", and a "Try again" button. "Could not dispatch this job" is no longer
+  said about a job that was dispatched fine. (Was Open item 6.)
+- **The blue banner follows the real state** (uncommitted, 2026-10-04): start -> being built
+  -> check the first frame -> make the full video -> being made -> watch and approve ->
+  Export. The Preview and Export tabs tell it when the facts change, and it re-reads by
+  itself every 5 seconds while something is running, on whichever tab is open.
+- **One shared "this is running" notice with a clock** (`BusyNotice`) and one shared plain
+  failure notice (`ProblemNotice`) (uncommitted, 2026-10-04), used for: building the video,
+  making the full video, rendering (Export - which used to say "Started" and then never look
+  at the job again), each scene preview ("After Effects is making this preview… 0:23" /
+  "Waiting its turn"), "Updating previews… 3 of 8 ready" beside Approve Scenes, the picture
+  check ("… 3 of 14 - Now: Picture in Scene 2"), a file upload, and the new-project template
+  inspection. (Was Open item 3, first half.)
+- **Jobs page: one unreadable row no longer blanks the page** - the rest are listed and the
+  page says how many are not shown (uncommitted, 2026-10-04). (Part of Open item 7.)
+- **Plain names instead of the template's** on the storyboard strip and the picture-check
+  captions ("Scene 3", "Picture 2 in Scene 3"); the template's own name stays on hover
+  (uncommitted, 2026-10-04). (Part of Open item 4.)
+- **One voice, one primary button on Scenes** (uncommitted, 2026-10-04): the banner's
+  "Review each scene" now hands the order to the numbered guide instead of giving its own,
+  different instruction; and only the button of the step the guide marks "now" is drawn
+  primary. (Part of Open item 9.)
+- **Export tab, Simple mode** (uncommitted, 2026-10-04):
+  - Pressing Render replaces the button with "Your final Landscape video is being made…
+    mm:ss" and says it can take 30 to 40 minutes; it cannot be pressed twice; a reload finds
+    the running render again. (It used to say "Started" and never look at the job again - a
+    render that failed 20 seconds later went on reading "Started".)
+  - A failed render says "Your final Landscape video could not be made", one plain
+    sentence, the raw reason behind "Technical details", and "Try again".
+  - The finished videos sit directly under the Landscape card and turn into the download
+    when the render ends, without a reload.
+  - The Reels card and its setup form wait behind a closed "Also make a tall version for
+    phones" unless a tall version is already set up. Advanced view is unchanged.
+- **Approving the full video unlocks Export at once** (uncommitted, 2026-10-04): the lock
+  comes off the tab and the banner moves on without a reload, and in Simple mode the page
+  moves to Export - as Approve Scenes moves to Preview.
+- Empty states that pointed at a button that does not exist ("Click Preview Scene") or at
+  nothing ("renders will appear here") now say what really happens and what to press
+  (uncommitted, 2026-10-04).
 
 ## Open - in the order a client meets them
-1. **After Approve Scenes the page stays on Scenes.** Nothing visibly happens; the client
-   concluded the click had failed. Move to the Preview tab, or say "Approved" where they
-   are looking.
-2. **The brand rules are only discovered by a refusal.** The required line and the logo
+1. **The brand rules are only discovered by a refusal.** The required line and the logo
    rule should be a step in the guide before Approve, with one press to put the line on a
    text layer.
-3. **"Preview generating…" has no progress and no time estimate**, and every decision on a
-   scene re-renders its preview before Approve unlocks. Show a loader with elapsed time;
-   do not re-render for a decision that changes nothing on screen.
-4. **Raw template names everywhere** - `!MAIN`, `Transition_scene_01`, `White Solid 2`,
-   `Screen_holder_06 › White Solid 2`. The plain label is above the card now; the storyboard
-   strip, the picture-check captions and the edit drawer still show the template's names.
-5. **The edit drawer** is long and technical: slot verdict percentages, layer paths in
-   capitals, timestamps and durations a client never needs.
-6. **Preview tab errors are raw worker messages** ("operation 0 (SET_BRAND_COLOR) failed:
-   …") with a "Continue execution" button that repeats the same failure. Say which thing
-   failed in the client's terms and what to change.
-7. **Empty and loading states**: cards with no preview, an empty storyboard tile, the
-   Jobs page failing whole when one row is unreadable.
-8. **Colours**: the drawer shows a colour picker with a value for a layer nobody chose a
+2. **Every decision on a scene re-renders its preview before Approve unlocks.** The wait now
+   shows a count and a clock, but the re-render itself still happens for decisions that
+   change nothing on screen. Not done: it needs a rule for "this edit cannot change the
+   frame", which is a behaviour change to the preview queue, not a display one.
+3. **Raw template names in the edit drawer and on the cards' own titles.** The storyboard
+   and picture captions are plain now; the card heading under "Scene N" and the whole edit
+   drawer still show the template's composition and layer names. Not done: the drawer is
+   used in Advanced too and has no plain label for a layer to fall back on.
+4. **The edit drawer** is long and technical: slot verdict percentages, layer paths in
+   capitals, timestamps and durations a client never needs. Not touched.
+5. **After "yes" on the first frame with SEVERAL scenes**, the remaining scenes are still
+   built one press at a time ("Build the rest of the video"), and only then does the full
+   video start. With one scene it is a single press. Not done: chaining dispatches needs a
+   live check of how soon the editing computer accepts the next job.
+6. **A file upload shows elapsed time, not a percentage.** The upload goes through `fetch`,
+   which reports no progress; a real bar needs the upload rewritten on XMLHttpRequest.
+7. **Export, once the tall version is opened or set up, shows two primary buttons**
+   (Render Landscape, Render Reels). Left: each is "the" action of its own card.
+8. **Empty and loading states still to walk**: an empty storyboard tile, the Project front
+   page and Files list while loading (a bare shimmer with no words).
+9. **Colours**: the drawer shows a colour picker with a value for a layer nobody chose a
    colour for; confirm it never saves that value unasked. Offer the client's website
    colours as suggestions (read from the site's CSS, never guessed by the assistant).
-9. **Two "what to do" banners** on one page (the blue one above the tabs and the guide)
-   can disagree in wording; keep one voice.
-10. **New project**: the path field needs a typed Windows path; the inspection result is a
+10. **The Scenes guide and the banner are still two elements.** They no longer contradict
+    each other, but the page carries both; merging them is a layout change.
+11. **New project**: the path field needs a typed Windows path; the inspection result is a
     table of counts with no sentence saying "this template is ready".
+12. **A job whose status response cannot be read is waited on forever** by the pages that
+    poll a single job (they treat an unreadable answer as "not finished yet"). Seen while
+    writing tests, not live. Needs a bound and a plain message.
+13. **Someone else's complete preview**: if a different user started it, this user's tab
+    shows "being made" (from the server's refusal) but the banner cannot see that job and
+    keeps saying "Make the full video" until the video lands.

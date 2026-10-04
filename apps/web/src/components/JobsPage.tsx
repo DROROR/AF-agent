@@ -15,7 +15,7 @@ import { explainJobError } from "../lib/explain-job-error";
 /** Job history + errors (2026-08-29 closure requirement) - a dedicated card below "Currently active", covering completed/failed/in-progress jobs so no DB/curl access is ever needed to understand what happened. */
 function JobHistorySection(): ReactElement {
   const { t } = useLocale();
-  const { jobs, isLoading, error } = useJobHistory();
+  const { jobs, isLoading, error, unreadableCount } = useJobHistory();
 
   return (
     <Card className="jobs-history-card">
@@ -23,6 +23,12 @@ function JobHistorySection(): ReactElement {
         <h2>{t.jobs.historyTitle}</h2>
         <p>{t.jobs.historyDescription}</p>
       </div>
+      {/* 2026-10-04: one unreadable row used to blank this whole page. The rest are shown, and this says how many are not. */}
+      {unreadableCount > 0 ? (
+        <p role="status" className="stale-notice">
+          {t.jobs.historyUnreadableRows(unreadableCount)}
+        </p>
+      ) : null}
       {isLoading ? (
         <Skeleton height="1.5rem" />
       ) : error ? (

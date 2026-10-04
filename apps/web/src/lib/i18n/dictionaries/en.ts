@@ -22,6 +22,8 @@ export const en = {
     no: "No",
     never: "never",
     close: "Close",
+    /** The closed disclosure a raw worker/server message sits behind (ProblemNotice, 2026-10-04) - kept word for word there, never used as a headline. */
+    technicalDetails: "Technical details",
     unavailableFallback: "Could not load dashboard data.",
     staleNotice: (error: string): string => `Live updates paused - showing last known data, retrying… (${error})`,
     switchToTheme: (themeName: string): string => `Switch to ${themeName} theme`
@@ -174,6 +176,7 @@ export const en = {
       statusClaimed: "Claimed by the Worker - starting shortly.",
       statusRunning: "Inspecting the real template on the Worker now...",
       statusWaiting: "Waiting on a required action before this can continue.",
+      inspectionBusyHint: "Reading a template usually takes about five minutes. Keep this page open - the result appears here by itself, and there is nothing to press.",
       inspectionFailedTitle: "Inspection failed",
       resultTitle: "Inspection result",
       resultCompositions: "Compositions",
@@ -213,6 +216,8 @@ export const en = {
     historyTableCaption: "Job dispatch history",
     historyLoading: "Loading job history…",
     historyUnavailableTitle: "Job history unavailable",
+    historyUnreadableRows: (n: number): string =>
+      n === 1 ? "1 job could not be read and is not shown below. Every other job is listed." : `${n} jobs could not be read and are not shown below. Every other job is listed.`,
     historyEmptyTitle: "No jobs dispatched yet",
     historyEmptyDescription: "Jobs you dispatch from anywhere in the dashboard will appear here.",
     operationColumn: "Operation",
@@ -295,7 +300,7 @@ export const en = {
     noProjectsDescription: "Create a project to see its renders here once they exist.",
     loadErrorTitle: "Could not load renders for this project",
     emptyTitle: "No renders yet",
-    emptyDescription: "Completed, validated renders for this project will appear here once produced.",
+    emptyDescription: "Finished videos for this project appear here by themselves. To make one, press Render on the project's Export tab.",
     variantColumn: "Variant",
     variantLabel: { LANDSCAPE: "Landscape", REELS: "Reels" },
     compositionColumn: "Composition",
@@ -531,7 +536,9 @@ export const en = {
         },
         reviewScenes: {
           title: "Review each scene",
-          description: "Open the Scenes tab and settle every scene marked \"Needs your choice\". \"Approve Scenes\" stays disabled until every included scene is reviewed and at least one scene is included."
+/* 2026-10-04: one voice with the numbered guide on the Scenes tab. This used to give its own instruction ("settle every scene marked Needs your choice") while the guide under it said to start somewhere else (take the plan, check the pictures). It now names the step and hands the order to that guide. */
+          description:
+            "Open the Scenes tab and follow the numbered steps at the top of the page, in order. \"Approve Scenes\" unlocks once every included scene is settled and at least one scene is included."
         },
         approveScenes: {
           title: "Approve the scenes",
@@ -540,24 +547,38 @@ export const en = {
         },
         startFirstPreview: {
           title: "Create the first preview",
-          description: "Open the Preview tab and press \"Start execution\". After Effects builds one designed frame for you to check before the rest of the video is built."
+          description: "Open the Preview tab and press the button there. After Effects builds your video and shows you one frame to check before anything else is made."
         },
         approveFirstPreview: {
-          title: "Approve the first preview",
-          description: "Your first designed frame is waiting on the Preview tab. Press \"Approve preview\" to let the remaining scenes be built, or \"Reject preview\" to stop here."
+          title: "Check the first frame",
+          description:
+            "One real frame of your video is waiting on the Preview tab. Look at it and say whether it looks right - the rest of the video is only made after you say yes."
         },
         executeRemainingScenes: {
           title: "Build the remaining scenes",
-          description: "Open the Preview tab and press \"Continue execution\" until every approved scene has been built."
+          description: "Open the Preview tab and press the button there until every approved scene has been built."
+        },
+        /* 2026-10-04: a wait is a state of its own. The banner used to go on saying "press Start execution" for the whole build and after it. */
+        buildingVideo: {
+          title: "Your video is being built",
+          description: "After Effects is working on your editing computer. There is nothing to press - the Preview tab shows the result as soon as it is ready."
         },
         configureRenderOutput: {
           title: "Choose which part of the template is your finished video",
           description:
             "Open Export. Under \"Landscape\", pick the piece of the template that is the whole finished video, fill in the two After Effects settings names your editor gave you, and press Save. Render stays greyed out until that is saved."
         },
+        makeFullVideo: {
+          title: "Make the full video",
+          description: "Everything is built. Open the Preview tab and follow the one step shown there to make the full video - it takes a few minutes."
+        },
+        waitForFullVideo: {
+          title: "Your full video is being made",
+          description: "This takes a few minutes. There is nothing to press - the video appears on the Preview tab by itself when it is ready."
+        },
         reviewFinalPreview: {
-          title: "Review the complete video",
-          description: "Open the Preview tab, press \"Create Complete Preview\", watch the result, then press \"Approve Final Preview\". Export unlocks only after that approval."
+          title: "Watch and approve the full video",
+          description: "Your full video is ready on the Preview tab. Watch it, then press \"Approve Final Preview\". Export unlocks only after that approval."
         },
         render: {
           title: "Render the final video",
@@ -640,6 +661,57 @@ export const en = {
     deletingAction: "Deleting…",
     deleteCancelAction: "Cancel",
     deleteFailedTitle: "Could not delete this project",
+    /**
+     * The Preview tab as a non-technical client sees it (Simple mode only,
+     * 2026-10-04). Raised by the owner after walking it live: "you can't tell
+     * where to click next". Two steps, one question each, and a wait that
+     * says it is a wait. Advanced keeps `overview` below, word for word.
+     */
+    simplePreview: {
+      firstFrameTitle: "Step 1 - Check one frame",
+      startIntro: "After Effects builds your video on your editing computer and shows you one frame to check first.",
+      startAction: "Build my video",
+      continueAction: "Build the rest of the video",
+      continueIntro: "The first frame is approved. The remaining scenes still have to be built.",
+      buildingTitle: "Your video is being built…",
+      buildingDescription: "After Effects is working on your editing computer. The result appears here by itself - there is nothing to press.",
+      frameQuestion: "Does this frame look right?",
+      frameQuestionHint: "This is one real frame of your video. If your pictures, text and colours look right here, the rest of the video is made the same way.",
+      frameYesAndMakeAction: "Yes, make my full video",
+      frameYesAction: "Yes, it looks right",
+      frameNoAction: "No, something is wrong",
+      frameApprovedNote: "You said this frame looks right.",
+      /** Neutral on purpose: a session can stop for reasons other than a "no", and this must not put words in anyone's mouth. */
+      frameRejectedTitle: "This frame was not approved",
+      frameRejectedDescription:
+        "If the content is wrong, go back to Scenes and change it. If the picture was only taken at a bad moment, open \"Look at a different moment\" below.",
+      backToScenesAction: "Go back to Scenes",
+      differentMomentToggle: "Look at a different moment",
+      differentMomentHint: "Shows the same video at another point in time. Nothing in your video changes.",
+      tryAgainAction: "Try again",
+      /** True, unlike the "Could not dispatch this job" it replaces here: the job was dispatched fine and failed inside After Effects. */
+      buildFailedTitle: "The video could not be built",
+      buildFailedDescription: "After Effects stopped while building it. Nothing you prepared is lost. Press Try again - if it stops again, send the technical details below to support.",
+      startFailedTitle: "The video could not be started",
+      actionFailedTitle: "That did not go through",
+      actionFailedDescription: "Nothing was changed. Try again in a moment - if it keeps happening, send the technical details below to support.",
+      workerBusy: "Your editing computer is busy with another task right now. Wait a minute and try again.",
+      fullVideoTitle: "Step 2 - Your full video",
+      fullVideoIntro: "Make the full video to watch it from start to finish before the final export.",
+      makeFullVideoAction: "Make my full video",
+      /** Shown from the moment it starts until the video is there - including after a page reload, and when the server says one is already being made. */
+      makingTitle: "Your video is being made…",
+      makingDescription: "This usually takes a few minutes. The video appears here by itself - you can leave this page and come back.",
+      suggestionLine: (compositionName: string, projectName: string): string =>
+        `The full video will be made from "${compositionName}", with the same output settings as your project "${projectName}".`,
+      setupNeededTitle: "One thing is needed before the full video can be made",
+      setupNeededDescription: "Choose which part of the template is the whole finished video, fill in the form below and press Save. The button to make the video appears as soon as it is saved.",
+      fullVideoFailedTitle: "The full video could not be made",
+      fullVideoFailedDescription: "After Effects stopped while making it. Nothing is lost. Press Try again - if it stops again, send the technical details below to support.",
+      fullVideoNotStartedTitle: "The full video could not be started",
+      watchQuestion: "Watch your video from start to finish. Is it ready?",
+      approvedNote: "You approved this video. The next step is on the Export tab."
+    },
     overview: {
       detailsToggle: "Plan details (for support)",
       projectSection: "Project",
@@ -976,6 +1048,14 @@ export const en = {
     export: {
       description: "Render and download the final Landscape and Reels videos.",
       renderAction: (variantLabel: string): string => `Render ${variantLabel}`,
+      /** Shown from the press until the render ends, including after a reload (2026-10-04) - "Started, this will update automatically" used to be followed by nothing. */
+      renderingTitle: (variantLabel: string): string => `Your final ${variantLabel} video is being made…`,
+      renderingDescription:
+        "A final video can take 30 to 40 minutes. The finished video appears just below by itself, ready to download - you can leave this page and come back.",
+      reelsToggle: "Also make a tall version for phones",
+      renderFailedTitle: (variantLabel: string): string => `Your final ${variantLabel} video could not be made`,
+      renderFailedDescription: "Your editing computer stopped before the video was finished. Nothing is lost. Press Try again - if it stops again, send the technical details below to support.",
+      renderNotStartedTitle: "The final video could not be started",
       notConfiguredTitle: "Not set up yet",
       /**
        * REAL 2026-09-26 DEAD END. This line used to read "ask your editor to
@@ -1080,6 +1160,8 @@ export const en = {
     mediaKindLogoHint: "Only valid for an image file - marks it as the client/company logo.",
     uploadAction: "Upload",
     uploading: "Uploading…",
+    uploadingFile: (fileName: string): string => `Uploading ${fileName}…`,
+    uploadingHint: "A large video can take a few minutes. Keep this page open - the file appears in the list below as soon as it is in.",
     uploadFailedTitle: "Could not upload this file",
     emptyTitle: "No assets uploaded",
     emptyDescription: "Upload the client's images, videos, logos, audio, or documents here.",
@@ -1334,7 +1416,7 @@ export const en = {
   },
   simpleScenes: {
     emptyTitle: "No scenes yet",
-    emptyDescription: "Scenes will appear here once your video plan is ready.",
+    emptyDescription: "Scenes appear here once your video plan exists. Open the AI Plan tab to make it.",
     status: {
       ready: "Ready",
       needsChoice: "Needs your choice",
@@ -1362,7 +1444,8 @@ export const en = {
     plannedPreviewLabel: "A rough sketch - the real picture is made at Preview",
     aePreviewLabel: "After Effects preview",
     outdatedPreviewHint: "You changed this scene, so this picture is from before your change. The new one is made at Preview.",
-    noPreviewYetHint: "No preview yet. Click \"Preview Scene\" to generate one from the real After Effects project.",
+/* 2026-10-04: this told people to click "Preview Scene" - a button this card does not have. Previews are made automatically. */
+    noPreviewYetHint: "No preview yet. After Effects makes one automatically - there is nothing to press.",
     previewErrorPrefix: "Could not generate a preview:",
     reviewQueueTitle: "Suggested for this scene",
     reviewQueueEmptyDescription: "Nothing needs your input right now.",
@@ -1380,7 +1463,23 @@ export const en = {
       showing: (done: number, total: number): string => `After Effects is preparing them… ${done} of ${total}`,
       confirmAction: (n: number): string => (n === 1 ? "Yes - it is in the right place" : `Yes - all ${n} are in the right place`),
       saving: "Saving…",
-      hint: "One of them wrong? Open that scene with Edit and change that picture there."
+      hint: "One of them wrong? Open that scene with Edit and change that picture there.",
+      /** Said while the run is going, under the "N of M" line (2026-10-04) - which picture, and what to expect. */
+      showingNow: (caption: string): string => `Now: ${caption}. Each spot takes about half a minute - they appear above one by one, and there is nothing to press.`,
+      pictureIn: (sceneLabel: string): string => `Picture in ${sceneLabel}`,
+      pictureNumberIn: (n: number, sceneLabel: string): string => `Picture ${n} in ${sceneLabel}`,
+      couldNotShow: (caption: string): string => `After Effects could not show this spot: ${caption}`,
+      couldNotSave: "Your answer could not be saved",
+      problemHint: "Nothing was changed. Press the button again - if it keeps happening, send the technical details below to support."
+    },
+    /** What is running on this tab, in the client's words (2026-10-04) - shown with a clock by BusyNotice. */
+    previewBusy: {
+      generating: "After Effects is making this preview…",
+      generatingHint: "It appears here by itself - usually within a minute.",
+      queued: "Waiting its turn - previews are made one at a time.",
+      updatingCount: (ready: number, total: number): string => `Updating previews… ${ready} of ${total} ready`,
+      updatingHint: "\"Approve Scenes\" unlocks by itself when they are done. There is nothing to press.",
+      approvingHint: "The Preview tab opens by itself in a moment."
     },
     guide: {
       heading: "What to do on this page",

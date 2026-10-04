@@ -301,6 +301,11 @@ describe("NewProjectWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inspect Template" }));
 
     await waitFor(() => expect(screen.getByText("Inspecting the real template on the Worker now...")).not.toBeNull(), { timeout: 5000 });
+    // 2026-10-04: a five-minute inspection showed a shimmering bar over one
+    // line. It now runs a clock and says the result arrives by itself.
+    const busy = screen.getByText("Inspecting the real template on the Worker now...").closest(".busy-notice") as HTMLElement;
+    expect(busy.querySelector(".busy-notice__elapsed")).not.toBeNull();
+    expect(busy.textContent).toContain("Reading a template usually takes about five minutes.");
     await waitFor(() => expect(screen.getByText("Inspection result")).not.toBeNull(), { timeout: 5000 });
 
     expect(screen.getByText("Compositions").nextElementSibling?.textContent).toBe("3");
