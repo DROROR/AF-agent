@@ -1203,6 +1203,16 @@ export const he: Dictionary = {
     suggestedKindLabel: (kind: string): string => `Claude מציע להתייחס לשכבה הזו כאל: ${kind}`,
     keepOriginalAction: "השארת המקור",
     useSuggestionAction: "שימוש בהצעה",
+    slotBulk: {
+      title: (n: number): string => `${n} תמונות ממתינות למבט שלך לפני האישור`,
+      description:
+        "כל תמונה למטה נכנסת למקום שהתבנית לא מסמנת בבירור כמסך או ככרטיס. הביטו היכן כל אחת יושבת, ואז אשרו את כולן יחד. על זה נשאלת השאלה:",
+      showAllAction: (n: number): string => `להציג את כל ${n} ב-After Effects`,
+      showing: (done: number, total: number): string => `After Effects מציג אותן… ${done} מתוך ${total}`,
+      confirmAction: (n: number): string => `הסתכלתי - כל ${n} נכונות כפי שהוקצו`,
+      saving: "שומר…",
+      hint: "משהו לא נכון? פתחו את הסצנה עם עריכה והחליטו שם על התמונה הזו."
+    },
     useWholePlanAction: (n: number): string => `שימוש בכל התוכנית (${n})`,
     useAllSuggestionsAction: (n: number): string => `שימוש בכל ${n} ההצעות`,
     findingsTitle: (count: number): string =>

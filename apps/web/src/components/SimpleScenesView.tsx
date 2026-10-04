@@ -13,6 +13,7 @@ import { isScenePreviewSettled, useScenePreviewQueue, type UseScenePreviewQueueR
 import { sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
+import { SlotBulkReview } from "./SlotBulkReview";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { ClaudeActionButton } from "./ui/ClaudeActionButton";
@@ -326,6 +327,8 @@ export function SimpleScenesView(): ReactElement {
           {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
         </Button>
       </Card>
+
+      <SlotBulkReview />
 
       {realScenes.length === 0 ? (
         <Card>

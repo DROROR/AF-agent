@@ -1696,3 +1696,28 @@ Used for the scene preview and for the executed-frame preview. The scene-preview
 budget now counts the capture at its real worst case.
 
 **Not yet run on real After Effects.**
+
+## 2026-10-04 - Eleven pictures each needed their own decision in their own drawer
+
+**Seen live (project `cc0c91a0`), and by running the approval gate against the real plan
+before pressing Approve:** 21 slot findings on 11 pictures. Every phone screen is judged
+"a flat card, 56-62% confident" - the structural evidence that it is a phone (a 3D layer cut
+by a rendered matte) sits one composition above a single-layer wrapper, and the classifier
+reads only the nearest host. Reading past the wrapper still gives 69% against a 70%
+threshold, so the weights were left alone rather than tuned to one template.
+
+**What did not change:** the gate. A slot decision is still the reviewer's own and the
+server still refuses one that does not name that slot's own current evidence frame.
+
+**What changed:** the Scenes tab now lists every picture waiting for a decision in one
+place, asks After Effects for each slot's frame in turn, shows them together, and records
+"right as assigned" for each picture whose frame is on screen - one request, one decision
+per picture, each naming its frame. A picture the reviewer disagrees with is still decided
+in its scene's drawer.
+
+**Confirmed live the same day:** the drawer route works on real After Effects - evidence
+frame captured at the slot's own moment, decision saved in the reviewer's name (plan
+revision 4). Also added: one press to take every proposed line of the plan; a scene card
+reads its file and its text from the layers that hold them.
+
+**Not yet seen in a browser:** the bulk review itself.

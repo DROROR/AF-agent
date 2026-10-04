@@ -1371,6 +1371,16 @@ export const en = {
     suggestedKindLabel: (kind: string): string => `Claude suggests treating this layer as: ${kind}`,
     keepOriginalAction: "Keep original",
     useSuggestionAction: "Use suggestion",
+    slotBulk: {
+      title: (n: number): string => `${n} picture${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you to look before approving`,
+      description:
+        "Each picture below goes into a place the template does not clearly mark as a screen or as a card. Look at where each one sits, then confirm them together. This is what is being asked about:",
+      showAllAction: (n: number): string => `Show me ${n === 1 ? "it" : `all ${n}`} in After Effects`,
+      showing: (done: number, total: number): string => `After Effects is showing them… ${done} of ${total}`,
+      confirmAction: (n: number): string => `I looked - ${n === 1 ? "it is" : `all ${n} are`} right as assigned`,
+      saving: "Saving…",
+      hint: "Something not right? Open that scene with Edit and decide that picture there instead."
+    },
     useWholePlanAction: (n: number): string => `Use the whole plan (${n})`,
     useAllSuggestionsAction: (n: number): string => `Use all ${n} suggestions`,
     findingsTitle: (count: number): string =>
