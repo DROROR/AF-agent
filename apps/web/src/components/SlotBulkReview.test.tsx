@@ -86,8 +86,9 @@ function mapping(id: string, placeholderId: string) {
   };
 }
 
-function frame(storageKey: string, capturedAtSeconds: number) {
+function frame(storageKey: string, capturedAtSeconds: number, slotMappingId: string | null = null) {
   return {
+    slotMappingId,
     id: "00000000-0000-4000-8000-000000000001",
     projectId: PROJECT_ID,
     manifestCompositionId: "c1",
@@ -153,7 +154,7 @@ describe("SlotBulkReview", () => {
   });
 
   it("a frame taken when the slot is not on screen is not evidence - still no confirm button", async () => {
-    setup({ status: 200, body: { preview: frame("evidence/f.png", 0) } });
+    setup({ status: 200, body: { preview: frame("evidence/f.png", 0, "m-a") } });
     renderReview();
 
     await screen.findByText("2 pictures need you to look before approving");
@@ -161,20 +162,27 @@ describe("SlotBulkReview", () => {
     expect(screen.queryByRole("button", { name: /right as assigned/ })).toBeNull();
   });
 
-  it("with every slot's frame on screen, one press records one decision per picture, each naming the frame that was shown", async () => {
-    const calls: RecordedFetchCall[] = [];
-    setup({ status: 200, body: { preview: frame("evidence/shown.png", 2) } }, calls);
+  it("REAL 2026-10-04: the scene's own preview, not captured for any slot, is not shown as a slot's evidence even when its moment is inside the window", async () => {
+    setup({ status: 200, body: { preview: frame("evidence/scene.png", 2, null) } });
     renderReview();
 
-    fireEvent.click(await screen.findByRole("button", { name: "I looked - all 2 are right as assigned" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show me all 2 in After Effects" })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /right as assigned/ })).toBeNull();
+  });
+
+  it("with a frame captured for the slot on screen, one press records the decision naming that frame - and only for that slot", async () => {
+    const calls: RecordedFetchCall[] = [];
+    setup({ status: 200, body: { preview: frame("evidence/shown.png", 2, "m-a") } }, calls);
+    renderReview();
+
+    fireEvent.click(await screen.findByRole("button", { name: "I looked - it is right as assigned" }));
 
     await waitFor(() => {
       const edit = calls.find((call) => call.url.endsWith("/execution-plan") && call.method !== "GET" && call.body !== null);
       expect(edit).toBeDefined();
       const operations = (edit!.body as { operations: Record<string, unknown>[] }).operations;
       expect(operations).toEqual([
-        { type: "SET_SLOT_REVIEW", scenePlanId: "s1", mappingId: "m-a", decision: "ACCEPT", evidenceFrameStorageKey: "evidence/shown.png" },
-        { type: "SET_SLOT_REVIEW", scenePlanId: "s1", mappingId: "m-b", decision: "ACCEPT", evidenceFrameStorageKey: "evidence/shown.png" }
+        { type: "SET_SLOT_REVIEW", scenePlanId: "s1", mappingId: "m-a", decision: "ACCEPT", evidenceFrameStorageKey: "evidence/shown.png" }
       ]);
     });
   });

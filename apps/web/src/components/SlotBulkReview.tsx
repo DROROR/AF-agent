@@ -54,8 +54,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function showsTheSlot(preview: SceneEvidencePreviewDto | null | undefined, window: PendingSlot["window"]): boolean {
+/**
+ * A frame counts here only if it was captured FOR this slot.
+ *
+ * REAL 2026-10-04: the scene's own representative preview (taken for the
+ * scene card, at a moment chosen for the scene) happened to fall inside one
+ * slot's window, and was shown as that slot's evidence - a picture of a
+ * transition, with no button pressed. A frame captured for the slot is taken
+ * at the middle of the slot's own window; that is the one a reviewer is
+ * asked to look at here.
+ */
+function showsTheSlot(preview: SceneEvidencePreviewDto | null | undefined, slot: Pick<PendingSlot, "mappingId" | "window">): boolean {
+  const window = slot.window;
   if (!preview || preview.capturedAtSeconds === null || preview.capturedAtSeconds === undefined || window === null || preview.storageKey === undefined) {
+    return false;
+  }
+  if (preview.slotMappingId !== slot.mappingId) {
     return false;
   }
   return preview.capturedAtSeconds >= window.startSeconds && preview.capturedAtSeconds <= window.endSeconds;
@@ -157,8 +171,8 @@ export function SlotBulkReview(): ReactElement | null {
   }
 
   const showable = pending.filter((slot) => slot.canBeShown);
-  const ready = showable.filter((slot) => showsTheSlot(previews[slot.mappingId], slot.window));
-  const missing = showable.filter((slot) => !showsTheSlot(previews[slot.mappingId], slot.window));
+  const ready = showable.filter((slot) => showsTheSlot(previews[slot.mappingId], slot));
+  const missing = showable.filter((slot) => !showsTheSlot(previews[slot.mappingId], slot));
   const reasons = [...new Set(pending.flatMap((slot) => slot.reasons))];
 
   async function captureOne(slot: PendingSlot): Promise<string | null> {
@@ -201,7 +215,7 @@ export function SlotBulkReview(): ReactElement | null {
       }
       if (status.data.status === "SUCCEEDED") {
         const preview = await refresh(slot);
-        return showsTheSlot(preview, slot.window) ? null : t.projectWorkspace.editDrawer.slotEvidenceFrameMissing;
+        return showsTheSlot(preview, slot) ? null : t.projectWorkspace.editDrawer.slotEvidenceFrameMissing;
       }
       if (status.data.status === "FAILED" || status.data.status === "CANCELLED") {
         return status.data.error?.message ?? t.projectWorkspace.editDrawer.slotEvidenceFrameMissing;
