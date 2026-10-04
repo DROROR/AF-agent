@@ -144,7 +144,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
   it("shows exactly one card for a real scene and its nested-only helper composition - never a separate card for the nested comp", async () => {
     stubWorkspace({});
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
     // "Phone Frame" (the nested-only composition's own name) never appears
     // as its own heading - only as an Advanced-details fact under the real
     // scene's card once expanded.
@@ -154,7 +154,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
   it("hides technical facts (the raw manifest composition id) behind a closed Advanced details disclosure by default", async () => {
     stubWorkspace({});
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
     const details = screen.getByText("comp-parent").closest("details") as HTMLDetailsElement;
     expect(details.open).toBe(false);
     fireEvent.click(screen.getByText("Advanced details"));
@@ -178,7 +178,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
   it("tells the operator how to enable it, rather than showing a dead button, when no AI provider is connected", async () => {
     stubWorkspace({ aiAvailable: false });
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
     expect(screen.queryByRole("button", { name: /Generate suggestions/ })).toBeNull();
     expect(screen.queryByText("Connect an AI provider in Settings to use AI Mapping Assistant.")).not.toBeNull();
   });
@@ -233,7 +233,8 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     });
     // The card's label - and, since later the same day, the storyboard
     // strip's caption too, which used to show the template's own name.
-    expect(document.querySelector(".scene-card__eyebrow")?.textContent).toBe("Scene 1");
+    // 2026-10-04 (later): the plain name is the card's TITLE now; the template's own name stays on hover.
+    expect(screen.getByRole("heading", { name: "Scene 1" }).getAttribute("title")).toBe("App Features");
     const thumb = document.querySelector(".storyboard__thumb") as HTMLElement;
     expect(thumb.querySelector("span")?.textContent).toBe("Scene 1");
     // The template's name is kept, on hover, for matching it to After Effects.
@@ -261,7 +262,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
   it("shows no whole-plan button when nothing is proposed", async () => {
     stubWorkspace({ suggestions: [] });
     renderView();
-    await screen.findAllByText("App Features");
+    await screen.findAllByText("Scene 1");
     expect(screen.queryByRole("button", { name: /Use everything from my plan/ })).toBeNull();
   });
 
@@ -312,7 +313,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       ]
     });
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
     expect(screen.queryByText("Suggested for this scene")).toBeNull();
   });
 
@@ -412,7 +413,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       }
     });
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
 
     await screen.findByText("Preview generating…", {}, { timeout: 5000 });
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -483,7 +484,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       }
     });
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
 
     await screen.findByText("You changed this scene, so this picture is from before your change. The new one is made at Preview.");
     await screen.findByText("Updating previews for scenes you just changed - this only takes a moment, no action needed.");
@@ -698,7 +699,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
           }
         });
         renderView();
-        await screen.findByRole("heading", { name: "App Features" });
+        await screen.findByRole("heading", { name: "Scene 1" });
 
         await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), {
           timeout: 20_000
@@ -719,7 +720,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         }
       });
       renderView();
-      await screen.findByRole("heading", { name: "App Features" });
+      await screen.findByRole("heading", { name: "Scene 1" });
 
       await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), {
         timeout: 10_000
@@ -761,7 +762,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
           }
         });
         renderView();
-        await screen.findByRole("heading", { name: "App Features" });
+        await screen.findByRole("heading", { name: "Scene 1" });
 
         await screen.findByText("After Effects preview", {}, { timeout: 20_000 });
         expect(screen.queryByText(/already has a live/)).toBeNull();
@@ -785,7 +786,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
           }
         });
         renderView();
-        await screen.findByRole("heading", { name: "App Features" });
+        await screen.findByRole("heading", { name: "Scene 1" });
 
         const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
         // The refused dispatch has happened, so every preview has settled as failed...
@@ -843,7 +844,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     const writes = () => fetchCalls().filter(([, init]) => init?.method === "PATCH" || init?.method === "POST").map(([url, init]) => ({ url, method: init!.method, body: init!.body ? JSON.parse(String(init!.body)) : null }));
 
     async function waitForApproveEnabled() {
-      await screen.findByRole("heading", { name: "App Features" });
+      await screen.findByRole("heading", { name: "Scene 1" });
       await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 10_000 });
     }
 
@@ -856,7 +857,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
 
         fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
 
-        await screen.findByText("Scenes approved - continue to First Preview.", {}, { timeout: 10_000 });
+        await screen.findByText("Scenes approved - the next step is on the Preview tab.", {}, { timeout: 10_000 });
         const sent = writes();
         expect(sent.map((w) => `${w.method} ${w.url}`)).toEqual([
           `PATCH /api/projects/${PROJECT_ID}/execution-plan`,
@@ -928,7 +929,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
 
         fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
 
-        await screen.findByText("Scenes approved - continue to First Preview.", {}, { timeout: 10_000 });
+        await screen.findByText("Scenes approved - the next step is on the Preview tab.", {}, { timeout: 10_000 });
         expect(writes().map((w) => `${w.method} ${w.url}`)).toEqual([
           `PATCH /api/projects/${PROJECT_ID}/execution-plan`,
           `POST /api/projects/${PROJECT_ID}/execution-plan/approve`
@@ -948,7 +949,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         fireEvent.click(button);
         fireEvent.click(button);
 
-        await screen.findByText("Scenes approved - continue to First Preview.", {}, { timeout: 10_000 });
+        await screen.findByText("Scenes approved - the next step is on the Preview tab.", {}, { timeout: 10_000 });
         expect(writes()).toHaveLength(2);
         expect(screen.queryByText(/not DRAFT/)).toBeNull();
       },
@@ -963,7 +964,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       }
     });
     renderView();
-    await screen.findByRole("heading", { name: "App Features" });
+    await screen.findByRole("heading", { name: "Scene 1" });
 
     await screen.findByText(/No computer is online to generate this preview right now\./, {}, { timeout: 5000 });
     const regenerateButton = screen.getByRole("button", { name: "Regenerate Preview" }) as HTMLButtonElement;

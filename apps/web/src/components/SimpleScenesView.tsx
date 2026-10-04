@@ -62,7 +62,10 @@ function Storyboard({
         </Link>
       </div>
       <div className="storyboard__strip">
-        {realScenes.map((realScene) => (
+        {/* A part with no card of its own (nothing in it to change) and no picture is an empty tile under a raw template name - left out. */}
+        {realScenes
+          .filter((realScene) => labels.has(realScene.scenePlan.id) || previewQueue.getEntry(realScene.scenePlan.id).preview !== null)
+          .map((realScene) => (
           <StoryboardThumb
             key={realScene.manifestCompositionId}
             projectId={projectId}

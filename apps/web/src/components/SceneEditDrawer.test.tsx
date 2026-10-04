@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SceneEditDrawer, isBrandColorChanged } from "./SceneEditDrawer";
+import { WorkspaceModeProvider } from "./WorkspaceModeProvider";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { renderWithLocale } from "../test-utils/render-with-locale";
 import { classifySlotSemantics, computeTextVerification, type SlotStructuralFacts } from "@dyo/schemas";
@@ -930,6 +931,23 @@ describe("SceneEditDrawer - colour", () => {
     }
     return (JSON.parse(call.body) as { operations: Array<Record<string, unknown>> }).operations;
   }
+
+  it("2026-10-04 audit - Simple view: a plain title, no expert fields, and the colours folded away under one line", async () => {
+    colorSetup();
+    renderWithLocale(
+      <WorkspaceModeProvider>
+        <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+          <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+        </ProjectWorkspaceProvider>
+      </WorkspaceModeProvider>
+    );
+    await screen.findByText("Change this scene");
+    expect(screen.queryByText("Edit scene mapping")).toBeNull();
+    expect(screen.queryByLabelText("Final duration (seconds)")).toBeNull();
+    expect(screen.queryByLabelText("Instructions / notes")).toBeNull();
+    const summary = await screen.findByText("Colours (optional) - 1");
+    expect((summary.closest("details") as HTMLDetailsElement).open).toBe(false);
+  });
 
   it("offers a colour field for a mapping the manifest classified color, and emits SET_BRAND_COLOR", async () => {
     colorSetup();

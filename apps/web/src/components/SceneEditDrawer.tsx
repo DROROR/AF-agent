@@ -1,5 +1,6 @@
 "use client";
 
+import { useWorkspaceModeIfPresent } from "./WorkspaceModeProvider";
 import { useEffect, useState, type ReactElement } from "react";
 import {
   assessMappingSlot,
@@ -156,6 +157,7 @@ function isSlotDecisionPersisted(form: MappingFormState, mapping: PlaceholderMap
  */
 export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneEditDrawerProps): ReactElement | null {
   const { t } = useLocale();
+  const isSimple = useWorkspaceModeIfPresent() === "simple";
   const { project, plan, applyEdit } = useProjectWorkspaceContext();
   const { assets } = useProjectAssets(project?.project.projectId ?? "");
   const [finalDuration, setFinalDuration] = useState("");
@@ -630,8 +632,43 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
     })
   );
 
+  // 2026-10-04 audit (seen on the live dashboard): in Simple view this drawer
+  // was the Advanced one - "Edit scene mapping", every phone screen named
+  // "White Solid 2" under a path in capitals, a structural verdict with
+  // percentages under each picture, and a dozen colour pickers in between; one
+  // scene's drawer was 5,700 px tall. Simple view now shows what a client
+  // changes: pictures first, then texts, each under a plain name, with the
+  // colours folded away and the expert-only fields left to Advanced view.
+  // Nothing about what is SAVED changes - the same fields write the same
+  // operations.
+  const plainNames = new Map<string, string>();
+  if (isSimple) {
+    let pictureCount = 0;
+    let textCount = 0;
+    const totals = { picture: 0, text: 0 };
+    for (const entry of orderedForRender) {
+      const fields = fieldsFor(entry.mapping.mappingId);
+      if (fields.asset) totals.picture++;
+      else if (fields.text) totals.text++;
+    }
+    for (const entry of orderedForRender) {
+      const fields = fieldsFor(entry.mapping.mappingId);
+      if (fields.asset) {
+        pictureCount++;
+        plainNames.set(entry.mapping.mappingId, totals.picture === 1 ? t.projectWorkspace.editDrawer.simple.picture : t.projectWorkspace.editDrawer.simple.pictureN(pictureCount));
+      } else if (fields.text) {
+        textCount++;
+        plainNames.set(entry.mapping.mappingId, totals.text === 1 ? t.projectWorkspace.editDrawer.simple.text : t.projectWorkspace.editDrawer.simple.textN(textCount));
+      }
+    }
+  }
+  const isColourEntry = (entry: (typeof orderedForRender)[number]): boolean => classificationFor(entry.mapping.mappingId) === "color";
+  const rank = (entry: (typeof orderedForRender)[number]): number => (fieldsFor(entry.mapping.mappingId).asset ? 0 : 1);
+  const mainEntries = isSimple ? orderedForRender.filter((entry) => !isColourEntry(entry)).sort((a, b) => rank(a) - rank(b)) : orderedForRender;
+  const colourEntries = isSimple ? orderedForRender.filter(isColourEntry) : [];
+
   return (
-    <Dialog open onClose={requestClose} title={t.projectWorkspace.editDrawer.title} variant="drawer">
+    <Dialog open onClose={requestClose} title={isSimple ? t.projectWorkspace.editDrawer.simple.title : t.projectWorkspace.editDrawer.title} variant="drawer">
       <div className="edit-drawer-form">
         {error ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={error} /> : null}
         {hasPendingChanges() ? (
@@ -639,6 +676,8 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
             {t.projectWorkspace.editDrawer.unsavedChangesNotice}
           </p>
         ) : null}
+        {isSimple ? null : (
+        <>
         <Field label={t.projectWorkspace.editDrawer.finalDurationLabel} htmlFor="scene-final-duration">
           <Input
             id="scene-final-duration"
@@ -658,32 +697,41 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
             onChange={(event) => setInstructions(event.target.value)}
           />
         </Field>
+        </>
+        )}
         {mappings.length === 0 ? (
           <EmptyState
             title={t.projectWorkspace.editDrawer.noMappingsTitle}
             description={t.projectWorkspace.editDrawer.noMappingsDescription}
           />
         ) : null}
-        {orderedForRender.map(({ mapping, index, groupLabel }) => (
+        {(() => {
+          const renderEntry = ({ mapping, index, groupLabel }: (typeof orderedForRender)[number]) => (
           <div key={mapping.mappingId} className="edit-drawer-group-item">
-            {groupLabel === null ? null : (
+            {groupLabel === null || isSimple ? null : (
               <h3 className="edit-drawer-group-heading">
                 {groupLabel}
                 <span className="edit-drawer-group-heading__hint">{t.projectWorkspace.editDrawer.groupPathHint}</span>
               </h3>
             )}
             <fieldset className="edit-drawer-form">
-            <legend>
-              {mapping.label}
+            <legend title={isSimple ? mapping.label : undefined}>
+              {plainNames.get(mapping.mappingId) ?? mapping.label}
               {/* What this layer takes, in a word - the layer's own name ("White Solid 2") rarely says. */}
-              {(() => {
+              {isSimple && plainNames.has(mapping.mappingId) ? null : (
+              (() => {
                 const kind = classificationFor(mapping.mappingId);
                 const kindLabel = kind === null ? undefined : (t.projectWorkspace.editDrawer.layerKindLabels as Record<string, string | undefined>)[kind];
                 return kindLabel === undefined ? null : <span className="edit-drawer-kind">{kindLabel}</span>;
-              })()}
+              })()
+              )}
             </legend>
             {fieldsFor(mapping.mappingId).asset ? (
-            <Field label={t.projectWorkspace.editDrawer.assetLabel} htmlFor={`mapping-asset-${mapping.mappingId}`} hint={t.projectWorkspace.editDrawer.assetHint}>
+            <Field
+              label={isSimple ? t.projectWorkspace.editDrawer.simple.pictureFieldLabel : t.projectWorkspace.editDrawer.assetLabel}
+              htmlFor={`mapping-asset-${mapping.mappingId}`}
+              hint={isSimple ? t.projectWorkspace.editDrawer.simple.pictureFieldHint : t.projectWorkspace.editDrawer.assetHint}
+            >
               <Select
                 id={`mapping-asset-${mapping.mappingId}`}
                 value={mapping.selectedAssetId}
@@ -693,7 +741,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                   setMappings(next);
                 }}
               >
-                <option value="">{t.projectWorkspace.editDrawer.assetUnmappedOption}</option>
+                <option value="">{isSimple ? t.projectWorkspace.editDrawer.simple.noPictureOption : t.projectWorkspace.editDrawer.assetUnmappedOption}</option>
                 {(assets ?? []).map((asset) => (
                   <option key={asset.id} value={asset.id}>
                     {asset.label ?? asset.originalFilename}
@@ -917,6 +965,13 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
               const original = scene!.mappings.find((candidate) => candidate.id === mapping.mappingId);
               const recorded = original?.slotReview ?? null;
               const currentDigest = slotEvidenceDigest(slotAssessment);
+              // Simple view: a place already confirmed (the picture check at the
+              // top of the Scenes page records it) shows nothing here. One that
+              // still needs a decision, or whose decision went stale, shows the
+              // full panel - a gate is never hidden.
+              if (isSimple && recorded !== null && recorded.evidenceDigest === currentDigest) {
+                return null;
+              }
               return (
                 <SlotReviewPanel
                   scenePlanId={scene!.id}
@@ -951,7 +1006,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                 />
               );
             })()}
-            {fieldsFor(mapping.mappingId).timestamp ? (
+            {fieldsFor(mapping.mappingId).timestamp && !isSimple ? (
             <Field label={t.projectWorkspace.editDrawer.assetTimestampLabel} htmlFor={`mapping-timestamp-${mapping.mappingId}`}>
               <Input
                 id={`mapping-timestamp-${mapping.mappingId}`}
@@ -969,7 +1024,20 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
             ) : null}
             </fieldset>
           </div>
-        ))}
+          );
+          return (
+            <>
+              {mainEntries.map(renderEntry)}
+              {colourEntries.length === 0 ? null : (
+                <details className="edit-drawer-colours">
+                  <summary>{t.projectWorkspace.editDrawer.simple.coloursSummary(colourEntries.length)}</summary>
+                  <p className="field__hint">{t.projectWorkspace.editDrawer.simple.coloursHint}</p>
+                  {colourEntries.map(renderEntry)}
+                </details>
+              )}
+            </>
+          );
+        })()}
         <div className="edit-drawer-actions">
           <Button variant="ghost" onClick={requestClose} disabled={isSaving}>
             {t.projectWorkspace.editDrawer.cancel}

@@ -158,10 +158,13 @@ export function ProjectExportTab(): ReactElement | null {
 
   return (
     <div className="overview-grid">
-      <Card className="overview-section">
-        <CardHeader title={t.projectWorkspace.tabs.export} />
-        <p>{t.projectWorkspace.export.description}</p>
-      </Card>
+      {/* Simple view: a card holding one sentence about the tab the person is already on said nothing and took a third of the row. */}
+      {isSimple ? null : (
+        <Card className="overview-section">
+          <CardHeader title={t.projectWorkspace.tabs.export} />
+          <p>{t.projectWorkspace.export.description}</p>
+        </Card>
+      )}
 
       {variantSections.LANDSCAPE}
       {isSimple ? (
@@ -305,6 +308,7 @@ function SimpleExportVariantCard({
   const renderWorker = session ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === session.assignedWorkerId) ?? null : null;
   const renderWorkerOnline = renderWorker !== null && renderWorker.status === "ONLINE" && renderWorker.currentJobId === null;
   const canRender = currentConfig !== null && !isStale && renderReady && renderWorkerOnline;
+  const alreadyMade = mode === "simple" && session !== null && session.status === "COMPLETED" && !dispatchError;
   const isKnownWorkerOffline = renderWorker !== null && renderWorker.status !== "ONLINE";
   const variantLabel = t.renders.variantLabel[variant];
   // REAL 2026-09-25 INCIDENT: this render button has four independent
@@ -386,12 +390,22 @@ function SimpleExportVariantCard({
         <BusyNotice title={t.projectWorkspace.export.renderingTitle(variantLabel)} description={t.projectWorkspace.export.renderingDescription} startedAt={rendering.startedAt} />
       ) : (
         <div className="overview-actions">
-          <Button variant="primary" disabled={!canRender || isDispatching} disabledReason={renderDisabledReason} onClick={() => void handleRender()}>
+          {/*
+            2026-10-04 audit: with the finished video sitting right below, the
+            one primary button on the page was still "Render Landscape" - a
+            press that starts the whole render again. Once this session has
+            completed, Simple view says the video is ready and offers making
+            it again as a secondary action; the download is what stands out.
+          */}
+          {alreadyMade ? <p role="status">{t.projectWorkspace.export.alreadyMadeNote}</p> : null}
+          <Button variant={alreadyMade ? "secondary" : "primary"} disabled={!canRender || isDispatching} disabledReason={renderDisabledReason} onClick={() => void handleRender()}>
             {isDispatching
               ? t.jobDispatch.dispatching
               : mode === "simple" && dispatchError
                 ? t.projectWorkspace.simplePreview.tryAgainAction
-                : t.projectWorkspace.export.renderAction(variantLabel)}
+                : alreadyMade
+                  ? t.projectWorkspace.export.renderAgainAction
+                  : t.projectWorkspace.export.renderAction(variantLabel)}
           </Button>
         </div>
       )}

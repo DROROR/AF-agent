@@ -29,10 +29,10 @@ function renderAssets(): void {
 }
 
 describe("ProjectAssetsTab", () => {
-  it('shows the honest empty state "No assets uploaded" when the project has none - never a fake asset', async () => {
+  it('shows the honest empty state "No files yet" when the project has none - never a fake asset', async () => {
     stubWorkspace({ status: 200, body: { assets: [] } });
     renderAssets();
-    await screen.findByText("No assets uploaded");
+    await screen.findByText("No files yet");
   });
 
   it("renders the real asset from the API - filename, size, and SHA are the real stored values", async () => {
@@ -58,7 +58,7 @@ describe("ProjectAssetsTab", () => {
     });
 
     renderAssets();
-    await screen.findByText("No assets uploaded");
+    await screen.findByText("No files yet");
 
     const file = new File(["real bytes"], "new-upload.png", { type: "image/png" });
     const fileInput = document.getElementById("asset-file-input") as HTMLInputElement;
@@ -99,7 +99,7 @@ describe("ProjectAssetsTab", () => {
     );
 
     renderAssets();
-    await screen.findByText("No assets uploaded");
+    await screen.findByText("No files yet");
     const fileInput = document.getElementById("asset-file-input") as HTMLInputElement;
     fireEvent.change(fileInput, { target: { files: [new File(["bytes"], "long-video.mp4", { type: "video/mp4" })] } });
     fireEvent.click(screen.getByRole("button", { name: "Upload" }));
@@ -156,7 +156,7 @@ describe("ProjectAssetsTab", () => {
     await screen.findByText("Delete this asset?");
     fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
 
-    await screen.findByText("No assets uploaded");
+    await screen.findByText("No files yet");
   });
 
   it("renders in Hebrew when the active locale is he - real translated strings, not English fallback text", async () => {

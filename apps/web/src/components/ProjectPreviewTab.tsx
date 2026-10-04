@@ -1365,6 +1365,19 @@ function FinalPreviewCard({
             <VideoArtifactPlayer key={artifact?.capturedAt ?? "preview"} src={fullPreviewFileUrl(projectId, session.id)} ariaLabel={t.projectWorkspace.overview.finalPreview.title} />
             {isSimple ? <p role="status">{currentSession.fullPreviewApproved ? sp.approvedNote : sp.watchQuestion}</p> : null}
             {failureNotice}
+            {/*
+              2026-10-04 audit: an approved video still showed three buttons -
+              "Regenerate Complete Preview", a disabled "Request Changes" and a
+              disabled "Approved", each with the same grey sentence under it.
+              In Simple view an approved video has one way forward: Export.
+            */}
+            {isSimple && currentSession.fullPreviewApproved ? (
+              <div className="overview-actions">
+                <Link href={`/projects/${projectId}/export`} className="btn btn--primary">
+                  {sp.goToExportAction}
+                </Link>
+              </div>
+            ) : (
             <div className="overview-actions">
               {/*
                 Real 2026-09-10/11 incident (session a7fee3d9): isFresh only
@@ -1403,6 +1416,7 @@ function FinalPreviewCard({
                 {currentSession.fullPreviewApproved ? t.projectWorkspace.overview.finalPreview.approvedBadge : t.projectWorkspace.overview.finalPreview.approveAction}
               </Button>
             </div>
+            )}
           </>
         )}
       </Card>

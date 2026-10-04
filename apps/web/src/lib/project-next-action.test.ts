@@ -177,7 +177,7 @@ describe("resolveNextAction - the named action is the genuinely blocking one", (
 
   it("only sends anyone to Export after the real fullPreviewApproved gate, and reports 'done' once an artifact exists", () => {
     expect(resolveNextAction(readyToRender())).toEqual({ id: "render", tab: "export" });
-    expect(resolveNextAction(readyToRender({ hasRenderArtifact: true }))).toEqual({ id: "done", tab: null });
+    expect(resolveNextAction(readyToRender({ hasRenderArtifact: true }))).toEqual({ id: "done", tab: "export" });
   });
 
   it("walks the whole workflow forward without ever repeating or skipping an action", () => {

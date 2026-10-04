@@ -76,7 +76,7 @@ export type NextActionId = (typeof NEXT_ACTION_IDS)[number];
 
 export interface NextAction {
   id: NextActionId;
-  /** Where the action lives. `null` only for "unknown" (nowhere to send anyone) and "done" (nothing left to do). */
+  /** Where the action lives. `null` only for "unknown" (nowhere to send anyone). */
   tab: NextActionTab | null;
 }
 
@@ -247,7 +247,9 @@ export function resolveNextAction(input: NextActionInput): NextAction {
   if (!input.hasRenderArtifact) {
     return { id: "render", tab: "export" };
   }
-  return { id: "done", tab: null };
+  // 2026-10-04 audit: "Everything is done" pointed nowhere - the banner had no
+  // button, on a project whose download sat one tab away.
+  return { id: "done", tab: "export" };
 }
 
 /**

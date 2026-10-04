@@ -123,3 +123,32 @@ with the commit, so the list is also the record.
 - **Open:** that control lives in the edit drawer only; a client who sees a mirrored picture
   in the preview has no pointer from the Preview tab to it. The "No, something is wrong"
   answer on the first frame should offer it by name.
+
+## 2026-10-04 (evening) - audit of the live dashboard, signed in as the test user
+Seen on real screens of project `5db054f5` in Simple view, not inferred from code.
+
+**Fixed in this pass**
+- Edit drawer in Simple view: titled "Change this scene"; pictures first, then texts, each
+  under a plain name ("Picture 2", "Text 1") with the template's layer name on hover; the
+  composition paths in capitals, "Final duration", "Instructions / notes" and the asset
+  timestamp are Advanced-only; colours sit under one closed "Colours (optional)" line; a
+  picture place already confirmed no longer shows its structural verdict (an unconfirmed or
+  stale one still does - a gate is never hidden). One scene's drawer was 5,700 px tall.
+- Scene cards: the plain name ("Scene 3", "The whole video") is the title; the template's
+  name is on hover. The card button reads "Change picture or text" and looks like a button.
+- Storyboard: a part with no card and no picture is no longer an empty tile under a raw name.
+- Export, once the video is made: no intro card, "Your video is ready" above a secondary
+  "Make it again" (it was a primary "Render Landscape" that restarts the render).
+- Preview, once approved: one "Go to Export" button instead of three buttons, two disabled.
+- "Everything is done" banner and checklist row now link to Export.
+- Files tab wording: "Your files", "Add a file", "What is this file?", "No files yet".
+
+**Still open from the same audit**
+- New project, second step: "Template ID", "Source project path (on the Worker machine)",
+  "ae-mcp bridge"; a typed Windows path; a table of counts as the result.
+- The sidebar shows Jobs / Queue, Workers, Approvals, Renders, Activity / Logs in Simple view.
+- "Delete Project" is a large red button at the top of every tab.
+- Files: a SHA-256 on every file; one file per upload.
+- Project checklist names ("Review AI Plan", "Match Your Content") do not match the tab names.
+- "No, something is wrong" on the first frame does not lead to the picture that is wrong.
+- The Hebrew for everything added today is unreviewed.

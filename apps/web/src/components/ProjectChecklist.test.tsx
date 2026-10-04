@@ -200,7 +200,7 @@ describe("ProjectChecklist - one list, one live row", () => {
     expect(list().textContent).not.toContain("Advanced");
   });
 
-  it("reports the finished job as finished, with no action left to press", async () => {
+  it("reports the finished job as finished, and points at the one thing left: the download on Export", async () => {
     stubAll({
       ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null }, sessionOverrides: { fullPreviewApproved: true } }),
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture()] } }
@@ -209,7 +209,10 @@ describe("ProjectChecklist - one list, one live row", () => {
     await screen.findByText("Everything is done");
 
     screen.getByText("7 of 7 done");
-    expect(within(list()).queryAllByRole("link")).toHaveLength(0);
+    // 2026-10-04 (later): "Everything is done" used to point nowhere, on a project whose download sat one tab away.
+    const links = within(list()).queryAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe(`/projects/${PROJECT_ID}/export`);
   });
 
   it("renders entirely in Hebrew, with no English leaking through", async () => {

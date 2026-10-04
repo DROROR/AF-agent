@@ -245,9 +245,14 @@ export function SceneCard({
 
   return (
     <Card className="scene-card">
-      {eyebrow ? <p className="scene-card__eyebrow">{eyebrow}</p> : null}
+      {/*
+        2026-10-04 audit: the card's big title was the template author's name
+        ("Transition_scene_03", "!MAIN") with "Scene 3" as a small label above
+        it. A client reads the big one. The plain name is the title now; the
+        template's name stays on hover for whoever matches it to After Effects.
+      */}
       <div className="scene-card__header">
-        <h3>{realScene.sceneName}</h3>
+        <h3 title={realScene.sceneName}>{eyebrow ?? realScene.sceneName}</h3>
         <span className={`status-badge status-badge--${STATUS_TONE[status]}`}>{t.simpleScenes.status[status]}</span>
       </div>
 
@@ -304,7 +309,7 @@ export function SceneCard({
       ) : null}
 
       <div className="scene-card__actions">
-        <Button size="sm" variant="ghost" onClick={onEdit}>
+        <Button size="sm" variant="secondary" onClick={onEdit}>
           {t.simpleScenes.editAction}
         </Button>
       </div>
