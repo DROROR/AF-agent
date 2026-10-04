@@ -1647,3 +1647,23 @@ own top-level layers are unchanged.
 flare clip is gone, every other placeholder keeps its id, and each of the eight scenes has
 at least one phone screen to put a picture in. **Not yet run on real After Effects** - it
 needs worker build of this commit and a new inspection.
+
+## 2026-10-04 - A template was inspected as having nothing editable because After Effects was silent for 30 seconds once
+
+**Seen live (worker build `85406c0`, inspection job `7976dd59`):** New project showed 77
+compositions, 0 editable placeholders, 261 unresolved items.
+
+**Cause (from the job's own result):** the project-wide scan is read in slices of ten
+project items. The slice for items 101-110 - none of which is a composition - hit the
+bridge's `[AE_TIMEOUT] Timed out after 30000ms`. The bridge reports that as a tool error,
+which the transport retry never repeats, so one silence discarded every slice already read
+and with them every layer fact; each layer then became "could not be confirmed".
+Why After Effects did not answer in that half minute is not known.
+
+**Fix:** a slice that fails with the bridge's timeout is asked for again, three attempts
+in all, five seconds apart. The script only reads, so repeating it is safe. Any other
+failure is not repeated, and after the last attempt the scan fails with the bridge's own
+message as before.
+
+**Not yet run on real After Effects.** Still open: an inspection whose scan failed is
+reported as succeeded and can be turned into a project.

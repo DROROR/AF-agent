@@ -198,6 +198,27 @@ export const PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS = 60_000;
 export const MAX_PROJECT_SCAN_SLICES = 200;
 
 /**
+ * How many times one slice of the project-wide scan is asked for before the
+ * scan is given up (2026-10-04, real incident).
+ *
+ * A 146-item template came back with NO editable placeholders and 261
+ * unknown items. The job's own evidence: one slice - ten project items that
+ * are not even compositions, so there was nothing in it to scan - hit the
+ * bridge's "[AE_TIMEOUT] Timed out after 30000ms". After Effects had simply
+ * not answered for half a minute, and that one silence threw away the
+ * fourteen slices already read and every layer fact with them.
+ *
+ * The bridge reports that timeout as a tool error, which the transport-level
+ * retry rightly never repeats. But this script only READS, so asking again
+ * is safe, and a slice is small by design. Bounded: after the last attempt
+ * the scan fails with the bridge's own message exactly as before, so a real
+ * hang (a modal dialog) still stops rather than retrying forever.
+ */
+export const PROJECT_SCAN_SLICE_MAX_ATTEMPTS = 3;
+export const PROJECT_SCAN_SLICE_RETRY_DELAY_MS = 5_000;
+const BRIDGE_TIMEOUT_MARKER = "[AE_TIMEOUT]";
+
+/**
  * If the single app.open() attempt above times out, MCP/stdio has no
  * cancellation guarantee - the ae-mcp bridge may still be processing (or
  * queued behind) that original request. Re-issuing app.open() in that
@@ -975,6 +996,29 @@ export async function ensureTargetProjectOpen(
 }
 
 /**
+ * Asks for one scan slice, and asks again - up to `maxAttempts` in all - only
+ * when the bridge says After Effects did not answer in time. Any other
+ * failure, and the last timeout, are returned exactly as reported.
+ */
+export async function retryScanSliceOnBridgeTimeout(
+  askForSlice: () => Promise<ToolCallResult>,
+  options: { logger?: pino.Logger | undefined; firstItem: number; lastItem: number; maxAttempts?: number; delayMs?: number }
+): Promise<ToolCallResult> {
+  const maxAttempts = options.maxAttempts ?? PROJECT_SCAN_SLICE_MAX_ATTEMPTS;
+  const delayMs = options.delayMs ?? PROJECT_SCAN_SLICE_RETRY_DELAY_MS;
+  let result = await askForSlice();
+  for (let attempt = 2; !result.ok && result.error.message.includes(BRIDGE_TIMEOUT_MARKER) && attempt <= maxAttempts; attempt++) {
+    options.logger?.warn(
+      { operation: "project_preflight_scan", attempt, maxAttempts, firstItem: options.firstItem, lastItem: options.lastItem },
+      "After Effects did not answer a scan slice in time, asking for it again"
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    result = await askForSlice();
+  }
+  return result;
+}
+
+/**
  * Real plugin detection for preflight.pluginReferences (2026-09-11) -
  * exactly ONE ae_run_jsx call for the whole project, retried on a
  * transient MCP timeout the same way every other real inspection call in
@@ -1004,7 +1048,12 @@ async function scanProjectPreflightEvidence(
     }
     const endItemIndex = nextItemIndex + SCAN_PROJECT_ITEMS_PER_CALL - 1;
     const script = buildScanProjectPreflightScript(nextItemIndex, endItemIndex);
-    const result = await callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS), retryOptions);
+    // See PROJECT_SCAN_SLICE_MAX_ATTEMPTS: a slice After Effects did not
+    // answer in time is asked for again, a bounded number of times.
+    const result = await retryScanSliceOnBridgeTimeout(
+      () => callWithTransientRetry("project_preflight_scan", logger, () => client.runFixedInspectionScript(script, PROJECT_PREFLIGHT_SCAN_TIMEOUT_MS), retryOptions),
+      { logger, firstItem: nextItemIndex, lastItem: endItemIndex }
+    );
     if (!result.ok) {
       return { ok: false, reason: `ae_run_jsx failed (project items ${nextItemIndex}-${endItemIndex}): ${result.error.message}` };
     }
