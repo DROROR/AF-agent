@@ -213,6 +213,20 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     });
   });
 
+  it("REAL 2026-10-04: says what to do first - take the plan - and numbers the scene for a person", async () => {
+    stubWorkspace({
+      suggestions: [mappingSuggestionFixture({ id: "s-1", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: "New headline" })]
+    });
+    renderView();
+    await screen.findByText("What to do on this page");
+    await waitFor(() => {
+      const now = screen.getAllByRole("listitem").find((item) => item.getAttribute("data-state") === "now");
+      expect(now?.textContent).toContain("Put your plan on the scenes.");
+      expect(now?.textContent).toContain('Press "Use everything from my plan (1)" below.');
+    });
+    expect(screen.getByText("Scene 1")).toBeTruthy();
+  });
+
   it("shows no whole-plan button when nothing is proposed", async () => {
     stubWorkspace({ suggestions: [] });
     renderView();

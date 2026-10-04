@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import {
   assessMappingSlot,
   slotEvidenceDigest,
+  type AssetDto,
   type ExecutionPlanEditOperation,
   type SceneEvidencePreviewDto,
-  type SlotBlocker
+  type ScenePlanEntry,
+  type SlotBlocker,
+  type TemplateManifest
 } from "@dyo/schemas";
 import { dispatchJob, fetchJobStatus, fetchSceneEvidencePreviewStatus, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
@@ -41,7 +44,7 @@ const MAX_POLL_ATTEMPTS = 45;
 const DISPATCH_RETRY_ATTEMPTS = 24;
 const DISPATCH_RETRY_INTERVAL_MS = 5_000;
 
-interface PendingSlot {
+export interface PendingSlot {
   scenePlanId: string;
   mappingId: string;
   label: string;
@@ -75,6 +78,68 @@ function showsTheSlot(preview: SceneEvidencePreviewDto | null | undefined, slot:
   return preview.capturedAtSeconds >= window.startSeconds && preview.capturedAtSeconds <= window.endSeconds;
 }
 
+/**
+ * Every picture slot still waiting for the reviewer's look - the same list
+ * the gate would refuse approval over. Pure, so the Scenes guide can say how
+ * many are left without rendering this panel.
+ */
+export function findPendingPictureSlots(
+  project: { manifest: TemplateManifest } | null | undefined,
+  scenePlans: readonly ScenePlanEntry[] | null | undefined,
+  assets: readonly AssetDto[] | null
+): PendingSlot[] {
+  if (!project || !scenePlans || assets === null) {
+    return [];
+  }
+  const placeholders = new Map(project.manifest.scenes.flatMap((scene) => scene.placeholders.map((p) => [p.placeholderId, p] as const)));
+  const slots: PendingSlot[] = [];
+  for (const scene of scenePlans) {
+    if (!scene.use) {
+      continue;
+    }
+    for (const mapping of scene.mappings) {
+      const asset = mapping.selectedAssetId === null ? null : (assets.find((a) => a.id === mapping.selectedAssetId) ?? null);
+      const assessment = assessMappingSlot({
+        scene,
+        mapping,
+        manifest: project.manifest,
+        asset:
+          asset === null
+            ? null
+            : {
+                id: asset.id,
+                widthPx: asset.width,
+                heightPx: asset.height,
+                hasAlphaChannel: asset.hasAlphaChannel ?? null,
+                hasTransparentPixels: asset.hasTransparentPixels ?? null,
+                transparentPixelRatio: asset.transparentPixelRatio ?? null,
+                visibleCoverageRatio: asset.visibleCoverageRatio ?? null,
+                visibleContentBounds: asset.visibleContentBounds ?? null
+              }
+      });
+      if (assessment.blockers.length === 0) {
+        continue;
+      }
+      const review = mapping.slotReview ?? null;
+      if (review !== null && review.evidenceDigest === slotEvidenceDigest(assessment)) {
+        continue;
+      }
+      const framed: SlotBlocker | undefined = assessment.blockers.find((blocker) => blocker.requiresEvidenceFrame);
+      const placeholder = mapping.manifestPlaceholderId === null ? undefined : placeholders.get(mapping.manifestPlaceholderId);
+      const where = placeholder?.layerPath.at(-1) ?? scene.compositionName;
+      slots.push({
+        scenePlanId: scene.id,
+        mappingId: mapping.id,
+        label: `${where} \u203A ${mapping.placeholderName ?? ""}`.trim(),
+        reasons: [...new Set(assessment.blockers.map((blocker) => blocker.reason))],
+        window: framed?.evidenceFrameWindowSeconds ?? null,
+        canBeShown: framed !== undefined && framed.evidenceFrameAtSeconds !== null
+      });
+    }
+  }
+  return slots;
+}
+
 export function SlotBulkReview(): ReactElement | null {
   const { t } = useLocale();
   const { project, plan, applyEdit, isStale } = useProjectWorkspaceContext();
@@ -87,58 +152,7 @@ export function SlotBulkReview(): ReactElement | null {
   const [isSaving, setIsSaving] = useState(false);
   const cancelledRef = useRef(false);
 
-  const pending = useMemo<PendingSlot[]>(() => {
-    if (!project || !plan || assets === null) {
-      return [];
-    }
-    const placeholders = new Map(project.manifest.scenes.flatMap((scene) => scene.placeholders.map((p) => [p.placeholderId, p] as const)));
-    const slots: PendingSlot[] = [];
-    for (const scene of plan.plan.scenePlans) {
-      if (!scene.use) {
-        continue;
-      }
-      for (const mapping of scene.mappings) {
-        const asset = mapping.selectedAssetId === null ? null : (assets.find((a) => a.id === mapping.selectedAssetId) ?? null);
-        const assessment = assessMappingSlot({
-          scene,
-          mapping,
-          manifest: project.manifest,
-          asset:
-            asset === null
-              ? null
-              : {
-                  id: asset.id,
-                  widthPx: asset.width,
-                  heightPx: asset.height,
-                  hasAlphaChannel: asset.hasAlphaChannel ?? null,
-                  hasTransparentPixels: asset.hasTransparentPixels ?? null,
-                  transparentPixelRatio: asset.transparentPixelRatio ?? null,
-                  visibleCoverageRatio: asset.visibleCoverageRatio ?? null,
-                  visibleContentBounds: asset.visibleContentBounds ?? null
-                }
-        });
-        if (assessment.blockers.length === 0) {
-          continue;
-        }
-        const review = mapping.slotReview ?? null;
-        if (review !== null && review.evidenceDigest === slotEvidenceDigest(assessment)) {
-          continue;
-        }
-        const framed: SlotBlocker | undefined = assessment.blockers.find((blocker) => blocker.requiresEvidenceFrame);
-        const placeholder = mapping.manifestPlaceholderId === null ? undefined : placeholders.get(mapping.manifestPlaceholderId);
-        const where = placeholder?.layerPath.at(-1) ?? scene.compositionName;
-        slots.push({
-          scenePlanId: scene.id,
-          mappingId: mapping.id,
-          label: `${where} › ${mapping.placeholderName ?? ""}`.trim(),
-          reasons: [...new Set(assessment.blockers.map((blocker) => blocker.reason))],
-          window: framed?.evidenceFrameWindowSeconds ?? null,
-          canBeShown: framed !== undefined && framed.evidenceFrameAtSeconds !== null
-        });
-      }
-    }
-    return slots;
-  }, [project, plan, assets]);
+  const pending = useMemo<PendingSlot[]>(() => findPendingPictureSlots(project, plan?.plan.scenePlans, assets), [project, plan, assets]);
 
   const pendingKey = pending.map((slot) => slot.mappingId).join(",");
 

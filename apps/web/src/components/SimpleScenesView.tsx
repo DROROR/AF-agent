@@ -13,7 +13,8 @@ import { isScenePreviewSettled, useScenePreviewQueue, type UseScenePreviewQueueR
 import { sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
-import { SlotBulkReview } from "./SlotBulkReview";
+import { findPendingPictureSlots, SlotBulkReview } from "./SlotBulkReview";
+import { ScenesGuide, type GuideStep } from "./ScenesGuide";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { ClaudeActionButton } from "./ui/ClaudeActionButton";
@@ -191,6 +192,69 @@ export function SimpleScenesView(): ReactElement {
   const usedScenes = plan.plan.scenePlans.filter((scene) => scene.use);
   const scenesApproved = plan.plan.status === "APPROVED" && usedScenes.length > 0 && usedScenes.every((scene) => scene.approvalState === "APPROVED");
 
+  // WHAT TO DO NOW, IN ORDER (2026-10-04). A non-technical client faced this
+  // tab with nothing saying where to start or what came next. Each step is
+  // derived from the same state the buttons below already act on, so the
+  // guide can never say something the screen then contradicts.
+  const picturesWaiting = findPendingPictureSlots(project, plan.plan.scenePlans, assets).length;
+  const nothingChosenYet = plan.plan.scenePlans.every((scene) => scene.mappings.every((m) => m.text === null && m.selectedAssetId === null && m.colorHex === null));
+  const scenesWaiting = realScenes.filter(
+    (scene) =>
+      (pendingByScene.get(scene.scenePlan.id)?.length ?? 0) > 0 ||
+      !(scene.scenePlan.approvalState === "READY_FOR_APPROVAL" || scene.scenePlan.approvalState === "APPROVED")
+  ).length;
+  // Nothing left to take from the plan - or the scenes are already settled
+  // without it, in which case there is nothing to send the client back for.
+  const planStepDone = allProposals.length === 0 && (!nothingChosenYet || reviewsReady);
+  const guideSteps: GuideStep[] = [
+    {
+      title: t.simpleScenes.guide.planTitle,
+      detail: planStepDone
+        ? t.simpleScenes.guide.planDone
+        : allProposals.length > 0
+          ? t.simpleScenes.guide.planNow(allProposals.length)
+          : t.simpleScenes.guide.planAsk,
+      done: planStepDone
+    },
+    {
+      title: t.simpleScenes.guide.picturesTitle,
+      detail: picturesWaiting > 0 ? t.simpleScenes.guide.picturesNow(picturesWaiting) : t.simpleScenes.guide.picturesDone,
+      done: picturesWaiting === 0
+    },
+    {
+      title: t.simpleScenes.guide.leftoverTitle,
+      detail: scenesWaiting > 0 ? t.simpleScenes.guide.leftoverNow(scenesWaiting) : t.simpleScenes.guide.leftoverDone,
+      done: scenesWaiting === 0
+    },
+    {
+      title: t.simpleScenes.guide.approveTitle,
+      detail: scenesApproved ? t.simpleScenes.scenesApprovedHint : !previewsReady && reviewsReady ? t.simpleScenes.previewsUpdatingHint : t.simpleScenes.guide.approveNow,
+      done: scenesApproved
+    }
+  ];
+
+  // What each card is called for a person (the template's own name stays
+  // beneath it). A card whose scene also owns layers shown on OTHER cards is
+  // the video as a whole; the rest are numbered in the order they are shown.
+  const cardLabels = new Map<string, string>();
+  const quietCards = new Set<string>();
+  let sceneNumber = 0;
+  for (const realScene of realScenes) {
+    const shown = homes.mappingsByCardId.get(realScene.scenePlan.id) ?? [];
+    const ownsLayersShownElsewhere = realScene.scenePlan.mappings.some((mapping) => {
+      const cardId = homes.cardIdByMappingId.get(mapping.id);
+      return cardId !== undefined && cardId !== realScene.scenePlan.id;
+    });
+    if (shown.length === 0 && (pendingByScene.get(realScene.scenePlan.id)?.length ?? 0) === 0) {
+      quietCards.add(realScene.scenePlan.id);
+    } else if (ownsLayersShownElsewhere) {
+      cardLabels.set(realScene.scenePlan.id, t.simpleScenes.wholeVideoLabel);
+    } else {
+      sceneNumber += 1;
+      cardLabels.set(realScene.scenePlan.id, t.simpleScenes.sceneNumberLabel(sceneNumber));
+    }
+  }
+
   // REAL 2026-09-25 INCIDENT: "Approve Scenes" is disabled for FIVE
   // genuinely different reasons and looked identical in all of them. Three
   // of those five were already explained by the status line rendered
@@ -273,17 +337,7 @@ export function SimpleScenesView(): ReactElement {
       ) : null}
 
       <Card className="simple-scenes__approve-bar">
-        <p>
-          {scenesApproved
-            ? t.simpleScenes.scenesApprovedHint
-            : allProposals.length > 0
-              ? t.simpleScenes.usePlanFirstHint
-              : allReady
-              ? t.simpleScenes.allScenesReadyHint
-              : !reviewsReady
-                ? t.simpleScenes.scenesNotReadyHint
-                : t.simpleScenes.previewsUpdatingHint}
-        </p>
+        <ScenesGuide steps={guideSteps} heading={t.simpleScenes.guide.heading} />
         {/*
           The ASK half of the Mapping Assistant, in the view that exists to be
           the easy path. Simple mode already accepted and rejected suggestions
@@ -338,9 +392,10 @@ export function SimpleScenesView(): ReactElement {
         </Card>
       ) : (
         <div className="simple-scenes__grid">
-          {realScenes.map((realScene) => (
+          {realScenes.filter((realScene) => !quietCards.has(realScene.scenePlan.id)).map((realScene) => (
             <SceneCard
               key={realScene.manifestCompositionId}
+              {...(cardLabels.has(realScene.scenePlan.id) ? { eyebrow: cardLabels.get(realScene.scenePlan.id)! } : {})}
               projectId={projectId}
               realScene={realScene}
               assets={assets}
@@ -371,6 +426,51 @@ export function SimpleScenesView(): ReactElement {
           ))}
         </div>
       )}
+      {/*
+        Parts of the template with nothing a client can change (a music
+        track, a helper composition) are kept, but out of the way: they are
+        not a step, and a wall of "nothing to change" cards hid the scenes
+        that are.
+      */}
+      {quietCards.size > 0 ? (
+        <details className="advanced-details simple-scenes__quiet">
+          <summary>{t.simpleScenes.quietCardsToggle(quietCards.size)}</summary>
+          <div className="simple-scenes__grid">
+          {realScenes.filter((realScene) => quietCards.has(realScene.scenePlan.id)).map((realScene) => (
+            <SceneCard
+              key={realScene.manifestCompositionId}
+              {...(cardLabels.has(realScene.scenePlan.id) ? { eyebrow: cardLabels.get(realScene.scenePlan.id)! } : {})}
+              projectId={projectId}
+              realScene={realScene}
+              assets={assets}
+              previewEntry={previewQueue.getEntry(realScene.scenePlan.id)}
+              pendingSuggestions={pendingByScene.get(realScene.scenePlan.id) ?? []}
+              suggestionsBusy={busySuggestionId !== null}
+              cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
+              // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
+              onEdit={() => {
+                const hosted = homes.mappingsByCardId.get(realScene.scenePlan.id) ?? [];
+                const owner = hosted.find((entry) => entry.ownerScenePlanId !== realScene.scenePlan.id);
+                if (owner) {
+                  // This card shows layers another scene owns: open the
+                  // owner, narrowed to just the layers shown here.
+                  setEditingMappingIds(hosted.filter((entry) => entry.ownerScenePlanId === owner.ownerScenePlanId).map((entry) => entry.mapping.id));
+                  setEditingSceneId(owner.ownerScenePlanId);
+                } else {
+                  const shownIds = hosted.map((entry) => entry.mapping.id);
+                  setEditingMappingIds(shownIds.length === realScene.scenePlan.mappings.length ? null : shownIds);
+                  setEditingSceneId(realScene.scenePlan.id);
+                }
+              }}
+              onRegeneratePreview={() => previewQueue.regenerate(realScene.scenePlan.id)}
+              onAcceptSuggestion={(suggestion) => void handleAccept(suggestion)}
+              onRejectSuggestion={(suggestion) => void handleReject(suggestion)}
+              onAcceptSuggestions={(many) => void handleAcceptMany(many)}
+            />
+          ))}
+          </div>
+        </details>
+      ) : null}
 
       <SceneEditDrawer
         scenePlanId={editingSceneId}

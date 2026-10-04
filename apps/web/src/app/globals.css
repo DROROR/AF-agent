@@ -4128,3 +4128,59 @@ a.workflow-stepper__step:hover {
   font-size: 0.8125rem;
   color: var(--color-text-muted, inherit);
 }
+
+/* What to do now, in order (ScenesGuide.tsx). */
+.scenes-guide {
+  flex: 1 1 100%;
+}
+.scenes-guide__heading {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+.scenes-guide ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.scenes-guide li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  opacity: 0.55;
+}
+.scenes-guide li[data-state="now"] {
+  opacity: 1;
+}
+.scenes-guide li[data-state="done"] {
+  opacity: 0.75;
+}
+.scenes-guide__marker {
+  flex: 0 0 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border: 1px solid currentColor;
+}
+.scenes-guide li[data-state="now"] .scenes-guide__marker {
+  background: var(--color-primary, #4f6fe8);
+  border-color: transparent;
+  color: #fff;
+}
+.scene-card__eyebrow {
+  margin: 0 0 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.simple-scenes__quiet {
+  margin-top: 1rem;
+}

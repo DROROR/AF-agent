@@ -146,6 +146,8 @@ export interface SceneCardProps {
    * exactly as before.
    */
   cardMappings?: readonly PlaceholderMapping[];
+  /** What this card is called for a person ("Scene 3", "Whole video") - shown above the template's own name. */
+  eyebrow?: string;
   /** Applies several suggestions in ONE request. Absent: no "use all" button is offered - several single accepts fired together would each carry the same plan revision and all but the first would be refused as stale. */
   onAcceptSuggestions?: (suggestions: MappingSuggestion[]) => void;
 }
@@ -172,7 +174,8 @@ export function SceneCard({
   onAcceptSuggestion,
   onRejectSuggestion,
   cardMappings,
-  onAcceptSuggestions
+  onAcceptSuggestions,
+  eyebrow
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
   const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
@@ -217,6 +220,7 @@ export function SceneCard({
 
   return (
     <Card className="scene-card">
+      {eyebrow ? <p className="scene-card__eyebrow">{eyebrow}</p> : null}
       <div className="scene-card__header">
         <h3>{realScene.sceneName}</h3>
         <span className={`status-badge status-badge--${STATUS_TONE[status]}`}>{t.simpleScenes.status[status]}</span>

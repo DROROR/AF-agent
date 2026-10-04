@@ -1382,6 +1382,28 @@ export const en = {
       saving: "Saving…",
       hint: "One of them wrong? Open that scene with Edit and change that picture there."
     },
+    guide: {
+      heading: "What to do on this page",
+      planTitle: "Put your plan on the scenes.",
+      planNow: (n: number): string => `Press "Use everything from my plan (${n})" below. Your texts and pictures go onto every scene; you can still change any of them after.`,
+      planAsk: "Press \"Claude — Generate suggestions\" below to fill the scenes from your plan.",
+      planDone: "Done.",
+      picturesTitle: "Check where your pictures go.",
+      picturesNow: (n: number): string =>
+        n === 1
+          ? "1 picture is waiting. In the box below, press the button to see its spot, then confirm it."
+          : `${n} pictures are waiting. In the box below, press the button to see their spots, then confirm them.`,
+      picturesDone: "Done.",
+      leftoverTitle: "Finish the scenes marked \"Needs your choice\".",
+      leftoverNow: (n: number): string =>
+        n === 1 ? "1 scene still needs you. Open it below and answer what it asks." : `${n} scenes still need you. Open each one below and answer what it asks.`,
+      leftoverDone: "Done.",
+      approveTitle: "Approve.",
+      approveNow: "Press \"Approve Scenes\". Then the Preview tab opens and the real video frame is made."
+    },
+    wholeVideoLabel: "The whole video",
+    sceneNumberLabel: (n: number): string => `Scene ${n}`,
+    quietCardsToggle: (n: number): string => (n === 1 ? "1 part of the template with nothing for you to change" : `${n} parts of the template with nothing for you to change`),
     useWholePlanAction: (n: number): string => `Use everything from my plan (${n})`,
     useAllSuggestionsAction: (n: number): string => `Use all ${n}`,
     findingsTitle: (count: number): string =>
