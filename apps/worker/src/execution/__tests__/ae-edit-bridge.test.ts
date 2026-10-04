@@ -216,6 +216,56 @@ describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-
     expect(await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true })).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
   });
 
+  /**
+   * REAL 2026-10-04 FAILURE: the open call ran out of the bridge's 30 s while
+   * After Effects went on to open the file, and the job failed with "could
+   * not confirm the session working copy is open".
+   */
+  describe("a slow open is asked about, never repeated", () => {
+    const timeout: MutationCallResult = { ok: false, error: { code: "TOOL_ERROR", message: "[AE_TIMEOUT] Timed out after 30000ms waiting for After Effects (method: system.runJsx)" } };
+    function sequenceBridge(results: MutationCallResult[]) {
+      const scripts: string[] = [];
+      let call = 0;
+      const bridge = new HeroicSwanAeEditBridge({
+        createMutationClient: () => ({
+          connect: async () => {},
+          close: async () => {},
+          runFixedOperation: async (script: FixedJsxScript) => {
+            scripts.push(script);
+            return results[Math.min(call++, results.length - 1)]!;
+          }
+        })
+      });
+      bridge.slowOpenPollIntervalMs = 0;
+      return { bridge, scripts };
+    }
+    const opened = (path: string): MutationCallResult => ({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: path, openedName: "working-copy.aep" } }) });
+
+    it("the open times out, AE finishes meanwhile: the next question finds the working copy open", async () => {
+      const { bridge, scripts } = sequenceBridge([timeout, timeout, opened(WORKING_COPY_PATH)]);
+      expect(await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true })).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
+      expect(scripts).toHaveLength(3);
+      // Only the first call opens; every later one only asks.
+      expect(scripts[0]).toContain("app.open(");
+      expect(scripts.slice(1).every((script) => !script.includes("app.open(") && !script.includes(".close("))).toBe(true);
+    });
+
+    it("AE finished opening something else: refused, as before", async () => {
+      const { bridge } = sequenceBridge([timeout, opened("C:\\other\\project.aep")]);
+      const result = await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true });
+      expect(result.ok).toBe(false);
+    });
+
+    it("AE never answers: gives up after its bounded questions with the bridge's own message", async () => {
+      const { bridge, scripts } = sequenceBridge([timeout]);
+      bridge.slowOpenPolls = 3;
+      const result = await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true });
+      expect(result).toMatchObject({ ok: false });
+      expect(!result.ok && result.failureReason).toMatch(/AE_TIMEOUT/);
+      expect(scripts).toHaveLength(4);
+    });
+  });
+
   it("still refuses when the path it DOES read is missing - tolerance extends to the unused field only", async () => {
     const fake = new FakeMutationClient({
       ok: true,

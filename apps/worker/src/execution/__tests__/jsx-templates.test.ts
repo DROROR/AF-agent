@@ -1534,6 +1534,40 @@ describe("buildReopenProjectFromDiskScript (real 2026-09-14: a retry must never 
     expect(out.log).toEqual([`open:${WORKING}`]);
   });
 
+  /**
+   * REAL 2026-10-04 FAILURE: with ANOTHER session's unsaved working copy
+   * open, opening this one ran past the bridge's 30 s and the job failed.
+   */
+  describe("another session's working copy", () => {
+    const fileFake = `
+      var __log = [];
+      function __folder(path) { return path === null ? null : { fsName: path, parent: __parentOf(path) }; }
+      function __parentOf(path) { var i = path.lastIndexOf("\\\\"); return i <= 2 ? null : __folder(path.substring(0, i)); }
+      function File(path) { this.fsName = path; this.exists = true; this.name = path.substring(path.lastIndexOf("\\\\") + 1); this.parent = __parentOf(path); }
+      var CloseOptions = { DO_NOT_SAVE_CHANGES: 1, SAVE_CHANGES: 2 };
+    `;
+    const withOpen = (openPath: string) => `${fileFake}
+      var app = {
+        beginSuppressDialogs: function () {}, endSuppressDialogs: function () {},
+        project: { file: new File(${JSON.stringify(openPath)}), name: "x.aep", close: function (option) { __log.push("close:" + option); } },
+        open: function (file) { __log.push("open:" + file.fsName); app.project = { file: file, name: "working-copy.aep", close: function () {} }; return app.project; }
+      };`;
+
+    it("left open and unsaved by a different session is closed without saving first - it is this worker's own disposable file", () => {
+      const out = run(buildReopenProjectFromDiskScript(WORKING), withOpen("C:\\DYO-Agent\\execution-sessions\\s-2\\working-copy.aep"));
+      expect(out.log).toEqual(["close:1", `open:${WORKING}`]);
+    });
+
+    it.each([
+      ["a person's own project elsewhere", "C:\\Users\\someone\\Documents\\working-copy.aep"],
+      ["a differently named file in a sibling session folder", "C:\\DYO-Agent\\execution-sessions\\s-2\\something-else.aep"],
+      ["the same file name one folder too deep", "C:\\DYO-Agent\\execution-sessions\\s-2\\inner\\working-copy.aep"]
+    ])("%s is never closed", (_name, openPath) => {
+      const out = run(buildReopenProjectFromDiskScript(WORKING), withOpen(openPath));
+      expect(out.log).toEqual([`open:${WORKING}`]);
+    });
+  });
+
   it("refuses when the working copy does not exist on disk - never opens or closes anything", () => {
     const out = run(buildReopenProjectFromDiskScript(WORKING), setup(WORKING, false));
     expect(out.log).toEqual([]);

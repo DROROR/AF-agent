@@ -1892,3 +1892,27 @@ value depends on the time stored in the project file.
 **During these runs:** the ae-mcp bridge inside After Effects stopped answering (health
 check: "No live bridge heartbeat") while the dashboard went on showing it ONLINE from a
 cached probe. Restarting After Effects restored it. Cause not known.
+
+## 2026-10-04 - A new session could not open its working copy while another session's unsaved copy was open
+
+**Seen live, three times (jobs `7cd3e0a0`, `96946a03`, `620c31fa`):** "could not confirm
+the session working copy is open in After Effects: [AE_TIMEOUT] Timed out after 30000ms".
+Each time a previous session's working copy was open in After Effects with unsaved edits
+(a job that had failed part-way). A health check a few minutes after the third showed
+After Effects had gone on to open the requested copy.
+
+**Cause:** the reopen script discards unsaved edits only when the open project is the SAME
+working copy. With a different session's copy open, After Effects had that project's
+unsaved state to deal with before opening, and did not return inside the bridge's 30 s.
+The executor read the timeout as a failed open.
+
+**Fix:** another session's working copy - the same file name in a sibling folder of this
+session's folder - is closed without saving first; it is this worker's own disposable file
+and its state of record is on disk. A project a person has open of their own is still
+never closed. And when an open call times out, the worker asks After Effects what is open
+(read-only, up to six times, ten seconds apart) instead of failing at once; only the
+requested working copy counts.
+
+This is the path a client takes after any failed session, so it was a product defect and
+not only a side effect of the shadow runs that exposed it. Not yet run on real After
+Effects.

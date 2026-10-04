@@ -1583,6 +1583,29 @@ export function buildOpenProjectScript(sourceProjectPath: string): FixedJsxScrip
 }
 
 /**
+ * READ-ONLY: which project After Effects has open right now, in the same
+ * result shape the open scripts return. Used after an open call ran out of
+ * the bridge's time, to ask whether AE finished opening meanwhile - it never
+ * opens, closes or saves anything.
+ */
+export function buildDescribeOpenProjectScript(): FixedJsxScript {
+  const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
+  try {
+    __result = JSON.stringify({
+      ok: true,
+      resultingValue: {
+        openedPath: app.project && app.project.file ? app.project.file.fsName : null,
+        openedName: app.project ? app.project.name : null
+      }
+    });
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({ ok: false, failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
+/**
  * Opens a session working copy FROM DISK, discarding unsaved in-memory
  * edits to that same file.
  *
@@ -1610,7 +1633,30 @@ export function buildReopenProjectFromDiskScript(workingProjectPath: string): Fi
     } else {
       var __closedUnsaved = false;
       var __openFile = app.project && app.project.file ? app.project.file : null;
-      if (__openFile !== null && __openFile.fsName.toLowerCase() === __targetFile.fsName.toLowerCase()) {
+      // REAL 2026-10-04 FAILURE (jobs 7cd3e0a0, 96946a03, 620c31fa): with a
+      // DIFFERENT session's working copy open and unsaved, opening this one
+      // did not return inside the bridge's 30 s - After Effects had the other
+      // project's unsaved state to deal with first - and the job failed with
+      // "could not confirm the session working copy is open" while AE went
+      // on to open it. A second session after a failed first one is an
+      // ordinary thing for a client to start.
+      //
+      // Another session's working copy is this worker's own disposable file,
+      // exactly like this session's: its persisted state is what is on disk.
+      // It is recognised by WHERE it lives - the same file name, in a sibling
+      // folder of this session's folder - never by guessing, so a project a
+      // person has open of their own is still never closed here.
+      var __isSameFile = __openFile !== null && __openFile.fsName.toLowerCase() === __targetFile.fsName.toLowerCase();
+      var __isSiblingSessionCopy = false;
+      try {
+        __isSiblingSessionCopy =
+          __openFile !== null && !__isSameFile &&
+          __openFile.name.toLowerCase() === __targetFile.name.toLowerCase() &&
+          __openFile.parent !== null && __targetFile.parent !== null &&
+          __openFile.parent.parent !== null && __targetFile.parent.parent !== null &&
+          __openFile.parent.parent.fsName.toLowerCase() === __targetFile.parent.parent.fsName.toLowerCase();
+      } catch (__siblingError) { __isSiblingSessionCopy = false; }
+      if (__isSameFile || __isSiblingSessionCopy) {
         app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
         __closedUnsaved = true;
       }

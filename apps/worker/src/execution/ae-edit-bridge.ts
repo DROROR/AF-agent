@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { SceneEditOperation, SceneEditOperationType } from "@dyo/schemas";
 import { parseJsonTextContent } from "../inspection/parse-mcp-shapes.js";
 import { windowsPathsEqual } from "../inspection/canonical-windows-path.js";
-import { buildDescribeChainStructureScript, buildOperationScript, buildOpenProjectScript, buildReopenProjectFromDiskScript, buildSaveProjectScript, type FixedJsxScript } from "./jsx-templates.js";
+import { buildDescribeChainStructureScript, buildOperationScript, buildOpenProjectScript, buildReopenProjectFromDiskScript, buildSaveProjectScript, type FixedJsxScript, buildDescribeOpenProjectScript } from "./jsx-templates.js";
 import { HeroicSwanAeMutationClient, type MutationCallResult } from "./heroic-swan-ae-mutation-client.js";
 import { describeMcpFailure } from "./classify-mcp-failure.js";
 import { parseStableCompositionNumericId, resolveCompositionIndex } from "./resolve-composition-index.js";
@@ -243,6 +243,9 @@ export class NotAvailableAeEditBridge implements AeEditBridge {
 
 export class HeroicSwanAeEditBridge implements AeEditBridge {
   private readonly createMutationClient: () => AeMutationClient;
+  /** How often, and how far apart, a timed-out open is followed by asking what is open. Public so tests can shorten them. */
+  slowOpenPolls = 6;
+  slowOpenPollIntervalMs = 10_000;
 
   constructor(config: { aeMcpPath: string } | { createMutationClient: () => AeMutationClient }) {
     this.createMutationClient =
@@ -253,7 +256,19 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
 
   async openProject(expectedPath: string, options?: OpenProjectOptions): Promise<OpenProjectResult> {
     const script = options?.discardUnsavedChanges ? buildReopenProjectFromDiskScript(expectedPath) : buildOpenProjectScript(expectedPath);
-    const outcome = await this.runScript(script);
+    let outcome = await this.runScript(script);
+    // A slow open is not a failed open (2026-10-04): when the call itself
+    // ran out of the bridge's time, After Effects is usually still opening
+    // the file. It is ASKED what it has open - never told to open again,
+    // which would queue a second open behind the first - a bounded number of
+    // times, and only the requested working copy being open counts.
+    for (let attempt = 1; !outcome.ok && outcome.failureReason.includes("[AE_TIMEOUT]") && attempt <= this.slowOpenPolls; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, this.slowOpenPollIntervalMs));
+      const asked = await this.runScript(buildDescribeOpenProjectScript());
+      if (asked.ok || !asked.failureReason.includes("[AE_TIMEOUT]")) {
+        outcome = asked;
+      }
+    }
     if (!outcome.ok) {
       return { ok: false, failureReason: outcome.failureReason };
     }
