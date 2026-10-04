@@ -4288,3 +4288,7 @@ a.workflow-stepper__step:hover {
 .simple-scenes__quiet {
   margin-top: 1rem;
 }
+
+/* Edit drawer: flip / turn a picture on its place */
+.edit-drawer-orientation { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+.edit-drawer-orientation__flip { display: inline-flex; gap: 0.4rem; align-items: center; }

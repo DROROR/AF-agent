@@ -61,6 +61,9 @@ interface MappingFormState {
   text: string;
   assetTimestamp: string;
   selectedAssetId: string;
+  /** How the picture is turned on its place - both "off" means exactly as the template holds it. */
+  mirror: boolean;
+  quarterTurns: 0 | 1 | 2 | 3;
   /**
    * The colour typed/picked in THIS form session - "" means "no explicit
    * colour", which leaves the template's own colour untouched. Only ever
@@ -101,6 +104,14 @@ function isTemplateDecisionPersisted(form: MappingFormState, mapping: Placeholde
  * change on a colour nobody touched, and every save would emit a no-op
  * SET_BRAND_COLOR for every colour mapping in the scene.
  */
+/** True when the form's flip/turn differs from what the plan holds - an absent record and "no flip, no turn" are the same thing. */
+export function isOrientationChanged(
+  form: { mirror: boolean; quarterTurns: 0 | 1 | 2 | 3 },
+  persisted: { assetOrientation?: { mirror: boolean; quarterTurns: 0 | 1 | 2 | 3 } | null | undefined }
+): boolean {
+  return form.mirror !== (persisted.assetOrientation?.mirror ?? false) || form.quarterTurns !== (persisted.assetOrientation?.quarterTurns ?? 0);
+}
+
 export function isBrandColorChanged(formColorHex: string, persistedColorHex: string | null): boolean {
   const trimmed = formColorHex.trim();
   const next = trimmed === "" ? null : trimmed;
@@ -177,6 +188,8 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
         text: mapping.text ?? "",
         assetTimestamp: mapping.assetTimestamp !== null ? String(mapping.assetTimestamp) : "",
         selectedAssetId: mapping.selectedAssetId ?? "",
+        mirror: mapping.assetOrientation?.mirror ?? false,
+        quarterTurns: mapping.assetOrientation?.quarterTurns ?? 0,
         colorHex: mapping.colorHex ?? "",
         templateTextDecision: mapping.keepTemplateText?.decision ?? null,
         slotDecision:
@@ -420,6 +433,19 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
         }
       }
 
+      if (isOrientationChanged(form, originalMapping)) {
+        if (!form.mirror && form.quarterTurns === 0) {
+          ops.push({ type: "CLEAR_ASSET_ORIENTATION", scenePlanId: currentScene.id, mappingId: form.mappingId });
+        } else {
+          ops.push({
+            type: "SET_ASSET_ORIENTATION",
+            scenePlanId: currentScene.id,
+            mappingId: form.mappingId,
+            orientation: { mirror: form.mirror, quarterTurns: form.quarterTurns }
+          });
+        }
+      }
+
       // STAGE 4 - emitted LAST for this mapping, after any asset change above,
       // so the findings the API binds the decision to are the ones this same
       // request produces. A decision saved against the previous asset would be
@@ -482,6 +508,9 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
         return true;
       }
       if ((form.selectedAssetId === "" ? null : form.selectedAssetId) !== originalMapping.selectedAssetId) {
+        return true;
+      }
+      if (isOrientationChanged(form, originalMapping)) {
         return true;
       }
       if (form.templateTextDecision === null) {
@@ -671,6 +700,39 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
                   </option>
                 ))}
               </Select>
+            </Field>
+            ) : null}
+            {fieldsFor(mapping.mappingId).asset && mapping.selectedAssetId !== "" ? (
+            <Field label={t.projectWorkspace.editDrawer.orientationLabel} htmlFor={`mapping-turn-${mapping.mappingId}`} hint={t.projectWorkspace.editDrawer.orientationHint}>
+              <div className="edit-drawer-orientation">
+                <label className="edit-drawer-orientation__flip">
+                  <input
+                    type="checkbox"
+                    checked={mapping.mirror}
+                    onChange={(event) => {
+                      const next = [...mappings];
+                      next[index] = { ...mapping, mirror: event.target.checked };
+                      setMappings(next);
+                    }}
+                  />
+                  {t.projectWorkspace.editDrawer.orientationFlip}
+                </label>
+                <Select
+                  id={`mapping-turn-${mapping.mappingId}`}
+                  value={String(mapping.quarterTurns)}
+                  onChange={(event) => {
+                    const turns = Number(event.target.value);
+                    const next = [...mappings];
+                    next[index] = { ...mapping, quarterTurns: turns === 1 || turns === 2 || turns === 3 ? turns : 0 };
+                    setMappings(next);
+                  }}
+                >
+                  <option value="0">{t.projectWorkspace.editDrawer.orientationTurnNone}</option>
+                  <option value="1">{t.projectWorkspace.editDrawer.orientationTurnRight}</option>
+                  <option value="2">{t.projectWorkspace.editDrawer.orientationTurnHalf}</option>
+                  <option value="3">{t.projectWorkspace.editDrawer.orientationTurnLeft}</option>
+                </Select>
+              </div>
             </Field>
             ) : null}
             {fieldsFor(mapping.mappingId).text ? (

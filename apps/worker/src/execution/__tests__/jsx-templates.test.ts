@@ -1734,6 +1734,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       var __scaleValue = ${JSON.stringify(options.scale ?? [100, 100, 100])};
       var __positionValue = ${JSON.stringify(options.position ?? [621, 1344, 0])};
       var __rotationValue = ${options.rotation ?? 0};
+      var __rotationSets = 0;
       var __card = new AVLayer();
       __card.index = 3;
       __card.locked = ${options.locked ? "true" : "false"};
@@ -1753,7 +1754,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
             if (inner === "ADBE Scale") { return { numKeys: ${options.animatedScale ? 2 : 0}, value: __scaleValue, setValue: function (v) { __scaleValue = v; } }; }
             if (inner === "ADBE Anchor Point") { return { numKeys: 0, value: __anchorValue, setValue: function (v) { __anchorValue = v; } }; }
             if (inner === "ADBE Position") { return { numKeys: 0, value: __positionValue, setValue: function (v) { __positionValue = v; } }; }
-            if (inner === "ADBE Rotate Z") { return { numKeys: 0, value: __rotationValue, setValue: function () { throw new Error("rotation must not change"); } }; }
+            if (inner === "ADBE Rotate Z") { return { numKeys: 0, value: __rotationValue, setValue: function (v) { __rotationSets++; __rotationValue = v; } }; }
             return null;
           }
         };
@@ -1773,7 +1774,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     };
     // ExtendScript has no JSON.parse (only the stringify polyfill), so the
     // step's own result travels back as a string and is parsed out here.
-    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, position: __positionValue, locked: __card.locked, cardFill: __cardFill.enabled, cardBlur: __cardBlur.enabled, otherFill: __otherFill.enabled, otherBlur: __otherBlur.enabled });";
+    const probe = "; __result = JSON.stringify({ step: __result, moved: __moved, scale: __scaleValue, anchor: __anchorValue, position: __positionValue, rotation: __rotationValue, rotationSets: __rotationSets, locked: __card.locked, cardFill: __cardFill.enabled, cardBlur: __cardBlur.enabled, otherFill: __otherFill.enabled, otherBlur: __otherBlur.enabled });";
 
     function runProbed(op: SceneEditOperation, options: CardOptions = {}) {
       const script = buildOperationScript(999, "irrelevant", op);
@@ -1828,6 +1829,61 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       expect(outcome.scale[1]).toBeCloseTo(outcome.scale[0], 9);
       expect(1080 * outcome.scale[0] / 100).toBeGreaterThanOrEqual(1242 * 1.015 - 1e-6);
       expect(2340 * outcome.scale[1] / 100).toBeGreaterThanOrEqual(2688 - 1e-6);
+    });
+
+    it("an ordinary fill never touches the card's rotation", () => {
+      const outcome = runCard({ rotation: 12 });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.rotationSets).toBe(0);
+      expect(outcome.rotation).toBe(12);
+    });
+
+    describe("2026-10-04: the plan's recorded orientation - a card the template holds mirrored or on its side", () => {
+      it("mirror flips the picture left-to-right about its own centre: same size, same place, negative X scale", () => {
+        const plain = runCard();
+        const outcome = runProbed({ ...cardOp, orientation: { mirror: true, quarterTurns: 0 } });
+        expect(outcome.step.ok).toBe(true);
+        expect(outcome.scale[0]).toBeCloseTo(-plain.scale[0], 9);
+        expect(outcome.scale[1]).toBeCloseTo(plain.scale[1], 9);
+        expect(outcome.anchor).toEqual(plain.anchor);
+        expect(outcome.position).toEqual(plain.position);
+        expect(outcome.rotationSets).toBe(0);
+      });
+
+      it("a quarter turn adds 90 degrees to the card's own rotation and measures the cover fit against the picture's turned footprint", () => {
+        const outcome = runProbed({ ...cardOp, orientation: { mirror: false, quarterTurns: 1 } }, { rotation: 10 });
+        expect(outcome.step.ok).toBe(true);
+        expect(outcome.rotation).toBe(100);
+        // Turned, the 1080 x 2340 picture stands 2340 wide by 1080 high on the 1242 x 2688 card.
+        const cover = Math.max(1242 / 2340, 2688 / 1080) * 100;
+        expect(outcome.scale[0]).toBeCloseTo(cover, 6);
+        expect(outcome.scale[1]).toBeCloseTo(cover, 6);
+        expect(outcome.anchor).toEqual([540, 1170, 0]);
+      });
+
+      it("a half turn keeps the ordinary cover size and turns 180 degrees; mirror and turn combine", () => {
+        const plain = runCard();
+        const outcome = runProbed({ ...cardOp, orientation: { mirror: true, quarterTurns: 2 } });
+        expect(outcome.step.ok).toBe(true);
+        expect(outcome.rotation).toBe(180);
+        expect(outcome.scale[0]).toBeCloseTo(-plain.scale[0], 9);
+        expect(outcome.scale[1]).toBeCloseTo(plain.scale[1], 9);
+      });
+
+      it("no orientation and the identity orientation build the identical script", () => {
+        expect(buildOperationScript(999, "irrelevant", { ...cardOp, orientation: { mirror: false, quarterTurns: 0 } })).toBe(buildOperationScript(999, "irrelevant", cardOp));
+      });
+
+      it("a place that is not a screen card refuses a turned picture instead of silently placing it unturned", () => {
+        const notACard = `${cardSetup()}
+          __card.source = { name: "Clip", width: 1242, height: 2688, mainSource: {} };
+          var __replaced = false;
+          __card.replaceSource = function () { __replaced = true; };`;
+        const script = buildOperationScript(999, "irrelevant", { ...cardOp, orientation: { mirror: true, quarterTurns: 0 } });
+        const step = JSON.parse(runFixedScriptWithoutNativeJson(script.replace(/return __result;\s*$/, "; __result = JSON.stringify({ step: __result, replaced: __replaced });\n  return __result;"), notACard));
+        expect(JSON.parse(step.step)).toEqual({ ok: false, failureReason: expect.stringMatching(/not a screen card/) });
+        expect(step.replaced).toBe(false);
+      });
     });
 
     it("real 2026-09-17: a card with an OFF-CENTRE anchor gets the media centred on the card itself, not shifted by the anchor", () => {
@@ -3094,7 +3150,7 @@ describe("buildDescribeLayerAtTimeScript (real 2026-09-17: a proven-correct Hebr
 
 
 describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line grew over a shape of its own orange colour)", () => {
-  type FitOptions = { blockerColour?: number[]; blockerAbove?: boolean; blockerPositionX?: number; blockerY?: number; textRotation?: number; locked?: boolean; blockerFlags?: string };
+  type FitOptions = { blockerColour?: number[]; blockerAbove?: boolean; blockerPositionX?: number; blockerY?: number; textRotation?: number; locked?: boolean; blockerFlags?: string; templateRect?: { left: number; width: number }; newRect?: { left: number; width: number } };
   const ORANGE = [1, 0.66139823198318, 0.26009500026703, 1];
   const setup = (options: FitOptions = {}) => `
     function CompItem() {}
@@ -3114,7 +3170,11 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
     __text.name = "Text 1"; __text.enabled = true; __text.threeDLayer = false; __text.parent = null; __text.inPoint = 0.4; __text.outPoint = 60.4;
     __text.locked = ${options.locked ? "true" : "false"};
     __text.sourceText = { value: { text: "Mixkit", applyFill: true, fillColor: [0, 0, 0] }, setValue: function (v) { this.value = v; } };
-    __text.sourceRectAtTime = function () { return { left: -1095.74072265625, top: -123.2587890625, width: 1041.52001953125, height: 162.1826171875 }; };
+    __text.sourceRectAtTime = function () {
+      var __own = this.sourceText.value.text === "Mixkit" ? ${JSON.stringify(options.templateRect ?? null)} : ${JSON.stringify(options.newRect ?? null)};
+      if (__own !== null) { return { left: __own.left, top: -123.2587890625, width: __own.width, height: 162.1826171875 }; }
+      return { left: -1095.74072265625, top: -123.2587890625, width: 1041.52001953125, height: 162.1826171875 };
+    };
     __text.property = function (n) {
       if (n === "ADBE Transform Group") { return { property: function (inner) { return __textProps[inner] || null; } }; }
       if (n === "ADBE Effect Parade") { return fillParade(${JSON.stringify(ORANGE)}); }
@@ -3191,6 +3251,50 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
     expect(outcome.scale[2]).toBe(100);
     // Its new left edge now sits exactly one margin to the right of the shape.
     expect(1542.90086616518 + dLeft * expectedFactor).toBeCloseTo(blockerRight + 24, 6);
+  });
+
+  describe("2026-10-04: a replacement longer than the template's line must stay inside the frame", () => {
+    const BLUE = [0.2196, 0.2314, 0.4627, 1];
+    // Right-aligned: the right edge stays at the anchor side, the line grows left.
+    const shortLine = { left: -600, width: 545 };
+    const longLine = { left: -2600, width: 2545 };
+    const anchorX = -50.5461578369141;
+    const positionX = 1542.90086616518;
+
+    it("shrinks a line that grew past the left edge until it is one margin inside the frame", () => {
+      const outcome = runFit({ blockerColour: BLUE, templateRect: shortLine, newRect: longLine });
+      expect(outcome.step.ok).toBe(true);
+      const dLeftLong = (longLine.left - anchorX) * 0.8;
+      expect(positionX + dLeftLong).toBeLessThan(0);
+      const factor = (24 - positionX) / dLeftLong;
+      expect(factor).toBeGreaterThan(0.6);
+      expect(outcome.scale[0]).toBeCloseTo(80 * factor, 6);
+      expect(outcome.scale[1]).toBeCloseTo(outcome.scale[0], 9);
+      expect(positionX + dLeftLong * factor).toBeCloseTo(24, 6);
+    });
+
+    it("never shrinks below the minimum readable size, and still succeeds", () => {
+      const outcome = runFit({ blockerColour: BLUE, templateRect: shortLine, newRect: { left: -9000, width: 8945 } });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.scale[0]).toBeCloseTo(80 * 0.6, 9);
+    });
+
+    it("leaves a line alone when the template's own text already crossed the frame edge - there the edge is the design", () => {
+      const outcome = runFit({ blockerColour: BLUE, templateRect: longLine, newRect: longLine });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.scale).toEqual([80, 80, 100]);
+    });
+
+    it("leaves a line alone when it still fits", () => {
+      const outcome = runFit({ blockerColour: BLUE, templateRect: shortLine, newRect: { left: -900, width: 845 } });
+      expect(outcome.scale).toEqual([80, 80, 100]);
+    });
+
+    it("a rotated text is not measured at all, as before", () => {
+      const outcome = runFit({ blockerColour: BLUE, templateRect: shortLine, newRect: longLine, textRotation: 15 });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.scale).toEqual([80, 80, 100]);
+    });
   });
 
   it("leaves the text size alone when the shape behind it is a different colour", () => {

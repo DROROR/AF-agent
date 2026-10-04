@@ -376,6 +376,57 @@ describe("SceneEditDrawer", () => {
     });
   });
 
+  it("offers flip and turn only once a picture is chosen, and saves SET_ASSET_ORIENTATION with the choice", async () => {
+    const placed = mappingFixture({ selectedAssetId: "asset-1", selectedAssetType: "image" });
+    const scenes = [sceneFixture({ id: "s1", mappings: [placed] })];
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: [
+        { status: 200, body: { plan: planFixture({ revision: 1 }, scenes), sceneTable: [] } },
+        { status: 200, body: { plan: planFixture({ revision: 2 }, scenes), sceneTable: [] } }
+      ],
+      [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture({ id: "asset-1", label: "Client logo" })] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+
+    const onClose = vi.fn();
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={onClose} />
+      </ProjectWorkspaceProvider>
+    );
+
+    await screen.findByText("APP PROMO");
+    fireEvent.click(await screen.findByLabelText("Flip it left to right"));
+    fireEvent.change(screen.getByLabelText("Is the picture the wrong way round in the video?"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.map(([, init]) => init)
+      .find((init): init is RequestInit & { body: string } => typeof init?.body === "string" && init.body.includes("SET_ASSET_ORIENTATION"));
+    expect(call).toBeDefined();
+    const payload = JSON.parse(call!.body) as { operations: Array<Record<string, unknown>> };
+    expect(payload.operations).toEqual([
+      { type: "SET_ASSET_ORIENTATION", scenePlanId: "s1", mappingId: "mapping-1", orientation: { mirror: true, quarterTurns: 1 } }
+    ]);
+  });
+
+  it("offers no flip or turn for a place that has no picture chosen", async () => {
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ revision: 1 }, [sceneFixture({ id: "s1", mappings: [mappingFixture()] })]), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+    renderWithLocale(
+      <ProjectWorkspaceProvider projectId={PROJECT_ID}>
+        <SceneEditDrawer scenePlanId="s1" onClose={vi.fn()} />
+      </ProjectWorkspaceProvider>
+    );
+    await screen.findByText("APP PROMO");
+    expect(screen.queryByLabelText("Flip it left to right")).toBeNull();
+  });
+
   it("renders nothing when no scenePlanId is selected", () => {
     stubFetchByUrl({
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },

@@ -162,6 +162,29 @@ describe("applyExecutionPlanEdit", () => {
     expect(cleared.ok && cleared.scenePlans[0]?.mappings[0]?.text).toBeNull();
   });
 
+  it("SET_ASSET_ORIENTATION records how the picture is turned; an orientation that changes nothing is stored as null; CLEAR removes it", () => {
+    const set = applyExecutionPlanEdit(
+      [scene()],
+      { type: "SET_ASSET_ORIENTATION", scenePlanId: "scene-1", mappingId: "mapping-1", orientation: { mirror: true, quarterTurns: 1 } },
+      fixedNow
+    );
+    expect(set.ok && set.scenePlans[0]?.mappings[0]?.assetOrientation).toEqual({ mirror: true, quarterTurns: 1 });
+
+    const identity = applyExecutionPlanEdit(
+      [scene({ mappings: [mapping({ assetOrientation: { mirror: true, quarterTurns: 0 } })] })],
+      { type: "SET_ASSET_ORIENTATION", scenePlanId: "scene-1", mappingId: "mapping-1", orientation: { mirror: false, quarterTurns: 0 } },
+      fixedNow
+    );
+    expect(identity.ok && identity.scenePlans[0]?.mappings[0]?.assetOrientation).toBeNull();
+
+    const cleared = applyExecutionPlanEdit(
+      [scene({ mappings: [mapping({ assetOrientation: { mirror: false, quarterTurns: 3 } })] })],
+      { type: "CLEAR_ASSET_ORIENTATION", scenePlanId: "scene-1", mappingId: "mapping-1" },
+      fixedNow
+    );
+    expect(cleared.ok && cleared.scenePlans[0]?.mappings[0]?.assetOrientation).toBeNull();
+  });
+
   it("SET_ASSET_TIMESTAMP / CLEAR_ASSET_TIMESTAMP - independent of finalDuration", () => {
     const set = applyExecutionPlanEdit(
       [scene({ finalDuration: 5 })],

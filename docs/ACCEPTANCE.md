@@ -1972,3 +1972,35 @@ Fixed in `c6bef60`: the check connects with a 60 s budget and makes up to three 
 each with a fresh client. The Export screen went on saying "Started" after the job had
 failed; that is recorded in `docs/UX_BACKLOG.md` terms and is being fixed with the rest of
 the Export tab. The final render itself is still unverified on this template.
+
+## 2026-10-04 - Two defects seen in the first finished video: pictures the wrong way round, and a long line running off the frame
+
+**Seen in the complete preview of job `49d24f57`:** the client's screenshot was mirrored on
+two screen cards and lay on its side on a third; and one long replacement text ran past
+the left edge of the frame. Neither is a fault in the placing code - the template holds
+those cards mirrored or turned (its own gradient looked the same either way), and its own
+short line fitted where the longer one did not.
+
+**Pictures.** Which way is up cannot be read from the project, so it is a recorded choice,
+not an inference: a mapping may carry `assetOrientation` (`mirror`, `quarterTurns` 0-3),
+set with `SET_ASSET_ORIENTATION` / cleared with `CLEAR_ASSET_ORIENTATION`, offered in the
+edit drawer as "Is the picture the wrong way round in the video?". The worker mirrors the
+picture about its own centre and adds the turn to the card's own rotation, measuring the
+cover/contain fit against the turned footprint. A place that is not a screen card refuses
+a turned picture rather than placing it unturned. A plan without the field sends nothing
+new, and builds the byte-identical script.
+
+**Text.** After a text is replaced, if the template's own text sat wholly inside its
+composition's frame and the new text does not, the new text is shrunk about its anchor
+until it is one margin inside - never below the existing minimum readable factor (it then
+stays at that size and the job still succeeds), never enlarged, never moved. A template
+text that itself crossed the edge is left alone. Same conditions as the existing fit: a
+static, unparented, unrotated 2D text layer; anything else is not measured.
+
+**Not yet verified on After Effects.** Both are covered by unit tests against a modelled
+layer only; the worker was rendering while they were written. Whether the off-frame line
+in this template is a layer the rule can measure is unknown until it is run there.
+
+**The two colours in that video** (`#0FAFFF`, `#9A4242`) were not an unasked save: plan
+revision 2 differs from revision 1 in exactly those two colour values and nothing else,
+and the drawer sends a colour only when its field was changed.

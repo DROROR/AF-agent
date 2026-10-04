@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { templateTextDecisionSchema } from "./template-copy.js";
-import { slotClassificationSchema, slotReviewDecisionSchema } from "./slot-semantics.js";
+import { assetOrientationSchema, slotClassificationSchema, slotReviewDecisionSchema } from "./slot-semantics.js";
 import { placeholderTypeSchema } from "./template-manifest.js";
 import { layerTransformSchema } from "./execute-scene-edit.js";
 import { nestedTargetStepSchema } from "./template-manifest.js";
@@ -29,6 +29,8 @@ export const EXECUTION_PLAN_EDIT_OPERATION_TYPES = [
   "CLEAR_TEXT",
   "SET_ASSET_TIMESTAMP",
   "CLEAR_ASSET_TIMESTAMP",
+  "SET_ASSET_ORIENTATION",
+  "CLEAR_ASSET_ORIENTATION",
   "SET_FINAL_DURATION",
   "CLEAR_FINAL_DURATION",
   "SET_INSTRUCTIONS",
@@ -188,6 +190,23 @@ const clearSlotReviewSchema = z
   })
   .strict();
 
+/** Turns the mapping's picture on its screen card - see assetOrientationSchema. */
+const setAssetOrientationSchema = z
+  .object({
+    type: z.literal("SET_ASSET_ORIENTATION"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1),
+    orientation: assetOrientationSchema
+  })
+  .strict();
+const clearAssetOrientationSchema = z
+  .object({
+    type: z.literal("CLEAR_ASSET_ORIENTATION"),
+    scenePlanId: z.string().min(1),
+    mappingId: z.string().min(1)
+  })
+  .strict();
+
 const setAssetTimestampSchema = z
   .object({
     type: z.literal("SET_ASSET_TIMESTAMP"),
@@ -326,6 +345,8 @@ export const executionPlanEditOperationSchema = z.discriminatedUnion("type", [
   clearSlotReviewSchema,
   setAssetTimestampSchema,
   clearAssetTimestampSchema,
+  setAssetOrientationSchema,
+  clearAssetOrientationSchema,
   setFinalDurationSchema,
   clearFinalDurationSchema,
   setInstructionsSchema,

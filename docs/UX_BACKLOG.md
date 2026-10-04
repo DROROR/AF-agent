@@ -116,3 +116,10 @@ with the commit, so the list is also the record.
 13. **Someone else's complete preview**: if a different user started it, this user's tab
     shows "being made" (from the server's refusal) but the banner cannot see that job and
     keeps saying "Make the full video" until the video lands.
+
+## 2026-10-04 (later) - added
+- **Done:** "Is the picture the wrong way round in the video?" in the edit drawer (flip left
+  to right, turn a quarter / upside down), shown once a picture is chosen.
+- **Open:** that control lives in the edit drawer only; a client who sees a mirrored picture
+  in the preview has no pointer from the Preview tab to it. The "No, something is wrong"
+  answer on the first frame should offer it by name.

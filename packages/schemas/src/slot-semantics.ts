@@ -1093,3 +1093,24 @@ export const slotReviewRecordSchema = z
   })
   .strict();
 export type SlotReviewRecord = z.infer<typeof slotReviewRecordSchema>;
+
+/**
+ * How a picture is turned before it is placed on its screen card. A template
+ * may hold a card mirrored or on its side (its own gradient looked the same
+ * either way; a screenshot does not), and only a person looking at the frame
+ * can say which way is up - so this is a recorded choice, never inferred.
+ * `mirror` flips the picture left-to-right in its own axes; `quarterTurns`
+ * then turns it clockwise in steps of 90 degrees.
+ */
+export const assetOrientationSchema = z
+  .object({
+    mirror: z.boolean(),
+    quarterTurns: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+  })
+  .strict();
+export type AssetOrientation = z.infer<typeof assetOrientationSchema>;
+
+/** True when the orientation changes nothing - stored as null, never as a no-op record. */
+export function isIdentityOrientation(orientation: AssetOrientation): boolean {
+  return orientation.mirror === false && orientation.quarterTurns === 0;
+}

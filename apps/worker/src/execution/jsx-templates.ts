@@ -1,5 +1,5 @@
 import { analyseTextDirection, textCodeUnits } from "@dyo/schemas";
-import type { ResolvedNestedTargetStep, SceneEditOperation } from "@dyo/schemas";
+import type { AssetOrientation, ResolvedNestedTargetStep, SceneEditOperation } from "@dyo/schemas";
 
 /**
  * The ONE and ONLY source of JSX/ExtendScript text this worker will ever
@@ -290,6 +290,12 @@ function buildSetTextMutation(text: string): string {
         } else {
           var __td = __layer.sourceText.value;
           var __previousText = __td.text;
+          // Where the template's own text sat, measured before it is replaced -
+          // what the frame fit below compares the new text against.
+          var __rectBeforeSet = null;
+          try {
+            __rectBeforeSet = __layer.sourceRectAtTime((Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __layer.containingComp.duration)) / 2, false);
+          } catch (__rectBeforeSetError) { __rectBeforeSet = null; }
           var __requiresBidi = ${requiresBidi ? "true" : "false"};
           var __expectedCodeUnits = ${expectedCodeUnits};
           var __dirNote = null;
@@ -480,8 +486,10 @@ function buildTextAutoFit(): string {
             if (__textColour === null) {
               try { if (__td.applyFill) { __textColour = __td.fillColor; } } catch (__fillColorError) { __textColour = null; }
             }
+            // A text with no readable colour has no same-colour blockers (the
+            // comparison below is false for it) but is still kept inside the frame.
             var __fitSupported =
-              __textColour !== null && !__layer.threeDLayer && !__layer.parent &&
+              !__layer.threeDLayer && !__layer.parent &&
               __fitScaleProp.numKeys === 0 && __fitAnchorProp.numKeys === 0 && __fitPositionProp.numKeys === 0 && __fitRotationProp.numKeys === 0 &&
               __fitRotationProp.value === 0 && __fitScaleProp.value[0] > 0 && __fitScaleProp.value[1] > 0;
             if (__fitSupported) {
@@ -536,7 +544,31 @@ function buildTextAutoFit(): string {
               }
               if (__factor < ${TEXT_AUTO_FIT_MIN_FACTOR}) {
                 __fitFailureReason = "replaced text overlaps a shape of its own colour and would have to shrink to " + Math.round(__factor * 100) + "% of its template size to stay visible (minimum ${Math.round(TEXT_AUTO_FIT_MIN_FACTOR * 100)}%) - refusing to produce unreadable or hidden text";
-              } else if (__factor < 1) {
+              }
+              // 2026-10-04 (seen in a finished video): a long replacement for a
+              // short right-aligned template line grew past the left edge of
+              // the frame. If the template's own text sat wholly inside its
+              // composition's frame and the new text does not, the new text is
+              // shrunk about its anchor until it is back inside, with the same
+              // margin - never below the minimum readable factor, never
+              // enlarged, never moved. A template text that itself crossed the
+              // frame edge (an animation entering, a deliberate bleed) is left
+              // alone: there the edge is the design.
+              var __frameFactor = 1;
+              if (__fitFailureReason === null && __rectBeforeSet !== null) {
+                var __pLeft = __fp[0] + (__rectBeforeSet.left - __fa[0]) * __fs[0] / 100;
+                var __pRight = __fp[0] + (__rectBeforeSet.left + __rectBeforeSet.width - __fa[0]) * __fs[0] / 100;
+                var __pTop = __fp[1] + (__rectBeforeSet.top - __fa[1]) * __fs[1] / 100;
+                var __pBottom = __fp[1] + (__rectBeforeSet.top + __rectBeforeSet.height - __fa[1]) * __fs[1] / 100;
+                if (__pLeft >= 0 && __pTop >= 0 && __pRight <= __fitComp.width && __pBottom <= __fitComp.height) {
+                  if (__fp[0] + __dLeft < 0 && __fp[0] > __margin) { __frameFactor = Math.min(__frameFactor, (__margin - __fp[0]) / __dLeft); }
+                  if (__fp[0] + __dRight > __fitComp.width && __fp[0] < __fitComp.width - __margin) { __frameFactor = Math.min(__frameFactor, (__fitComp.width - __margin - __fp[0]) / __dRight); }
+                  if (__fp[1] + __dTop < 0 && __fp[1] > __margin) { __frameFactor = Math.min(__frameFactor, (__margin - __fp[1]) / __dTop); }
+                  if (__fp[1] + __dBottom > __fitComp.height && __fp[1] < __fitComp.height - __margin) { __frameFactor = Math.min(__frameFactor, (__fitComp.height - __margin - __fp[1]) / __dBottom); }
+                }
+              }
+              __factor = Math.min(__factor, Math.max(__frameFactor, ${TEXT_AUTO_FIT_MIN_FACTOR}));
+              if (__fitFailureReason === null && __factor < 1) {
                 var __newTextScale = [__fs[0] * __factor, __fs[1] * __factor];
                 if (__fs.length > 2) { __newTextScale.push(__fs[2]); }
                 __fitScaleProp.setValue(__newTextScale);
@@ -554,9 +586,12 @@ function buildTextAutoFit(): string {
 export type MapFootageFit = "cover" | "contain";
 
 /** Shared mutation body for MAP_FOOTAGE - identical for the flat and nested target cases (module doc comment on buildSetTextBody above). */
-function buildMapFootageBody(assetPath: string, fit: MapFootageFit): string {
-  return withTargetLayerUnlocked(buildMapFootageMutation(assetPath, fit));
+function buildMapFootageBody(assetPath: string, fit: MapFootageFit, orientation: AssetOrientation): string {
+  return withTargetLayerUnlocked(buildMapFootageMutation(assetPath, fit, orientation));
 }
+
+/** The plan's "place it as the template holds the card" - nothing is flipped or turned. */
+export const IDENTITY_ORIENTATION: AssetOrientation = { mirror: false, quarterTurns: 0 };
 
 /**
  * REAL 2026-09-16 FINDING (session 1257ac95): a near-square logo cover-fitted
@@ -590,8 +625,8 @@ function buildMapFootageContainOnCard(): string {
                   __fitFailure = "screen card layer has a zero or mirrored scale - refusing to guess how to fit the media";
                 } else {
                   var __containFactor = Math.min(
-                    (__solidCard.width * __cardScale[0] / 100) / __newFootageItem.width,
-                    (__solidCard.height * __cardScale[1] / 100) / __newFootageItem.height
+                    (__solidCard.width * __cardScale[0] / 100) / __mediaFootprint.width,
+                    (__solidCard.height * __cardScale[1] / 100) / __mediaFootprint.height
                   );
                   var __rotationRadians = __cardRotation * Math.PI / 180;
                   var __offsetX = (__solidCard.width / 2 - __cardAnchor[0]) * __cardScale[0] / 100;
@@ -604,14 +639,14 @@ function buildMapFootageContainOnCard(): string {
                   var __mediaTransform = __media.property("ADBE Transform Group");
                   var __mediaAnchor = [__newFootageItem.width / 2, __newFootageItem.height / 2];
                   var __mediaPosition = [__cardCenterX, __cardCenterY];
-                  var __mediaScale = [__containFactor * 100, __containFactor * 100];
+                  var __mediaScale = [__containFactor * 100 * __orientation.mirrorSign, __containFactor * 100];
                   if (__cardAnchor.length > 2) { __mediaAnchor.push(__cardAnchor[2]); }
                   if (__cardPosition.length > 2) { __mediaPosition.push(__cardPosition[2]); }
                   if (__cardScale.length > 2) { __mediaScale.push(__cardScale[2]); }
                   __mediaTransform.property("ADBE Anchor Point").setValue(__mediaAnchor);
                   __mediaTransform.property("ADBE Position").setValue(__mediaPosition);
                   __mediaTransform.property("ADBE Scale").setValue(__mediaScale);
-                  __mediaTransform.property("ADBE Rotate Z").setValue(__cardRotation);
+                  __mediaTransform.property("ADBE Rotate Z").setValue(__cardRotation + __orientation.degrees);
                   __media.startTime = __layer.startTime;
                   __media.inPoint = __layer.inPoint;
                   __media.outPoint = __layer.outPoint;
@@ -633,9 +668,10 @@ function buildMapFootageContainOnCard(): string {
  */
 export const SOURCE_REPLACING_EFFECT_MATCH_NAMES = ["ADBE Fill", "ADBE Ramp", "ADBE 4ColorGradient"] as const;
 
-function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string {
+function buildMapFootageMutation(assetPath: string, fit: MapFootageFit, orientation: AssetOrientation): string {
   const assetPathLiteral = JSON.stringify(assetPath);
   const containOnCard = fit === "contain";
+  const turned = orientation.mirror || orientation.quarterTurns !== 0;
   return `
         if (!(__layer instanceof AVLayer)) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer is not an AV layer" });
@@ -658,7 +694,18 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string 
             var __importOptions = new ImportOptions(__assetFile);
             var __newFootageItem = app.project.importFile(__importOptions);
             var __fitFailure = null;
-            ${containOnCard ? `if (__solidCard !== null) {${buildMapFootageContainOnCard()}
+            // 2026-10-04: a card the template holds mirrored or on its side
+            // showed the client's screenshot mirrored or on its side. The plan
+            // can now record how the picture is turned: mirrored in its own
+            // axes, then turned clockwise in quarter turns. On a quarter or
+            // three-quarter turn the picture's footprint on the card is its
+            // height by its width, which is what the fit below measures.
+            var __orientation = { mirrorSign: ${orientation.mirror ? -1 : 1}, degrees: ${orientation.quarterTurns * 90} };
+            var __mediaFootprint = ${orientation.quarterTurns % 2 === 1 ? "{ width: __newFootageItem.height, height: __newFootageItem.width }" : "{ width: __newFootageItem.width, height: __newFootageItem.height }"};
+            ${turned ? `if (__solidCard === null) {
+              __fitFailure = "this picture's place is not a screen card - it cannot be flipped or turned there";
+            }
+            if (__fitFailure === null) ` : ""}            ${containOnCard ? `if (__solidCard !== null) {${buildMapFootageContainOnCard()}
             } else ` : ""}{
             // Card geometry is read BEFORE the source swap: replaceSource itself
             // rescales the layer's anchor point to the new source's size.
@@ -703,8 +750,8 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string 
                 var __oldPosition = __cardBefore.position;
                 var __oldRotationRadians = __cardBefore.rotation * Math.PI / 180;
                 var __coverFactor = Math.max(
-                  (__solidCard.width * __oldScale[0] / 100) / __newFootageItem.width,
-                  (__solidCard.height * __oldScale[1] / 100) / __newFootageItem.height
+                  (__solidCard.width * __oldScale[0] / 100) / __mediaFootprint.width,
+                  (__solidCard.height * __oldScale[1] / 100) / __mediaFootprint.height
                 );
                 var __centerOffsetX = (__solidCard.width / 2 - __oldAnchor[0]) * __oldScale[0] / 100;
                 var __centerOffsetY = (__solidCard.height / 2 - __oldAnchor[1]) * __oldScale[1] / 100;
@@ -713,13 +760,14 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string 
                   __oldPosition[1] + __centerOffsetX * Math.sin(__oldRotationRadians) + __centerOffsetY * Math.cos(__oldRotationRadians)
                 ];
                 var __newAnchor = [__newFootageItem.width / 2, __newFootageItem.height / 2];
-                var __newScale = [__coverFactor * 100, __coverFactor * 100];
+                var __newScale = [__coverFactor * 100 * __orientation.mirrorSign, __coverFactor * 100];
                 if (__oldAnchor.length > 2) { __newAnchor.push(__oldAnchor[2]); }
                 if (__oldPosition.length > 2) { __newPosition.push(__oldPosition[2]); }
                 if (__oldScale.length > 2) { __newScale.push(__oldScale[2]); }
                 __anchorProp.setValue(__newAnchor);
                 __positionProp.setValue(__newPosition);
                 __scaleProp.setValue(__newScale);
+                if (__orientation.degrees !== 0) { __rotationProp.setValue(__cardBefore.rotation + __orientation.degrees); }
                 __layer.moveToBeginning();
                 // Verify the ordering actually changed - the media must now be
                 // the top layer, above the card's guide labels.
@@ -773,8 +821,8 @@ function buildSetTextScript(aeProjectItemIndex: number, compositionName: string,
   return withTargets(wrapScript("SET_TEXT", buildSetTextBody(text)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
 }
 
-function buildMapFootageScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, assetPath: string, fit: MapFootageFit): FixedJsxScript {
-  return withTargets(wrapScript("MAP_FOOTAGE", buildMapFootageBody(assetPath, fit)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
+function buildMapFootageScript(aeProjectItemIndex: number, compositionName: string, layerIndex: number, assetPath: string, fit: MapFootageFit, orientation: AssetOrientation): FixedJsxScript {
+  return withTargets(wrapScript("MAP_FOOTAGE", buildMapFootageBody(assetPath, fit, orientation)), aeProjectItemIndex, compositionName, layerIndex) as FixedJsxScript;
 }
 
 /**
@@ -926,8 +974,8 @@ function buildSetTextNestedScript(nestedTarget: readonly ResolvedNestedTargetSte
   return wrapNestedScript("SET_TEXT", buildSetTextBody(text), nestedTarget);
 }
 
-function buildMapFootageNestedScript(nestedTarget: readonly ResolvedNestedTargetStep[], assetPath: string, fit: MapFootageFit): FixedJsxScript {
-  return wrapNestedScript("MAP_FOOTAGE", buildMapFootageBody(assetPath, fit), nestedTarget);
+function buildMapFootageNestedScript(nestedTarget: readonly ResolvedNestedTargetStep[], assetPath: string, fit: MapFootageFit, orientation: AssetOrientation): FixedJsxScript {
+  return wrapNestedScript("MAP_FOOTAGE", buildMapFootageBody(assetPath, fit, orientation), nestedTarget);
 }
 
 function buildSetLayerVisibilityScript(
@@ -3011,12 +3059,12 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildSetTextScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.text);
     case "MAP_FOOTAGE":
       if (operation.nestedTarget !== null) {
-        return buildMapFootageNestedScript(operation.nestedTarget, operation.assetPath, operation.fit ?? "cover");
+        return buildMapFootageNestedScript(operation.nestedTarget, operation.assetPath, operation.fit ?? "cover", operation.orientation ?? IDENTITY_ORIENTATION);
       }
       if (operation.layerIndex === null) {
         throw new Error("MAP_FOOTAGE operation has neither layerIndex nor nestedTarget set");
       }
-      return buildMapFootageScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.assetPath, operation.fit ?? "cover");
+      return buildMapFootageScript(aeProjectItemIndex, compositionName, operation.layerIndex, operation.assetPath, operation.fit ?? "cover", operation.orientation ?? IDENTITY_ORIENTATION);
     case "SET_LAYER_VISIBILITY":
       return buildSetLayerVisibilityScript(aeProjectItemIndex, compositionName, operation);
     case "SET_TIME_REMAP_FREEZE":

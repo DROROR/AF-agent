@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { textDirectionEvidenceSchema } from "./text-direction.js";
-import { slotFingerprintSchema } from "./slot-semantics.js";
+import { assetOrientationSchema, slotFingerprintSchema } from "./slot-semantics.js";
 
 /**
  * Phase 7A foundation: the strict, allowlisted contract for a future
@@ -105,6 +105,8 @@ const mapFootageOperationSchema = z
      * jsx-templates.ts). Ignored for a layer that is not a solid card.
      */
     fit: z.enum(["cover", "contain"]).optional(),
+    /** How the media is turned on its screen card (the plan's recorded choice); absent means as the template holds the card. Refused for a layer that is not a solid card. */
+    orientation: assetOrientationSchema.optional(),
     /**
      * Stage 4: the structural fingerprint this slot had when the plan was
      * approved. The worker recomputes it from the LIVE project immediately
@@ -321,6 +323,8 @@ const mapFootageOperationIntentSchema = z
      * jsx-templates.ts). Ignored for a layer that is not a solid card.
      */
     fit: z.enum(["cover", "contain"]).optional(),
+    /** How the media is turned on its screen card (the plan's recorded choice); absent means as the template holds the card. Refused for a layer that is not a solid card. */
+    orientation: assetOrientationSchema.optional(),
     /**
      * Stage 4: the structural fingerprint this slot had when the plan was
      * approved. The worker recomputes it from the LIVE project immediately

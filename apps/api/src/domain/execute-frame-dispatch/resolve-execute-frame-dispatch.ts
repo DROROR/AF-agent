@@ -1,5 +1,6 @@
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
-import { computeEffectiveVisibility, describeSlotBlockers, findSlotBlockers, selectScenePreviewFrameSeconds } from "@dyo/schemas";
+import { computeEffectiveVisibility, describeSlotBlockers, findSlotBlockers, isIdentityOrientation, selectScenePreviewFrameSeconds } from "@dyo/schemas";
+import type { AssetOrientation } from "@dyo/schemas";
 import type {
   ExecuteSceneEditRequest,
   ExecutionSessionStatus,
@@ -187,6 +188,12 @@ export type ResolveExecuteFrameDispatchResult =
  */
 function logoFit(mapping: { selectedAssetType?: string | null }): { fit: "contain" } | Record<string, never> {
   return mapping.selectedAssetType === "logo" ? { fit: "contain" } : {};
+}
+
+/** The plan's recorded choice of how a picture is turned on its card; nothing is sent when there is none, so an existing plan's payload is unchanged. */
+function assetOrientationOf(mapping: { assetOrientation?: AssetOrientation | null | undefined }): { orientation: AssetOrientation } | Record<string, never> {
+  const orientation = mapping.assetOrientation ?? null;
+  return orientation === null || isIdentityOrientation(orientation) ? {} : { orientation };
 }
 
 export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchInput): ResolveExecuteFrameDispatchResult {
@@ -449,7 +456,8 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
           assetId: asset.id,
           expectedSha256: asset.sha256,
           mimeType: asset.mimeType,
-          ...logoFit(mapping)
+          ...logoFit(mapping),
+          ...assetOrientationOf(mapping)
         });
         approvedMappingIds.push(mapping.id);
       } else {
@@ -584,7 +592,8 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         // Stage 4: the structure this slot had when the plan was approved. The
         // worker re-reads it live and refuses to mutate if it has changed.
         ...(placeholder.slotMutationFingerprint ? { expectedSlotFingerprint: placeholder.slotMutationFingerprint } : {}),
-        ...logoFit(mapping)
+        ...logoFit(mapping),
+        ...assetOrientationOf(mapping)
       });
       approvedMappingIds.push(mapping.id);
     } else if (classification === "color" && placeholder.colorControl !== undefined) {

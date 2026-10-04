@@ -1,4 +1,4 @@
-import { sha256Hex } from "@dyo/schemas";
+import { isIdentityOrientation, sha256Hex } from "@dyo/schemas";
 import { randomUUID } from "node:crypto";
 import type { ExecutionPlanEditOperation, NestedTargetStep, PlaceholderMapping, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { computeSceneUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
@@ -357,6 +357,20 @@ function applyExecutionPlanEditRaw(
 
     case "CLEAR_ASSET_TIMESTAMP": {
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, assetTimestamp: null, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "SET_ASSET_ORIENTATION": {
+      // An orientation that changes nothing is stored as null, never as a record.
+      const orientation = isIdentityOrientation(operation.orientation) ? null : operation.orientation;
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, assetOrientation: orientation, updatedAt: timestamp }));
+      if (!result.ok) return result;
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+    }
+
+    case "CLEAR_ASSET_ORIENTATION": {
+      const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, assetOrientation: null, updatedAt: timestamp }));
       if (!result.ok) return result;
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
     }
