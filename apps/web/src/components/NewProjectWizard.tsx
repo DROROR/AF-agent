@@ -328,6 +328,17 @@ export function NewProjectWizard(): ReactElement {
     parsedInspectionResult?.success && parsedInspectionResult.data.kind === "manifest" ? parsedInspectionResult.data.response : null;
 
   /**
+   * REAL 2026-10-04: an inspection whose project-wide scan had failed was
+   * shown like any other - "0 editable placeholders" in a list of numbers -
+   * and was turned into a project in which nothing could be edited. The
+   * worker attaches the scan's layer inventory to the job result only when
+   * that scan completed, so its absence is the worker's own statement that
+   * the layers were never read. Such a result cannot become a project.
+   */
+  const scanIncomplete =
+    inspectionResult !== null && !(typeof job?.result === "object" && job.result !== null && "layerInventory" in job.result);
+
+  /**
    * REAL 2026-09-28: a client's first two inspections failed, and all the
    * product told them was "Template inspection could not produce a valid
    * manifest." The actual reason was sitting in the job's own persisted
@@ -561,10 +572,13 @@ export function NewProjectWizard(): ReactElement {
                       </div>
                     </dl>
 
+                    {scanIncomplete ? (
+                      <ErrorState title={t.projectsNew.template.scanIncompleteTitle} description={t.projectsNew.template.scanIncompleteDescription} />
+                    ) : null}
                     {createProjectError ? <ErrorState title={t.projectsNew.template.createProjectFailedTitle} description={createProjectError} /> : null}
 
                     <div className="overview-actions">
-                      <Button variant="primary" disabled={isCreatingProject || name.trim() === ""} onClick={() => void handleCreateProject()}>
+                      <Button variant="primary" disabled={isCreatingProject || name.trim() === "" || scanIncomplete} onClick={() => void handleCreateProject()}>
                         {isCreatingProject ? t.projectsNew.template.creatingProject : t.projectsNew.template.createProjectAction}
                       </Button>
                     </div>

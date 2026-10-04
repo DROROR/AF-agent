@@ -1667,3 +1667,8 @@ message as before.
 
 **Not yet run on real After Effects.** Still open: an inspection whose scan failed is
 reported as succeeded and can be turned into a project.
+
+**Same day, closed:** the New project screen now says "After Effects did not finish reading
+this template" and will not create a project from an inspection whose job result carries
+no layer inventory (the worker attaches it only when the project-wide scan completed).
+Project `new2` was created from the failed inspection before this and holds 5 placeholders.

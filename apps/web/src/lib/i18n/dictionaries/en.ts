@@ -187,6 +187,8 @@ export const en = {
       resultUnknown: "Unresolved/degraded items",
       createProjectAction: "Create Project",
       creatingProject: "Creating…",
+      scanIncompleteTitle: "After Effects did not finish reading this template",
+      scanIncompleteDescription: "The layers were not read, so nothing in this template could be offered for editing. Close any dialog open in After Effects, leave it alone, and press Inspect Template again.",
       createProjectFailedTitle: "Could not create the project",
       retryAction: "Inspect again",
       previousInspectionCancelled: "The previous inspection was cancelled before it ran. You can inspect again."

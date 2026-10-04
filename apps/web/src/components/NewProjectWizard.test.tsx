@@ -247,6 +247,8 @@ describe("NewProjectWizard", () => {
                 kind: "manifest",
                 response: { manifest: manifest(), summary: inspectionSummary() },
                 diagnostics: [],
+                // The worker's proof that the project-wide scan completed.
+                layerInventory: { compositions: [], omittedCompositionCount: 0 },
                 // P0 fix (2026-09-03): a manifest result always carries proof
                 // the requested project was actually open - see
                 // projectOpenEvidenceSchema.
@@ -734,6 +736,12 @@ describe("NewProjectWizard", () => {
       // Reopening a completed result never enqueues a duplicate inspection.
       const jobsPostCountAfterRefresh = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length;
       expect(jobsPostCountAfterRefresh).toBe(jobsPostCountBeforeRefresh);
+
+      // REAL 2026-10-04: this result carries no layer inventory - the
+      // worker's project-wide scan never completed - so it is shown, said
+      // out loud, and cannot be turned into a project.
+      expect(screen.getByText("After Effects did not finish reading this template")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Create Project" }).hasAttribute("disabled")).toBe(true);
     }, 15000);
   });
 });

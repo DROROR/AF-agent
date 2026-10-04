@@ -181,6 +181,8 @@ export const he: Dictionary = {
       resultUnknown: "פריטים לא פתורים/מוגבלים",
       createProjectAction: "יצירת פרויקט",
       creatingProject: "יוצר…",
+      scanIncompleteTitle: "After Effects לא סיים לקרוא את התבנית",
+      scanIncompleteDescription: "השכבות לא נקראו, ולכן אי אפשר להציע שום דבר לעריכה בתבנית הזו. סגרו כל חלון שפתוח ב-After Effects, אל תיגעו בו, ולחצו שוב על בדיקת התבנית.",
       createProjectFailedTitle: "לא ניתן היה ליצור את הפרויקט",
       retryAction: "בדיקה נוספת",
       previousInspectionCancelled: "הבדיקה הקודמת בוטלה לפני שהתחילה. אפשר לבדוק שוב."
