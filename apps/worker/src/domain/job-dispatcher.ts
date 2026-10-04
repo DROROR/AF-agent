@@ -385,7 +385,12 @@ async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<Jo
             ? { ok: true }
             : {
                 ok: false,
-                reason: `this slot's structure has changed since the plan was approved (approved ${expected.digest.slice(0, 12)}, now ${recomputed.digest.slice(0, 12)}) - refusing to edit a layer that is no longer the one that was reviewed; re-run template inspection and re-approve`
+                // The live facts are stated, not only their digest (2026-10-04):
+                // a refusal that says "changed" without saying WHAT changed
+                // could only be diagnosed by installing a new build to ask.
+                reason:
+                  `this slot's structure has changed since the plan was approved (approved ${expected.digest.slice(0, 12)}, now ${recomputed.digest.slice(0, 12)}) - refusing to edit a layer that is no longer the one that was reviewed; re-run template inspection and re-approve. ` +
+                  `Live chain now: ${JSON.stringify({ hops: live.hops, targetWidthPx: live.targetWidthPx, targetHeightPx: live.targetHeightPx }).slice(0, 1500)}`
               };
         },
         now: deps.now
