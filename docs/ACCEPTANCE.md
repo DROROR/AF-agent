@@ -1787,3 +1787,20 @@ bounded backoff (six attempts, about a minute). A finished job whose result coul
 delivered was lost in the same way. If a report still cannot be delivered, the worker
 fails whatever it left active on the server before it claims anything new, and keeps
 trying that on each heartbeat until it gets through. Not yet seen on a real network drop.
+
+## 2026-10-04 - The dashboard asked for one slot's frame and was given the scene's latest
+
+**Seen live (project `5db054f5`):** ten slot frames had been captured, each at its own
+slot's moment and each attributed to its mapping (checked in the database: 3.8, 9.8, 14.2
+x3, 25.6, 30.6, 36.4, 41.4 and 41.7 s). The bulk picture review showed one of them.
+
+**Cause:** the web app's own proxy routes for `.../preview-status` and `.../preview`
+forwarded the path and dropped the query string. `?mappingId=` never reached the API - its
+log holds thousands of preview-status requests and none with a mapping id from the
+dashboard - so the API answered every one with the scene's latest frame. The per-slot rule
+introduced on 2026-09-24 has therefore never applied to what the dashboard displayed:
+every slot of a scene was shown whichever frame was captured last. (The server-side check
+on a saved decision did use the slot's own frame, which is why a multi-slot scene could be
+refused for reasons the screen did not show.)
+
+**Fix:** both proxies forward `mappingId`, and only that.
