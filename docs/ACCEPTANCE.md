@@ -1847,3 +1847,18 @@ the way After Effects shapes it. Not yet run on real After Effects.
 **Also noted, not yet fixed:** the two colours in this plan were saved at 10:21 UTC from
 the edit drawer before any suggestion existed; whether the drawer saved its colour pickers
 without being asked to is unconfirmed.
+
+## 2026-10-04 - A text was refused as "overlapping a shape of its own colour" because of an adjustment layer
+
+**Seen live (job `b36a353f`, worker `815b92d`):** the two colour changes now succeeded on
+real After Effects (operations 0 and 1 - the first time SET_BRAND_COLOR has ever worked),
+and operation 2, the brand line on the master composition's text layer, failed: "would
+have to shrink to 0% of its template size".
+
+**Cause:** the auto-fit looks below the text for layers of the text's own colour. The
+layer it found is a full-frame adjustment layer, which After Effects stores as a solid
+item with a colour and which draws none of it.
+
+**Fix:** a layer that draws nothing is not a blocker - an adjustment layer, a guide layer,
+a null, a layer used as a track matte, a layer not on screen at the moment checked, or one
+fully transparent then. Not yet run on real After Effects.

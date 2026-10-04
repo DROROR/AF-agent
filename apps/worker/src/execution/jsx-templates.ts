@@ -498,6 +498,24 @@ function buildTextAutoFit(): string {
               for (var __li = __layer.index + 1; __li <= __fitComp.numLayers; __li++) {
                 var __other = __fitComp.layer(__li);
                 if (!__other || !__other.enabled || __other.threeDLayer || __other.parent || __other instanceof TextLayer) { continue; }
+                // REAL 2026-10-04 FAILURE (job b36a353f): a full-frame ADJUSTMENT
+                // layer below the text is, to After Effects, a solid item with a
+                // colour - and this text was refused as "overlapping a shape of
+                // its own colour, shrink to 0%". An adjustment layer draws none
+                // of its own colour; nor does a guide layer, a null, or a layer
+                // used as a track matte. And a layer that is not on screen at
+                // the moment being checked, or is fully transparent then, hides
+                // nothing. None of these can swallow the text.
+                var __drawsNothing = false;
+                try {
+                  __drawsNothing = __other.adjustmentLayer === true || __other.guideLayer === true || __other.nullLayer === true || __other.isTrackMatte === true ||
+                    !(__other.inPoint <= __fitTime && __other.outPoint > __fitTime);
+                  if (!__drawsNothing) {
+                    var __otherOpacity = __other.property("ADBE Transform Group").property("ADBE Opacity");
+                    if (__otherOpacity && __otherOpacity.valueAtTime(__fitTime, false) === 0) { __drawsNothing = true; }
+                  }
+                } catch (__drawsNothingError) { __drawsNothing = false; }
+                if (__drawsNothing) { continue; }
                 var __otherColour = __fitFillColour(__other);
                 if (__otherColour === null) {
                   try { if (__other.source && __other.source.mainSource instanceof SolidSource) { __otherColour = __other.source.mainSource.color; } } catch (__solidColourError) { __otherColour = null; }

@@ -3060,7 +3060,7 @@ describe("buildDescribeLayerAtTimeScript (real 2026-09-17: a proven-correct Hebr
 
 
 describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line grew over a shape of its own orange colour)", () => {
-  type FitOptions = { blockerColour?: number[]; blockerAbove?: boolean; blockerPositionX?: number; blockerY?: number; textRotation?: number; locked?: boolean };
+  type FitOptions = { blockerColour?: number[]; blockerAbove?: boolean; blockerPositionX?: number; blockerY?: number; textRotation?: number; locked?: boolean; blockerFlags?: string };
   const ORANGE = [1, 0.66139823198318, 0.26009500026703, 1];
   const setup = (options: FitOptions = {}) => `
     function CompItem() {}
@@ -3091,6 +3091,8 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
     var __mask = { maskMode: MaskMode.ADD, inverted: false, property: function () { return { valueAtTime: function () { return { vertices: [[110, 10], [1175.625, 10], [1175.625, 1075.625], [110, 1075.625]] }; } }; } };
     var __blocker = new AVLayer();
     __blocker.name = "BG Color 2"; __blocker.enabled = true; __blocker.threeDLayer = false; __blocker.parent = null;
+    __blocker.inPoint = 0; __blocker.outPoint = 60;
+    ${options.blockerFlags ?? ""}
     __blocker.source = { mainSource: new SolidSource() };
     __blocker.sourceRectAtTime = function () { return { left: 0, top: 0, width: 1920, height: 1080 }; };
     __blocker.property = function (n) {
@@ -3129,6 +3131,20 @@ describe("SET_TEXT auto-fit (real 2026-09-17: a longer right-aligned Hebrew line
   const blockerRight = 465 + (1175.625 - 643.547794117647) * 0.68;
   const dLeft = (-1095.74072265625 - -50.5461578369141) * 0.8;
   const expectedFactor = (blockerRight + 24 - 1542.90086616518) / dLeft;
+
+  // REAL 2026-10-04 FAILURE (job b36a353f): the text was refused - "shrink to
+  // 0%" - because of a full-frame adjustment layer beneath it.
+  it.each([
+    ["an adjustment layer", "__blocker.adjustmentLayer = true;"],
+    ["a guide layer", "__blocker.guideLayer = true;"],
+    ["a null layer", "__blocker.nullLayer = true;"],
+    ["a layer used as a track matte", "__blocker.isTrackMatte = true;"],
+    ["a layer not on screen at that moment", "__blocker.inPoint = 50; __blocker.outPoint = 60;"]
+  ])("%s of the text's colour draws nothing and never shrinks or blocks the text", (_name, flags) => {
+    const outcome = runFit({ blockerFlags: flags });
+    expect(outcome.step).toMatchObject({ ok: true, resultingValue: HEBREW });
+    expect(outcome.scale).toEqual([80, 80, 100]);
+  });
 
   it("shrinks the replaced line uniformly about its anchor just enough to clear a same-coloured shape behind it (~66 %)", () => {
     const outcome = runFit();
