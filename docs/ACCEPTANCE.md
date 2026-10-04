@@ -1826,3 +1826,24 @@ Also the same day, for a non-technical client: plain wording throughout the Scen
 numbered "what to do on this page" guide driven by the same state as the buttons, cards
 labelled "Scene 1 / The whole video" above the template's own names, and parts with
 nothing to change folded away.
+
+## 2026-10-04 - A colour change on a solid layer was refused: "target layer's source is not a solid color"
+
+**Seen live (job `a0cc7db6`, the first execution ever started on this template):** the
+first of 37 operations failed in 8 seconds. The layer is a solid (the scan says so:
+`isSolid: true`).
+
+**Cause:** the script checked `layer.source instanceof SolidSource`. In After Effects a
+layer's `source` is a footage item and the SolidSource is that item's `mainSource`, so the
+check is never true - SET_BRAND_COLOR had refused every solid it was ever given. The tests
+passed because their fake put the SolidSource directly on `source`.
+
+**Fix:** the script reads `source.mainSource`. Because After Effects reuses one solid item
+for every duplicate of a solid layer, the item's colour is set only when this layer is its
+sole user; otherwise this layer alone is given a new solid of the same size and name. The
+colour is read back and a mismatch fails the operation. The tests now use a solid shaped
+the way After Effects shapes it. Not yet run on real After Effects.
+
+**Also noted, not yet fixed:** the two colours in this plan were saved at 10:21 UTC from
+the edit drawer before any suggestion existed; whether the drawer saved its colour pickers
+without being asked to is unconfirmed.

@@ -199,10 +199,78 @@ describe("buildOperationScript", () => {
   it("SET_BRAND_COLOR only supports a SolidSource, converts hex to a 0-1 RGB triple, and rejects other layer types with a typed failure path", () => {
     const op: SceneEditOperation = { type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "#FF8000" };
     const script = buildOperationScript(0, COMP_NAME, op);
-    expect(script).toContain("__layer.source instanceof SolidSource");
+    // A layer's source is a footage ITEM; the SolidSource is its mainSource.
+    expect(script).toContain("__layer.source.mainSource instanceof SolidSource");
+    expect(script).not.toContain("__layer.source instanceof SolidSource");
     expect(script).toContain("only supports solid-color layers");
     // #FF8000 -> [1, 0.50196..., 0]
     expect(script).toContain(JSON.stringify([1, 128 / 255, 0]));
+  });
+
+  /**
+   * REAL 2026-10-04 FAILURE (job a0cc7db6): the operation refused a real
+   * solid layer, because After Effects keeps the SolidSource on the layer's
+   * item (`source.mainSource`), not on `source` itself. The fake below is
+   * shaped the way After Effects shapes it.
+   */
+  describe("SET_BRAND_COLOR on a solid shaped as After Effects shapes it", () => {
+    const run = (setup: string): { outcome: { ok: boolean; failureReason?: string }; state: Record<string, unknown> } => {
+      const op: SceneEditOperation = { type: "SET_BRAND_COLOR", manifestPlaceholderId: "ph-1", layerIndex: 1, colorHex: "#FF8000" };
+      const script = buildOperationScript(1, COMP_NAME, op);
+      const probe = "; __result = JSON.stringify({ step: __result, state: __state() });";
+      const probed = script.replace(/return __result;\s*$/, `${probe}\n  return __result;`);
+      expect(probed).not.toBe(script);
+      const raw = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup)) as { step: string; state: Record<string, unknown> };
+      return { outcome: JSON.parse(raw.step) as { ok: boolean; failureReason?: string }, state: raw.state };
+    };
+    const base = (users: number, extra = "") => `
+      function CompItem() {}
+      function AVLayer() {}
+      function SolidSource() {}
+      var __undo = [];
+      var __itemSource = new SolidSource(); __itemSource.color = [0, 0, 0];
+      var __item = { name: "Backdrop", width: 1920, height: 1080, pixelAspect: 1, mainSource: __itemSource, usedIn: [] };
+      var __layerObj = new AVLayer(); __layerObj.name = "Backdrop"; __layerObj.index = 1; __layerObj.locked = false; __layerObj.source = __item;
+      var __replaced = null; var __added = 0; var __removed = 0;
+      __layerObj.replaceSource = function (newItem) { __replaced = newItem; this.source = newItem; };
+      var __others = [];
+      for (var __k = 1; __k < ${users}; __k++) { var __o = new AVLayer(); __o.source = __item; __others.push(__o); }
+      var __comp = new CompItem(); __comp.name = ${JSON.stringify(COMP_NAME)};
+      __comp.numLayers = 1 + __others.length;
+      __comp.layer = function (i) { return i === 1 ? __layerObj : __others[i - 2]; };
+      __layerObj.containingComp = __comp;
+      __comp.layers = { addSolid: function (color, name, w, h, par) {
+        __added++;
+        var src = new SolidSource(); src.color = color;
+        return { source: { name: name, width: w, height: h, pixelAspect: par, mainSource: src }, remove: function () { __removed++; } };
+      } };
+      __item.usedIn = [__comp];
+      var app = { project: { item: function () { return __comp; }, numItems: 1 }, beginUndoGroup: function (n) { __undo.push("begin"); }, endUndoGroup: function () { __undo.push("end"); } };
+      function __state() { return { itemColor: __item.mainSource.color, layerColor: __layerObj.source.mainSource.color, replaced: __replaced !== null, added: __added, removed: __removed, undo: __undo }; }
+      ${extra}
+    `;
+
+    it("the only user of its solid: the solid's own colour is set, inside one undo group", () => {
+      const { outcome, state } = run(base(1));
+      expect(outcome.ok).toBe(true);
+      expect(state.itemColor).toEqual([1, 128 / 255, 0]);
+      expect(state.replaced).toBe(false);
+      expect(state.undo).toEqual(["begin", "end"]);
+    });
+
+    it("a solid shared by other layers: only this layer is recoloured - the shared solid is left alone", () => {
+      const { outcome, state } = run(base(3));
+      expect(outcome.ok).toBe(true);
+      expect(state.itemColor).toEqual([0, 0, 0]);
+      expect(state.layerColor).toEqual([1, 128 / 255, 0]);
+      expect(state).toMatchObject({ replaced: true, added: 1, removed: 1 });
+    });
+
+    it("a layer that is not a solid is still refused with the typed reason", () => {
+      const { outcome } = run(base(1, "__item.mainSource = { file: 'clip.mov' };"));
+      expect(outcome.ok).toBe(false);
+      expect(outcome.failureReason).toMatch(/only supports solid-color layers/);
+    });
   });
 
   it("every operation type produces a distinct script", () => {

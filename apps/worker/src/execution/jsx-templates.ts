@@ -965,20 +965,62 @@ function buildSetDurationScript(aeProjectItemIndex: number, compositionName: str
 function buildSetBrandColorScript(aeProjectItemIndex: number, compositionName: string, op: Extract<SceneEditOperation, { type: "SET_BRAND_COLOR" }>): FixedJsxScript {
   // Only the one exact, unambiguous target type this narrow 2-field
   // operation can safely mean without a free-form property path: a solid
-  // color layer's own SolidSource.color. Any other layer/source shape is
-  // a typed failure, never a guess (section 9: "unsupported target =>
-  // typed failure").
+  // layer's own colour. Any other layer/source shape is a typed failure,
+  // never a guess (section 9: "unsupported target => typed failure").
+  //
+  // REAL 2026-10-04 FAILURE (job a0cc7db6): "target layer's source is not a
+  // solid color" - on a layer that IS a solid. A layer's `source` is a
+  // footage ITEM; the SolidSource is that item's `mainSource`. The check read
+  // `layer.source instanceof SolidSource`, which is never true in After
+  // Effects, so this operation had refused every solid it was ever given.
+  // (MAP_FOOTAGE in this same file already read `source.mainSource`.)
+  //
+  // A solid ITEM can be shared: After Effects reuses one item for every
+  // duplicate of a solid layer. Recolouring the item would recolour every
+  // layer using it, which nobody asked for. So when this layer is the item's
+  // only user the item's colour is set; when it is shared, this layer alone
+  // is given a new solid of the same size and name in the chosen colour.
   const rgb = hexToUnitRgb(op.colorHex);
   const rgbLiteral = JSON.stringify(rgb);
   const body = `
-        if (!(__layer instanceof AVLayer) || !(__layer.source instanceof SolidSource)) {
+        var __solidItem = null;
+        try {
+          if (__layer instanceof AVLayer && __layer.source && __layer.source.mainSource instanceof SolidSource) { __solidItem = __layer.source; }
+        } catch (__solidLookupError) { __solidItem = null; }
+        if (__solidItem === null) {
           __result = JSON.stringify({ ok: false, failureReason: "target layer's source is not a solid color - SET_BRAND_COLOR only supports solid-color layers" });
         } else {
-          var __previousColor = __layer.source.color;
-          __layer.source.color = ${rgbLiteral};
-          __result = JSON.stringify({ ok: true, previousValue: __previousColor, resultingValue: ${rgbLiteral} });
+          var __previousColor = __solidItem.mainSource.color;
+          var __users = 0;
+          try {
+            var __usedIn = __solidItem.usedIn;
+            for (var __u = 0; __u < __usedIn.length; __u++) {
+              for (var __l = 1; __l <= __usedIn[__u].numLayers; __l++) {
+                if (__usedIn[__u].layer(__l).source === __solidItem) { __users++; }
+              }
+            }
+          } catch (__usersError) { __users = 0; }
+          if (__users === 1) {
+            __solidItem.mainSource.color = ${rgbLiteral};
+          } else {
+            // Shared, or its users could not be counted: this layer alone gets its own solid.
+            var __ownComp = __layer.containingComp;
+            var __temporary = __ownComp.layers.addSolid(${rgbLiteral}, __solidItem.name, __solidItem.width, __solidItem.height, __solidItem.pixelAspect);
+            var __ownSolid = __temporary.source;
+            __temporary.remove();
+            __layer.replaceSource(__ownSolid, false);
+          }
+          var __appliedColor = null;
+          try { __appliedColor = __layer.source.mainSource.color; } catch (__readBackError) { __appliedColor = null; }
+          var __wanted = ${rgbLiteral};
+          var __matches = __appliedColor !== null && Math.abs(__appliedColor[0] - __wanted[0]) < 0.003 && Math.abs(__appliedColor[1] - __wanted[1]) < 0.003 && Math.abs(__appliedColor[2] - __wanted[2]) < 0.003;
+          if (!__matches) {
+            __result = JSON.stringify({ ok: false, failureReason: "the layer's colour was written but After Effects did not report the new colour afterwards" });
+          } else {
+            __result = JSON.stringify({ ok: true, previousValue: __previousColor, resultingValue: ${rgbLiteral} });
+          }
         }`;
-  return withTargets(wrapScript("SET_BRAND_COLOR", body), aeProjectItemIndex, compositionName, op.layerIndex) as FixedJsxScript;
+  return withTargets(wrapScript("SET_BRAND_COLOR", withTargetLayerUnlocked(body)), aeProjectItemIndex, compositionName, op.layerIndex) as FixedJsxScript;
 }
 
 /**
