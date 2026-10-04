@@ -1355,6 +1355,7 @@ export const en = {
     originalTimingPreserved: "Original timing preserved",
     previewSceneAction: "Preview Scene",
     generatingPreviewAction: "Generating…",
+    tryPreviewAgainAction: "Try again",
     regeneratePreviewAction: "Regenerate Preview",
     editAction: "Edit",
     advancedDetailsToggle: "Advanced details",

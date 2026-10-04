@@ -1187,6 +1187,7 @@ export const he: Dictionary = {
     originalTimingPreserved: "התזמון המקורי נשמר",
     previewSceneAction: "תצוגה מקדימה של הסצנה",
     generatingPreviewAction: "יוצר…",
+    tryPreviewAgainAction: "לנסות שוב",
     regeneratePreviewAction: "יצירת תצוגה מקדימה מחדש",
     editAction: "עריכה",
     advancedDetailsToggle: "פרטים מתקדמים",

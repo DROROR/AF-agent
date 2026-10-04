@@ -121,3 +121,19 @@ describe("SceneCard - zero-mapping resolved scenes show 'kept as original' copy 
     expect(screen.getByText("Needs your choice")).not.toBeNull();
   });
 });
+
+/**
+ * REAL 2026-10-04: a scene whose preview failed said "Please try again" and
+ * offered no way to - the only control was folded under Advanced details.
+ */
+describe("SceneCard - a failed preview can be tried again where the failure is shown", () => {
+  it("shows Try again beside the failure, and nothing extra when there is none", () => {
+    const failed: ScenePreviewEntry = { preview: null, state: "unavailable", isStale: false, errorMessage: "After Effects did not produce a picture.", hasFailed: true };
+    renderCard(realScene(), failed);
+    expect(screen.getByRole("button", { name: "Try again" }).hasAttribute("disabled")).toBe(false);
+
+    cleanup();
+    renderCard(realScene());
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+});

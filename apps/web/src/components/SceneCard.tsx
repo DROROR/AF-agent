@@ -235,9 +235,18 @@ export function SceneCard({
       </dl>
 
       {previewEntry.errorMessage ? (
-        <p className="scene-card__error">
-          {t.simpleScenes.previewErrorPrefix} {previewEntry.errorMessage}
-        </p>
+        <>
+          <p className="scene-card__error">
+            {t.simpleScenes.previewErrorPrefix} {previewEntry.errorMessage}
+          </p>
+          {/*
+            REAL 2026-10-04: the message said "Please try again" and the only
+            way to do so was folded away under Advanced details.
+          */}
+          <Button size="sm" variant="secondary" disabled={!canRegenerate} onClick={onRegeneratePreview}>
+            {t.simpleScenes.tryPreviewAgainAction}
+          </Button>
+        </>
       ) : null}
 
       <div className="scene-card__actions">
