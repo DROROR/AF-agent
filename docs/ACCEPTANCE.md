@@ -1958,3 +1958,17 @@ passed the whole answer, `dirty` included, to a strict check written for an open
 result. A successful slow open was reported as a failure. The poll's unit test had used a
 fixture without `dirty`, which is why it passed. Fixed: only the two fields are passed on,
 and the fixture now has the real answer's shape.
+
+## 2026-10-04 - The first final render was refused in 20 seconds because the worker gave After Effects 15 seconds to answer
+
+**Job `65b9faeb` (RENDER, Landscape):** FAILED with "composition verification failed:
+could not connect to ae-mcp: MCP error -32001: Request timed out". It was started minutes
+after a 36-minute complete-preview render on the same machine; a health check run straight
+afterwards reported After Effects and the bridge ONLINE, and itself took 21 s. Nothing was
+wrong with the project - the read-only composition check simply did not wait long enough
+for a busy machine and never tried again.
+
+Fixed in `c6bef60`: the check connects with a 60 s budget and makes up to three attempts,
+each with a fresh client. The Export screen went on saying "Started" after the job had
+failed; that is recorded in `docs/UX_BACKLOG.md` terms and is being fixed with the rest of
+the Export tab. The final render itself is still unverified on this template.
