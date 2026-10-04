@@ -1404,6 +1404,9 @@ export const en = {
     wholeVideoLabel: "The whole video",
     sceneNumberLabel: (n: number): string => `Scene ${n}`,
     quietCardsToggle: (n: number): string => (n === 1 ? "1 part of the template with nothing for you to change" : `${n} parts of the template with nothing for you to change`),
+    leftoverTextTitle: (n: number): string => (n === 1 ? "1 text here has not been decided" : `${n} texts here have not been decided`),
+    leftoverTextHint: "Keep what the template says, or press Edit to write your own.",
+    leftoverTextKeepAction: (n: number): string => (n === 1 ? "Keep the template's text" : `Keep the template's text for all ${n}`),
     useWholePlanAction: (n: number): string => `Use everything from my plan (${n})`,
     useAllSuggestionsAction: (n: number): string => `Use all ${n}`,
     findingsTitle: (count: number): string =>

@@ -99,7 +99,7 @@ function StoryboardThumb({
  */
 export function SimpleScenesView(): ReactElement {
   const { t } = useLocale();
-  const { project, plan, approveScenes, isStale, createPlan, refetch } = useProjectWorkspaceContext();
+  const { project, plan, approveScenes, isStale, createPlan, refetch, applyEdit } = useProjectWorkspaceContext();
   // 2026-09-28: Simple mode consumed suggestions but could never ASK for
   // them - `generate` lived only in MappingAssistantPanel, which Advanced
   // mode renders and Simple mode does not. So the view that exists to be the
@@ -302,6 +302,38 @@ export function SimpleScenesView(): ReactElement {
     await refetch();
   }
 
+  /**
+   * "Leave it as the template has it" as a real, recorded decision (see
+   * compute-scene-unresolved-reasons.ts, 2026-10-04): settles any no-change
+   * findings, then records KEEP_TEMPLATE_TEXT for each text layer named, in
+   * the reviewer's name. One plan edit for all of them.
+   */
+  async function handleKeepTemplateText(mappingIds: string[], findings: MappingSuggestion[]): Promise<void> {
+    setBusySuggestionId(findings[0]?.id ?? "keep-template-text");
+    setActionError(null);
+    for (const finding of findings) {
+      const result = await accept(finding.id, plan!.plan.revision);
+      if (!result.ok) {
+        setBusySuggestionId(null);
+        setActionError(result.message ?? null);
+        return;
+      }
+    }
+    const operations = mappingIds.flatMap((mappingId) => {
+      const owner = plan!.plan.scenePlans.find((scene) => scene.mappings.some((m) => m.id === mappingId));
+      return owner ? [{ type: "SET_TEMPLATE_TEXT_DECISION" as const, scenePlanId: owner.id, mappingId, decision: "KEEP_TEMPLATE_TEXT" as const }] : [];
+    });
+    if (operations.length > 0) {
+      const result = await applyEdit(operations);
+      if (!result.ok) {
+        setActionError(result.message ?? null);
+      }
+    } else {
+      await refetch();
+    }
+    setBusySuggestionId(null);
+  }
+
   async function handleReject(suggestion: MappingSuggestion): Promise<void> {
     setBusySuggestionId(suggestion.id);
     setActionError(null);
@@ -422,6 +454,7 @@ export function SimpleScenesView(): ReactElement {
               onAcceptSuggestion={(suggestion) => void handleAccept(suggestion)}
               onRejectSuggestion={(suggestion) => void handleReject(suggestion)}
               onAcceptSuggestions={(many) => void handleAcceptMany(many)}
+              onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
             />
           ))}
         </div>
@@ -466,6 +499,7 @@ export function SimpleScenesView(): ReactElement {
               onAcceptSuggestion={(suggestion) => void handleAccept(suggestion)}
               onRejectSuggestion={(suggestion) => void handleReject(suggestion)}
               onAcceptSuggestions={(many) => void handleAcceptMany(many)}
+              onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
             />
           ))}
           </div>

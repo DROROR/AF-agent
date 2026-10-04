@@ -191,3 +191,64 @@ describe("SceneCard - a scene's picture and wording are read from the layers tha
     expect(screen.queryByText("No picture chosen")).toBeNull();
   });
 });
+
+/**
+ * REAL 2026-10-04 DEAD END: a text layer left "as the template has it"
+ * recorded nothing, its scene stayed at "needs your choice" and Approve stayed
+ * disabled with no control left on the page that could clear it.
+ */
+describe("SceneCard - a text nobody decided about can be kept as the template has it", () => {
+  const textKind = { value: "text", source: "MANIFEST", evidence: [] };
+  function renderWithKeep(mappings: unknown[], onKeep: (ids: string[], findings: MappingSuggestion[]) => void, pending: MappingSuggestion[] = []) {
+    renderWithLocale(
+      <SceneCard
+        projectId={PROJECT_ID}
+        realScene={realScene({ mappings: mappings as never })}
+        assets={[]}
+        previewEntry={READY_PREVIEW}
+        pendingSuggestions={pending}
+        suggestionsBusy={false}
+        onEdit={() => {}}
+        onRegeneratePreview={() => {}}
+        onAcceptSuggestion={() => {}}
+        onRejectSuggestion={() => {}}
+        onKeepTemplateText={onKeep}
+      />
+    );
+  }
+
+  it("asks plainly, and one press hands back exactly the undecided text layers", () => {
+    const kept: string[][] = [];
+    renderWithKeep(
+      [
+        mappingFixture({ id: "m-credit", placeholderName: "Credit line", placeholderClassification: textKind }),
+        mappingFixture({ id: "m-done", placeholderName: "Headline", placeholderClassification: textKind, text: "Written" }),
+        mappingFixture({ id: "m-kept", placeholderName: "Footer", placeholderClassification: textKind, keepTemplateText: { decision: "KEEP_TEMPLATE_TEXT" } })
+      ],
+      (ids) => kept.push(ids)
+    );
+    expect(screen.getByText("1 text here has not been decided")).toBeTruthy();
+    expect(screen.getByText("Credit line")).toBeTruthy();
+    screen.getByRole("button", { name: "Keep the template's text" }).click();
+    expect(kept).toEqual([["m-credit"]]);
+  });
+
+  it("agreeing with a no-change finding about a text layer records the decision for that layer too", () => {
+    const calls: { ids: string[]; findings: string[] }[] = [];
+    const finding = mappingSuggestionFixture({ id: "f-1", mappingId: "m-credit", suggestedText: null, reasoning: "template credit" });
+    renderWithKeep(
+      [mappingFixture({ id: "m-credit", placeholderName: "Credit line", placeholderClassification: textKind })],
+      (ids, findings) => calls.push({ ids, findings: findings.map((f) => f.id) }),
+      [finding as never]
+    );
+    // A finding is already asking about it - no second question for the same layer.
+    expect(screen.queryByText("1 text here has not been decided")).toBeNull();
+    screen.getByRole("button", { name: "OK - leave it as it is" }).click();
+    expect(calls).toEqual([{ ids: ["m-credit"], findings: ["f-1"] }]);
+  });
+
+  it("says nothing when every text is written or already kept", () => {
+    renderWithKeep([mappingFixture({ id: "m-done", placeholderClassification: textKind, text: "Written" })], () => {});
+    expect(screen.queryByText(/has not been decided/)).toBeNull();
+  });
+});

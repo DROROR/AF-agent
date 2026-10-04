@@ -146,6 +146,12 @@ export interface SceneCardProps {
    * exactly as before.
    */
   cardMappings?: readonly PlaceholderMapping[];
+  /**
+   * Records "keep the template's text" for these text layers, and settles any
+   * no-change findings about them. Absent: the older behaviour, where
+   * agreeing with a finding recorded nothing on the plan.
+   */
+  onKeepTemplateText?: (mappingIds: string[], findings: MappingSuggestion[]) => void;
   /** What this card is called for a person ("Scene 3", "Whole video") - shown above the template's own name. */
   eyebrow?: string;
   /** Applies several suggestions in ONE request. Absent: no "use all" button is offered - several single accepts fired together would each carry the same plan revision and all but the first would be refused as stale. */
@@ -175,7 +181,8 @@ export function SceneCard({
   onRejectSuggestion,
   cardMappings,
   onAcceptSuggestions,
-  eyebrow
+  eyebrow,
+  onKeepTemplateText
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
   const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
@@ -212,6 +219,16 @@ export function SceneCard({
   const findings = pendingSuggestions.filter(
     (s) => s.suggestedText === null && s.suggestedAssetId === null && s.suggestedClassification === null
   );
+  // Text layers nobody has decided about: no text typed, and no recorded
+  // "keep the template's text". Each keeps its scene from being approved.
+  const undecidedTexts = shownMappings.filter(
+    (m) => m.placeholderClassification?.value === "text" && (m.text === null || m.text.trim() === "") && (m.keepTemplateText ?? null) === null
+  );
+  const undecidedTextIds = new Set(undecidedTexts.map((m) => m.id));
+  // Those with nothing pending about them have no other control on this card
+  // at all - they get a plain question of their own (below).
+  const pendingMappingIds = new Set(pendingSuggestions.map((suggestion) => suggestion.mappingId));
+  const leftoverTexts = onKeepTemplateText ? undecidedTexts.filter((m) => !pendingMappingIds.has(m.id)) : [];
   const hasGenuineReview = proposals.length > 0;
   // const hasNoMappingsToReview = realScene.scenePlan.mappings.length === 0;
   const hasNoMappingsToReview = shownMappings.length === 0;
@@ -357,11 +374,39 @@ export function SceneCard({
             size="sm"
             variant="ghost"
             disabled={suggestionsBusy}
-            onClick={() => findings.forEach((finding) => onAcceptSuggestion(finding))}
+            onClick={() => {
+              // REAL 2026-10-04 DEAD END: agreeing here recorded nothing on
+              // the plan, so a text layer left "as the template has it" kept
+              // its scene at "needs your choice" for ever. Agreeing now also
+              // records that decision for each text layer it is about.
+              if (onKeepTemplateText) {
+                onKeepTemplateText(
+                  findings.flatMap((finding) => (finding.mappingId !== null && undecidedTextIds.has(finding.mappingId) ? [finding.mappingId] : [])),
+                  findings
+                );
+              } else {
+                findings.forEach((finding) => onAcceptSuggestion(finding));
+              }
+            }}
           >
             {t.simpleScenes.findingsAcceptAllAction(findings.length)}
           </Button>
         </details>
+      ) : null}
+
+      {leftoverTexts.length > 0 ? (
+        <div className="scene-card__leftover">
+          <p className="scene-card__review-title">{t.simpleScenes.leftoverTextTitle(leftoverTexts.length)}</p>
+          <ul>
+            {leftoverTexts.map((m) => (
+              <li key={m.id}>{m.placeholderName}</li>
+            ))}
+          </ul>
+          <p className="scene-card__finding-reason">{t.simpleScenes.leftoverTextHint}</p>
+          <Button size="sm" variant="secondary" disabled={suggestionsBusy} onClick={() => onKeepTemplateText?.(leftoverTexts.map((m) => m.id), [])}>
+            {t.simpleScenes.leftoverTextKeepAction(leftoverTexts.length)}
+          </Button>
+        </div>
       ) : null}
 
       <details className="advanced-details">

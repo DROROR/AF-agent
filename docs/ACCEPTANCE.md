@@ -1804,3 +1804,25 @@ on a saved decision did use the slot's own frame, which is why a multi-slot scen
 refused for reasons the screen did not show.)
 
 **Fix:** both proxies forward `mappingId`, and only that.
+
+## 2026-10-04 - "Leave it as it is" recorded nothing, and the scene could never be approved
+
+**Seen live (project `5db054f5`, plan revision 4):** the template's own credit line was a
+text layer. The assistant found nothing to change; the reviewer pressed "OK - leave it as
+it is". The finding disappeared, the scene stayed "Needs your choice", Approve Scenes
+stayed disabled, and nothing on the page could clear it. The reviewer said, rightly, that
+they had no idea what they had just been asked to do.
+
+**Cause:** accepting a suggestion that proposes nothing changes nothing on the plan, and a
+text layer with no text counts as undecided.
+
+**Fix:** a recorded "keep the template's text" on a text layer nobody typed into is a
+decision - in the reviewer's name, bound to that (empty) text, void the moment a text is
+typed. Agreeing with a no-change finding about a text layer now records it. A text layer
+still undecided with nothing else on its card gets a plain question of its own: keep what
+the template says, or press Edit.
+
+Also the same day, for a non-technical client: plain wording throughout the Scenes tab, a
+numbered "what to do on this page" guide driven by the same state as the buttons, cards
+labelled "Scene 1 / The whole video" above the template's own names, and parts with
+nothing to change folded away.

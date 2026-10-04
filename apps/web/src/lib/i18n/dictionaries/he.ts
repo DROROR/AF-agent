@@ -1236,6 +1236,9 @@ export const he: Dictionary = {
     wholeVideoLabel: "הסרטון כולו",
     sceneNumberLabel: (n: number): string => `סצנה ${n}`,
     quietCardsToggle: (n: number): string => (n === 1 ? "חלק אחד של התבנית שאין בו מה לשנות" : `${n} חלקים של התבנית שאין בהם מה לשנות`),
+    leftoverTextTitle: (n: number): string => (n === 1 ? "טקסט אחד כאן עדיין לא הוחלט" : `${n} טקסטים כאן עדיין לא הוחלטו`),
+    leftoverTextHint: "אפשר להשאיר את מה שהתבנית אומרת, או ללחוץ על עריכה ולכתוב משלכם.",
+    leftoverTextKeepAction: (n: number): string => (n === 1 ? "להשאיר את הטקסט של התבנית" : `להשאיר את הטקסט של התבנית בכל ${n}`),
     useWholePlanAction: (n: number): string => `להשתמש בכל התוכנית שלי (${n})`,
     useAllSuggestionsAction: (n: number): string => `להשתמש בכל ${n}`,
     findingsTitle: (count: number): string =>

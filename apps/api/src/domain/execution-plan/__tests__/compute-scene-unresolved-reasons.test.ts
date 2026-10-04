@@ -86,6 +86,31 @@ describe("isMappingResolved", () => {
     expect(isMappingResolved(color, null)).toBe(true);
   });
 
+  // REAL 2026-10-04 DEAD END: "leave it as it is" on a template's own credit
+  // line recorded nothing, and the scene could never be approved.
+  describe("an explicit 'keep the template's text' on a text layer nobody typed into", () => {
+    const text = { value: "text" as const, source: "MANIFEST" as const, evidence: [] };
+    const kept = (textAtDecision: string, decision: "KEEP_TEMPLATE_TEXT" | "REPLACE" = "KEEP_TEMPLATE_TEXT") => ({
+      decision,
+      decidedBy: "user-1",
+      decidedAt: "2026-10-04T00:00:00.000Z",
+      textAtDecision
+    });
+
+    it("IS resolved - a recorded, attributable decision about that empty text", () => {
+      expect(isMappingResolved(mapping({ placeholderName: "Headline", placeholderClassification: text, keepTemplateText: kept("") }), null)).toBe(true);
+    });
+
+    it("is NOT resolved with no decision at all", () => {
+      expect(isMappingResolved(mapping({ placeholderName: "Headline", placeholderClassification: text }), null)).toBe(false);
+    });
+
+    it("is NOT resolved by a decision made about some other text, nor by a REPLACE decision", () => {
+      expect(isMappingResolved(mapping({ placeholderName: "Headline", placeholderClassification: text, keepTemplateText: kept("Old words") }), null)).toBe(false);
+      expect(isMappingResolved(mapping({ placeholderName: "Headline", placeholderClassification: text, keepTemplateText: kept("", "REPLACE") }), null)).toBe(false);
+    });
+  });
+
   it("a content mapping IS resolved once it has a real accepted asset/text", () => {
     const s = scene({ mappings: [mapping({ text: "Real headline" })] });
     expect(isMappingResolved(s.mappings[0]!, s.instructions)).toBe(true);

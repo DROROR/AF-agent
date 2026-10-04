@@ -78,6 +78,18 @@ export function isMappingResolved(mapping: PlaceholderMapping, instructions: str
   if (mapping.placeholderClassification.value === "color") {
     return true;
   }
+  // REAL 2026-10-04 DEAD END: a template's own credit line was listed as a
+  // text layer. The assistant said "nothing to change", the reviewer pressed
+  // "leave it" - and nothing was recorded, so the scene stayed "needs your
+  // choice" with Approve disabled and no control left that could clear it.
+  // A reviewer saying "keep the template's text" about a text layer they
+  // typed nothing into IS their decision about it: recorded in their name,
+  // about exactly that (empty) text. It stops counting the moment a text is
+  // typed there, because the record is bound to the text it was made about.
+  const keep = mapping.keepTemplateText ?? null;
+  if (mapping.text === null && keep !== null && keep.decision === "KEEP_TEMPLATE_TEXT" && keep.textAtDecision === "") {
+    return true;
+  }
   const input = {
     placeholderName: mapping.placeholderName,
     currentClassification: mapping.placeholderClassification.value,
