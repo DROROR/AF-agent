@@ -40,7 +40,19 @@ export interface GetCurrentExecutionSessionDeps {
 export async function getCurrentExecutionSession(deps: GetCurrentExecutionSessionDeps, projectId: string): Promise<CurrentExecutionSessionResponse> {
   const plan = await deps.executionPlanRepository.findCurrentByProjectId(projectId);
   const latest = await deps.executionSessionRepository.findLatestByProjectId(projectId);
-  if (!plan || !latest || (!isSessionActive(latest, plan.revision) && !isRecoverableForPreviewRegeneration(latest, plan.revision))) {
+  // REAL 2026-10-04 DEFECT (project 5db054f5, seen on the live dashboard
+  // minutes after its first final render succeeded): the session became
+  // COMPLETED, this read returned null, and every screen fell back to the
+  // very beginning - the banner said "Create the first preview", the Preview
+  // tab offered "Build my video", Export said "Not ready yet" next to the
+  // finished, downloadable video. A session that COMPLETED for the plan
+  // revision still current is the project's state, not the absence of one:
+  // its approvals are what the finished video was made from. It is returned
+  // (it stays terminal - nothing can be dispatched against it, the server's
+  // own gates decide that, not this read); a session of a superseded
+  // revision is still not returned, so editing the plan starts afresh.
+  const completedForCurrentPlan = plan !== null && latest !== null && latest.status === "COMPLETED" && latest.planRevision === plan.revision;
+  if (!plan || !latest || (!isSessionActive(latest, plan.revision) && !isRecoverableForPreviewRegeneration(latest, plan.revision) && !completedForCurrentPlan)) {
     return { session: null };
   }
 

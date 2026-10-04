@@ -2004,3 +2004,28 @@ in this template is a layer the rule can measure is unknown until it is run ther
 **The two colours in that video** (`#0FAFFF`, `#9A4242`) were not an unasked save: plan
 revision 2 differs from revision 1 in exactly those two colour values and nothing else,
 and the drawer sends a colour only when its field was changed.
+
+## 2026-10-04 - A project whose final video had just been made was sent back to "Create the first preview"
+
+**Seen on the live dashboard, project `5db054f5`, minutes after RENDER job `62b96a32`
+succeeded** (1920x1080, 30 fps, 44.83 s, 1345 frames, artifact VALID and downloadable): the
+banner said "Create the first preview", the checklist marked "First Preview - do this now"
+above "Export Video - Done", the Preview tab offered "Build my video", and the Landscape
+card said "Not ready yet" beside the finished video. A client pressing what the screen told
+them to press would have started the whole build again.
+
+**Cause.** A successful render marks the execution session COMPLETED.
+`GET .../execution-sessions/current` returned null for every terminal session, so each
+screen read "no session" and showed its starting state. The web already treats a COMPLETED
+session as a finished one (`resolveNextAction` ends at "done"; Export counts COMPLETED as
+render-ready) - it was simply never given one. A unit test pinned the null.
+
+**Fixed.** The read returns a COMPLETED session when it belongs to the plan revision still
+current; a superseded revision still yields null, so an edited plan starts afresh. The
+session stays terminal - this is a read, and every dispatch gate still uses
+`isSessionActive`. The pinned test was rewritten to the corrected behaviour, with the
+superseded-revision case beside it.
+
+**Not yet seen on the dashboard after the fix** - to be confirmed on the same project once
+deployed: banner "Everything is done", Preview showing the approved video, Export showing
+the download without "Not ready yet".

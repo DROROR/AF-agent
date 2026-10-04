@@ -132,10 +132,27 @@ describe("getCurrentExecutionSession", () => {
     expect(result.session).toBeNull();
   });
 
-  it("returns null for a genuinely COMPLETED session - never resurrects a real terminal completion", async () => {
+  // 2026-10-04: this test used to pin `null` here. On the live dashboard that
+  // null sent a project with a finished, downloadable video back to "Create
+  // the first preview". The session stays terminal - it is only READ.
+  it("returns a COMPLETED session of the plan revision still current - a finished video is the project's state, not the absence of one", async () => {
     const repos = await setup();
     await repos.executionSessionRepository.recordSceneCompleted(SESSION_ID, "scene-1", "b".repeat(64), "COMPLETED", NOW);
     await repos.executionSessionRepository.markStatus(SESSION_ID, "COMPLETED", NOW);
+
+    const result = await getCurrentExecutionSession(deps(repos), PROJECT_ID);
+    expect(result.session?.id).toBe(SESSION_ID);
+    expect(result.session?.status).toBe("COMPLETED");
+  });
+
+  it("returns null for a COMPLETED session of a superseded plan revision - an edited plan starts afresh", async () => {
+    const repos = await setup();
+    await repos.executionSessionRepository.recordSceneCompleted(SESSION_ID, "scene-1", "b".repeat(64), "COMPLETED", NOW);
+    await repos.executionSessionRepository.markStatus(SESSION_ID, "COMPLETED", NOW);
+    await repos.executionPlanRepository.createRevision(
+      { id: "plan-2", projectId: PROJECT_ID, revision: 5, status: "APPROVED", templateId: "tmpl-1", sourceProjectSha256: "a".repeat(64), scenePlans: [], approvedAt: NOW, approvedBy: "user-1" },
+      NOW
+    );
 
     const result = await getCurrentExecutionSession(deps(repos), PROJECT_ID);
     expect(result.session).toBeNull();
