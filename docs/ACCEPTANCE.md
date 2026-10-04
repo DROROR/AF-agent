@@ -1756,3 +1756,13 @@ treated as unknown, and "unknown" then fell back to the nested window again.
 the nested composition is inside the window being lifted. And a scene window that was
 looked for and not established is now recorded as null, which means "no provable moment" -
 never a fallback to a nested composition's timeline.
+
+## 2026-10-04 - A gradient on a card solid would have painted over the screenshot (found by reading, before any run)
+
+The worker switches off a card solid's "ADBE Fill" effect when media replaces the solid,
+because a Fill paints every pixel one colour. The phone-screen solids of the template under
+test get their look from "ADBE Ramp" (Gradient Ramp) instead, which generates every pixel
+in the same way - a screenshot placed there would have rendered as the template's
+gradient. The rule now covers Fill, Gradient Ramp and 4-Colour Gradient: switched off,
+never deleted, verified afterwards, other effects untouched. Not yet run on real After
+Effects.

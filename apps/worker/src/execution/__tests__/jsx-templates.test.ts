@@ -1603,7 +1603,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
   });
 
   describe("screen card replacement (Mixkit 'place image above' slots: a 1242x2688 solid under guide labels)", () => {
-    type CardOptions = { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean; fillStuck?: boolean; anchor?: number[]; position?: number[]; scale?: number[]; rotation?: number };
+    type CardOptions = { animatedScale?: boolean; locked?: boolean; moveIgnored?: boolean; fillStuck?: boolean; cardEffect?: string; anchor?: number[]; position?: number[]; scale?: number[]; rotation?: number };
     const cardSetup = (options: CardOptions = {}) => `
       ${NESTED_FAKE_APP_SETUP}
       function SolidSource() {}
@@ -1622,7 +1622,7 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       function __makeParade(effects) {
         return { numProperties: effects.length, property: function (i) { return effects[i - 1]; } };
       }
-      var __cardFill = __makeEffect("ADBE Fill", "Fill", ${options.fillStuck ? "true" : "false"});
+      var __cardFill = __makeEffect(${JSON.stringify(options.cardEffect ?? "ADBE Fill")}, "Fill", ${options.fillStuck ? "true" : "false"});
       var __cardBlur = __makeEffect("ADBE Gaussian Blur 2", "Gaussian Blur", false);
       var __otherFill = __makeEffect("ADBE Fill", "Fill", false);
       var __otherBlur = __makeEffect("ADBE Gaussian Blur 2", "Gaussian Blur", false);
@@ -1782,10 +1782,19 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
       expect(outcome.cardBlur).toBe(true);
     });
 
+    // REAL 2026-10-04: a phone-screen solid that gets its look from a
+    // Gradient Ramp. Left on, the gradient paints over the screenshot.
+    it.each(["ADBE Ramp", "ADBE 4ColorGradient"])("switches off a card solid's %s too - a gradient generates every pixel just as a fill does", (matchName) => {
+      const outcome = runCard({ cardEffect: matchName });
+      expect(outcome.step.ok).toBe(true);
+      expect(outcome.cardFill).toBe(false);
+      expect(outcome.cardBlur).toBe(true);
+    });
+
     it("a Fill effect that cannot be switched off fails the operation with its name - never a silent flat card - and the lock is still restored", () => {
       const outcome = runCard({ locked: true, fillStuck: true });
       expect(outcome.step.ok).toBe(false);
-      expect(outcome.step.failureReason).toMatch(/Fill effect "Fill" could not be switched off/);
+      expect(outcome.step.failureReason).toMatch(/effect "Fill" could not be switched off/);
       expect(outcome.cardFill).toBe(true);
       expect(outcome.locked).toBe(true);
     });

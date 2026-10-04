@@ -607,6 +607,14 @@ function buildMapFootageContainOnCard(): string {
               }`;
 }
 
+/**
+ * Effects that GENERATE a layer's pixels and ignore its source: a flat fill
+ * and After Effects' two built-in gradients. On a card solid they are how the
+ * card gets its look; left on after the source is swapped they paint over the
+ * media. Switched off (never deleted) when media replaces a card solid.
+ */
+export const SOURCE_REPLACING_EFFECT_MATCH_NAMES = ["ADBE Fill", "ADBE Ramp", "ADBE 4ColorGradient"] as const;
+
 function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string {
   const assetPathLiteral = JSON.stringify(assetPath);
   const containOnCard = fit === "contain";
@@ -708,20 +716,26 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit): string 
               // logo rendered as plain dark-grey cards. Switch those Fill effects
               // off (never delete them) and verify, failing rather than
               // reporting a fill nobody can see. Other effects are left alone.
+              // 2026-10-04: a card solid can equally get its look from a
+              // GRADIENT - "Gradient Ramp" or "4-Colour Gradient" - which, like
+              // Fill, generates every pixel of the layer and ignores what the
+              // source holds. A screenshot placed under one renders as the
+              // template's gradient. The same rule covers all three.
+              var __paintsOverSource = ${JSON.stringify(Object.fromEntries(SOURCE_REPLACING_EFFECT_MATCH_NAMES.map((name) => [name, true])))};
               if (__fitFailure === null) {
                 var __effectParade = null;
                 try { __effectParade = __layer.property("ADBE Effect Parade"); } catch (__paradeError) { __effectParade = null; }
                 if (__effectParade) {
                   for (var __effectIndex = 1; __effectIndex <= __effectParade.numProperties; __effectIndex++) {
                     var __effect = __effectParade.property(__effectIndex);
-                    if (__effect && __effect.matchName === "ADBE Fill" && __effect.enabled) {
+                    if (__effect && __paintsOverSource[__effect.matchName] === true && __effect.enabled) {
                       try { __effect.enabled = false; } catch (__disableError) { /* verified below */ }
                     }
                   }
                   for (var __checkIndex = 1; __checkIndex <= __effectParade.numProperties; __checkIndex++) {
                     var __checkEffect = __effectParade.property(__checkIndex);
-                    if (__checkEffect && __checkEffect.matchName === "ADBE Fill" && __checkEffect.enabled) {
-                      __fitFailure = "screen card's Fill effect \\"" + __checkEffect.name + "\\" could not be switched off - it would paint the media one flat colour";
+                    if (__checkEffect && __paintsOverSource[__checkEffect.matchName] === true && __checkEffect.enabled) {
+                      __fitFailure = "screen card's effect \\"" + __checkEffect.name + "\\" could not be switched off - it would paint over the media";
                     }
                   }
                 }
