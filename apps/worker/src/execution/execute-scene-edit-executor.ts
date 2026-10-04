@@ -264,6 +264,30 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // working copy on disk - the session's only persisted state. A genuine
   // resume keeps the open project, because its completed operations only
   // exist there.
+  //
+  // REAL 2026-10-04 HAZARD (session 398816c4, found before it could bite): a
+  // job applied two operations and failed on the third. They existed only in
+  // After Effects' memory - nothing is saved until every operation is done.
+  // After Effects was then restarted. "Continue" would have opened the
+  // untouched copy from disk and carried on from the THIRD operation, and the
+  // finished video would have been silently missing the first two.
+  //
+  // A resume may keep the open project only when it is provably still there:
+  // After Effects has THIS working copy open AND says it holds unsaved edits.
+  // Anything else - another project open, none, a clean copy, or a bridge
+  // that cannot say - means the partial work is gone, and the job starts
+  // again from the first operation on the copy from disk.
+  // Only a PARTIAL job is in question: one whose every operation completed
+  // has been saved, and re-applying it would do each edit twice.
+  const isPartial = checkpoint.completedOperationIndices.length > 0 && nextPendingOperationIndex(checkpoint, request.operations.length) !== null;
+  if (isPartial && !captureOnlyResume && request.previewOnly !== true && deps.aeEditBridge.describeOpenProject) {
+    const open = await deps.aeEditBridge.describeOpenProject();
+    const partialWorkStillOpen =
+      open.ok && open.openedPath !== null && windowsPathsEqual(open.openedPath, workingCopy.workingProjectPath) && open.dirty === true;
+    if (!partialWorkStillOpen) {
+      checkpoint = { ...checkpoint, completedOperationIndices: [] };
+    }
+  }
   const startsFresh = checkpoint.completedOperationIndices.length === 0;
   // A capture-only resume also reopens from disk: the pinned, hash-verified
   // saved file is the authority, never whatever is still open in AE.

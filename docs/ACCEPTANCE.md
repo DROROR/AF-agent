@@ -1916,3 +1916,27 @@ requested working copy counts.
 This is the path a client takes after any failed session, so it was a product defect and
 not only a side effect of the shadow runs that exposed it. Not yet run on real After
 Effects.
+
+## 2026-10-04 - All 37 operations of the approved plan ran on real After Effects (shadow session)
+
+**Shadow job `bca3e1f2`, worker `c2efc48`:** every operation of the approved plan - two
+colours, 24 texts including the Hebrew brand line, ten screenshots into phone screens and
+one logo - was applied to a working copy on the QA worker, and the preview still was
+captured. The only failure was the last step, uploading the preview, which the server
+refuses for a session it does not know; that is what a shadow session is. What the frame
+looks like has therefore not been seen by anyone yet.
+
+## 2026-10-04 - "Continue" after After Effects was restarted would have skipped the finished operations
+
+**Found by reading, before it happened (session `398816c4`):** a job applied two
+operations and failed on the third. Operations are saved only when all are done, so those
+two existed only in After Effects' memory. After Effects was later restarted. A resume
+opened the working copy without discarding anything and continued from the first
+unfinished operation - on a copy that no longer held the first two. The video would have
+been built without them and nothing would have said so.
+
+**Fix:** a partial job keeps the open project only when After Effects has this working
+copy open AND reports unsaved edits. Otherwise - another project, none, a clean copy, or a
+bridge that cannot say - it starts again from the first operation on the copy from disk.
+A job whose every operation completed is untouched by this. Not yet run on real After
+Effects.

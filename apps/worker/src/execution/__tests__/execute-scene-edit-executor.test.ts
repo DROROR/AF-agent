@@ -1418,6 +1418,55 @@ describe("executeSceneEdit", () => {
       expect(bridge.resolveCompositionIndexCalls).toHaveLength(2);
     });
 
+    /**
+     * REAL 2026-10-04 HAZARD: two operations existed only in After Effects'
+     * memory, After Effects was restarted, and "Continue" would have carried
+     * on from the third on an untouched copy - a finished video silently
+     * missing the first two.
+     */
+    describe("a resume keeps the open project only when the partial work is provably still there", () => {
+      const partial: SceneEditCheckpoint = { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: null, failureReason: null };
+      async function resume(state: (workingPath: string) => { ok: true; openedPath: string | null; dirty: boolean | null } | { ok: false; reason: string }) {
+        const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+        const workRoot = join(root, "work-root");
+        const bridge = new FakeAeEditBridge(alwaysSucceed);
+        let workingPath = "";
+        (bridge as unknown as { describeOpenProject: () => Promise<unknown> }).describeOpenProject = async () => state(workingPath);
+        const originalOpen = bridge.openProject.bind(bridge);
+        bridge.openProject = async (path, options) => {
+          workingPath = path;
+          return originalOpen(path, options);
+        };
+        // The working copy path is only known once prepared; the executor asks
+        // what is open BEFORE opening, so resolve it the way the executor does.
+        const probe = await executeSceneEdit(deps(new FakeAeEditBridge(alwaysSucceed), undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-x", operations: [] }));
+        workingPath = probe.workingProjectPath ?? "";
+        const result = await executeSceneEdit(deps(bridge, undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-x", checkpoint: partial }));
+        return { result, bridge };
+      }
+
+      it("this working copy is open with unsaved edits: carries on from the next operation", async () => {
+        const { result, bridge } = await resume((workingPath) => ({ ok: true, openedPath: workingPath, dirty: true }));
+        expect(result.failureReason).toBeNull();
+        expect(bridge.openProjectOptions).toEqual([{ discardUnsavedChanges: false }]);
+        expect(bridge.calls).toHaveLength(1);
+      });
+
+      it.each([
+        ["a different project is open", () => ({ ok: true as const, openedPath: "C:\\other\\project.aep", dirty: true })],
+        ["the working copy is open but clean - After Effects was restarted", (workingPath: string) => ({ ok: true as const, openedPath: workingPath, dirty: false })],
+        ["After Effects cannot say whether it is dirty", (workingPath: string) => ({ ok: true as const, openedPath: workingPath, dirty: null })],
+        ["nothing is open", () => ({ ok: true as const, openedPath: null, dirty: null })],
+        ["After Effects did not answer", () => ({ ok: false as const, reason: "timeout" })]
+      ])("%s: starts again from the first operation on the copy from disk", async (_name, state) => {
+        const { result, bridge } = await resume(state);
+        expect(result.failureReason).toBeNull();
+        expect(bridge.openProjectOptions).toEqual([{ discardUnsavedChanges: true }]);
+        expect(bridge.calls).toHaveLength(2);
+        expect(result.operationsCompleted).toEqual([0, 1]);
+      });
+    });
+
     it("a fresh run opens the working copy from disk (discarding unsaved edits); a genuine resume keeps the open project", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");

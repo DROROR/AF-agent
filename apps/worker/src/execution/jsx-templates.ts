@@ -1595,7 +1595,10 @@ export function buildDescribeOpenProjectScript(): FixedJsxScript {
       ok: true,
       resultingValue: {
         openedPath: app.project && app.project.file ? app.project.file.fsName : null,
-        openedName: app.project ? app.project.name : null
+        openedName: app.project ? app.project.name : null,
+        // Whether the open project holds edits that are not on disk. Null when
+        // this After Effects build does not say - unknown, never "clean".
+        dirty: (function () { try { return typeof app.project.dirty === "boolean" ? app.project.dirty : null; } catch (__dirtyError) { return null; } })()
       }
     });
   } catch (__unexpectedError) {

@@ -211,6 +211,12 @@ export interface AeEditBridge {
   describeChainStructure(nestedTarget: readonly ResolvedNestedTargetStep[]): Promise<
     { ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null } | { ok: false; reason: string }
   >;
+  /**
+   * READ-ONLY: which project is open and whether it holds unsaved edits.
+   * Optional so a bridge that cannot answer changes nothing - the executor
+   * then behaves exactly as it did before this existed.
+   */
+  describeOpenProject?(): Promise<{ ok: true; openedPath: string | null; dirty: boolean | null } | { ok: false; reason: string }>;
   /** Saves the currently-open project IN PLACE (the working copy - see buildSaveProjectScript's own doc comment for why this can never reach the original source, and openProject's own doc comment for why that guarantee now actually holds). */
   saveProject(): Promise<SaveProjectResult>;
 }
@@ -286,6 +292,19 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
       };
     }
     return { ok: true, openedPath: parsed.data.openedPath as string };
+  }
+
+  async describeOpenProject(): Promise<{ ok: true; openedPath: string | null; dirty: boolean | null } | { ok: false; reason: string }> {
+    const outcome = await this.runScript(buildDescribeOpenProjectScript());
+    if (!outcome.ok) {
+      return { ok: false, reason: outcome.failureReason };
+    }
+    const value = (outcome.resultingValue ?? {}) as { openedPath?: unknown; dirty?: unknown };
+    return {
+      ok: true,
+      openedPath: typeof value.openedPath === "string" ? value.openedPath : null,
+      dirty: typeof value.dirty === "boolean" ? value.dirty : null
+    };
   }
 
   async resolveCompositionIndex(manifestCompositionId: string, expectedName: string): Promise<ResolveCompositionIndexResult> {
