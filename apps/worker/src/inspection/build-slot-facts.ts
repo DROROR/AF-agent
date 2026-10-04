@@ -59,6 +59,7 @@ export interface ScannedSlotLayer {
         startTimeSeconds?: number | null | undefined;
         stretchPercent?: number | null | undefined;
         timeRemapEnabled?: boolean | null | undefined;
+        timeRemapSamples?: readonly { timeSeconds: number; valueSeconds: number }[] | null | undefined;
       }
     | null
     | undefined;
@@ -277,17 +278,62 @@ type TimeWindow = { startSeconds: number; endSeconds: number };
 /**
  * A window in a nested composition's timeline, as seen in the timeline of the
  * composition whose layer places it. Null - unknown, never guessed - when
- * that layer's timing was not read, when it is time-remapped (its time is
- * then a curve, not an offset), or when nothing of the window survives the
- * layer's own in and out points.
+ * that layer is switched off, when its timing was not read, or when nothing
+ * of the window survives the layer's own in and out points.
+ *
+ * A plain layer is an offset and a stretch. A TIME-REMAPPED layer is a curve:
+ * the moment of the nested composition it shows at each instant is whatever
+ * After Effects says, so the scan samples that curve and the window is the
+ * longest unbroken run of instants at which the nested composition is inside
+ * the window being lifted (real 2026-10-04 template: seven of its eight
+ * scenes are placed by a remapped layer).
  */
 function liftWindowThroughLayer(window: TimeWindow, placing: ScannedSlotLayer | undefined): TimeWindow | null {
   const detail = placing?.detail;
-  if (!detail || placing.enabled === false || detail.timeRemapEnabled !== false) {
+  if (!detail || placing.enabled === false) {
     return null;
   }
-  const { startTimeSeconds, stretchPercent, inPointSeconds, outPointSeconds } = detail;
-  if (typeof startTimeSeconds !== "number" || typeof stretchPercent !== "number" || !(stretchPercent > 0) || typeof inPointSeconds !== "number" || typeof outPointSeconds !== "number") {
+  const { inPointSeconds, outPointSeconds } = detail;
+  if (typeof inPointSeconds !== "number" || typeof outPointSeconds !== "number") {
+    return null;
+  }
+
+  if (detail.timeRemapEnabled === true) {
+    const samples = detail.timeRemapSamples;
+    if (!samples || samples.length < 2) {
+      return null;
+    }
+    let best: TimeWindow | null = null;
+    let runStart: number | null = null;
+    let runEnd = 0;
+    const close = (): void => {
+      if (runStart !== null && runEnd > runStart && (best === null || runEnd - runStart > best.endSeconds - best.startSeconds)) {
+        best = { startSeconds: runStart, endSeconds: runEnd };
+      }
+      runStart = null;
+    };
+    for (const sample of samples) {
+      const inside =
+        sample.timeSeconds >= inPointSeconds &&
+        sample.timeSeconds <= outPointSeconds &&
+        sample.valueSeconds >= window.startSeconds &&
+        sample.valueSeconds <= window.endSeconds;
+      if (inside) {
+        runStart ??= sample.timeSeconds;
+        runEnd = sample.timeSeconds;
+      } else {
+        close();
+      }
+    }
+    close();
+    return best;
+  }
+  if (detail.timeRemapEnabled !== false) {
+    return null;
+  }
+
+  const { startTimeSeconds, stretchPercent } = detail;
+  if (typeof startTimeSeconds !== "number" || typeof stretchPercent !== "number" || !(stretchPercent > 0)) {
     return null;
   }
   const scale = stretchPercent / 100;
@@ -472,10 +518,9 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
     // Recorded only when no host lives in the scene's own composition: such a
     // host already states its window in that timeline, opacity and all.
     ...(input.sceneCompositionId !== undefined && !hosts.some((host) => host.compositionId === input.sceneCompositionId)
-      ? (() => {
-          const sceneWindow = computeSceneWindow(input);
-          return sceneWindow === null ? {} : { sceneWindow };
-        })()
+      ? // Null is a real answer: this slot's moment in the scene was looked
+        // for and could not be established, so nothing may stand in for it.
+        { sceneWindow: computeSceneWindow(input) }
       : {})
   };
 }

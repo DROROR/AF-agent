@@ -243,14 +243,26 @@ describe("a nested slot's on-screen moment is stated in the scene's own timeline
     expect(slotOf(scannedChain({ [`${SCENE}:9`]: stretched }))?.slotFacts?.sceneWindow).toEqual({ compositionId: MASTER, startSeconds: 22, endSeconds: 30 });
   });
 
+  it("follows a time-remapped layer by the curve After Effects reported: the longest run in which the nested composition is inside the window", () => {
+    // The master shows the part from 20 to 30 s; its remap curve holds the
+    // part at 0 s for a second, plays it 0 -> 9 s over the next nine.
+    const samples = Array.from({ length: 21 }, (_unused, i) => {
+      const timeSeconds = 20 + i * 0.5;
+      return { timeSeconds, valueSeconds: Math.max(0, timeSeconds - 21) };
+    });
+    const remapped = timing(20, 20, 30, { timeRemapEnabled: true, timeRemapSamples: samples });
+    // In the part's own timeline the slot runs 2-7 s, which the curve shows from 23 to 28 s.
+    expect(slotOf(scannedChain({ [`${MASTER}:1`]: remapped }))?.slotFacts?.sceneWindow).toEqual({ compositionId: MASTER, startSeconds: 23, endSeconds: 28 });
+  });
+
   it.each([
-    ["a time-remapped hop", { [`${SCENE}:9`]: timing(2, 2, 10, { timeRemapEnabled: true }) }],
+    ["a time-remapped hop whose curve was not read", { [`${SCENE}:9`]: timing(2, 2, 10, { timeRemapEnabled: true }) }],
     ["a hop whose timing was never read", { [`${RIG}:1`]: { kind: "AVLayer", enabled: true, detail: { hasTrackMatte: true } } }],
     ["a hop switched off", { [`${MASTER}:1`]: { ...timing(20, 20, 30), enabled: false } }]
-  ])("records nothing for %s - unknown is never a guessed moment", (_name, overrides) => {
+  ])("records NULL for %s - looked for and not established, never a guessed moment", (_name, overrides) => {
     const slot = slotOf(scannedChain(overrides as Record<string, ScannedSlotLayer>));
     expect(slot).toBeDefined();
-    expect(slot?.slotFacts?.sceneWindow).toBeUndefined();
+    expect(slot?.slotFacts?.sceneWindow).toBeNull();
   });
 
   it("the manifest schema keeps it", () => {

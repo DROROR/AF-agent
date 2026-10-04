@@ -1310,8 +1310,9 @@ describe("buildScanProjectPreflightScript (real 2026-09-11 incident: 51-composit
     // effective-visibility facts an evidence frame's moment comes from
     // (position and anchor on both axes, and the opacity keyframes), plus the
     // three timing facts that carry a nested slot's moment up into the scene's
-    // timeline (start time, stretch, and whether time is remapped).
-    expect(Object.keys(plain.detail)).toHaveLength(34);
+    // timeline (start time, stretch, whether time is remapped, and the
+    // sampled remap curve).
+    expect(Object.keys(plain.detail)).toHaveLength(35);
     const broken = result.compositions.find((c: { compositionName: string }) => c.compositionName === "Broken Comp");
     expect(broken.layers[0].detail.opacityAtInPoint).toBeNull();
   });

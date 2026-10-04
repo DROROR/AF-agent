@@ -131,13 +131,15 @@ export const slotStructuralFactsSchema = z
      * own composition (2026-10-04). Present only for a slot none of whose
      * hosts lives in that composition - every host window above is then
      * measured in some nested composition's timeline, and none of them is a
-     * moment in the composition an evidence frame is rendered in. Absent in
-     * manifests written before it existed, and when the chain's timing could
-     * not be read.
+     * moment in the composition an evidence frame is rendered in. NULL when
+     * it was looked for and could not be established (a hop switched off, or
+     * its timing unread): nothing may then stand in for it. Absent only in
+     * manifests written before it existed.
      */
     sceneWindow: z
       .object({ compositionId: z.string().min(1), startSeconds: z.number().nonnegative(), endSeconds: z.number().nonnegative() })
       .strict()
+      .nullable()
       .optional()
   })
   .strict();
@@ -851,8 +853,14 @@ export function computeEffectiveVisibility(
   // the picture a reviewer is shown, so it is the answer both for whoever
   // renders that composition and for the gate that checks the frame against it.
   const sceneWindow = facts.sceneWindow;
-  if (sceneWindow !== undefined && sceneWindow.endSeconds > sceneWindow.startSeconds && (inCompositionId === undefined || inCompositionId === sceneWindow.compositionId)) {
-    return { startSeconds: sceneWindow.startSeconds, endSeconds: sceneWindow.endSeconds };
+  if (sceneWindow === null) {
+    // Looked for and not established. The nested windows below are not
+    // moments in the scene, so falling back to one would be exactly the
+    // defect this field exists to end: the slot has no provable moment.
+    return null;
+  }
+  if (sceneWindow !== undefined && (inCompositionId === undefined || inCompositionId === sceneWindow.compositionId)) {
+    return sceneWindow.endSeconds > sceneWindow.startSeconds ? { startSeconds: sceneWindow.startSeconds, endSeconds: sceneWindow.endSeconds } : null;
   }
   let best: { startSeconds: number; endSeconds: number } | null = null;
   for (const host of facts.hosts ?? []) {

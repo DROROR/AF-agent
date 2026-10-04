@@ -1746,3 +1746,13 @@ exactly as before.
 **Needs:** this worker build and a new inspection (the stored scan carries no start
 times, so this could not be re-checked offline against the real template).
 **Not yet run on real After Effects.**
+
+**Same day, first real run of that fix (worker `95578cd`, inspection job dispatched for the
+check):** only one of eleven slots got a scene window. The scan showed why - seven of the
+template's eight scenes are placed by a TIME-REMAPPED layer, which the first version
+treated as unknown, and "unknown" then fell back to the nested window again.
+**Corrected:** the scan samples a remapped layer's curve from After Effects itself (up to
+120 points across the layer's in/out) and the window is the longest unbroken run in which
+the nested composition is inside the window being lifted. And a scene window that was
+looked for and not established is now recorded as null, which means "no provable moment" -
+never a fallback to a nested composition's timeline.

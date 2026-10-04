@@ -2554,6 +2554,9 @@ const BLENDING_MODE_KEYS = [
  */
 export const SCAN_PROJECT_ITEMS_PER_CALL = 10;
 
+/** How many points of a time-remapped layer's curve the scan samples - enough to place a window to within a few frames, small enough to cost nothing. */
+const TIME_REMAP_MAX_SAMPLES = 120;
+
 /**
  * Scans project items `startItemIndex`..`endItemIndex` (1-based, inclusive,
  * clamped to the project's real item count inside AE).
@@ -2734,6 +2737,25 @@ export function buildScanProjectPreflightScript(startItemIndex = 1, endItemIndex
             startTimeSeconds: __readNumberFact(function () { return __layer.startTime; }),
             stretchPercent: __readNumberFact(function () { return __layer.stretch; }),
             timeRemapEnabled: __readBooleanFact(function () { return __layer.timeRemapEnabled; }),
+            // A time-remapped layer's time is a curve, not an offset. The
+            // curve is SAMPLED from After Effects itself (so easing and
+            // expressions are whatever AE says they are), across the layer's
+            // own in/out, at a bounded number of points.
+            timeRemapSamples: __readFact(function () {
+              if (__layer.timeRemapEnabled !== true) { return null; }
+              var __remap = __layer.property("ADBE Time Remapping");
+              var __from = __layer.inPoint;
+              var __to = __layer.outPoint;
+              if (!(__to > __from)) { return null; }
+              var __step = Math.max(1 / 30, (__to - __from) / ${TIME_REMAP_MAX_SAMPLES});
+              var __samples = [];
+              for (var __t = __from; __t <= __to + 0.000001 && __samples.length <= ${TIME_REMAP_MAX_SAMPLES}; __t += __step) {
+                var __v = __remap.valueAtTime(__t, false);
+                if (typeof __v !== "number" || !isFinite(__v)) { return null; }
+                __samples.push({ timeSeconds: __t, valueSeconds: __v });
+              }
+              return __samples;
+            }),
             opacityAtInPoint: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Opacity").valueAtTime(__layer.inPoint, false); }),
             opacityKeyframeCount: __readNumberFact(function () { return __layer.property("ADBE Transform Group").property("ADBE Opacity").numKeys; }),
             textPreview: __readStringFact(function () {

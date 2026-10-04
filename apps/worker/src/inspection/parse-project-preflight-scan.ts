@@ -104,7 +104,9 @@ const layerDetailSchema = z
     /** Layer timing in its own composition's timeline (2026-10-04) - what maps a moment in a nested composition to a moment in the one placing it. Optional: an older worker build does not report them, and they are then unknown. */
     startTimeSeconds: z.number().nullable().optional(),
     stretchPercent: z.number().nullable().optional(),
-    timeRemapEnabled: z.boolean().nullable().optional()
+    timeRemapEnabled: z.boolean().nullable().optional(),
+    /** A time-remapped layer's curve, sampled by After Effects across the layer's own in/out. Null when the layer is not remapped or the curve could not be read. */
+    timeRemapSamples: z.array(z.object({ timeSeconds: z.number(), valueSeconds: z.number() }).strict()).nullable().optional()
   })
   .strict();
 

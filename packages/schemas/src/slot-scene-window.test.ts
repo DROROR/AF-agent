@@ -64,6 +64,12 @@ describe("a nested slot's recorded scene window decides its evidence moment", ()
     expect(computeEffectiveVisibility(facts, "c-helper")).toEqual({ startSeconds: 0, endSeconds: 6 });
   });
 
+  it("NULL means it was looked for and not found: no moment at all, never the nested window", () => {
+    const facts = slot({ sceneWindow: null });
+    expect(selectEvidenceFrameSeconds(facts, scene)).toBeNull();
+    expect(computeEffectiveVisibility(facts)).toBeNull();
+  });
+
   it("a manifest written before it existed behaves exactly as before", () => {
     expect(selectEvidenceFrameSeconds(slot(), scene)).toBe(3);
     expect(computeEffectiveVisibility(slot())).toEqual({ startSeconds: 0, endSeconds: 6 });
