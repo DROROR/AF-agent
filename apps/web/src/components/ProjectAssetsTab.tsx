@@ -49,23 +49,41 @@ function AssetsPanel({ projectId }: { projectId: string }): ReactElement {
 
   async function handleUploadSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
+    // 2026-10-04 audit: a client with ten screenshots had to choose, upload
+    // and wait ten times. Several files can be chosen at once; they go up one
+    // after another (each is still its own verified upload), and the notice
+    // says which one and how many are left. "This is my logo" describes ONE
+    // file, so it is refused for a selection of several rather than applied
+    // to all of them.
+    const files = Array.from(fileInputRef.current?.files ?? []);
+    if (files.length === 0) {
+      return;
+    }
+    if (files.length > 1 && uploadMediaKind === "LOGO") {
+      setUploadError(t.assetsTab.logoOneFileOnly);
       return;
     }
     setIsUploading(true);
-    setUploadInFlight({ fileName: file.name, startedAt: currentTimeMs() });
     setUploadError(null);
-    const result = await upload(file, uploadMediaKind === "LOGO" ? "LOGO" : undefined);
+    let failure: string | null = null;
+    for (const [position, file] of files.entries()) {
+      setUploadInFlight({ fileName: files.length === 1 ? file.name : t.assetsTab.fileOfTotal(file.name, position + 1, files.length), startedAt: currentTimeMs() });
+      const result = await upload(file, uploadMediaKind === "LOGO" ? "LOGO" : undefined);
+      if (!result.ok) {
+        // Files before this one are in and stay in; the rest were not sent.
+        failure = files.length === 1 ? result.message : t.assetsTab.fileFailedOfTotal(file.name, position, files.length, result.message);
+        break;
+      }
+    }
     setIsUploading(false);
     setUploadInFlight(null);
-    if (result.ok) {
+    if (failure === null) {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
       setUploadMediaKind("");
     } else {
-      setUploadError(result.message);
+      setUploadError(failure);
     }
   }
 
@@ -76,7 +94,7 @@ function AssetsPanel({ projectId }: { projectId: string }): ReactElement {
         <form className="asset-upload-form" onSubmit={(event) => void handleUploadSubmit(event)}>
           {uploadError ? <ErrorState title={t.assetsTab.uploadFailedTitle} description={uploadError} /> : null}
           <Field label={t.assetsTab.fileLabel} htmlFor="asset-file-input">
-            <input ref={fileInputRef} id="asset-file-input" type="file" className="input" disabled={isUploading} />
+            <input ref={fileInputRef} id="asset-file-input" type="file" multiple className="input" disabled={isUploading} />
           </Field>
           <Field
             label={t.assetsTab.mediaKindLabel}

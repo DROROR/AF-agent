@@ -363,7 +363,9 @@ function SimpleExportVariantCard({
         <EmptyState title={t.projectWorkspace.export.notConfiguredTitle} description={t.projectWorkspace.export.setUpBelowDescription} />
       ) : !renderReady ? (
         <EmptyState title={t.projectWorkspace.export.notReadyTitle} description={t.projectWorkspace.export.notReadyDescription} />
-      ) : !renderWorkerOnline ? (
+      ) : !renderWorkerOnline && !alreadyMade ? (
+        // A finished video does not need the editing computer: its "offline"
+        // box sat above "Your video is ready" as if something were wrong.
         isKnownWorkerOffline ? (
           <EmptyState title={t.jobDispatch.workerOfflineTitle} description={t.jobDispatch.workerOfflineDescription} />
         ) : (

@@ -68,6 +68,56 @@ describe("ProjectAssetsTab", () => {
     await screen.findByText("new-upload.png");
   });
 
+  it("2026-10-04 audit: several files chosen at once go up one after another, each as its own upload", async () => {
+    const reply = (status: number, body: unknown) => ({ ok: status < 300, status, text: async () => JSON.stringify(body), json: async () => body });
+    const uploaded: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: { method?: string; body?: unknown }) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/assets") && init?.method === "POST") {
+          const name = ((init.body as FormData).get("file") as File).name;
+          uploaded.push(name);
+          return reply(201, { asset: assetFixture({ id: `asset-${uploaded.length}`, originalFilename: name }) });
+        }
+        if (url.endsWith("/assets")) {
+          return reply(200, { assets: uploaded.map((name, index) => assetFixture({ id: `asset-${index + 1}`, originalFilename: name })) });
+        }
+        if (url.endsWith("/execution-plan")) {
+          return reply(200, { plan: planFixture(), sceneTable: [] });
+        }
+        return reply(200, { project: projectDtoFixture(), manifest: manifestFixture() });
+      })
+    );
+    renderAssets();
+    await screen.findByText("No files yet");
+
+    const fileInput = document.getElementById("asset-file-input") as HTMLInputElement;
+    expect(fileInput.multiple).toBe(true);
+    const files = ["one.png", "two.png", "three.png"].map((name) => new File(["bytes"], name, { type: "image/png" }));
+    fireEvent.change(fileInput, { target: { files } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+
+    await screen.findByText("three.png");
+    expect(uploaded).toEqual(["one.png", "two.png", "three.png"]);
+  });
+
+  it("refuses 'this is my logo' for a selection of several files instead of marking them all", async () => {
+    stubFetchByUrl({
+      [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture(), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } }
+    });
+    renderAssets();
+    await screen.findByText("No files yet");
+    const fileInput = document.getElementById("asset-file-input") as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(["a"], "a.png", { type: "image/png" }), new File(["b"], "b.png", { type: "image/png" })] } });
+    fireEvent.change(document.getElementById("asset-media-kind") as HTMLSelectElement, { target: { value: "LOGO" } });
+    fireEvent.click(screen.getByRole("button", { name: "Upload" }));
+    await screen.findByText("Choose a single file when you mark it as your logo.");
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => (init as { method?: string } | undefined)?.method === "POST")).toBe(false);
+  });
+
   /**
    * 2026-10-04: a video upload runs for minutes and the only sign of it was
    * the button reading "Uploading…".

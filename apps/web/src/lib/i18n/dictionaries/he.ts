@@ -1023,6 +1023,10 @@ export const he: Dictionary = {
     uploadingFile: (fileName: string): string => `מעלה את ${fileName}…`,
     uploadingHint: "וידאו גדול יכול לקחת כמה דקות. השאירו את העמוד פתוח - הקובץ יופיע ברשימה שלמטה ברגע שיעלה.",
     uploadFailedTitle: "לא ניתן היה להעלות את הקובץ הזה",
+    fileOfTotal: (fileName: string, position: number, total: number): string => `${fileName} (${position} מתוך ${total})`,
+    fileFailedOfTotal: (fileName: string, uploadedBefore: number, total: number, reason: string): string =>
+      `לא ניתן היה להעלות את "${fileName}": ${reason} ${uploadedBefore} מתוך ${total} קבצים הועלו לפניו; בחרו שוב את השאר.`,
+    logoOneFileOnly: "בחרו קובץ אחד בלבד כשמסמנים אותו כלוגו.",
     emptyTitle: "לא הועלו נכסים",
     emptyDescription: "העלו כאן את התמונות, הסרטונים, הלוגואים, קבצי האודיו או המסמכים של הלקוח.",
     labelLabel: "תווית",
