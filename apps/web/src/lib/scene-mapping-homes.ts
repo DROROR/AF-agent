@@ -38,12 +38,69 @@ export function resolveSceneMappingHomes(manifest: TemplateManifest, realScenes:
   const mappingsByCardId = new Map<string, HostedMapping[]>(realScenes.map((realScene) => [realScene.scenePlan.id, []]));
   const cardIdByMappingId = new Map<string, string>();
 
+  // Which cards' compositions contain a given composition, directly or through
+  // any depth of nesting - read from the manifest's own parent links.
+  const parentsByCompositionId = new Map((manifest.compositions ?? []).map((composition) => [composition.compositionId, composition.parentCompositionIds ?? []] as const));
+  const containingCardsCache = new Map<string, Set<string>>();
+  function cardsContaining(compositionId: string): Set<string> {
+    const cached = containingCardsCache.get(compositionId);
+    if (cached) {
+      return cached;
+    }
+    const cards = new Set<string>();
+    const seen = new Set<string>([compositionId]);
+    const queue = [...(parentsByCompositionId.get(compositionId) ?? [])];
+    while (queue.length > 0) {
+      const current = queue.pop() as string;
+      if (seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+      const cardId = cardIdByCompositionId.get(current);
+      // A card that itself holds other cards (the master) contains everything and says nothing about sharing.
+      if (cardId !== undefined && !nestingCardIds.has(cardId)) {
+        cards.add(cardId);
+      }
+      queue.push(...(parentsByCompositionId.get(current) ?? []));
+    }
+    containingCardsCache.set(compositionId, cards);
+    return cards;
+  }
+  // Cards whose composition contains another card's composition.
+  const nestingCardIds = new Set<string>();
+  for (const [compositionId] of cardIdByCompositionId) {
+    const seen = new Set<string>();
+    const queue = [...(parentsByCompositionId.get(compositionId) ?? [])];
+    while (queue.length > 0) {
+      const current = queue.pop() as string;
+      if (seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+      const cardId = cardIdByCompositionId.get(current);
+      if (cardId !== undefined) {
+        nestingCardIds.add(cardId);
+      }
+      queue.push(...(parentsByCompositionId.get(current) ?? []));
+    }
+  }
+
   for (const realScene of realScenes) {
     for (const mapping of realScene.scenePlan.mappings) {
       const placeholder = mapping.manifestPlaceholderId ? placeholderById.get(mapping.manifestPlaceholderId) : undefined;
       const firstStepCompositionId = placeholder?.nestedTarget?.[0]?.compositionId;
       const hostCardId = firstStepCompositionId !== undefined ? cardIdByCompositionId.get(firstStepCompositionId) : undefined;
-      const cardId = hostCardId ?? realScene.scenePlan.id;
+      // REAL 2026-10-06: the client could not find where a background logo
+      // goes, and when told "Scene 8, Picture 2" asked how a picture set in
+      // the last scene is behind the whole video. Its layer sits in ONE
+      // composition that every scene contains; the chain recorded for it is
+      // merely the last of eight ways to reach it. A layer whose composition
+      // is contained in more than one card's composition belongs to none of
+      // those cards in particular - set once, it shows in all of them - so it
+      // stays on its owner's card (the whole video), not on whichever scene
+      // the recorded chain happens to pass through.
+      const sharedAcrossCards = placeholder !== undefined && cardsContaining(placeholder.compositionId).size > 1;
+      const cardId = (sharedAcrossCards ? undefined : hostCardId) ?? realScene.scenePlan.id;
       mappingsByCardId.get(cardId)?.push({ ownerScenePlanId: realScene.scenePlan.id, mapping });
       cardIdByMappingId.set(mapping.id, cardId);
     }

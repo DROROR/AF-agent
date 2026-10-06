@@ -88,3 +88,45 @@ describe("resolveSceneMappingHomes", () => {
     expect((resolveSceneMappingHomes(manifestWith([]), [lone]).mappingsByCardId.get("plan-lone") ?? []).map((h) => h.mapping.id)).toEqual(["m-x"]);
   });
 });
+
+/**
+ * REAL 2026-10-06: a background picture's layer sits in one composition that
+ * every scene contains. It was listed as "Picture 2" of the LAST scene - the
+ * scene its recorded chain happened to pass through - and the client could
+ * neither find it nor see why a picture set there is behind the whole video.
+ */
+describe("resolveSceneMappingHomes - a place shared by several scenes", () => {
+  const master = realScene("master", [mapping("m-shared", "ph-shared"), mapping("m-only-b", "ph-only-b")]);
+  const partA = realScene("part-a", []);
+  const partB = realScene("part-b", []);
+  const manifest = {
+    scenes: [
+      {
+        placeholders: [
+          { ...placeholder("ph-shared", ["part-b", "wrap-b", "shared"]), compositionId: "shared" },
+          { ...placeholder("ph-only-b", ["part-b", "wrap-b"]), compositionId: "wrap-b" }
+        ]
+      }
+    ],
+    compositions: [
+      { compositionId: "master", parentCompositionIds: [] },
+      { compositionId: "part-a", parentCompositionIds: ["master"] },
+      { compositionId: "part-b", parentCompositionIds: ["master"] },
+      { compositionId: "wrap-a", parentCompositionIds: ["part-a"] },
+      { compositionId: "wrap-b", parentCompositionIds: ["part-b"] },
+      { compositionId: "shared", parentCompositionIds: ["wrap-a", "wrap-b"] }
+    ]
+  } as unknown as TemplateManifest;
+  const homes = resolveSceneMappingHomes(manifest, [master, partA, partB]);
+  const shownOn = (compositionId: string): string[] => (homes.mappingsByCardId.get(`plan-${compositionId}`) ?? []).map((hosted) => hosted.mapping.id);
+
+  it("stays on the whole-video card instead of the one scene its recorded chain passes through", () => {
+    expect(shownOn("master")).toEqual(["m-shared"]);
+    expect(homes.cardIdByMappingId.get("m-shared")).toBe("plan-master");
+  });
+
+  it("a place only one scene contains still goes to that scene - the master containing everything does not make it shared", () => {
+    expect(shownOn("part-b")).toEqual(["m-only-b"]);
+    expect(shownOn("part-a")).toEqual([]);
+  });
+});
