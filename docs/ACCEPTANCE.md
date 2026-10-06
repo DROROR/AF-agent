@@ -2079,3 +2079,13 @@ A card's badge is "Needs your choice" when something undecided is on that card, 
 its scene's own state only when it shows everything the scene owns.
 
 **Not verified on the client's project** - unit-tested only.
+
+## 2026-10-06 - texts sit in the wrong places of each scene (client project 3241977f, open)
+Read from the plan and the manifest, not yet seen in a render. In every scene the template
+has a large word (APP), a second line (PROMO) and a small paragraph. The plan holds the
+client's short title in the paragraph's place, his sentence in the second line's place, and
+in three scenes a full sentence in the large word's place; in five scenes the large word is
+still the template's. The AI plan was given each place's own template words and still filled
+them in this order. Not established: whether the suggestions or the client's own typing put
+them there, and what the worker's text fitting does with a sentence in a one-word place.
+Nothing was changed on the client's project.

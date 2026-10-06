@@ -62,6 +62,8 @@ export function SimpleScenesView(): ReactElement {
   // Set when Edit is pressed on a card that SHOWS layers another scene
   // owns: the drawer then opens the owner, narrowed to that card's layers.
   const [editingMappingIds, setEditingMappingIds] = useState<string[] | null>(null);
+  // The one layer the panel should open on, when a card's own "write my text" button opened it.
+  const [focusMappingId, setFocusMappingId] = useState<string | null>(null);
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isApproving, setIsApproving] = useState(false);
@@ -105,6 +107,18 @@ export function SimpleScenesView(): ReactElement {
   const pendingByScene = new Map<string, MappingSuggestion[]>();
   // Which card each layer is shown on - see resolveSceneMappingHomes.
   const homes = resolveSceneMappingHomes(project.manifest, realScenes);
+  // The template's own wording per text layer, only where the manifest holds
+  // it in full - an excerpt is not what the video would show.
+  const templateTextByPlaceholderId = new Map<string, string>();
+  for (const manifestScene of project.manifest.scenes) {
+    for (const placeholder of manifestScene.placeholders) {
+      if (placeholder.originalTextTruncated !== true && typeof placeholder.originalText === "string" && placeholder.originalText.trim() !== "") {
+        templateTextByPlaceholderId.set(placeholder.placeholderId, placeholder.originalText);
+      }
+    }
+  }
+  const templateTextOf = (mapping: { manifestPlaceholderId: string | null }): string | null =>
+    mapping.manifestPlaceholderId === null ? null : (templateTextByPlaceholderId.get(mapping.manifestPlaceholderId) ?? null);
   for (const suggestion of pending) {
     // Was bucketed by suggestion.scenePlanId alone, which put every
     // suggestion of a single-master template on the master's one card.
@@ -434,7 +448,8 @@ export function SimpleScenesView(): ReactElement {
               quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
-              onEdit={() => {
+              onEdit={(focusMappingId) => {
+                setFocusMappingId(focusMappingId ?? null);
                 const hosted = homes.mappingsByCardId.get(realScene.scenePlan.id) ?? [];
                 const owner = hosted.find((entry) => entry.ownerScenePlanId !== realScene.scenePlan.id);
                 if (owner) {
@@ -453,6 +468,7 @@ export function SimpleScenesView(): ReactElement {
               onRejectSuggestion={(suggestion) => void handleReject(suggestion)}
               onAcceptSuggestions={(many) => void handleAcceptMany(many)}
               onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
+              templateTextOf={templateTextOf}
             />
           ))}
         </div>
@@ -480,7 +496,8 @@ export function SimpleScenesView(): ReactElement {
               quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
-              onEdit={() => {
+              onEdit={(focusMappingId) => {
+                setFocusMappingId(focusMappingId ?? null);
                 const hosted = homes.mappingsByCardId.get(realScene.scenePlan.id) ?? [];
                 const owner = hosted.find((entry) => entry.ownerScenePlanId !== realScene.scenePlan.id);
                 if (owner) {
@@ -499,6 +516,7 @@ export function SimpleScenesView(): ReactElement {
               onRejectSuggestion={(suggestion) => void handleReject(suggestion)}
               onAcceptSuggestions={(many) => void handleAcceptMany(many)}
               onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
+              templateTextOf={templateTextOf}
             />
           ))}
           </div>
@@ -508,7 +526,9 @@ export function SimpleScenesView(): ReactElement {
       <SceneEditDrawer
         scenePlanId={editingSceneId}
         onlyMappingIds={editingMappingIds}
+        focusMappingId={focusMappingId}
         onClose={() => {
+          setFocusMappingId(null);
           setEditingSceneId(null);
           setEditingMappingIds(null);
         }}

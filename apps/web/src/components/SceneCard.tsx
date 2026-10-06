@@ -130,7 +130,10 @@ export interface SceneCardProps {
   previewEntry: ScenePreviewEntry;
   pendingSuggestions: MappingSuggestion[];
   suggestionsBusy: boolean;
-  onEdit: () => void;
+  /** Opens this card's panel; with a layer id, the panel opens on that layer's own box. */
+  onEdit: (focusMappingId?: string) => void;
+  /** The template's own wording for a text layer, when the manifest holds it in full. Absent or null: the card names the layer instead. */
+  templateTextOf?: (mapping: PlaceholderMapping) => string | null;
   onRegeneratePreview: () => void;
   onAcceptSuggestion: (suggestion: MappingSuggestion) => void;
   onRejectSuggestion: (suggestion: MappingSuggestion) => void;
@@ -184,6 +187,7 @@ export function SceneCard({
   onAcceptSuggestions,
   eyebrow,
   onKeepTemplateText,
+  templateTextOf,
   quietActions = false
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
@@ -331,7 +335,7 @@ export function SceneCard({
       ) : null}
 
       <div className="scene-card__actions">
-        <Button size="sm" variant="secondary" onClick={onEdit}>
+        <Button size="sm" variant="secondary" onClick={() => onEdit()}>
           {t.simpleScenes.editAction}
         </Button>
       </div>
@@ -442,18 +446,40 @@ export function SceneCard({
         </details>
       ) : null}
 
+      {/*
+        REAL 2026-10-06 (client project 3241977f): this block named the open
+        text by its layer ("Text A") while the panel called the same box
+        "Text 3", and its only button was "Keep the template's text" without
+        saying what that text is - here the template's English headline, in a
+        Hebrew video. Each open text is now shown by the words the video
+        would carry, with its own button that opens the panel on that very
+        box; keeping the template's words is the quieter second choice and
+        says which words.
+      */}
       {leftoverTexts.length > 0 ? (
         <div className="scene-card__leftover">
           <p className="scene-card__review-title">{t.simpleScenes.leftoverTextTitle(leftoverTexts.length)}</p>
-          <ul>
-            {leftoverTexts.map((m) => (
-              <li key={m.id}>{m.placeholderName}</li>
-            ))}
-          </ul>
           <p className="scene-card__finding-reason">{t.simpleScenes.leftoverTextHint}</p>
-          <Button size="sm" variant="secondary" disabled={suggestionsBusy} onClick={() => onKeepTemplateText?.(leftoverTexts.map((m) => m.id), [])}>
-            {t.simpleScenes.leftoverTextKeepAction(leftoverTexts.length)}
-          </Button>
+          <ul className="scene-card__leftover-list">
+            {leftoverTexts.map((m) => {
+              const words = templateTextOf?.(m) ?? null;
+              return (
+                <li key={m.id} className="scene-card__leftover-item">
+                  <span className="scene-card__leftover-words" dir="auto">
+                    {words === null ? m.placeholderName : t.simpleScenes.leftoverTextTemplateSays(words)}
+                  </span>
+                  <span className="scene-card__leftover-actions">
+                    <Button size="sm" variant={quietActions ? "secondary" : "primary"} onClick={() => onEdit(m.id)}>
+                      {t.simpleScenes.leftoverTextWriteAction}
+                    </Button>
+                    <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={() => onKeepTemplateText?.([m.id], [])}>
+                      {words === null ? t.simpleScenes.leftoverTextKeepAction(1) : t.simpleScenes.leftoverTextKeepWordsAction(words)}
+                    </Button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       ) : null}
 

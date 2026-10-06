@@ -210,3 +210,11 @@ card. The operator's own test of this template never met this because every text
   video will then show.
 - **Open:** a badge that turns from "Ready" to "Needs your choice" after an update gives no
   reason; the client read it as his work being undone.
+
+**Done the same day (web only), seen in a local preview against the client's own plan:**
+- The card shows an open text by the words the video would carry ("APP"), with "Write my own
+  text" that opens the panel on that very box, and a quieter "Keep "APP"".
+- In the panel an unfilled text box is marked "Not filled in yet"; the line under every text
+  box says which template words it replaces. The grey word inside an empty box is gone.
+- Still open from the list above: the order of the text boxes, "no text here", and a reason
+  when a badge changes after an update.

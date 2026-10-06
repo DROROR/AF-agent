@@ -54,6 +54,8 @@ export interface SceneEditDrawerProps {
    * Null/absent: every mapping of the scene, exactly as before.
    */
   onlyMappingIds?: readonly string[] | null;
+  /** Open on this layer's own box (scrolled to and focused). Null/absent: the top of the panel, as before. */
+  focusMappingId?: string | null;
 }
 
 interface MappingFormState {
@@ -155,7 +157,7 @@ function isSlotDecisionPersisted(form: MappingFormState, mapping: PlaceholderMap
  * one batched PATCH (one revision bump), diffed against the scene's
  * current real values - an untouched field is never resent/cleared.
  */
-export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneEditDrawerProps): ReactElement | null {
+export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMappingId }: SceneEditDrawerProps): ReactElement | null {
   const { t } = useLocale();
   const isSimple = useWorkspaceModeIfPresent() === "simple";
   const { project, plan, applyEdit } = useProjectWorkspaceContext();
@@ -168,6 +170,20 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
   const [isConfirmingDiscard, setIsConfirmingDiscard] = useState(false);
 
   const scene = plan?.plan.scenePlans.find((candidate) => candidate.id === scenePlanId) ?? null;
+
+  // A card's "write my own text" opens the panel ON that text's box - the
+  // client is not left to work out which of several boxes was meant.
+  const hasFormForFocus = focusMappingId != null && mappings.some((m) => m.mappingId === focusMappingId);
+  useEffect(() => {
+    if (!hasFormForFocus) {
+      return;
+    }
+    const input = document.getElementById(`mapping-text-${focusMappingId}`);
+    if (input instanceof HTMLElement) {
+      input.scrollIntoView?.({ block: "center" });
+      input.focus();
+    }
+  }, [hasFormForFocus, focusMappingId, scenePlanId]);
 
   useEffect(() => {
     if (!scene) {
@@ -662,6 +678,21 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
       }
     }
   }
+  // A text box nobody has settled: nothing typed, and no recorded "keep the template's text".
+  const isUndecidedText = (mapping: MappingFormState): boolean =>
+    fieldsFor(mapping.mappingId).text && mapping.text.trim() === "" && mapping.templateTextDecision === null;
+  // What the line under a text box says. Advanced: as before. Simple: what the
+  // video shows here now, in the template's own words when they are known.
+  const textHintProps = (mapping: MappingFormState): { hint?: string } => {
+    if (!isSimple) {
+      return { hint: t.projectWorkspace.editDrawer.textHint };
+    }
+    const words = templateTextFor(mapping.mappingId).text ?? null;
+    if (mapping.text.trim() !== "") {
+      return words === null ? {} : { hint: t.projectWorkspace.editDrawer.simple.textReplacesHint(words) };
+    }
+    return { hint: words === null ? t.projectWorkspace.editDrawer.simple.textEmptyHint : t.projectWorkspace.editDrawer.simple.textEmptyTemplateHint(words) };
+  };
   const isColourEntry = (entry: (typeof orderedForRender)[number]): boolean => classificationFor(entry.mapping.mappingId) === "color";
   const rank = (entry: (typeof orderedForRender)[number]): number => (fieldsFor(entry.mapping.mappingId).asset ? 0 : 1);
   const mainEntries = isSimple ? orderedForRender.filter((entry) => !isColourEntry(entry)).sort((a, b) => rank(a) - rank(b)) : orderedForRender;
@@ -717,6 +748,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
             <fieldset className="edit-drawer-form">
             <legend title={isSimple ? mapping.label : undefined}>
               {plainNames.get(mapping.mappingId) ?? mapping.label}
+              {isSimple && isUndecidedText(mapping) ? <span className="edit-drawer-open-mark">{t.projectWorkspace.editDrawer.simple.textNotFilledMark}</span> : null}
               {/* What this layer takes, in a word - the layer's own name ("White Solid 2") rarely says. */}
               {isSimple && plainNames.has(mapping.mappingId) ? null : (
               (() => {
@@ -795,12 +827,13 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
             </Field>
             ) : null}
             {fieldsFor(mapping.mappingId).text ? (
-            <Field label={t.projectWorkspace.editDrawer.textLabel} htmlFor={`mapping-text-${mapping.mappingId}`} hint={t.projectWorkspace.editDrawer.textHint}>
+            <Field label={t.projectWorkspace.editDrawer.textLabel} htmlFor={`mapping-text-${mapping.mappingId}`} {...textHintProps(mapping)}>
               <Input
                 id={`mapping-text-${mapping.mappingId}`}
                 value={mapping.text}
-                /* The template's own wording, shown faintly so the reviewer sees what this line replaces. */
-                placeholder={templateTextFor(mapping.mappingId).text ?? templateTextFor(mapping.mappingId).preview ?? undefined}
+                dir="auto"
+                /* The template's own wording, shown faintly so the reviewer sees what this line replaces. Not in Simple view: there a grey word in an empty box read as a filled one (2026-10-06), so the line under the box says it instead. */
+                placeholder={isSimple ? undefined : (templateTextFor(mapping.mappingId).text ?? templateTextFor(mapping.mappingId).preview ?? undefined)}
                 onChange={(event) => {
                   const next = [...mappings];
                   next[index] = { ...mapping, text: event.target.value };

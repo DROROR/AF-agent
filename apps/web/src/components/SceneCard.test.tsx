@@ -249,6 +249,43 @@ describe("SceneCard - a text nobody decided about can be kept as the template ha
 
   // REAL 2026-10-06 (client project 3241977f): an empty background picture
   // place kept "The whole video" at "Needs your choice" with nothing to press.
+  it("shows an open text by the template's own words, opens the panel on that very text, and names the words it would keep", () => {
+    const kept: string[][] = [];
+    const opened: (string | undefined)[] = [];
+    renderWithLocale(
+      <SceneCard
+        projectId={PROJECT_ID}
+        realScene={realScene({
+          mappings: [
+            mappingFixture({ id: "m-headline", placeholderName: "Layer 7", placeholderClassification: textKind }),
+            mappingFixture({ id: "m-unknown", placeholderName: "Layer 9", placeholderClassification: textKind })
+          ] as never
+        })}
+        assets={[]}
+        previewEntry={READY_PREVIEW}
+        pendingSuggestions={[]}
+        suggestionsBusy={false}
+        onEdit={(focusMappingId) => opened.push(focusMappingId)}
+        onRegeneratePreview={() => {}}
+        onAcceptSuggestion={() => {}}
+        onRejectSuggestion={() => {}}
+        onKeepTemplateText={(ids) => kept.push(ids)}
+        templateTextOf={(mapping) => (mapping.id === "m-headline" ? "SAMPLE WORD" : null)}
+      />
+    );
+    // The words the video would carry, not the layer's name - and the layer's name where the words are not known.
+    expect(screen.getByText('"SAMPLE WORD"')).toBeTruthy();
+    expect(screen.queryByText("Layer 7")).toBeNull();
+    expect(screen.getByText("Layer 9")).toBeTruthy();
+    screen.getAllByRole("button", { name: "Write my own text" })[0]!.click();
+    expect(opened).toEqual(["m-headline"]);
+    screen.getByRole("button", { name: 'Keep "SAMPLE WORD"' }).click();
+    expect(kept).toEqual([["m-headline"]]);
+    // The card's general button still opens the panel at its top.
+    screen.getByRole("button", { name: "Change picture or text" }).click();
+    expect(opened).toEqual(["m-headline", undefined]);
+  });
+
   it("an empty picture place asks too, and one press records 'leave it as the template has it' for exactly that place", () => {
     const kept: string[][] = [];
     const imageKind = { ...textKind, value: "image" };
