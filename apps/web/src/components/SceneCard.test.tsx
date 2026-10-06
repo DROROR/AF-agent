@@ -247,6 +247,25 @@ describe("SceneCard - a text nobody decided about can be kept as the template ha
     expect(calls).toEqual([{ ids: ["m-credit"], findings: ["f-1"] }]);
   });
 
+  // REAL 2026-10-06 (client project 3241977f): an empty background picture
+  // place kept "The whole video" at "Needs your choice" with nothing to press.
+  it("an empty picture place asks too, and one press records 'leave it as the template has it' for exactly that place", () => {
+    const kept: string[][] = [];
+    const imageKind = { ...textKind, value: "image" };
+    renderWithKeep(
+      [
+        mappingFixture({ id: "m-background", placeholderName: "Background", placeholderClassification: imageKind }),
+        mappingFixture({ id: "m-filled", placeholderName: "Screen", placeholderClassification: imageKind, selectedAssetId: "asset-1", selectedAssetType: "image" }),
+        mappingFixture({ id: "m-left", placeholderName: "Other", placeholderClassification: imageKind, keepTemplateText: { decision: "KEEP_TEMPLATE_TEXT" } })
+      ],
+      (ids) => kept.push(ids)
+    );
+    expect(screen.getByText("1 picture place here is empty")).toBeTruthy();
+    expect(screen.getByText("Needs your choice")).toBeTruthy();
+    screen.getByRole("button", { name: "Leave it as the template has it" }).click();
+    expect(kept).toEqual([["m-background"]]);
+  });
+
   it("says nothing when every text is written or already kept", () => {
     renderWithKeep([mappingFixture({ id: "m-done", placeholderClassification: textKind, text: "Written" })], () => {});
     expect(screen.queryByText(/has not been decided/)).toBeNull();

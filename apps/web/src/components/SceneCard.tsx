@@ -40,9 +40,16 @@ function deriveCardStatus(
   previewState: ScenePreviewState,
   isStale: boolean,
   approvalState: RealScene["scenePlan"]["approvalState"],
-  hasNoMappingsToReview: boolean
+  hasNoMappingsToReview: boolean,
+  hasUndecidedHere: boolean,
+  showsEverythingItOwns: boolean
 ): CardStatus {
-  if (hasGenuineReview) {
+  // REAL 2026-10-06 (client project 3241977f): three scene cards each said
+  // "1 text here has not been decided" under a green "Ready", while "The
+  // whole video" said "Needs your choice" and showed nothing to choose - it
+  // owns those texts in the plan but they are drawn on the scenes' cards. A
+  // badge now speaks for what its own card shows.
+  if (hasGenuineReview || hasUndecidedHere) {
     return "needsChoice";
   }
   if (previewState === "checking" || previewState === "queued") {
@@ -54,7 +61,9 @@ function deriveCardStatus(
   if (isStale) {
     return "outdated";
   }
-  if (approvalState !== "READY_FOR_APPROVAL" && approvalState !== "APPROVED") {
+  // Only a card that shows everything its scene owns can read the scene's
+  // own state as its own; otherwise what is undecided is on another card.
+  if (showsEverythingItOwns && approvalState !== "READY_FOR_APPROVAL" && approvalState !== "APPROVED") {
     return "needsChoice";
   }
   return hasNoMappingsToReview ? "noChangeNeeded" : "ready";
@@ -222,10 +231,35 @@ export function SceneCard({
   // at all - they get a plain question of their own (below).
   const pendingMappingIds = new Set(pendingSuggestions.map((suggestion) => suggestion.mappingId));
   const leftoverTexts = onKeepTemplateText ? undecidedTexts.filter((m) => !pendingMappingIds.has(m.id)) : [];
+  // REAL 2026-10-06 DEAD END: a picture place nobody put a picture in (a
+  // background the client did not want) kept its scene "Needs your choice"
+  // with no question and no control anywhere that could settle it - the same
+  // dead end texts had on 2026-10-04. "Leave it as the template has it" is a
+  // complete answer for a picture place too, recorded the same way.
+  const leftoverPictures = onKeepTemplateText
+    ? shownMappings.filter(
+        (m) =>
+          PICTURE_KINDS.has(m.placeholderClassification?.value ?? "") &&
+          m.selectedAssetId === null &&
+          (m.keepTemplateText ?? null) === null &&
+          !pendingMappingIds.has(m.id)
+      )
+    : [];
+  const ownedIds = new Set(realScene.scenePlan.mappings.map((m) => m.id));
+  const shownIds = new Set(shownMappings.map((m) => m.id));
+  const showsEverythingItOwns = [...ownedIds].every((id) => shownIds.has(id));
   const hasGenuineReview = proposals.length > 0;
   // const hasNoMappingsToReview = realScene.scenePlan.mappings.length === 0;
   const hasNoMappingsToReview = shownMappings.length === 0;
-  const status = deriveCardStatus(hasGenuineReview, previewEntry.state, previewEntry.isStale, realScene.scenePlan.approvalState, hasNoMappingsToReview);
+  const status = deriveCardStatus(
+    hasGenuineReview,
+    previewEntry.state,
+    previewEntry.isStale,
+    realScene.scenePlan.approvalState,
+    hasNoMappingsToReview,
+    undecidedTexts.length > 0 || leftoverPictures.length > 0,
+    showsEverythingItOwns
+  );
   const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
 
   return (
@@ -419,6 +453,16 @@ export function SceneCard({
           <p className="scene-card__finding-reason">{t.simpleScenes.leftoverTextHint}</p>
           <Button size="sm" variant="secondary" disabled={suggestionsBusy} onClick={() => onKeepTemplateText?.(leftoverTexts.map((m) => m.id), [])}>
             {t.simpleScenes.leftoverTextKeepAction(leftoverTexts.length)}
+          </Button>
+        </div>
+      ) : null}
+
+      {leftoverPictures.length > 0 ? (
+        <div className="scene-card__leftover">
+          <p className="scene-card__review-title">{t.simpleScenes.leftoverPictureTitle(leftoverPictures.length)}</p>
+          <p className="scene-card__finding-reason">{t.simpleScenes.leftoverPictureHint}</p>
+          <Button size="sm" variant="secondary" disabled={suggestionsBusy} onClick={() => onKeepTemplateText?.(leftoverPictures.map((m) => m.id), [])}>
+            {t.simpleScenes.leftoverPictureKeepAction(leftoverPictures.length)}
           </Button>
         </div>
       ) : null}

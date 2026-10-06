@@ -2053,3 +2053,29 @@ a file name.
 
 **Not verified end to end**: the rule is unit-tested; the client's plan has not been made
 again with it. His existing plan is unchanged - he has to make the plan again.
+
+## 2026-10-06 - "Everything is set, why does the first card still say Needs your choice?"
+
+**Client project `3241977f`, plan revision 19.** The plan's own state: scene `!MAIN` is
+UNREVIEWED with "6 placeholder(s) in this scene still need a mapping decision". The six are
+five text layers named "Text A" with no text and no recorded decision, and one picture
+place (`Your_image`, the background every scene shares) with no picture.
+
+**Why it never showed in the earlier test of this same template (project `5db054f5`):** that
+plan had a text on every text layer and a logo in the background place, so "empty picture
+place" never arose. The client left the background empty and five headings unwritten.
+
+**Two defects.**
+- A picture place with no picture had no answer at all. A text layer can be settled with
+  "Keep the template's text"; nothing offered the same for a picture, so a background the
+  client did not want blocked approval with no question shown and nothing to press.
+- The badges pointed at the wrong card: the three scene cards holding an undecided text
+  said "Ready" above "1 text here has not been decided", while "The whole video" - which
+  owns them in the plan but does not show them - said "Needs your choice".
+
+**Fixed.** An empty picture place asks its own question on its card, with "Leave it as the
+template has it" (the same recorded decision a text gets; the server already counts it).
+A card's badge is "Needs your choice" when something undecided is on that card, and reads
+its scene's own state only when it shows everything the scene owns.
+
+**Not verified on the client's project** - unit-tested only.
