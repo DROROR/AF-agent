@@ -233,3 +233,15 @@ The step "Check where 1 picture will appear" shows the template's untouched fram
 the client's picture in it, and asks whether the picture is in the right place. Nothing on
 screen can answer that. "Why am I asked?" shows the checker's own sentence ("a full-bleed
 image ... mapped into a decorative card"). **Open.**
+
+## 2026-10-06 - "Approve Scenes" refused after every step said Done (client)
+All four steps of the Scenes guide were ticked; pressing Approve returned both brand rules
+at once in one red paragraph: no logo, and no "by DYO App" line. His logo was in the video,
+but the file had been uploaded as a picture, and only a file uploaded as a logo counts.
+- **Done:** the two messages named a button that no longer exists ("Edit"); they now name
+  "Change picture or text" and say the logo must be the file uploaded as the logo.
+- **Open:** the two rules should be a step of the guide, checked before Approve is offered,
+  each with a button that opens the place to fix it.
+- **Open:** nothing tells a client that a logo uploaded in the picture box does not count,
+  and a file's kind cannot be changed after upload.
+- **Open:** two refusals arrive as one run-on paragraph.
