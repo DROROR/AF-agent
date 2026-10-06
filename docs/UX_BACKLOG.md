@@ -168,3 +168,13 @@ Seen on real screens of project `5db054f5` in Simple view, not inferred from cod
 - The sidebar still lists Jobs / Workers / Approvals / Renders / Activity for everyone: it is
   the operator's own navigation, and hiding it is their decision to make.
 - The Hebrew step names and wizard labels were left as they were; only English was reworded.
+
+## 2026-10-06 - asked for by the client while making his first video
+- **Done:** "Set colours once for the whole video" on the Scenes tab. Each colour layer that
+  repeats across scenes is listed once, by the layer's own name, with how many places it is
+  in; one choice is written to all of them (the same SET/CLEAR_BRAND_COLOR a scene's drawer
+  sends, under the same rule for which colours can be set). Not drawn when nothing repeats.
+- **Open:** the rows carry the template's own layer names ("Text A", "DOTS"); the client's
+  words were "header, subtitle, text, background". Nothing in a template says which layer is
+  which of those, so a plain name would be a guess - a person would have to name them once.
+- **Open:** not yet seen on the live dashboard or tried on a real plan.

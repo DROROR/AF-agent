@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactElement } from "react";
 import type { MappingSuggestion } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
+import { WholeVideoColours } from "./WholeVideoColours";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
 import { resolveSceneMappingHomes } from "../lib/scene-mapping-homes";
@@ -418,6 +419,8 @@ export function SimpleScenesView(): ReactElement {
       {suggestionsError ? (
         <ErrorState title={t.mappingAssistant.title} description={suggestionsError} />
       ) : null}
+
+      {plan && project ? <WholeVideoColours scenePlans={plan.plan.scenePlans} manifest={project.manifest} disabled={isStale} applyEdit={applyEdit} /> : null}
 
       <Card className="simple-scenes__approve-bar">
         <ScenesGuide steps={guideSteps} heading={t.simpleScenes.guide.heading} />

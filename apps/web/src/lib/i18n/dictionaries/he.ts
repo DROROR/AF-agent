@@ -1259,6 +1259,16 @@ export const he: Dictionary = {
     toggleAriaLabel: "החלפה בין תצוגה פשוטה למתקדמת"
   },
   simpleScenes: {
+    wholeVideoColours: {
+      summary: (n: number): string => `קביעת צבעים פעם אחת לכל הסרטון (${n})`,
+      hint: "כל צבע כאן מופיע בכמה סצנות. בחרו אותו פעם אחת והוא ייקבע בכל מקום שבו הוא מופיע. עדיין אפשר לשנות סצנה בודדת בכרטיס שלה.",
+      places: (n: number): string => (n === 1 ? "- מקום אחד" : `- ${n} מקומות`),
+      templateColour: "צבע התבנית",
+      backToTemplate: "חזרה לצבע התבנית",
+      mixed: "שונה בין הסצנות",
+      applyAction: "החלה על כל הסרטון",
+      saved: (n: number): string => `נשמר ב-${n} מקומות. צרו שוב תצוגה מקדימה כדי לראות.`
+    },
     emptyTitle: "אין עדיין סצנות",
     emptyDescription: "הסצנות יופיעו כאן ברגע שתוכנית הסרטון שלכם תהיה קיימת. פתחו את לשונית \"תוכנית בינה מלאכותית\" כדי ליצור אותה.",
     status: {

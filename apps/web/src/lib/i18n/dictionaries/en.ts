@@ -1441,6 +1441,16 @@ export const en = {
     toggleAriaLabel: "Switch between Simple and Advanced view"
   },
   simpleScenes: {
+    wholeVideoColours: {
+      summary: (n: number): string => `Set colours once for the whole video (${n})`,
+      hint: "Each colour below is used in several scenes. Choose it once here and it is set everywhere it appears. A single scene can still be changed on its own card.",
+      places: (n: number): string => (n === 1 ? "- 1 place" : `- ${n} places`),
+      templateColour: "Template's colour",
+      backToTemplate: "Back to the template's colour",
+      mixed: "Different in different scenes",
+      applyAction: "Apply to the whole video",
+      saved: (n: number): string => `Saved in ${n} places. Make the preview again to see it.`
+    },
     emptyTitle: "No scenes yet",
     emptyDescription: "Scenes appear here once your video plan exists. Open the AI Plan tab to make it.",
     status: {

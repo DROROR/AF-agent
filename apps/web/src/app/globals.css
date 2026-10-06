@@ -4296,3 +4296,10 @@ a.workflow-stepper__step:hover {
 /* Edit drawer, Simple view: colours folded away */
 .edit-drawer-colours { border-top: 1px solid var(--color-border); padding-top: 0.75rem; }
 .edit-drawer-colours > summary { cursor: pointer; font-weight: 600; }
+
+/* Scenes: set a repeated colour once for the whole video */
+.whole-video-colours summary { cursor: pointer; font-weight: 600; }
+.whole-video-colours__list { list-style: none; margin: 0.75rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.whole-video-colours__row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.whole-video-colours__name { min-width: 12rem; font-weight: 600; }
+.whole-video-colours__state { min-width: 9rem; font-variant-numeric: tabular-nums; }
