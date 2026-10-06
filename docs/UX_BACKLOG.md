@@ -192,3 +192,21 @@ Seen in a local preview against live data before committing.
 - **Open:** the swatch names are still the template's ("Text A", "DOTS"); "Claude - Generate
   suggestions" stays the loudest button after its step is done; nothing here has been tried
   by the client yet.
+
+## 2026-10-06 - "all those were good, and suddenly they need attention" (client)
+Checked against all 24 revisions of his plan: nothing he set was lost. Five headline texts
+were never filled; their cards said "Ready" until 636a404 made the badge speak for its own
+card. The operator's own test of this template never met this because every text was filled.
+- **Open:** the card names the open text "Text A"; the panel calls the same box "Text 3".
+  Nothing connects the two.
+- **Open:** in the panel the undecided box is not marked, and the template's word shown grey
+  inside it ("APP") reads as if it were already filled.
+- **Open:** "Keep the template's text" does not say what that text is. Here it is the
+  template's English headline, which a client would not want in a Hebrew video.
+- **Open:** the headline is the last text box in the panel, after the smaller lines.
+- **Open:** no way to say "no text here" (SET_TEXT needs at least one character; no hide
+  control in the web app). Needs a worker change and a run on After Effects.
+- **Open:** "Leave empty to clear the current text" under every box does not say what the
+  video will then show.
+- **Open:** a badge that turns from "Ready" to "Needs your choice" after an update gives no
+  reason; the client read it as his work being undone.
