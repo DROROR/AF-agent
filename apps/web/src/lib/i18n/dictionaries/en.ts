@@ -1443,9 +1443,9 @@ export const en = {
   },
   simpleScenes: {
     wholeVideoColours: {
-      summary: (n: number): string => `Set colours once for the whole video (${n})`,
-      hint: "Each colour below is used in several scenes. Choose it once here and it is set everywhere it appears. A single scene can still be changed on its own card.",
-      places: (n: number): string => (n === 1 ? "- 1 place" : `- ${n} places`),
+      title: "Colours for the whole video",
+      hint: "Click a colour to change it. It changes in every scene that uses it. Leave them alone to keep the template's colours.",
+      places: (n: number): string => (n === 1 ? "in 1 place" : `in ${n} places`),
       templateColour: "Template's colour",
       backToTemplate: "Back to the template's colour",
       mixed: "Different in different scenes",
@@ -1479,7 +1479,7 @@ export const en = {
     editAction: "Change picture or text",
     advancedDetailsToggle: "Advanced details",
     plannedPreviewLabel: "A rough sketch - the real picture is made at Preview",
-    aePreviewLabel: "After Effects preview",
+    aePreviewLabel: "The template, before your changes",
     outdatedPreviewHint: "You changed this scene, so this picture is from before your change. The new one is made at Preview.",
 /* 2026-10-04: this told people to click "Preview Scene" - a button this card does not have. Previews are made automatically. */
     noPreviewYetHint: "No preview yet. After Effects makes one automatically - there is nothing to press.",

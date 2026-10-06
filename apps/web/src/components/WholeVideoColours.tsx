@@ -125,9 +125,8 @@ export function WholeVideoColours({
 
   return (
     <Card className="whole-video-colours">
-      <details>
-        <summary>{t.simpleScenes.wholeVideoColours.summary(groups.length)}</summary>
-        <p className="field__hint">{t.simpleScenes.wholeVideoColours.hint}</p>
+        <h3 className="whole-video-colours__title">{t.simpleScenes.wholeVideoColours.title}</h3>
+        <p className="whole-video-colours__hint">{t.simpleScenes.wholeVideoColours.hint}</p>
         {error ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={error} /> : null}
         <ul className="whole-video-colours__list">
           {groups.map((group) => {
@@ -135,12 +134,7 @@ export function WholeVideoColours({
             const shown = HEX.test(value) ? value : (group.templateColorHex ?? "#000000");
             const inputId = `whole-video-colour-${group.name.replace(/[^A-Za-z0-9]+/g, "-")}`;
             return (
-              <li key={group.name} className="whole-video-colours__row">
-                <label htmlFor={inputId} className="whole-video-colours__name">
-                  {/* The name can carry the path of the control it sits under; the last part is the layer itself. */}
-                  <span title={group.name}>{group.name.split("›").pop()?.trim() ?? group.name}</span>
-                  <span className="field__hint"> {t.simpleScenes.wholeVideoColours.places(group.targets.length)}</span>
-                </label>
+              <li key={group.name} className="whole-video-colours__row" data-changed={draft[group.name] !== undefined}>
                 <input
                   id={inputId}
                   type="color"
@@ -150,6 +144,11 @@ export function WholeVideoColours({
                   value={shown}
                   onChange={(event) => setDraft((current) => ({ ...current, [group.name]: event.target.value.toUpperCase() }))}
                 />
+                <label htmlFor={inputId} className="whole-video-colours__name">
+                  {/* The name can carry the path of the control it sits under; the last part is the layer itself. */}
+                  <span title={group.name}>{group.name.split("›").pop()?.trim() ?? group.name}</span>
+                  <span className="whole-video-colours__places">{t.simpleScenes.wholeVideoColours.places(group.targets.length)}</span>
+                </label>
                 <span className="whole-video-colours__state">
                   {draft[group.name] === ""
                     ? t.simpleScenes.wholeVideoColours.backToTemplate
@@ -174,7 +173,6 @@ export function WholeVideoColours({
           </Button>
           {savedCount !== null ? <span role="status">{t.simpleScenes.wholeVideoColours.saved(savedCount)}</span> : null}
         </div>
-      </details>
     </Card>
   );
 }

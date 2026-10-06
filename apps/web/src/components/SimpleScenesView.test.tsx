@@ -235,10 +235,8 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     // strip's caption too, which used to show the template's own name.
     // 2026-10-04 (later): the plain name is the card's TITLE now; the template's own name stays on hover.
     expect(screen.getByRole("heading", { name: "Scene 1" }).getAttribute("title")).toBe("App Features");
-    const thumb = document.querySelector(".storyboard__thumb") as HTMLElement;
-    expect(thumb.querySelector("span")?.textContent).toBe("Scene 1");
-    // The template's name is kept, on hover, for matching it to After Effects.
-    expect(thumb.getAttribute("title")).toBe("App Features");
+    // 2026-10-06: the thumbnail strip is gone - each card shows the same frame at full width.
+    expect(document.querySelector(".storyboard__thumb")).toBeNull();
   });
 
   /**
@@ -317,7 +315,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     expect(screen.queryByText("Suggested for this scene")).toBeNull();
   });
 
-  it("shows Original (AE) and Planned previews side by side when both exist - Before/After (point M.4)", async () => {
+  it("shows the one real After Effects frame, and no made-up planned picture beside it", async () => {
     const capturedAt = new Date().toISOString();
     stubWorkspace({
       assets: [assetFixture({ id: "asset-1", originalFilename: "checkout.mp4", mediaKind: "VIDEO" })],
@@ -350,8 +348,9 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       }
     });
     renderView();
-    await screen.findByText("After Effects preview");
-    expect(screen.queryByText("A rough sketch - the real picture is made at Preview")).not.toBeNull();
+    await screen.findByText("The template, before your changes");
+    // 2026-10-06: the second, made-up "rough sketch" picture is gone - one real frame per card.
+    expect(screen.queryByText("A rough sketch - the real picture is made at Preview")).toBeNull();
     expect(screen.getAllByText("Track every workout").length).toBeGreaterThan(0);
   });
 
@@ -429,7 +428,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
 
     await waitFor(
       () => {
-        expect(screen.queryByText("After Effects preview")).not.toBeNull();
+        expect(screen.queryByText("The template, before your changes")).not.toBeNull();
       },
       { timeout: 10_000 }
     );
@@ -624,7 +623,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       // Both eventually reach a real, AE-sourced preview.
       await waitFor(
         () => {
-          expect(screen.getAllByText("After Effects preview")).toHaveLength(2);
+          expect(screen.getAllByText("The template, before your changes")).toHaveLength(2);
         },
         { timeout: 10_000 }
       );
@@ -764,7 +763,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         renderView();
         await screen.findByRole("heading", { name: "Scene 1" });
 
-        await screen.findByText("After Effects preview", {}, { timeout: 20_000 });
+        await screen.findByText("The template, before your changes", {}, { timeout: 20_000 });
         expect(screen.queryByText(/already has a live/)).toBeNull();
         const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
         expect(fetchMock.mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length).toBe(2);

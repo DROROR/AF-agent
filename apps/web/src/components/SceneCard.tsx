@@ -81,21 +81,16 @@ function primaryMapping(mappings: readonly PlaceholderMapping[]) {
 function PreviewBeforeAfter({
   projectId,
   realScene,
-  previewEntry,
-  asset,
-  mappingText
+  previewEntry
 }: {
   projectId: string;
   realScene: RealScene;
   previewEntry: ScenePreviewEntry;
-  asset: AssetDto | null;
-  mappingText: string | null;
 }): ReactElement {
   const { t } = useLocale();
   const hasOriginal = previewEntry.preview !== null;
-  const hasPlanned = asset !== null || mappingText !== null;
 
-  if (!hasOriginal && !hasPlanned) {
+  if (!hasOriginal) {
     return (
       <div className="scene-card__preview">
         <p className="scene-card__preview-empty">{t.simpleScenes.noPreviewYetHint}</p>
@@ -104,27 +99,17 @@ function PreviewBeforeAfter({
   }
 
   return (
-    <div className="scene-card__preview scene-card__preview--split" data-split={hasOriginal && hasPlanned}>
-      {hasOriginal ? (
-        <div className="scene-card__preview-pane">
-          <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={realScene.sceneName} className="scene-card__preview-media" />
-          <span className="scene-card__preview-badge">{t.simpleScenes.aePreviewLabel}</span>
-          {previewEntry.isStale ? <p className="scene-card__preview-hint">{t.simpleScenes.outdatedPreviewHint}</p> : null}
-        </div>
-      ) : null}
-      {hasPlanned ? (
-        <div className="scene-card__preview-pane">
-          {asset ? (
-            asset.mediaKind === "VIDEO" ? (
-              <video src={assetFileUrl(projectId, asset.id)} className="scene-card__preview-media" muted />
-            ) : (
-              <img src={assetFileUrl(projectId, asset.id)} alt={realScene.sceneName} className="scene-card__preview-media" />
-            )
-          ) : null}
-          {mappingText ? <p className="scene-card__preview-caption">{mappingText}</p> : null}
-          <span className="scene-card__preview-badge scene-card__preview-badge--planned">{t.simpleScenes.plannedPreviewLabel}</span>
-        </div>
-      ) : null}
+    // 2026-10-06: beside this frame the card drew a second, made-up picture -
+    // the chosen file with the text in italics under it and an orange line
+    // saying it was "a rough sketch". Two pictures, one of them not real, on
+    // every card. The card now shows the one real frame; what goes on it is
+    // listed right below, with the chosen picture as a thumbnail.
+    <div className="scene-card__preview">
+      <div className="scene-card__preview-pane">
+        <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={realScene.sceneName} className="scene-card__preview-media" />
+        <span className="scene-card__preview-badge">{t.simpleScenes.aePreviewLabel}</span>
+        {previewEntry.isStale ? <p className="scene-card__preview-hint">{t.simpleScenes.outdatedPreviewHint}</p> : null}
+      </div>
     </div>
   );
 }
@@ -256,7 +241,7 @@ export function SceneCard({
         <span className={`status-badge status-badge--${STATUS_TONE[status]}`}>{t.simpleScenes.status[status]}</span>
       </div>
 
-      <PreviewBeforeAfter projectId={projectId} realScene={realScene} previewEntry={previewEntry} asset={asset} mappingText={mapping?.text ?? null} />
+      <PreviewBeforeAfter projectId={projectId} realScene={realScene} previewEntry={previewEntry} />
 
       {/*
         2026-10-04: "Preview generating…" was a badge and nothing else - no
@@ -274,7 +259,10 @@ export function SceneCard({
       <dl className="scene-card__facts">
         <div>
           <dt>{t.simpleScenes.screenLabel}</dt>
-          <dd>{asset ? (asset.label ?? asset.originalFilename) : status === "noChangeNeeded" ? t.simpleScenes.originalContentKept : t.simpleScenes.noAssetAssigned}</dd>
+          <dd className="scene-card__picture">
+            {asset && asset.mediaKind !== "VIDEO" ? <img src={assetFileUrl(projectId, asset.id)} alt="" className="scene-card__picture-thumb" /> : null}
+            <span>{asset ? (asset.label ?? asset.originalFilename) : status === "noChangeNeeded" ? t.simpleScenes.originalContentKept : t.simpleScenes.noAssetAssigned}</span>
+          </dd>
         </div>
         <div>
           <dt>{t.simpleScenes.textLabel}</dt>

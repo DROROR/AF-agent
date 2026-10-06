@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactElement } from "react";
 import type { MappingSuggestion } from "@dyo/schemas";
@@ -10,9 +9,8 @@ import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useMappingSuggestions } from "../lib/use-mapping-suggestions";
 import { resolveSceneMappingHomes } from "../lib/scene-mapping-homes";
 import { useProjectAssets } from "../lib/use-project-assets";
-import { groupIntoRealScenes, type RealScene } from "../lib/real-scene-grouping";
-import { isScenePreviewSettled, useScenePreviewQueue, type UseScenePreviewQueueResult } from "../lib/use-scene-preview-queue";
-import { sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
+import { groupIntoRealScenes } from "../lib/real-scene-grouping";
+import { isScenePreviewSettled, useScenePreviewQueue } from "../lib/use-scene-preview-queue";
 import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { findPendingPictureSlots, SlotBulkReview } from "./SlotBulkReview";
@@ -26,88 +24,12 @@ import { ErrorState } from "./ErrorState";
 import { Skeleton } from "./ui/Skeleton";
 import { useLocale } from "./LocaleProvider";
 
-/**
- * A compact visual storyboard (client-facing UX redesign, "M. VISUAL
- * PREVIEWS ARE MANDATORY", point 10) - one small thumbnail per real
- * scene, so a client can see the whole video's shape before diving into
- * individual cards. Reads the SAME shared preview queue state the scene
- * cards below use (never a separate fetch) - the storyboard and the
- * scene cards always agree on which scenes are real and what each one's
- * current preview is. "Play Full Preview" links to the Overview tab,
- * where the real AE-sourced complete-preview player and its own approval
- * gate already live (ProjectOverviewTab) - never duplicated here.
+/*
+ * 2026-10-06: a strip of small thumbnails ("Storyboard") used to head this
+ * page. Each scene's card now shows the same frame at full width directly
+ * below, so the strip was the same pictures twice on a page the client called
+ * complicated. It is gone; the cards are the storyboard.
  */
-function Storyboard({
-  projectId,
-  realScenes,
-  previewQueue,
-  labels
-}: {
-  projectId: string;
-  realScenes: RealScene[];
-  previewQueue: UseScenePreviewQueueResult;
-  /** What each scene is called for a person ("Scene 3", "The whole video") - the same labels the cards below carry. */
-  labels: ReadonlyMap<string, string>;
-}): ReactElement | null {
-  const { t } = useLocale();
-  if (realScenes.length === 0) {
-    return null;
-  }
-  return (
-    <Card className="storyboard">
-      <div className="storyboard__header">
-        <h3>{t.simpleScenes.storyboardTitle}</h3>
-        {/* 2026-10-04: pointed at the project's front page, where the complete preview used to live. It lives on the Preview tab. */}
-        <Link href={`/projects/${projectId}/preview`} className="btn btn--secondary btn--sm">
-          {t.simpleScenes.playFullPreviewAction}
-        </Link>
-      </div>
-      <div className="storyboard__strip">
-        {/* A part with no card of its own (nothing in it to change) and no picture is an empty tile under a raw template name - left out. */}
-        {realScenes
-          .filter((realScene) => labels.has(realScene.scenePlan.id) || previewQueue.getEntry(realScene.scenePlan.id).preview !== null)
-          .map((realScene) => (
-          <StoryboardThumb
-            key={realScene.manifestCompositionId}
-            projectId={projectId}
-            realScene={realScene}
-            preview={previewQueue.getEntry(realScene.scenePlan.id).preview}
-            label={labels.get(realScene.scenePlan.id) ?? null}
-          />
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function StoryboardThumb({
-  projectId,
-  realScene,
-  preview,
-  label
-}: {
-  projectId: string;
-  realScene: RealScene;
-  preview: ReturnType<UseScenePreviewQueueResult["getEntry"]>["preview"];
-  label: string | null;
-}): ReactElement {
-  // 2026-10-04: the strip showed the template author's own names, which say
-  // nothing to a client, while the cards under it said "Scene 3". One name
-  // for one thing: the strip uses the card's label, and the template's name
-  // stays on hover for whoever needs to match it to After Effects. A part
-  // with no card label (nothing in it to change) keeps the only name it has.
-  const caption = label ?? realScene.sceneName;
-  return (
-    <div className="storyboard__thumb" title={realScene.sceneName}>
-      {preview ? (
-        <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={caption} />
-      ) : (
-        <div className="storyboard__thumb-placeholder" aria-hidden="true" />
-      )}
-      <span>{caption}</span>
-    </div>
-  );
-}
 
 /**
  * "Review Scenes" (client-facing UX redesign, sections B-G + "M. VISUAL
@@ -414,13 +336,11 @@ export function SimpleScenesView(): ReactElement {
       {isStale ? <ErrorState title={t.projectWorkspace.staleRevisionTitle} description={t.projectWorkspace.staleRevisionDescription} /> : null}
       {actionError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} /> : null}
 
-      <Storyboard projectId={projectId} realScenes={realScenes} previewQueue={previewQueue} labels={cardLabels} />
 
       {suggestionsError ? (
         <ErrorState title={t.mappingAssistant.title} description={suggestionsError} />
       ) : null}
 
-      {plan && project ? <WholeVideoColours scenePlans={plan.plan.scenePlans} manifest={project.manifest} disabled={isStale} applyEdit={applyEdit} /> : null}
 
       <Card className="simple-scenes__approve-bar">
         <ScenesGuide steps={guideSteps} heading={t.simpleScenes.guide.heading} />
@@ -483,6 +403,15 @@ export function SimpleScenesView(): ReactElement {
           {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
         </Button>
       </Card>
+
+      {/*
+        2026-10-06, after the client still called this page complicated: it
+        opened with a strip of thumbnails and a closed line about colours, and
+        only then said what to do. The instructions come first now, and the
+        colours card is a real, open card (it was a collapsed line the client
+        was told about and could not see).
+      */}
+      {plan && project ? <WholeVideoColours scenePlans={plan.plan.scenePlans} manifest={project.manifest} disabled={isStale} applyEdit={applyEdit} /> : null}
 
       <SlotBulkReview isCurrentStep={currentGuideStep === GUIDE_PICTURES} sceneLabelFor={(slot) => cardLabels.get(homes.cardIdByMappingId.get(slot.mappingId) ?? slot.scenePlanId) ?? null} />
 

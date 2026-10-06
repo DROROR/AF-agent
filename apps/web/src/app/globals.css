@@ -4297,9 +4297,31 @@ a.workflow-stepper__step:hover {
 .edit-drawer-colours { border-top: 1px solid var(--color-border); padding-top: 0.75rem; }
 .edit-drawer-colours > summary { cursor: pointer; font-weight: 600; }
 
-/* Scenes: set a repeated colour once for the whole video */
-.whole-video-colours summary { cursor: pointer; font-weight: 600; }
-.whole-video-colours__list { list-style: none; margin: 0.75rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.whole-video-colours__row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-.whole-video-colours__name { min-width: 12rem; font-weight: 600; }
-.whole-video-colours__state { min-width: 9rem; font-variant-numeric: tabular-nums; }
+/* Scenes: colours for the whole video - an open card of swatches */
+.whole-video-colours__title { margin: 0; font-size: 1rem; }
+.whole-video-colours__hint { margin: var(--space-1, 0.25rem) 0 0; font-size: 0.86rem; color: var(--color-text-muted); }
+.whole-video-colours__list { list-style: none; margin: var(--space-3) 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: var(--space-2); }
+.whole-video-colours__row { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "swatch name" "swatch state" "swatch reset"; column-gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md, 0.5rem); }
+.whole-video-colours__row[data-changed="true"] { border-color: var(--color-border-strong); background: var(--color-surface-sunken); }
+.whole-video-colours__row > input[type="color"] { grid-area: swatch; width: 3rem; height: 3rem; padding: 0; border: 1px solid var(--color-border-strong); border-radius: 50%; overflow: hidden; cursor: pointer; background: none; }
+.whole-video-colours__row > input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.whole-video-colours__row > input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+.whole-video-colours__name { grid-area: name; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; font-weight: 600; min-width: 0; cursor: pointer; }
+.whole-video-colours__places { font-weight: 400; font-size: 0.78rem; color: var(--color-text-muted); }
+.whole-video-colours__state { grid-area: state; font-size: 0.82rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.whole-video-colours__row > .btn { grid-area: reset; justify-self: start; padding-inline: 0; font-size: 0.78rem; }
+
+/* Scenes: one real frame per card, then what goes on it */
+.scene-card__preview { padding: 0; min-height: 0; background: none; }
+.scene-card__preview-pane { width: 100%; }
+.scene-card__preview-media { max-height: none; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-md, 0.5rem); }
+.scene-card__preview-badge { font-weight: 400; }
+.scene-card__preview-empty { padding: var(--space-4, 1rem); background: var(--color-surface-sunken); border-radius: var(--radius-md, 0.5rem); width: 100%; }
+.scene-card__facts { gap: var(--space-2); font-size: 0.9rem; }
+.scene-card__facts > div { flex-direction: column; gap: 0.15rem; }
+.scene-card__facts dt { font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; }
+.scene-card__facts dd { text-align: start; font-weight: 500; }
+.scene-card__picture { display: flex; align-items: center; gap: var(--space-2); }
+.scene-card__picture-thumb { width: 2.25rem; height: 2.25rem; object-fit: cover; border-radius: var(--radius-sm, 0.35rem); border: 1px solid var(--color-border); flex: none; }
+.scene-card__actions > .btn { width: 100%; justify-content: center; }
+.scene-card { justify-content: flex-start; }

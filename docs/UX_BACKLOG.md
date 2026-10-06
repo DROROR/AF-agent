@@ -178,3 +178,17 @@ Seen on real screens of project `5db054f5` in Simple view, not inferred from cod
   words were "header, subtitle, text, background". Nothing in a template says which layer is
   which of those, so a plain name would be a guess - a person would have to name them once.
 - **Open:** not yet seen on the live dashboard or tried on a real plan.
+
+## 2026-10-06 - "still complex, and the colours are hidden" (client, relayed by the operator)
+Seen in a local preview against live data before committing.
+- Scenes page order: what to do first, then colours, then the cards. The thumbnail strip is
+  gone - each card shows the same frame at full width.
+- "Colours for the whole video" is an open card of round swatches (it was a collapsed line):
+  click a swatch, press "Apply to the whole video".
+- Scene card: one real frame ("The template, before your changes"), then PICTURE with a
+  thumbnail of the chosen file, TEXT, and one button. The second, made-up "rough sketch"
+  picture with its orange note is removed.
+- A place every scene shares (a background picture) is on "The whole video" card.
+- **Open:** the swatch names are still the template's ("Text A", "DOTS"); "Claude - Generate
+  suggestions" stays the loudest button after its step is done; nothing here has been tried
+  by the client yet.
