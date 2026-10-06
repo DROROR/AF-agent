@@ -1,4 +1,4 @@
-import { updateWorkMapRequestSchema, type TemplateManifest, type WorkMap, type WorkMapAiSummary } from "@dyo/schemas";
+import { parseHttpWebsiteUrl, updateWorkMapRequestSchema, type TemplateManifest, type WorkMap, type WorkMapAiSummary } from "@dyo/schemas";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError, ProjectNotFoundError } from "../../errors/app-error.js";
 import type { AssetRepository } from "../../domain/asset/types.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
@@ -151,6 +151,33 @@ function extractRawEntries(raw: unknown): unknown[] {
  * throws NoUsableWorkMapDraftError (422) rather than silently persisting
  * an empty Work Map that looks like a successful plan.
  */
+/**
+ * REAL 2026-10-06 (client project 3241977f): the client typed their website
+ * address into the box for instructions and left the website box empty. The
+ * site was never read ("websiteRead: NOT_GIVEN"), and with nothing else to go
+ * on the plan was written from the uploaded files' names. A person who types
+ * an address has given their website, whichever box it landed in.
+ *
+ * The website box always wins. Otherwise, when the typed instructions hold
+ * exactly ONE address that passes the same check the website box applies
+ * (http/https, a real public hostname), that address is the website. Two
+ * different addresses are ambiguous and none is chosen.
+ */
+export function resolveClientWebsiteUrl(explicitWebsiteUrl: string | null | undefined, instructions: string): string | null {
+  if (explicitWebsiteUrl) {
+    return explicitWebsiteUrl;
+  }
+  const candidates = new Set<string>();
+  for (const token of instructions.match(/https?:\/\/[^\s<>"']+/gi) ?? []) {
+    const trimmed = token.replace(/[.,;:!?)\]]+$/, "");
+    const parsed = parseHttpWebsiteUrl(trimmed);
+    if (parsed !== null) {
+      candidates.add(parsed.toString());
+    }
+  }
+  return candidates.size === 1 ? ([...candidates][0] as string) : null;
+}
+
 export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, projectId: string, instructions: string): Promise<WorkMap> {
   const project = await deps.projectRepository.findById(projectId);
   if (!project) {
@@ -160,6 +187,8 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
   if (!deps.aiWorkMapProvider.isConfigured()) {
     throw new AiWorkMapNotConfiguredError();
   }
+
+  const websiteUrl = resolveClientWebsiteUrl(project.brandInputs?.websiteUrl, `${instructions}\n${project.brandInputs?.textInstructions ?? ""}`);
 
   const assets = await deps.assetRepository.listByProjectId(projectId);
   const currentWorkMap = await deps.workMapRepository.findCurrentByProjectId(projectId);
@@ -181,7 +210,7 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
     compositions,
     candidateAssets: assets.map((asset) => ({ id: asset.id, originalFilename: asset.originalFilename, label: asset.label, mediaKind: asset.mediaKind })),
     existingEntries: currentWorkMap?.entries ?? [],
-    brandInputs: project.brandInputs,
+    brandInputs: websiteUrl === null ? project.brandInputs : { ...(project.brandInputs ?? { brandColors: [], logoAssetId: null, textInstructions: null }), websiteUrl },
     sceneEvidenceSummaries: compatibleEvidence.map((evidence) => ({ manifestCompositionId: evidence.manifestCompositionId, compositionName: evidence.response.compositionName }))
   });
   const providerDurationMs = Date.now() - providerStart;
@@ -223,6 +252,6 @@ export async function generateAiWorkMapDraft(deps: GenerateAiWorkMapDraftDeps, p
   }
 
   const baseRevision = currentWorkMap?.revision ?? 0;
-  const aiSummary = buildAiSummary(result.entries, project.brandInputs?.websiteUrl ?? null, result.metadata.webFetch);
+  const aiSummary = buildAiSummary(result.entries, websiteUrl, result.metadata.webFetch);
   return updateWorkMap({ workMapRepository: deps.workMapRepository, now: deps.now }, projectId, { baseRevision, entries: validEntries }, aiSummary);
 }

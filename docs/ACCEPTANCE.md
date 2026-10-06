@@ -2029,3 +2029,27 @@ superseded-revision case beside it.
 **Not yet seen on the dashboard after the fix** - to be confirmed on the same project once
 deployed: banner "Everything is done", Preview showing the approved video, Export showing
 the download without "Not ready yet".
+
+## 2026-10-06 - The client's first own plan was written about "DBT Academy" and never read his website
+
+**Reported by the client (project `3241977f`, his own PC):** "when I gave the AI the website
+to get insight for text, it described things from DBT Academy somehow."
+
+**What the records show.** The project's stored inputs are `websiteUrl: null` and
+`textInstructions: "https://studio-shani.co.il/"` - the address was typed into the
+instructions box, and the website box was left empty. The plan's own summary says
+`websiteRead: "NOT_GIVEN"` and, in its notes, that with no text from the client or a site
+the wording was produced from the names of the supplied files. One uploaded file is
+named `DBT Academy (1).png` (labelled as the logo); the summary's `productName` is
+"DBT Academy". The assistant was never pointed at the site, and took the business name from
+a file name.
+
+**Fixed.**
+- An address is the client's website whichever box it lands in: with the website box
+  empty, exactly one valid http(s) address in the typed instructions is used as the website
+  (the same check the website box applies; two different addresses choose none).
+- The assistant's rules now say a file's name or label is not evidence of what the business
+  is called or sells; without a name from the client's words or site, the name stays empty.
+
+**Not verified end to end**: the rule is unit-tested; the client's plan has not been made
+again with it. His existing plan is unchanged - he has to make the plan again.

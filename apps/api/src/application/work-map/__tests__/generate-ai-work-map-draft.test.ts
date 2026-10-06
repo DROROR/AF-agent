@@ -8,7 +8,7 @@ import { uploadAsset } from "../../asset/upload-asset.js";
 import { InMemoryAssetStorage } from "../../asset/test-support/in-memory-asset-storage.js";
 import { InMemoryWorkMapRepository } from "../test-support/in-memory-work-map-repository.js";
 import { InMemorySceneEvidenceRepository } from "../../job/test-support/in-memory-scene-evidence-repository.js";
-import { buildAiSummary, compositionsWorthPlanning, generateAiWorkMapDraft, reconcileTargetPlaceholder } from "../generate-ai-work-map-draft.js";
+import { buildAiSummary, compositionsWorthPlanning, generateAiWorkMapDraft, reconcileTargetPlaceholder, resolveClientWebsiteUrl } from "../generate-ai-work-map-draft.js";
 import { WorkMapDraftNotConfiguredError, type AiWorkMapDraftInput, type AiWorkMapDraftResult, type AiWorkMapMetadata, type AiWorkMapProvider } from "../ai-work-map-provider.js";
 import { AiWorkMapNotConfiguredError, NoUsableWorkMapDraftError } from "../../../errors/app-error.js";
 
@@ -319,5 +319,31 @@ describe("buildAiSummary - what the client is shown the assistant read (real com
     const { updateWorkMap } = await import("../update-work-map.js");
     const edited = await updateWorkMap({ workMapRepository: deps.workMapRepository, now: fixedNow }, deps.project.projectId, { baseRevision: drafted.revision, entries: drafted.entries });
     expect(edited.aiSummary).toMatchObject({ productName: "Acme" });
+  });
+});
+
+/**
+ * REAL 2026-10-06: a client typed their website address into the instructions
+ * box and left the website box empty; the site was never read.
+ */
+describe("resolveClientWebsiteUrl", () => {
+  it("the website box always wins", () => {
+    expect(resolveClientWebsiteUrl("https://a.example.com", "see https://b.example.com")).toBe("https://a.example.com");
+  });
+
+  it("takes the one address typed into the instructions when the website box is empty", () => {
+    expect(resolveClientWebsiteUrl(null, "https://shop.example.com/")).toBe("https://shop.example.com/");
+    expect(resolveClientWebsiteUrl(undefined, "Our site is https://shop.example.com/about.")).toBe("https://shop.example.com/about");
+    expect(resolveClientWebsiteUrl(null, "https://shop.example.com/\nhttps://shop.example.com/")).toBe("https://shop.example.com/");
+  });
+
+  it("chooses none when two different addresses are typed - that is ambiguous", () => {
+    expect(resolveClientWebsiteUrl(null, "https://a.example.com and https://b.example.com")).toBeNull();
+  });
+
+  it("never accepts an address the website box itself would refuse", () => {
+    expect(resolveClientWebsiteUrl(null, "http://localhost:3000/admin")).toBeNull();
+    expect(resolveClientWebsiteUrl(null, "http://10.0.0.5/")).toBeNull();
+    expect(resolveClientWebsiteUrl(null, "no address here")).toBeNull();
   });
 });
