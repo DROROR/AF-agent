@@ -286,16 +286,21 @@ function applyExecutionPlanEditRaw(
       if (editedBy === undefined || editedBy.trim() === "") {
         return { ok: false, reason: "SET_TEMPLATE_TEXT_DECISION requires the deciding user's identity - refusing to record an unattributable decision" };
       }
+      // "No text in this place" is a decision about an EMPTY place: whatever
+      // was typed there is removed in the same step, so the record can never
+      // say "no text" beside a text that would still be written.
+      const noText = operation.decision === "NO_TEXT";
       const result = updateMapping(scene, operation.mappingId, (m) => ({
         ...m,
+        ...(noText ? { text: null } : {}),
         keepTemplateText: {
           decision: operation.decision,
           decidedBy: editedBy,
           decidedAt: timestamp,
-          textAtDecision: m.text ?? "",
+          textAtDecision: noText ? "" : (m.text ?? ""),
           // Bound to the COMPLETE mapped text's canonical digest, so staleness
           // is never judged from an abbreviated rendering of it.
-          textDigestAtDecision: sha256Hex(m.text ?? "")
+          textDigestAtDecision: sha256Hex(noText ? "" : (m.text ?? ""))
         },
         updatedAt: timestamp
       }));

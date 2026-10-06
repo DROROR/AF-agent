@@ -80,6 +80,16 @@ const FAKE_RENDER_CAPABILITIES_APP_SETUP = `
 `;
 
 describe("buildOperationScript", () => {
+  it("an empty SET_TEXT (a recorded 'no text in this place') still writes and reads back the text, and runs no fitting on it", () => {
+    const empty = buildOperationScript(0, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "" });
+    const filled = buildOperationScript(0, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "x" });
+    expect(empty).toContain('__td.text = "";');
+    expect(empty).toContain("__layer.sourceText.setValue(__td);");
+    expect(empty).toContain("var __expectedCodeUnits = [];");
+    expect(filled).toContain("__frameFactor");
+    expect(empty).not.toContain("__frameFactor");
+  });
+
   it("is deterministic - the same operation always produces byte-identical JSX", () => {
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 3, nestedTarget: null, text: "Hello" };
     const a = buildOperationScript(2, COMP_NAME, op);

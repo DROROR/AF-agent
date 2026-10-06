@@ -171,6 +171,17 @@ describe("approveExecutionPlan - leftover template copy (real backend gate)", ()
     expect(decided?.decidedAt).toBe(NOW.toISOString());
   });
 
+  it("'no text in this place' removes whatever was typed there, is recorded about the empty text, and the plan can be approved", async () => {
+    const { scenes, edit, approve } = await setup(manifest([{ placeholderId: "ph-1", layerName: "Headline", originalText: "Assets" }]));
+    const scene = scenes[0]!;
+    await edit([{ type: "SET_TEXT", scenePlanId: scene.sceneId, mappingId: scene.mappingIds[0]!, text: "Something typed" }], 1);
+    await edit([{ type: "SET_TEMPLATE_TEXT_DECISION", scenePlanId: scene.sceneId, mappingId: scene.mappingIds[0]!, decision: "NO_TEXT" }], 2);
+    const approved = await approve(3);
+    const mapping = approved.plan.scenePlans[0]?.mappings[0];
+    expect(mapping?.text).toBeNull();
+    expect(mapping?.keepTemplateText).toMatchObject({ decision: "NO_TEXT", decidedBy: USER_ID, textAtDecision: "" });
+  });
+
   it("a decision made about earlier text does not survive a later edit", async () => {
     const { scenes, edit, approve } = await setup(manifest([{ placeholderId: "ph-1", layerName: "Headline", originalText: "Assets" }]));
     const scene = scenes[0]!;

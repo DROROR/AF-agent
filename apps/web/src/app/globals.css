@@ -4333,3 +4333,4 @@ a.workflow-stepper__step:hover {
 .scene-card__leftover-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 /* Marks a text box in the panel that nobody has filled in yet. */
 .edit-drawer-open-mark { margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; background: var(--color-warning-soft, #fff1d6); color: var(--color-warning-strong, #8a5300); }
+.edit-drawer-no-text { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.9rem; }

@@ -1,3 +1,4 @@
+import { isNoTextDecision } from "@dyo/schemas";
 import type { PlaceholderMapping, ScenePlanEntry } from "@dyo/schemas";
 import { classifyStructuralPlaceholder, resolveKeepOriginal } from "../mapping-suggestion/structural-classification.js";
 
@@ -88,6 +89,10 @@ export function isMappingResolved(mapping: PlaceholderMapping, instructions: str
   // typed there, because the record is bound to the text it was made about.
   const keep = mapping.keepTemplateText ?? null;
   if (mapping.text === null && keep !== null && keep.decision === "KEEP_TEMPLATE_TEXT" && keep.textAtDecision === "") {
+    return true;
+  }
+  // "No text in this place" is a complete answer too (2026-10-06).
+  if (isNoTextDecision(mapping)) {
     return true;
   }
   const input = {

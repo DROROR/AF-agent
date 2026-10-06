@@ -286,6 +286,28 @@ describe("SceneCard - a text nobody decided about can be kept as the template ha
     expect(opened).toEqual(["m-headline", undefined]);
   });
 
+  it("offers 'No text here' for an open text when the page can record it, and hands back exactly that text", () => {
+    const emptied: string[] = [];
+    renderWithLocale(
+      <SceneCard
+        projectId={PROJECT_ID}
+        realScene={realScene({ mappings: [mappingFixture({ id: "m-small", placeholderName: "Layer 3", placeholderClassification: textKind })] as never })}
+        assets={[]}
+        previewEntry={READY_PREVIEW}
+        pendingSuggestions={[]}
+        suggestionsBusy={false}
+        onEdit={() => {}}
+        onRegeneratePreview={() => {}}
+        onAcceptSuggestion={() => {}}
+        onRejectSuggestion={() => {}}
+        onKeepTemplateText={() => {}}
+        onNoText={(mappingId) => emptied.push(mappingId)}
+      />
+    );
+    screen.getByRole("button", { name: "No text here" }).click();
+    expect(emptied).toEqual(["m-small"]);
+  });
+
   it("an empty picture place asks too, and one press records 'leave it as the template has it' for exactly that place", () => {
     const kept: string[][] = [];
     const imageKind = { ...textKind, value: "image" };

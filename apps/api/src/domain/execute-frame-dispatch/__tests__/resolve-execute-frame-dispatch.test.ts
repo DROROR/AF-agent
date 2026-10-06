@@ -311,6 +311,22 @@ describe("resolveExecuteFrameDispatch - leftover template copy blocks EXECUTION,
     expect(result.ok).toBe(true);
   });
 
+  it("a recorded 'no text in this place' sends an empty text for exactly that layer - and an untouched text with no decision still refuses", () => {
+    const noText = resolveExecuteFrameDispatch(
+      baseInput({
+        currentPlan: validPlan({
+          scenePlans: [validScene({ mappings: [textMapping({ text: null, keepTemplateText: { decision: "NO_TEXT", decidedBy: "user-1", decidedAt: NOW.toISOString(), textAtDecision: "" } })] })]
+        })
+      })
+    );
+    expect(noText.ok).toBe(true);
+    expect(JSON.stringify(noText)).toContain('"type":"SET_TEXT"');
+    expect(JSON.stringify(noText)).toContain('"text":""');
+
+    const undecided = resolveExecuteFrameDispatch(baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: null })] })] }) }));
+    expect(JSON.stringify(undecided)).not.toContain('"text":""');
+  });
+
   it("refuses a scene whose manifest placeholder never captured the template's own text", () => {
     const legacyManifest = validManifest();
     const legacyScene = legacyManifest.scenes[0]!;

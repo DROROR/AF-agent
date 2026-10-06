@@ -400,7 +400,7 @@ function buildSetTextMutation(text: string): string {
               // a SEPARATE, optional key, so no existing consumer of
               // resultingValue can be affected by it existing.
               __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${textLiteral}, textDirection: __directionEvidence });
-              ${buildTextAutoFit()}
+              ${text === "" ? "// An emptied text place has nothing to fit: no glyph can overlap or leave the frame." : buildTextAutoFit()}
             }
           }
         }`;

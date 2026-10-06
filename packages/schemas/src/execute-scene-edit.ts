@@ -86,7 +86,8 @@ const setTextOperationSchema = z
     manifestPlaceholderId: z.string().min(1).nullable(),
     layerIndex: z.number().int().positive().nullable(),
     nestedTarget: z.array(resolvedNestedTargetStepSchema).min(1).nullable(),
-    text: z.string().min(1)
+    /** The exact text to store. Empty only for a recorded "no text in this place" decision (isNoTextDecision) - the dispatch never sends an empty text for any other reason. */
+    text: z.string()
   })
   .strict();
 

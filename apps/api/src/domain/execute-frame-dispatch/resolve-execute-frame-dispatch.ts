@@ -1,5 +1,5 @@
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
-import { computeEffectiveVisibility, describeSlotBlockers, findSlotBlockers, isIdentityOrientation, selectScenePreviewFrameSeconds } from "@dyo/schemas";
+import { computeEffectiveVisibility, describeSlotBlockers, findSlotBlockers, isIdentityOrientation, isNoTextDecision, selectScenePreviewFrameSeconds } from "@dyo/schemas";
 import type { AssetOrientation } from "@dyo/schemas";
 import type {
   ExecuteSceneEditRequest,
@@ -435,10 +435,12 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       const layerIndex = mapping.humanLayerIndex;
 
       if (classification === "text") {
-        if (mapping.text === null) {
+        // A recorded "no text in this place" writes an empty text - the one case an empty SET_TEXT is ever sent.
+        const humanText = mapping.text ?? (isNoTextDecision(mapping) ? "" : null);
+        if (humanText === null) {
           return { ok: false, reason: `Mapping "${mapping.id}" is a human-added text mapping but has no text set` };
         }
-        operations.push({ type: "SET_TEXT", manifestPlaceholderId: null, layerIndex, nestedTarget, text: mapping.text });
+        operations.push({ type: "SET_TEXT", manifestPlaceholderId: null, layerIndex, nestedTarget, text: humanText });
         approvedMappingIds.push(mapping.id);
       } else if ((ASSET_CLASSIFICATIONS as readonly string[]).includes(classification ?? "")) {
         if (mapping.selectedAssetId === null) {
@@ -557,12 +559,16 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     // decision of its own: a mapping that genuinely needs content and has
     // none still fails below, exactly as before. Never a second, competing
     // notion of "structural" that could drift from the readiness one.
-    if (!mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
+    // "No text in this place" is resolved AND has work to do (the layer's
+    // text is emptied), so it is not skipped with the leave-as-is mappings.
+    const noText = classification === "text" && isNoTextDecision(mapping);
+    if (!noText && !mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
       continue;
     }
 
     if (classification === "text") {
-      if (mapping.text === null) {
+      const manifestText = mapping.text ?? (noText ? "" : null);
+      if (manifestText === null) {
         return { ok: false, reason: `Mapping "${mapping.id}" is classified as text but has no text set` };
       }
       operations.push({
@@ -570,7 +576,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         manifestPlaceholderId: mapping.manifestPlaceholderId,
         layerIndex: manifestNestedTarget === null ? placeholder.layerIndex : null,
         nestedTarget: manifestNestedTarget,
-        text: mapping.text
+        text: manifestText
       });
       approvedMappingIds.push(mapping.id);
     } else if ((ASSET_CLASSIFICATIONS as readonly string[]).includes(classification ?? "")) {

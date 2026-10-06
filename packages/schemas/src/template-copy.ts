@@ -46,7 +46,14 @@ import {
  */
 
 /** What a reviewer can explicitly decide about a text that still matches the template's own wording. There is deliberately no third "unset" member - the ABSENCE of a decision is represented by a null decision record, never by a value that could be defaulted. */
-export const TEMPLATE_TEXT_DECISIONS = ["REPLACE", "KEEP_TEMPLATE_TEXT"] as const;
+/**
+ * `NO_TEXT` (2026-10-06, asked for by the client: "three sections of text - I
+ * put header and subheader, and I don't want the small text"): this place is
+ * to carry no text at all. Like "keep the template's text" on an untouched
+ * layer it is recorded about the EMPTY mapped text, so typing a text there
+ * later makes it stale by the same rule as every other decision.
+ */
+export const TEMPLATE_TEXT_DECISIONS = ["REPLACE", "KEEP_TEMPLATE_TEXT", "NO_TEXT"] as const;
 export const templateTextDecisionSchema = z.enum(TEMPLATE_TEXT_DECISIONS);
 export type TemplateTextDecision = (typeof TEMPLATE_TEXT_DECISIONS)[number];
 
@@ -79,6 +86,17 @@ export const templateTextDecisionRecordSchema = z
   })
   .strict();
 export type TemplateTextDecisionRecord = z.infer<typeof templateTextDecisionRecordSchema>;
+
+/**
+ * True when a reviewer has recorded "no text in this place" and it still
+ * describes the mapping: nothing is typed there, and the record was made
+ * about exactly that empty text. The one definition the readiness check, the
+ * dispatch and the dashboard all read.
+ */
+export function isNoTextDecision(mapping: { text: string | null; keepTemplateText?: TemplateTextDecisionRecord | null | undefined }): boolean {
+  const record = mapping.keepTemplateText ?? null;
+  return mapping.text === null && record !== null && record.decision === "NO_TEXT" && record.textAtDecision === "";
+}
 
 /**
  * How one mapping's text relates to the untouched template's own text.

@@ -150,6 +150,8 @@ export interface SceneCardProps {
    * agreeing with a finding recorded nothing on the plan.
    */
   onKeepTemplateText?: (mappingIds: string[], findings: MappingSuggestion[]) => void;
+  /** Records "no text in this place" for one text layer. Absent: the choice is not offered. */
+  onNoText?: (mappingId: string) => void;
   /** What this card is called for a person ("Scene 3", "Whole video") - shown above the template's own name. */
   eyebrow?: string;
   /** Applies several suggestions in ONE request. Absent: no "use all" button is offered - several single accepts fired together would each carry the same plan revision and all but the first would be refused as stale. */
@@ -187,6 +189,7 @@ export function SceneCard({
   onAcceptSuggestions,
   eyebrow,
   onKeepTemplateText,
+  onNoText,
   templateTextOf,
   quietActions = false
 }: SceneCardProps): ReactElement {
@@ -475,6 +478,11 @@ export function SceneCard({
                     <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={() => onKeepTemplateText?.([m.id], [])}>
                       {words === null ? t.simpleScenes.leftoverTextKeepAction(1) : t.simpleScenes.leftoverTextKeepWordsAction(words)}
                     </Button>
+                    {onNoText ? (
+                      <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={() => onNoText(m.id)}>
+                        {t.simpleScenes.leftoverTextNoTextAction}
+                      </Button>
+                    ) : null}
                   </span>
                 </li>
               );

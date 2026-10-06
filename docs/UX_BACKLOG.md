@@ -218,3 +218,18 @@ card. The operator's own test of this template never met this because every text
   box says which template words it replaces. The grey word inside an empty box is gone.
 - Still open from the list above: the order of the text boxes, "no text here", and a reason
   when a badge changes after an update.
+
+## 2026-10-06 - "the option to choose not to put text" (client)
+- **Done in code, not yet run on After Effects:** "No text here" on a scene card's open text
+  and "No text in this place" under every text box in the panel. Recorded on the plan as its
+  own decision (NO_TEXT) in the reviewer's name; the scene counts as settled; the worker is
+  sent an empty text for that layer and runs no fitting on it. Needs a worker newer than
+  cbd43c6 - an older one refuses the empty text and the job fails.
+- **Open:** texts in the panel are still listed smallest first; the client asked for header,
+  second heading, small text. The template reading records no text size to order them by.
+
+## 2026-10-06 - "it should present the new screenshot, or just the image itself" (client)
+The step "Check where 1 picture will appear" shows the template's untouched frame, without
+the client's picture in it, and asks whether the picture is in the right place. Nothing on
+screen can answer that. "Why am I asked?" shows the checker's own sentence ("a full-bleed
+image ... mapped into a decorative card"). **Open.**

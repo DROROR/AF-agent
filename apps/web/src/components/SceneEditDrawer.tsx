@@ -688,6 +688,9 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
       return { hint: t.projectWorkspace.editDrawer.textHint };
     }
     const words = templateTextFor(mapping.mappingId).text ?? null;
+    if (mapping.templateTextDecision === "NO_TEXT") {
+      return { hint: t.projectWorkspace.editDrawer.simple.noTextHereHint };
+    }
     if (mapping.text.trim() !== "") {
       return words === null ? {} : { hint: t.projectWorkspace.editDrawer.simple.textReplacesHint(words) };
     }
@@ -834,12 +837,28 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
                 dir="auto"
                 /* The template's own wording, shown faintly so the reviewer sees what this line replaces. Not in Simple view: there a grey word in an empty box read as a filled one (2026-10-06), so the line under the box says it instead. */
                 placeholder={isSimple ? undefined : (templateTextFor(mapping.mappingId).text ?? templateTextFor(mapping.mappingId).preview ?? undefined)}
+                disabled={isSimple && mapping.templateTextDecision === "NO_TEXT"}
                 onChange={(event) => {
                   const next = [...mappings];
                   next[index] = { ...mapping, text: event.target.value };
                   setMappings(next);
                 }}
               />
+              {/* 2026-10-06, the client: "I put header and subheader, and I don't want the small text" - there was no way to say so. */}
+              {isSimple ? (
+                <label className="edit-drawer-no-text">
+                  <input
+                    type="checkbox"
+                    checked={mapping.templateTextDecision === "NO_TEXT"}
+                    onChange={(event) => {
+                      const next = [...mappings];
+                      next[index] = event.target.checked ? { ...mapping, text: "", templateTextDecision: "NO_TEXT" } : { ...mapping, templateTextDecision: null };
+                      setMappings(next);
+                    }}
+                  />
+                  {t.projectWorkspace.editDrawer.simple.noTextHere}
+                </label>
+              ) : null}
             </Field>
             ) : null}
             {(() => {

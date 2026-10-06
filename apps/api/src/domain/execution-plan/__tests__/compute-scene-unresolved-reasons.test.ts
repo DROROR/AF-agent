@@ -101,6 +101,13 @@ describe("isMappingResolved", () => {
       expect(isMappingResolved(mapping({ placeholderName: "Headline", placeholderClassification: text, keepTemplateText: kept("") }), null)).toBe(true);
     });
 
+    // 2026-10-06, the client: "I put header and subheader, and I don't want the small text."
+    it("'no text in this place' IS resolved while nothing is typed there, and stops being so once a text is", () => {
+      const noText = { decision: "NO_TEXT" as const, decidedBy: "user-1", decidedAt: "2026-10-06T00:00:00.000Z", textAtDecision: "" };
+      expect(isMappingResolved(mapping({ placeholderName: "Small text", placeholderClassification: text, keepTemplateText: noText }), null)).toBe(true);
+      expect(isMappingResolved(mapping({ placeholderName: "Small text", placeholderClassification: text, text: "", keepTemplateText: { ...noText, textAtDecision: "Old words" } }), null)).toBe(false);
+    });
+
     it("is NOT resolved with no decision at all", () => {
       expect(isMappingResolved(mapping({ placeholderName: "Headline", placeholderClassification: text }), null)).toBe(false);
     });

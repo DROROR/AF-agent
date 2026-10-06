@@ -288,7 +288,7 @@ export function SimpleScenesView(): ReactElement {
    * findings, then records KEEP_TEMPLATE_TEXT for each text layer named, in
    * the reviewer's name. One plan edit for all of them.
    */
-  async function handleKeepTemplateText(mappingIds: string[], findings: MappingSuggestion[]): Promise<void> {
+  async function handleKeepTemplateText(mappingIds: string[], findings: MappingSuggestion[], decision: "KEEP_TEMPLATE_TEXT" | "NO_TEXT" = "KEEP_TEMPLATE_TEXT"): Promise<void> {
     setBusySuggestionId(findings[0]?.id ?? "keep-template-text");
     setActionError(null);
     for (const finding of findings) {
@@ -301,7 +301,7 @@ export function SimpleScenesView(): ReactElement {
     }
     const operations = mappingIds.flatMap((mappingId) => {
       const owner = plan!.plan.scenePlans.find((scene) => scene.mappings.some((m) => m.id === mappingId));
-      return owner ? [{ type: "SET_TEMPLATE_TEXT_DECISION" as const, scenePlanId: owner.id, mappingId, decision: "KEEP_TEMPLATE_TEXT" as const }] : [];
+      return owner ? [{ type: "SET_TEMPLATE_TEXT_DECISION" as const, scenePlanId: owner.id, mappingId, decision }] : [];
     });
     if (operations.length > 0) {
       const result = await applyEdit(operations);
@@ -469,6 +469,7 @@ export function SimpleScenesView(): ReactElement {
               onAcceptSuggestions={(many) => void handleAcceptMany(many)}
               onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
               templateTextOf={templateTextOf}
+              onNoText={(mappingId) => void handleKeepTemplateText([mappingId], [], "NO_TEXT")}
             />
           ))}
         </div>
@@ -517,6 +518,7 @@ export function SimpleScenesView(): ReactElement {
               onAcceptSuggestions={(many) => void handleAcceptMany(many)}
               onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
               templateTextOf={templateTextOf}
+              onNoText={(mappingId) => void handleKeepTemplateText([mappingId], [], "NO_TEXT")}
             />
           ))}
           </div>
