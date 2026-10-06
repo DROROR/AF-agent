@@ -137,7 +137,8 @@ export function WholeVideoColours({
             return (
               <li key={group.name} className="whole-video-colours__row">
                 <label htmlFor={inputId} className="whole-video-colours__name">
-                  {group.name}
+                  {/* The name can carry the path of the control it sits under; the last part is the layer itself. */}
+                  <span title={group.name}>{group.name.split("›").pop()?.trim() ?? group.name}</span>
                   <span className="field__hint"> {t.simpleScenes.wholeVideoColours.places(group.targets.length)}</span>
                 </label>
                 <input

@@ -726,6 +726,17 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds }: SceneE
               })()
               )}
             </legend>
+            {/*
+              REAL 2026-10-06: the client could not find where the example's
+              background logo goes. It is "Picture 2" of the last scene - and
+              nothing told "Picture 1" (a phone screen) from "Picture 2" (the
+              large picture behind everything). The one fact that does is the
+              name the template's author gave the place, so Simple view shows
+              it, as the template's word and not as ours.
+            */}
+            {isSimple && fieldsFor(mapping.mappingId).asset && (manifestLayerPathFor(mapping.mappingId) ?? []).length > 0 ? (
+              <p className="field__hint">{t.projectWorkspace.editDrawer.simple.templatePlaceName(String((manifestLayerPathFor(mapping.mappingId) ?? []).slice(-1)[0]))}</p>
+            ) : null}
             {fieldsFor(mapping.mappingId).asset ? (
             <Field
               label={isSimple ? t.projectWorkspace.editDrawer.simple.pictureFieldLabel : t.projectWorkspace.editDrawer.assetLabel}

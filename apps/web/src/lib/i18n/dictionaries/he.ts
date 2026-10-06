@@ -927,6 +927,7 @@ export const he: Dictionary = {
         pictureFieldLabel: "איזו תמונה תופיע כאן",
         pictureFieldHint: "בחרו אחד מהקבצים שהעליתם בלשונית הקבצים.",
         noPictureOption: "ללא תמונה",
+        templatePlaceName: (name: string): string => `בתבנית המקום הזה נקרא "${name}".`,
         coloursSummary: (n: number): string => `צבעים (לא חובה) - ${n}`,
         coloursHint: "השאירו כמו שהם כדי לשמור על צבעי התבנית."
       },

@@ -1088,6 +1088,7 @@ export const en = {
         pictureFieldLabel: "Which picture goes here",
         pictureFieldHint: "Choose one of the files you uploaded on the Files tab.",
         noPictureOption: "No picture",
+        templatePlaceName: (name: string): string => `The template calls this place "${name}".`,
         coloursSummary: (n: number): string => `Colours (optional) - ${n}`,
         coloursHint: "Leave these alone to keep the template's own colours."
       },
