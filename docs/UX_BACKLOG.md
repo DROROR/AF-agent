@@ -252,3 +252,11 @@ the approval gate would refuse (`brandNeeds`), the Scenes guide has a step for i
 "Approve", and a card under the guide settles each one: "This is my logo" on a picture
 already in the video, and "Add the line to this text" with the exact line from the server.
 Marking a picture as the logo also makes it fit whole inside its place, as any logo does.
+
+**Seen live the same day (b982d09), on the client's plan:** the step and the card appear
+with the deployed API. One press of "This is my logo" on a picture that had already been
+confirmed in its place re-opened "Check where your pictures go" for that picture - a logo
+fits whole inside its place, so the earlier confirmation no longer describes it. Honest,
+but it reads as the guide going backwards; the card now says so before the press.
+- **Open:** there is no "undo" for "This is my logo". The operator pressed it by mistake on
+  the client's plan and it had to be reverted with a plan edit.

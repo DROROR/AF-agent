@@ -1556,7 +1556,7 @@ export const en = {
       title: "Every DYO video needs these",
       intro: (n: number): string => (n === 1 ? "1 thing is still missing. \"Approve Scenes\" works once it is here." : `${n} things are still missing. \"Approve Scenes\" works once they are here.`),
       logoTitle: "Your logo",
-      logoPickHint: "Is one of the pictures already in your video your logo? Press it.",
+      logoPickHint: "Is one of the pictures already in your video your logo? Press it. A logo is shown whole inside its place, so you are then asked once more to check where it sits.",
       logoPickAction: "This is my logo",
       logoUnplacedHint: (names: string): string => `Or put the logo you uploaded (${names}) on a picture place: press "Change picture or text" on a scene and choose it.`,
       logoUploadHint: "Or upload your logo on the Files tab, then choose it on a scene with \"Change picture or text\".",
