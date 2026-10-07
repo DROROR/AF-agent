@@ -291,6 +291,25 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
     return null;
   }
 
+  /** When a layer is on screen, from the template reading - null when it was not recorded. */
+  function manifestTimingFor(mappingId: string): { startSeconds: number; durationSeconds: number } | null {
+    const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
+    if (!mapping || mapping.manifestPlaceholderId === null) {
+      return null;
+    }
+    for (const manifestScene of project?.manifest.scenes ?? []) {
+      for (const placeholder of manifestScene.placeholders) {
+        if (placeholder.placeholderId === mapping.manifestPlaceholderId) {
+          return typeof placeholder.startTimeSeconds === "number" && typeof placeholder.durationSeconds === "number"
+            ? { startSeconds: placeholder.startTimeSeconds, durationSeconds: placeholder.durationSeconds }
+            : null;
+        }
+      }
+    }
+    return null;
+  }
+  const videoSeconds = Math.max(0, ...(project?.manifest.compositions ?? []).filter((composition) => !composition.isNestedOnlyReferenced).map((composition) => composition.durationSeconds));
+
   /** The template's own colour for a Color Control placeholder - null for any other layer, and when inspection could not read it. Its presence is also what says a NESTED colour can be set (SET_COLOR_CONTROL reaches nested layers; a solid's fill cannot). */
   function colorControlFor(mappingId: string): { currentColorHex: string | null } | null {
     const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
@@ -874,6 +893,13 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
                 return <p className="field__hint">{t.projectWorkspace.editDrawer.colorNestedUnsupported}</p>;
               }
               const templateColor = colorControl?.currentColorHex ?? null;
+              // A colour on screen for a moment (a fade at the end) says so - a client set one to white as "the background" (2026-10-07).
+              const timing = manifestTimingFor(mapping.mappingId);
+              const brief = timing !== null && videoSeconds > 0 && timing.durationSeconds < videoSeconds * 0.1;
+              const clock = (seconds: number): string => `${Math.floor(Math.round(seconds) / 60)}:${String(Math.round(seconds) % 60).padStart(2, "0")}`;
+              const simpleHint = brief && timing !== null
+                ? t.projectWorkspace.editDrawer.simple.colourBriefHint(clock(timing.startSeconds), timing.durationSeconds)
+                : t.projectWorkspace.editDrawer.simple.colourHint;
               const setColor = (value: string): void => {
                 const next = [...mappings];
                 next[index] = { ...mapping, colorHex: value };
@@ -883,7 +909,7 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
                 <Field
                   label={t.projectWorkspace.editDrawer.colorLabel}
                   htmlFor={`mapping-color-${mapping.mappingId}`}
-                  hint={templateColor === null ? t.projectWorkspace.editDrawer.colorHint : t.projectWorkspace.editDrawer.colorControlHint(templateColor)}
+                  hint={isSimple ? simpleHint : templateColor === null ? t.projectWorkspace.editDrawer.colorHint : t.projectWorkspace.editDrawer.colorControlHint(templateColor)}
                 >
                   <div className="edit-drawer-color">
                     <Input
@@ -1034,6 +1060,15 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
               // full panel - a gate is never hidden.
               if (isSimple && recorded !== null && recorded.evidenceDigest === currentDigest) {
                 return null;
+              }
+              // 2026-10-07: in Simple view the same question stood here in the
+              // reviewer's words ("It is a device screen / a flat card", "Recorded:
+              // accepted after looking at the frame") whenever a flip or a new
+              // picture made the recorded check stale. The picture check at the
+              // top of the Scenes page asks it in the client's words; here it is
+              // one line pointing there.
+              if (isSimple) {
+                return <p className="field__hint">{t.projectWorkspace.editDrawer.simple.placeCheckedOnScenesPage}</p>;
               }
               return (
                 <SlotReviewPanel
