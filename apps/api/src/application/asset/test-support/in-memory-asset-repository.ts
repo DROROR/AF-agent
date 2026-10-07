@@ -27,6 +27,7 @@ export class InMemoryAssetRepository implements AssetRepository {
       ...existing,
       ...(update.label !== undefined ? { label: update.label } : {}),
       ...(update.notes !== undefined ? { notes: update.notes } : {}),
+      ...(update.mediaKind !== undefined ? { mediaKind: update.mediaKind } : {}),
       updatedAt: now
     };
     this.rows.set(id, updated);

@@ -149,6 +149,7 @@ describe("the plan shows what the assistant did (real complaint 2026-10-02: noth
     const group = {
       compositionId: "c1",
       compositionName: "Part 1",
+      plainTitle: null,
       rows: [{ entry: entry({ id: "r1", desiredText: "Acme" }), layerName: "Headline", kind: "text", currentText: "YOUR TITLE" }]
     };
     renderWithLocale(<LayerPlanCard group={group} assetById={new Map()} projectId="p1" />);
@@ -157,10 +158,31 @@ describe("the plan shows what the assistant did (real complaint 2026-10-02: noth
     expect(screen.getByText("Acme").tagName).toBe("STRONG");
   });
 
+  // 2026-10-07: the card named layers as the template does ("Text A", "White Solid 2"); the client meets "Text 1" and "Picture" on the Scenes tab.
+  it("a top-level scene is titled Scene N and its rows Text 1..N / Picture, with the template's own names on hover", () => {
+    const group = {
+      compositionId: "c1",
+      compositionName: "Scene_03",
+      plainTitle: { kind: "scene" as const, n: 3 },
+      rows: [
+        { entry: entry({ id: "r1", desiredText: "One" }), layerName: "Text A", kind: "text", currentText: "A" },
+        { entry: entry({ id: "r2", desiredText: "Two" }), layerName: "Text B", kind: "text", currentText: "B" },
+        { entry: entry({ id: "r3", desiredAssetId: "a-logo" }), layerName: "White Solid 2", kind: "image", currentText: null }
+      ]
+    };
+    renderWithLocale(<LayerPlanCard group={group} assetById={new Map([["a-logo", logo]])} projectId="p1" />);
+    expect(screen.getByText("Scene 3").getAttribute("title")).toBe("Scene_03");
+    expect(screen.getByText("Text 1").getAttribute("title")).toBe("Text A");
+    expect(screen.getByText("Text 2")).not.toBeNull();
+    expect(screen.getByText("Picture").getAttribute("title")).toBe("White Solid 2");
+    expect(screen.queryByText("Text A")).toBeNull();
+  });
+
   it("an image layer shows the chosen file as a picture", () => {
     const group = {
       compositionId: "c1",
       compositionName: "Part 1",
+      plainTitle: null,
       rows: [{ entry: entry({ id: "r1", desiredAssetId: "a-logo" }), layerName: "Screen", kind: "image", currentText: null }]
     };
     renderWithLocale(<LayerPlanCard group={group} assetById={new Map([["a-logo", logo]])} projectId="p1" />);

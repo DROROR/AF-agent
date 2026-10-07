@@ -160,7 +160,7 @@ function AssetCard({
 }: {
   projectId: string;
   asset: AssetDto;
-  onSaveDetails: (body: { label?: string | null; notes?: string | null }) => Promise<{ ok: boolean; message?: string }>;
+  onSaveDetails: (body: { label?: string | null; notes?: string | null; mediaKind?: "IMAGE" | "LOGO" }) => Promise<{ ok: boolean; message?: string }>;
   onDelete: () => Promise<{ ok: boolean; message?: string }>;
 }): ReactElement {
   const { t } = useLocale();
@@ -208,6 +208,8 @@ function AssetCard({
         )}
       </div>
       <div className="asset-card__meta">
+        {/* What the system takes this file for, always visible: a logo uploaded as a picture is not counted as the logo (2026-10-07), and nothing said so. */}
+        <p className="asset-card__kind" data-kind={asset.mediaKind}>{t.assetsTab.kindOnCard[asset.mediaKind]}</p>
         <p className="asset-card__filename">{asset.originalFilename}</p>
         <dl className="asset-card__facts">
           <div>
@@ -247,6 +249,23 @@ function AssetCard({
             onChange={(event) => setNotes(event.target.value)}
           />
         </Field>
+        {asset.mediaKind === "IMAGE" || asset.mediaKind === "LOGO" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={isSaving}
+            onClick={() => {
+              setIsSaving(true);
+              setSaveError(null);
+              void onSaveDetails({ mediaKind: asset.mediaKind === "LOGO" ? "IMAGE" : "LOGO" }).then((result) => {
+                setIsSaving(false);
+                if (!result.ok) setSaveError(result.message ?? null);
+              });
+            }}
+          >
+            {asset.mediaKind === "LOGO" ? t.assetsTab.markAsPictureAction : t.assetsTab.markAsLogoAction}
+          </Button>
+        ) : null}
         <div className="asset-card__actions">
           <Button size="sm" variant="secondary" disabled={isSaving} onClick={() => void handleSaveDetails()}>
             {isSaving ? t.assetsTab.savingDetails : t.assetsTab.saveDetails}

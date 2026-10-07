@@ -55,14 +55,23 @@ export type ListAssetsResponse = z.infer<typeof listAssetsResponseSchema>;
 export const assetResponseSchema = z.object({ asset: assetDtoSchema });
 export type AssetResponse = z.infer<typeof assetResponseSchema>;
 
-/** PATCH /api/projects/:projectId/assets/:assetId - only ever label/notes; every other fact is fixed at upload time (see section 4: "update label/notes"). */
+/**
+ * PATCH /api/projects/:projectId/assets/:assetId - label/notes, and (2026-10-07)
+ * whether a still image is the logo. A client uploaded his logo in the
+ * picture box, and only a file placed as a logo counts for the brand rule;
+ * a file's kind could not be changed after upload, so the only way out was
+ * to upload it again. IMAGE <-> LOGO is the one change allowed: both are the
+ * same sniffed image file, and LOGO was always the one kind a person assigns.
+ * Every other fact is still fixed at upload time.
+ */
 export const updateAssetRequestSchema = z
   .object({
     label: z.string().trim().min(1).max(200).nullable().optional(),
-    notes: z.string().trim().min(1).max(2000).nullable().optional()
+    notes: z.string().trim().min(1).max(2000).nullable().optional(),
+    mediaKind: z.enum(["IMAGE", "LOGO"]).optional()
   })
   .strict()
-  .refine((value) => value.label !== undefined || value.notes !== undefined, {
-    message: "At least one of label or notes must be provided"
+  .refine((value) => value.label !== undefined || value.notes !== undefined || value.mediaKind !== undefined, {
+    message: "At least one of label, notes or mediaKind must be provided"
   });
 export type UpdateAssetRequest = z.infer<typeof updateAssetRequestSchema>;

@@ -107,14 +107,13 @@ export const he: Dictionary = {
     database: "מסד נתונים",
     workersOnline: "עובדים מקוונים",
     aeOnline: "After Effects מקוון",
-    mcpOnline: "MCP מקוון",
+    mcpOnline: "מחובר ל-After Effects",
     activeJobs: "משימות פעילות",
     lastHeartbeat: (relative) => `פעימת לב אחרונה ${relative}`,
     noHeartbeat: "טרם התקבלה פעימת לב",
     queueOverview: "סקירת תור",
     queuePendingTitle: "היסטוריית תור המשימות אינה זמינה עדיין",
-    queuePendingDescription:
-      "כרגע ה-API תומך בתפיסת משימות בודדות ודיווח עליהן, אך עדיין אינו חושף נקודת קצה לרשימת התור. חלק זה יציג ספירת משימות בתור/בריצה/שהושלמו לאחר שנקודת קצה כזו תהיה קיימת (ראו docs/JOB-DISPATCH.md)."
+    queuePendingDescription: "ספירת העבודות הממתינות, הרצות והגמורות עדיין לא מוצגת כאן. בדף העבודות מופיעה כל עבודה עם המצב שלה.",
   },
   projects: {
     title: "פרויקטים",
@@ -129,7 +128,7 @@ export const he: Dictionary = {
       revision: "גרסה",
       sourceSha: "SHA של המקור",
       scenes: "סצנות",
-      unresolved: "לא פתורות",
+      unresolved: "עוד להחליט",
       updated: "עודכן",
       noPlanYet: "אין עדיין תוכנית",
       open: "פתיחה"
@@ -1024,7 +1023,7 @@ export const he: Dictionary = {
     fileLabel: "קובץ",
     mediaKindLabel: "דריסת סוג",
     mediaKindAuto: "זיהוי אוטומטי",
-    mediaKindLogoHint: "תקף רק עבור קובץ תמונה - מסמן אותו כלוגו הלקוח/החברה.",
+    mediaKindLogoHint: "כל סרטון חייב להציג את הלוגו שלכם פעם אחת. העלו אותו כאן כלוגו, כדי שהמערכת תדע איזה קובץ הוא.",
     uploadAction: "העלאה",
     uploading: "מעלה…",
     uploadingFile: (fileName: string): string => `מעלה את ${fileName}…`,
@@ -1048,6 +1047,16 @@ export const he: Dictionary = {
     deleteConfirmAction: "מחיקה לצמיתות",
     deleteCancelAction: "ביטול",
     deleteFailedTitle: "לא ניתן היה למחוק את הנכס הזה",
+    kindOnCard: {
+      IMAGE: "תמונה - נכנסת למקום של תמונה",
+      VIDEO: "סרטון - נכנס למקום של תמונה",
+      LOGO: "הלוגו שלכם",
+      AUDIO: "אודיו",
+      DOCUMENT: "מסמך",
+      OTHER: "קובץ אחר"
+    },
+    markAsLogoAction: "זה הלוגו שלי",
+    markAsPictureAction: "זו תמונה, לא הלוגו",
     mediaKind: {
       IMAGE: "תמונה",
       VIDEO: "סרטון",
@@ -1148,6 +1157,7 @@ export const he: Dictionary = {
         usedFileUsed: "בשימוש בתוכנית",
         usedFileNotUsed: "לא בשימוש",
         layerWasLabel: "בתבנית כתוב:",
+        sceneNumbered: (n: number): string => `סצנה ${n}`,
         layerPlanTitle: "מה ישתנה",
         layerPlanHint: "כל שורה היא שכבה אחת בתבנית ומה שיופיע בה. בודקים ומתקנים אותן בלשונית הסצנות לפני שמשהו נוצר.",
         thumbnailPlaceholder: "תצוגת הסצנה טרם נוצרה",
@@ -1175,7 +1185,7 @@ export const he: Dictionary = {
         approvePlanFailedTitle: "לא ניתן היה לאשר את התוכנית",
         // approvePlanHelper: "אישור התוכנית יפתח את שלב התאמת התוכן שלכם.",
         approvePlanHelper: "שום דבר עדיין לא סופי. בשלב הבא רואים כל טקסט ותמונה במקומם ואפשר לשנות אותם. התצוגה המקדימה האמיתית נוצרת אחר כך, ואת הסרטון מאשרים רק אחרי שרואים אותו.",
-        continueToMappingAction: "המשך להתאמת התוכן שלכם"
+        continueToMappingAction: "ללשונית הסצנות"
       }
     },
     picker: {
@@ -1267,6 +1277,7 @@ export const he: Dictionary = {
   },
   simpleScenes: {
     wholeVideoColours: {
+      nothingChangedReason: "קודם לחצו על צבע למעלה - הכפתור שומר את מה ששיניתם.",
       title: "צבעים לכל הסרטון",
       hint: "לחצו על צבע כדי לשנות אותו. הוא ישתנה בכל סצנה שמשתמשת בו. השאירו כמו שהם כדי לשמור על צבעי התבנית.",
       places: (n: number): string => (n === 1 ? "במקום אחד" : `ב-${n} מקומות`),
@@ -1323,8 +1334,9 @@ export const he: Dictionary = {
       showing: (done: number, total: number): string => `After Effects מכין אותם… ${done} מתוך ${total}`,
       confirmAction: (n: number): string => (n === 1 ? "כן - היא במקום הנכון" : `כן - כל ${n} במקום הנכון`),
       saving: "שומר…",
-      hint: "אחת מהן לא נכונה? פתחו את הסצנה עם עריכה ושנו שם את התמונה.",
+      hint: "אחת מהן לא נכונה? בכרטיס של הסצנה לחצו על \"שינוי תמונה או טקסט\" ובחרו תמונה אחרת.",
       showingNow: (caption: string): string => `כעת: ${caption}. כל מקום לוקח כחצי דקה - הם מופיעים למעלה אחד אחד, ואין צורך ללחוץ על דבר.`,
+      goesInto: (file: string, spot: string): string => (file === "" ? spot : `"${file}" נכנס לטלפון שמוצג כאן (${spot})`),
       pictureIn: (sceneLabel: string): string => `תמונה ב${sceneLabel}`,
       pictureNumberIn: (n: number, sceneLabel: string): string => `תמונה ${n} ב${sceneLabel}`,
       couldNotShow: (caption: string): string => `After Effects לא הצליח להציג את המקום הזה: ${caption}`,

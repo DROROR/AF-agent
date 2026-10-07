@@ -249,6 +249,47 @@ describe("a template whose content lives in nested compositions (real failure 20
       expect(groups[0]!.rows).toEqual([{ entry: layerEntries[2], layerName: "Headline", kind: "text", currentText: null }]);
     });
 
+    // 2026-10-07: titled and ordered the way the Scenes tab names its cards.
+    it("titles cards as the Scenes tab does: the master is the whole video, each branch under it with something to change is Scene N, a nested part takes its branch's number, a shared part keeps its name", () => {
+      const m = manifest({
+        compositions: [
+          composition({ compositionId: "master", name: "!MAIN" }),
+          composition({ compositionId: "intro", name: "A_Intro", isNestedOnlyReferenced: true, parentCompositionIds: ["master"] }),
+          composition({ compositionId: "b1", name: "Branch_01", isNestedOnlyReferenced: true, parentCompositionIds: ["master"] }),
+          composition({ compositionId: "b2", name: "Branch_02", isNestedOnlyReferenced: true, parentCompositionIds: ["master"] }),
+          composition({ compositionId: "s2", name: "Scene_02", isNestedOnlyReferenced: true, parentCompositionIds: ["b2"] }),
+          composition({ compositionId: "phone", name: "Screen_holder", isNestedOnlyReferenced: true, parentCompositionIds: ["s2"] }),
+          composition({ compositionId: "bg", name: "Background", isNestedOnlyReferenced: true, parentCompositionIds: ["b1", "b2"] })
+        ],
+        scenes: [
+          {
+            sceneId: "sc-master",
+            displayName: null,
+            compositionId: "master",
+            originalOrderIndex: 0,
+            startTimeSeconds: 0,
+            durationSeconds: 10,
+            placeholders: [
+              { placeholderId: "p-credit", displayLabel: null, compositionId: "master", layerName: "Credit", layerIndex: 1, layerPath: [], placeholderType: "text", editable: true, sourceType: "TextLayer", dimensions: null, startTimeSeconds: 0, durationSeconds: 10, evidence: { source: "read_directly", reason: "t" } },
+              { placeholderId: "p-b1", displayLabel: null, compositionId: "b1", layerName: "Text A", layerIndex: 1, layerPath: ["Branch_01"], placeholderType: "text", editable: true, sourceType: "TextLayer", dimensions: null, startTimeSeconds: 0, durationSeconds: 5, evidence: { source: "read_directly", reason: "t" } },
+              { placeholderId: "p-s2", displayLabel: null, compositionId: "s2", layerName: "Text A", layerIndex: 1, layerPath: ["Branch_02", "Scene_02"], placeholderType: "text", editable: true, sourceType: "TextLayer", dimensions: null, startTimeSeconds: 0, durationSeconds: 5, evidence: { source: "read_directly", reason: "t" } },
+              { placeholderId: "p-phone", displayLabel: null, compositionId: "phone", layerName: "White Solid 2", layerIndex: 1, layerPath: ["Branch_02", "Scene_02", "Screen_holder"], placeholderType: "image", editable: true, sourceType: "SolidSource", dimensions: null, startTimeSeconds: 0, durationSeconds: 5, evidence: { source: "read_directly", reason: "t" } },
+              { placeholderId: "p-bg", displayLabel: null, compositionId: "bg", layerName: "Dark Gray Solid 2", layerIndex: 1, layerPath: ["Background"], placeholderType: "image", editable: true, sourceType: "SolidSource", dimensions: null, startTimeSeconds: 0, durationSeconds: 5, evidence: { source: "read_directly", reason: "t" } }
+            ]
+          }
+        ]
+      });
+      const rows = ["p-bg", "p-phone", "p-s2", "p-b1", "p-credit"].map((id) => entry({ id: `r-${id}`, targetPlaceholderId: id, desiredText: "x" }));
+      const groups = groupLayerPlanEntries(rows, m);
+      expect(groups.map((group) => [group.compositionName, group.plainTitle])).toEqual([
+        ["!MAIN", { kind: "whole" }],
+        ["Branch_01", { kind: "scene", n: 1 }],
+        ["Scene_02", { kind: "scene", n: 2 }],
+        ["Screen_holder", { kind: "scene", n: 2 }],
+        ["Background", null]
+      ]);
+    });
+
     it("never shows a row as reaching a layer that is not in this template", () => {
       const shown = groupLayerPlanEntries(layerEntries, singleMasterManifest()).flatMap((group) => group.rows.map((row) => row.entry.id));
       expect(shown).not.toContain("r-ghost");

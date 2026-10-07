@@ -2,7 +2,7 @@
 
 import { Plus } from "lucide-react";
 import Link from "next/link";
-import type { ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { PageHeader } from "./ui/PageHeader";
@@ -13,9 +13,16 @@ import { PlanStatusBadge } from "./PlanStatusBadge";
 import { useLocale } from "./LocaleProvider";
 import { useProjectsList, type ProjectListItem } from "../lib/use-projects-list";
 import { formatRelativeTime } from "../lib/relative-time";
+import { readStoredWorkspaceMode } from "../lib/workspace-mode";
 
 function ProjectCard({ project }: { project: ProjectListItem }): ReactElement {
   const { t, locale } = useLocale();
+  // Read after mount, so the server-rendered card and the first client draw agree.
+  const [showFingerprint, setShowFingerprint] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShowFingerprint(readStoredWorkspaceMode() === "advanced");
+  }, []);
 
   return (
     <Card className="project-card">
@@ -32,12 +39,15 @@ function ProjectCard({ project }: { project: ProjectListItem }): ReactElement {
           <dt>{t.projects.card.revision}</dt>
           <dd>{project.planRevision ?? "—"}</dd>
         </div>
+        {/* A file fingerprint is for support; drawn only for someone who chose Advanced view (2026-10-07). */}
+        {showFingerprint ? (
         <div>
           <dt>{t.projects.card.sourceSha}</dt>
           <dd>
             <code>{project.sourceShaAbbrev ?? "—"}</code>
           </dd>
         </div>
+        ) : null}
         <div>
           <dt>{t.projects.card.scenes}</dt>
           <dd>{project.sceneCount ?? "—"}</dd>

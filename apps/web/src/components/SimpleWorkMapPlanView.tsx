@@ -7,6 +7,7 @@ import {
   computeSimpleAiPlanSummary,
   filterWorkMapEntriesForSimpleMode,
   groupLayerPlanEntries,
+  plainRowNames,
   hasAnyEditablePlaceholder,
   hasClientFacingInstructions,
   isTopLevelPlanEntry,
@@ -156,15 +157,19 @@ export function PlanCard({ entry, index, total, sceneNameByCompositionId, assetB
 export function LayerPlanCard({ group, assetById, projectId }: { group: LayerPlanGroup; assetById: Map<string, AssetDto>; projectId?: string }): ReactElement {
   const { t } = useLocale();
   const s = t.workMapTab.planPreview.simple;
+  // The names the client meets on the Scenes tab, not the template's layer
+  // names ("Text A", "White Solid 2") - which stay on hover (2026-10-07).
+  const plainTitle = group.plainTitle === null ? null : group.plainTitle.kind === "whole" ? t.simpleScenes.wholeVideoLabel : s.sceneNumbered(group.plainTitle.n);
+  const rowNames = plainRowNames(group.rows, t.projectWorkspace.editDrawer.simple);
   return (
     <Card className="layer-plan-card">
-      <h4 className="layer-plan-card__title">{group.compositionName}</h4>
+      <h4 className="layer-plan-card__title" title={group.compositionName}>{plainTitle ?? group.compositionName}</h4>
       <dl className="layer-plan-card__rows">
         {group.rows.map((row) => {
           const asset = row.entry.desiredAssetId ? assetById.get(row.entry.desiredAssetId) : undefined;
           return (
             <div key={row.entry.id} className="layer-plan-card__row">
-              <dt>{row.layerName}</dt>
+              <dt title={row.layerName}>{rowNames.get(row.entry.id) ?? row.layerName}</dt>
               {/* Was a bare value: <dd>{row.entry.desiredText ?? resolveAssetLabel(row.entry, assetById) ?? row.entry.instructions ?? "—"}</dd> */}
               <dd>
                 {/* Before -> after, so what the assistant changed is visible at a glance. */}

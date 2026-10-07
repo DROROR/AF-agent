@@ -78,6 +78,7 @@ export class DrizzleAssetRepository implements AssetRepository {
     const patch: Partial<typeof assets.$inferInsert> = { updatedAt: now };
     if (update.label !== undefined) patch.label = update.label;
     if (update.notes !== undefined) patch.notes = update.notes;
+    if (update.mediaKind !== undefined) patch.mediaKind = update.mediaKind;
     const [row] = await this.db.update(assets).set(patch).where(eq(assets.id, id)).returning();
     return row ? toDomain(row) : null;
   }

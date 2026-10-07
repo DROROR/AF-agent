@@ -145,6 +145,18 @@ describe("updateAsset", () => {
     expect(updated.sha256).toBe(uploaded.sha256);
   });
 
+  // 2026-10-07: a client's logo uploaded in the picture box is not counted as the logo, and nothing could change that after upload.
+  it("a still image can be declared the logo and back - and nothing else about it changes", async () => {
+    const deps = await setup();
+    const uploaded = await upload(deps, deps.project.projectId);
+    expect(uploaded.mediaKind).toBe("IMAGE");
+    const asLogo = await updateAsset({ assetRepository: deps.assetRepository, now: fixedNow }, deps.project.projectId, uploaded.id, { mediaKind: "LOGO" });
+    expect(asLogo.mediaKind).toBe("LOGO");
+    expect(asLogo.sha256).toBe(uploaded.sha256);
+    const back = await updateAsset({ assetRepository: deps.assetRepository, now: fixedNow }, deps.project.projectId, uploaded.id, { mediaKind: "IMAGE" });
+    expect(back.mediaKind).toBe("IMAGE");
+  });
+
   it("refuses to update an asset belonging to a different project", async () => {
     const deps = await setup();
     const uploaded = await upload(deps, deps.other.projectId);

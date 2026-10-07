@@ -11,7 +11,7 @@ import {
   type SlotBlocker,
   type TemplateManifest
 } from "@dyo/schemas";
-import { dispatchJob, fetchJobStatus, fetchSceneEvidencePreviewStatus, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
+import { assetFileUrl, dispatchJob, fetchJobStatus, fetchSceneEvidencePreviewStatus, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { Button } from "./ui/Button";
@@ -53,6 +53,9 @@ export interface PendingSlot {
   reasons: string[];
   window: { startSeconds: number; endSeconds: number } | null;
   canBeShown: boolean;
+  /** The client's chosen file for this place - its name, and a thumbnail when it is a still image. */
+  assetName: string | null;
+  assetThumbUrl: string | null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -135,7 +138,9 @@ export function findPendingPictureSlots(
         label: `${where} \u203A ${mapping.placeholderName ?? ""}`.trim(),
         reasons: [...new Set(assessment.blockers.map((blocker) => blocker.reason))],
         window: framed?.evidenceFrameWindowSeconds ?? null,
-        canBeShown: framed !== undefined && framed.evidenceFrameAtSeconds !== null
+        canBeShown: framed !== undefined && framed.evidenceFrameAtSeconds !== null,
+        assetName: asset === null ? null : (asset.label !== null && asset.label.trim() !== "" ? asset.label : asset.originalFilename),
+        assetThumbUrl: asset !== null && asset.mimeType.startsWith("image/") ? assetFileUrl(asset.projectId, asset.id) : null
       });
     }
   }
@@ -352,7 +357,11 @@ export function SlotBulkReview({
                 alt={captionOf(slot)}
               />
               {/* The template's own names stay on hover, for matching a picture to After Effects. */}
-              <figcaption title={slot.label}>{captionOf(slot)}</figcaption>
+              <figcaption title={slot.label}>
+                {/* 2026-10-07, the client: "it should present the new screenshot, or just the image itself" - the spot alone showed the template's frame without his picture. The chosen file is shown beside it. */}
+                {slot.assetThumbUrl !== null ? <img className="slot-bulk-review__chosen" src={slot.assetThumbUrl} alt="" /> : null}
+                <span>{t.simpleScenes.slotBulk.goesInto(slot.assetName ?? "", captionOf(slot))}</span>
+              </figcaption>
             </figure>
           ))}
         </div>

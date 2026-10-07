@@ -25,6 +25,8 @@ export interface ClaudeActionButtonProps extends Omit<ButtonHTMLAttributes<HTMLB
   busyLabel?: string;
   busy?: boolean;
   size?: "md" | "sm";
+  /** Drawn quieter, the same action: the page's one primary action is elsewhere right now (2026-10-07). */
+  quiet?: boolean;
 }
 
 /**
@@ -38,8 +40,8 @@ export interface ClaudeActionButtonProps extends Omit<ButtonHTMLAttributes<HTMLB
  * check is safe today (DB_AI_PROVIDER_NAMES is a single-value enum,
  * `["ANTHROPIC"]` - packages/database/src/schema.ts).
  */
-export function ClaudeActionButton({ label, busyLabel, busy, size = "md", className, disabled, ...rest }: ClaudeActionButtonProps): ReactElement {
-  const classes = ["btn", "btn--claude", size === "sm" ? "btn--sm" : null, className].filter(Boolean).join(" ");
+export function ClaudeActionButton({ label, busyLabel, busy, size = "md", quiet = false, className, disabled, ...rest }: ClaudeActionButtonProps): ReactElement {
+  const classes = ["btn", "btn--claude", quiet ? "btn--claude-quiet" : null, size === "sm" ? "btn--sm" : null, className].filter(Boolean).join(" ");
   return (
     <button type="button" className={classes} disabled={disabled || busy} {...rest}>
       <ClaudeMark />

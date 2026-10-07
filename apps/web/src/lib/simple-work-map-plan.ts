@@ -134,6 +134,39 @@ export interface LayerPlanGroup {
   compositionId: string;
   compositionName: string;
   rows: LayerPlanRow[];
+  /**
+   * What the Scenes tab calls the card this composition's layers end up on
+   * (2026-10-07). A template that keeps everything under one master: the
+   * master is "the whole video"; every part under it belongs to the Nth
+   * branch directly under the master, numbered in natural name order - so a
+   * phone screen nested inside the third branch is "Scene 3" too, as it is
+   * on the Scenes tab. A composition reached through several branches (a
+   * background every scene shares) keeps the template's own name (null).
+   */
+  plainTitle: { kind: "whole" } | { kind: "scene"; n: number } | null;
+}
+
+/**
+ * Plain names for a group's rows, the way the Scenes tab's panel names them
+ * (2026-10-07): "Text 1..N" and "Picture 1..N" in row order, one of each kind
+ * unnumbered. The template's own layer name stays available on hover.
+ */
+export function plainRowNames(rows: readonly LayerPlanRow[], words: { text: string; textN: (n: number) => string; picture: string; pictureN: (n: number) => string }): Map<string, string> {
+  const isText = (row: LayerPlanRow): boolean => row.kind === "text";
+  const totals = { text: rows.filter(isText).length, picture: rows.filter((row) => !isText(row)).length };
+  const names = new Map<string, string>();
+  let text = 0;
+  let picture = 0;
+  for (const row of rows) {
+    if (isText(row)) {
+      text++;
+      names.set(row.entry.id, totals.text === 1 ? words.text : words.textN(text));
+    } else {
+      picture++;
+      names.set(row.entry.id, totals.picture === 1 ? words.picture : words.pictureN(picture));
+    }
+  }
+  return names;
 }
 
 /**
@@ -153,7 +186,7 @@ export function groupLayerPlanEntries(entries: WorkMapEntry[], manifest: Templat
     if (!placeholder) {
       continue;
     }
-    const group = groups.get(placeholder.compositionId) ?? { compositionId: placeholder.compositionId, compositionName: nameById.get(placeholder.compositionId) ?? placeholder.compositionId, rows: [] };
+    const group = groups.get(placeholder.compositionId) ?? { compositionId: placeholder.compositionId, compositionName: nameById.get(placeholder.compositionId) ?? placeholder.compositionId, rows: [], plainTitle: null };
     const currentText = typeof placeholder.originalText === "string" && placeholder.originalText.trim() !== "" ? placeholder.originalText : null;
     group.rows.push({ entry, layerName: placeholder.layerName, kind: placeholder.placeholderType, currentText });
     groups.set(placeholder.compositionId, group);
@@ -163,7 +196,47 @@ export function groupLayerPlanEntries(entries: WorkMapEntry[], manifest: Templat
   for (const group of ordered) {
     group.rows.sort((a, b) => natural(a.layerName, b.layerName));
   }
-  return ordered;
+  const byId = new Map(manifest.compositions.map((composition) => [composition.compositionId, composition]));
+  const topLevel = manifest.compositions.filter((composition) => !composition.isNestedOnlyReferenced).map((composition) => composition.compositionId);
+  if (topLevel.length !== 1) {
+    return ordered;
+  }
+  const master = topLevel[0]!;
+  const allBranches = manifest.compositions
+    .filter((composition) => composition.parentCompositionIds.length === 1 && composition.parentCompositionIds[0] === master)
+    .sort((a, b) => natural(a.name, b.name))
+    .map((composition) => composition.compositionId);
+  // The one branch under the master a composition sits in, or null when it
+  // sits in none or in several.
+  const branchOf = (id: string, seen = new Set<string>()): string | null => {
+    if (seen.has(id)) return null;
+    seen.add(id);
+    if (allBranches.includes(id)) return id;
+    const parents = byId.get(id)?.parentCompositionIds ?? [];
+    const found = new Set(parents.map((parent) => branchOf(parent, seen)).filter((branch): branch is string => branch !== null));
+    return found.size === 1 ? [...found][0]! : null;
+  };
+  const branchOfGroup = new Map(ordered.map((group) => [group.compositionId, group.compositionId === master ? null : branchOf(group.compositionId)]));
+  // Only a branch with something to change on it is a scene card - a branch
+  // holding nothing editable (a transition, a sound) is not shown and takes
+  // no number, exactly as on the Scenes tab.
+  const branches = allBranches.filter((branch) => [...branchOfGroup.values()].includes(branch));
+  const numberOf = new Map<string, number>();
+  for (const group of ordered) {
+    if (group.compositionId === master) {
+      group.plainTitle = { kind: "whole" };
+      numberOf.set(group.compositionId, 0);
+      continue;
+    }
+    const branch = branchOfGroup.get(group.compositionId) ?? null;
+    if (branch !== null) {
+      const n = branches.indexOf(branch) + 1;
+      group.plainTitle = { kind: "scene", n };
+      numberOf.set(group.compositionId, n);
+    }
+  }
+  // Cards in the order the Scenes tab shows them: the whole video, then Scene 1, 2, ..., then the rest by name.
+  return ordered.sort((a, b) => (numberOf.get(a.compositionId) ?? Number.MAX_SAFE_INTEGER) - (numberOf.get(b.compositionId) ?? Number.MAX_SAFE_INTEGER) || natural(a.compositionName, b.compositionName));
 }
 
 /** Every row that is NOT shown as a layer row by groupLayerPlanEntries - the scene-level rows, in their given order. */

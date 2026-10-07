@@ -52,6 +52,8 @@ export interface NewAssetRecord {
 export interface AssetUpdate {
   label?: string | null;
   notes?: string | null;
+  /** Only ever IMAGE or LOGO, and only on a file that already is one of the two - see update-asset.ts. */
+  mediaKind?: "IMAGE" | "LOGO";
 }
 
 export interface AssetRepository {

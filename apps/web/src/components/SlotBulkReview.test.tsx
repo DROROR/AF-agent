@@ -211,7 +211,9 @@ describe("SlotBulkReview - captions a client can read", () => {
     await screen.findByRole("button", { name: "Yes - it is in the right place" });
     const caption = document.querySelector(".slot-bulk-review__grid figcaption") as HTMLElement;
     // Two pictures wait in this scene, so this one is numbered.
-    expect(caption.textContent).toBe("Picture 1 in Scene 2");
+    // 2026-10-07: the caption also names the client's own file, so the frame without his picture in it is not all he sees.
+    expect(caption.textContent).toBe('"logo.png" goes into the phone shown here (Picture 1 in Scene 2)');
+    expect((caption.querySelector("img.slot-bulk-review__chosen") as HTMLImageElement).src).toContain("/file");
     expect(caption.getAttribute("title")).toContain("\u203A");
     expect((document.querySelector(".slot-bulk-review__grid img") as HTMLImageElement).alt).toBe("Picture 1 in Scene 2");
   });

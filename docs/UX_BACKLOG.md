@@ -260,3 +260,28 @@ fits whole inside its place, so the earlier confirmation no longer describes it.
 but it reads as the guide going backwards; the card now says so before the press.
 - **Open:** there is no "undo" for "This is my logo". The operator pressed it by mistake on
   the client's plan and it had to be reverted with a plan edit.
+
+## 2026-10-07 - audit of every tab before a new template test (operator asked for "best, simple, nothing removed")
+Read against NN/g's heuristics (status always visible, one step at a time, errors next to
+their cause with the fix in them, a disabled control says why), Canva (preview beside the
+edit) and Plainly (human display names per layer). Seen on the test project in a local
+preview; nothing removed, every control still there.
+- **Done - Files:** each file says what the system takes it for ("Your logo" / "Picture - goes
+  into a picture place"), and a still image can be declared the logo or back ("This is my
+  logo"), the one change of kind allowed after upload. The upload hint says why a logo must
+  be uploaded as one.
+- **Done - AI Plan:** cards and rows carry the names the Scenes tab uses ("The whole video",
+  "Scene 3", "Text 1", "Picture"), in the same order; the template's names stay on hover.
+  The bottom button says where it goes ("Go to the Scenes tab").
+- **Done - Projects list:** "Still to decide" instead of "Unresolved"; the file fingerprint
+  is drawn only for someone in Advanced view.
+- **Done - Overview:** plain words ("Is everything running right now?", "Connected to After
+  Effects"); the queue note no longer points at a design document.
+- **Done - Scenes:** "Claude - Generate suggestions" steps back once its step is done; the
+  colours "Apply" button says it waits for a colour to be clicked.
+- **Done - picture check:** the client's chosen file is shown beside each spot, and the
+  caption says which file goes into the phone shown; the hint names the real button.
+- **Open:** the picture check still shows the template's own frame, not one with the
+  client's picture in it - that needs the frame rendered after the picture is placed.
+- **Open:** text boxes are listed smallest first (needs text size from the template reading).
+- **Open:** "This is my logo" in the brand box has no undo.

@@ -61,7 +61,7 @@ describe("OverviewPage", () => {
     // Workers online: 1 / 1, AE online: 1, MCP online: 1, active jobs: 1.
     expect(await screen.findAllByText("1")).not.toHaveLength(0);
     screen.getByText("1 / 1");
-    screen.getByText("Job queue history is not available yet");
+    screen.getByText("Job history is on the Jobs / Queue page");
   });
 
   it("shows an error state when the status request itself fails", async () => {

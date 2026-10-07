@@ -10,7 +10,7 @@ export interface ProjectAssetsState {
   error: string | null;
   refetch: () => Promise<void>;
   upload: (file: File, mediaKind?: MediaKind) => Promise<ApiResult<AssetDto>>;
-  update: (assetId: string, body: { label?: string | null; notes?: string | null }) => Promise<ApiResult<AssetDto>>;
+  update: (assetId: string, body: { label?: string | null; notes?: string | null; mediaKind?: "IMAGE" | "LOGO" }) => Promise<ApiResult<AssetDto>>;
   remove: (assetId: string) => Promise<ApiResult<true>>;
 }
 
@@ -55,7 +55,7 @@ export function useProjectAssets(projectId: string): ProjectAssetsState {
   );
 
   const update = useCallback(
-    async (assetId: string, body: { label?: string | null; notes?: string | null }): Promise<ApiResult<AssetDto>> => {
+    async (assetId: string, body: { label?: string | null; notes?: string | null; mediaKind?: "IMAGE" | "LOGO" }): Promise<ApiResult<AssetDto>> => {
       const result = await updateAsset(projectId, assetId, body);
       if (result.ok) {
         await load();

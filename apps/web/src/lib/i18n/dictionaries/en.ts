@@ -107,21 +107,20 @@ export const en = {
   },
   overview: {
     title: "Overview",
-    description: "Live status of the DYO control plane.",
+    description: "Is everything running right now?",
     loading: "Loading overview…",
     unavailableTitle: "Overview unavailable",
     api: "API",
     database: "Database",
     workersOnline: "Workers online",
     aeOnline: "After Effects online",
-    mcpOnline: "MCP online",
+    mcpOnline: "Connected to After Effects",
     activeJobs: "Active jobs",
     lastHeartbeat: (relative: string): string => `Last heartbeat ${relative}`,
     noHeartbeat: "No heartbeat received yet",
     queueOverview: "Queue overview",
-    queuePendingTitle: "Job queue history is not available yet",
-    queuePendingDescription:
-      "The API currently supports claiming and reporting individual jobs, but does not yet expose a queue listing endpoint. This section will show queued/running/completed job counts once that API exists (see docs/JOB-DISPATCH.md)."
+    queuePendingTitle: "Job history is on the Jobs / Queue page",
+    queuePendingDescription: "Counts of waiting, running and finished jobs are not shown here yet. The Jobs / Queue page lists every job with its state.",
   },
   projects: {
     title: "Projects",
@@ -136,7 +135,7 @@ export const en = {
       revision: "Revision",
       sourceSha: "Source SHA",
       scenes: "Scenes",
-      unresolved: "Unresolved",
+      unresolved: "Still to decide",
       updated: "Updated",
       noPlanYet: "No plan yet",
       open: "Open"
@@ -1185,8 +1184,8 @@ export const en = {
     uploadTitle: "Add a file",
     fileLabel: "Files (you can choose several at once)",
     mediaKindLabel: "What is this file?",
-    mediaKindAuto: "A screenshot, picture or video (worked out automatically)",
-    mediaKindLogoHint: "Only valid for an image file - marks it as the client/company logo.",
+    mediaKindAuto: "A screenshot, picture or video",
+    mediaKindLogoHint: "Every video must show your logo once. Upload it here as the logo, so the system knows which file it is.",
     uploadAction: "Upload",
     uploading: "Uploading…",
     uploadingFile: (fileName: string): string => `Uploading ${fileName}…`,
@@ -1210,6 +1209,16 @@ export const en = {
     deleteConfirmAction: "Delete permanently",
     deleteCancelAction: "Cancel",
     deleteFailedTitle: "Could not delete this asset",
+    kindOnCard: {
+      IMAGE: "Picture - goes into a picture place",
+      VIDEO: "Video - goes into a picture place",
+      LOGO: "Your logo",
+      AUDIO: "Audio",
+      DOCUMENT: "Document",
+      OTHER: "Other file"
+    },
+    markAsLogoAction: "This is my logo",
+    markAsPictureAction: "This is a picture, not the logo",
     mediaKind: {
       IMAGE: "Image",
       VIDEO: "Video",
@@ -1327,6 +1336,7 @@ export const en = {
         usedFileNotUsed: "Not used",
         layerWasLabel: "Template says:",
         layerPlanTitle: "What will change",
+        sceneNumbered: (n: number): string => `Scene ${n}`,
         layerPlanHint: "Each line is one layer of the template and what goes on it. You check and adjust these in the Scenes tab before anything is made.",
         thumbnailPlaceholder: "Scene preview not generated yet",
         sceneTitleMain: "Main Scene",
@@ -1356,7 +1366,7 @@ export const en = {
         approvePlanFailedTitle: "Could not approve this plan",
         // approvePlanHelper: "Approving this plan unlocks Match Your Content.",
         approvePlanHelper: "Nothing is final yet. Next you see every text and image in its place and can change it. The real preview is made after that, and you approve the video only once you have seen it.",
-        continueToMappingAction: "Continue to Match Your Content"
+        continueToMappingAction: "Go to the Scenes tab"
       }
     },
     picker: {
@@ -1449,6 +1459,7 @@ export const en = {
   },
   simpleScenes: {
     wholeVideoColours: {
+      nothingChangedReason: "Click a colour above first - this saves what you changed.",
       title: "Colours for the whole video",
       hint: "Click a colour to change it. It changes in every scene that uses it. Leave them alone to keep the template's colours.",
       places: (n: number): string => (n === 1 ? "in 1 place" : `in ${n} places`),
@@ -1506,9 +1517,10 @@ export const en = {
       showing: (done: number, total: number): string => `After Effects is preparing them… ${done} of ${total}`,
       confirmAction: (n: number): string => (n === 1 ? "Yes - it is in the right place" : `Yes - all ${n} are in the right place`),
       saving: "Saving…",
-      hint: "One of them wrong? Open that scene with Edit and change that picture there.",
+      hint: "One of them wrong? On that scene's card press \"Change picture or text\" and choose another picture.",
       /** Said while the run is going, under the "N of M" line (2026-10-04) - which picture, and what to expect. */
       showingNow: (caption: string): string => `Now: ${caption}. Each spot takes about half a minute - they appear above one by one, and there is nothing to press.`,
+      goesInto: (file: string, spot: string): string => (file === "" ? spot : `"${file}" goes into the phone shown here (${spot})`),
       pictureIn: (sceneLabel: string): string => `Picture in ${sceneLabel}`,
       pictureNumberIn: (n: number, sceneLabel: string): string => `Picture ${n} in ${sceneLabel}`,
       couldNotShow: (caption: string): string => `After Effects could not show this spot: ${caption}`,

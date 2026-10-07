@@ -456,20 +456,20 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
     fireEvent.click(approveButton);
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
+      expect(screen.getByRole("link", { name: "Go to the Scenes tab" })).not.toBeNull();
     });
     expect(screen.queryByRole("button", { name: "Continue to Scenes" })).toBeNull();
-    expect((screen.getByRole("link", { name: "Continue to Match Your Content" }) as HTMLAnchorElement).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/scenes`);
+    expect((screen.getByRole("link", { name: "Go to the Scenes tab" }) as HTMLAnchorElement).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/scenes`);
     // Once approved, the "unlocks Match Your Content" helper no longer applies.
     expect(screen.queryByText(/Nothing is final yet\./)).toBeNull();
   });
 
-  it("shows 'Continue to Match Your Content' immediately, never a duplicate 'Approve AI Plan' button, when a plan already exists", async () => {
+  it("shows 'Go to the Scenes tab' immediately, never a duplicate 'Approve AI Plan' button, when a plan already exists", async () => {
     stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
     renderWorkMap();
 
     await screen.findByText("Your Video Plan");
-    expect(screen.getByRole("link", { name: "Continue to Match Your Content" })).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Go to the Scenes tab" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Continue to Scenes" })).toBeNull();
   });
 });

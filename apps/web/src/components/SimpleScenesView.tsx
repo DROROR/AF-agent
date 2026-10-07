@@ -386,6 +386,7 @@ export function SimpleScenesView(): ReactElement {
             busyLabel={t.mappingAssistant.generating}
             busy={isGenerating}
             disabled={isStale}
+            quiet={currentGuideStep !== GUIDE_PLAN}
             onClick={() => void generate()}
           />
         ) : null}

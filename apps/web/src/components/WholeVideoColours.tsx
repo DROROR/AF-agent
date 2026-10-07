@@ -168,7 +168,7 @@ export function WholeVideoColours({
           })}
         </ul>
         <div className="overview-actions">
-          <Button variant="primary" disabled={disabled || isSaving || changed.length === 0} onClick={() => void handleApply()}>
+          <Button variant="primary" disabled={disabled || isSaving || changed.length === 0} disabledReason={changed.length === 0 ? t.simpleScenes.wholeVideoColours.nothingChangedReason : undefined} onClick={() => void handleApply()}>
             {isSaving ? t.projectWorkspace.savingLabel : t.simpleScenes.wholeVideoColours.applyAction}
           </Button>
           {savedCount !== null ? <span role="status">{t.simpleScenes.wholeVideoColours.saved(savedCount)}</span> : null}
