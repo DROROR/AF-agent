@@ -151,7 +151,8 @@ export const en = {
     },
     fields: {
       projectName: "Project name",
-      projectNamePlaceholder: "e.g. Cognetica - Spring launch"
+      projectNamePlaceholder: "e.g. Cognetica - Spring launch",
+      projectNameNeeded: "Type a name for the project first."
     },
     template: {
       workerLabel: "Editing computer",

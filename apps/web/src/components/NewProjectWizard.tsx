@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
+import Link from "next/link";
 import {
   hasAepExtension,
   isDisposableCopyPath,
@@ -599,12 +600,29 @@ export function NewProjectWizard(): ReactElement {
         )}
       </Card>
 
+      {/*
+        2026-10-07: on the first step "Back" was a dead, greyed button and "Next"
+        was greyed with no word about why. On the first step Back now leaves the
+        wizard (to the projects list - the only place back from here), and a
+        waiting Next says what it waits for.
+      */}
       <div className="page-header__actions">
-        <Button variant="secondary" onClick={() => setStepIndex((i) => Math.max(0, i - 1))} disabled={isFirst}>
-          {t.common.back}
-        </Button>
+        {isFirst ? (
+          <Link href="/projects" className="btn btn--secondary">
+            {t.common.back}
+          </Link>
+        ) : (
+          <Button variant="secondary" onClick={() => setStepIndex((i) => Math.max(0, i - 1))}>
+            {t.common.back}
+          </Button>
+        )}
         {!isLast ? (
-          <Button variant="primary" onClick={() => setStepIndex((i) => Math.min(STEP_IDS.length - 1, i + 1))} disabled={name.trim() === ""}>
+          <Button
+            variant="primary"
+            onClick={() => setStepIndex((i) => Math.min(STEP_IDS.length - 1, i + 1))}
+            disabled={name.trim() === ""}
+            disabledReason={name.trim() === "" ? t.projectsNew.fields.projectNameNeeded : undefined}
+          >
             {t.common.next}
           </Button>
         ) : null}

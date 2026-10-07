@@ -144,7 +144,8 @@ export const he: Dictionary = {
     },
     fields: {
       projectName: "שם הפרויקט",
-      projectNamePlaceholder: "לדוגמה: Cognetica - השקת אביב"
+      projectNamePlaceholder: "לדוגמה: Cognetica - השקת אביב",
+      projectNameNeeded: "קודם הקלידו שם לפרויקט."
     },
     template: {
       workerLabel: "עובד",
