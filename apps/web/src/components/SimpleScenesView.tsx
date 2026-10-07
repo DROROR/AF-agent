@@ -371,6 +371,7 @@ export function SimpleScenesView(): ReactElement {
           heading={t.simpleScenes.guide.heading}
           progress={t.simpleScenes.guide.progress(guideSteps.filter((step) => step.done).length, guideSteps.length)}
           summary={t.simpleScenes.guide.summary(realScenes.length - quietCards.size, scenesWaiting)}
+          allStepsLabel={t.simpleScenes.guide.allSteps}
         />
         {/*
           The ASK half of the Mapping Assistant, in the view that exists to be

@@ -1367,7 +1367,8 @@ export const he: Dictionary = {
       approvingHint: "לשונית התצוגה המקדימה תיפתח בעצמה בעוד רגע."
     },
     guide: {
-      heading: "מה עושים בעמוד הזה",
+      heading: "בדף הזה",
+      allSteps: "כל חמשת השלבים של הדף הזה",
       progress: (done: number, total: number): string => `${done} מתוך ${total} בוצעו`,
       summary: (scenes: number, waiting: number): string => (waiting === 0 ? `${scenes} סצנות - הכול מסודר.` : `${scenes} סצנות - ${waiting} עדיין מחכות להחלטה שלכם.`),
       planTitle: "שימו את התוכנית על הסצנות.",

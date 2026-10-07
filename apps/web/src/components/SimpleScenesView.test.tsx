@@ -225,9 +225,11 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       suggestions: [mappingSuggestionFixture({ id: "s-1", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: "New headline" })]
     });
     renderView();
-    await screen.findByText("What to do on this page");
+    await screen.findByText("On this page");
     await waitFor(() => {
-      const now = screen.getAllByRole("listitem").find((item) => item.getAttribute("data-state") === "now");
+      // 2026-10-07: only the step to do now speaks, in its own line above the folded list.
+      const now = document.querySelector(".scenes-guide__now") as HTMLElement | null;
+      expect(now?.getAttribute("data-state")).toBe("now");
       expect(now?.textContent).toContain("Put your plan on the scenes.");
       expect(now?.textContent).toContain('Press "Use everything from my plan (1)" below.');
     });

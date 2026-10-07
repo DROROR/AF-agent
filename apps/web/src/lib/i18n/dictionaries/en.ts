@@ -1552,7 +1552,8 @@ export const en = {
       approvingHint: "The Preview tab opens by itself in a moment."
     },
     guide: {
-      heading: "What to do on this page",
+      heading: "On this page",
+      allSteps: "All five steps of this page",
       progress: (done: number, total: number): string => `${done} of ${total} done`,
       summary: (scenes: number, waiting: number): string =>
         waiting === 0 ? `${scenes} scenes - all settled.` : `${scenes} scenes - ${waiting} still need your choice.`,
