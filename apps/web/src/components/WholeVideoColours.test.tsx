@@ -57,8 +57,8 @@ describe("collectColourGroups", () => {
   it("lists each repeated colour layer once, with every place it appears in and the template's colour", () => {
     const { scenes, manifest } = fixture();
     expect(collectColourGroups(scenes, manifest)).toEqual([
-      { name: "Heading", targets: [{ scenePlanId: "scene-a", mappingId: "m-a-heading" }, { scenePlanId: "scene-b", mappingId: "m-b-heading" }], templateColorHex: "#F3F2F3", chosenColorHex: "" },
-      { name: "Dots", targets: [{ scenePlanId: "scene-a", mappingId: "m-a-dots" }, { scenePlanId: "scene-b", mappingId: "m-b-dots" }], templateColorHex: "#FF0048", chosenColorHex: "" }
+      { name: "Heading", targets: [{ scenePlanId: "scene-a", mappingId: "m-a-heading" }, { scenePlanId: "scene-b", mappingId: "m-b-heading" }], templateColorHex: "#F3F2F3", chosenColorHex: "", shownFromSeconds: expect.anything(), shownForSeconds: expect.anything() },
+      { name: "Dots", targets: [{ scenePlanId: "scene-a", mappingId: "m-a-dots" }, { scenePlanId: "scene-b", mappingId: "m-b-dots" }], templateColorHex: "#FF0048", chosenColorHex: "", shownFromSeconds: expect.anything(), shownForSeconds: expect.anything() }
     ]);
   });
 

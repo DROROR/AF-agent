@@ -26,6 +26,14 @@ export interface ColourGroup {
   targets: Array<{ scenePlanId: string; mappingId: string }>;
   /** The template's colour when every place agrees on one, else null. */
   templateColorHex: string | null;
+  /**
+   * When this colour is on screen, from the template reading (2026-10-07): a
+   * client set "BLACK" to white and saw nothing change - that layer is a
+   * 1.5-second fade at the very end, not the background. Null when the
+   * places differ or the reading has no timing.
+   */
+  shownFromSeconds: number | null;
+  shownForSeconds: number | null;
   /** The colour already chosen when every place holds the same one; "" when none is chosen; null when the places differ. */
   chosenColorHex: string | null;
 }
@@ -37,7 +45,7 @@ export function collectColourGroups(scenePlans: readonly ScenePlanEntry[], manif
       placeholders.set(placeholder.placeholderId, placeholder);
     }
   }
-  const groups = new Map<string, { targets: ColourGroup["targets"]; templateColours: Set<string | null>; chosen: Set<string> }>();
+  const groups = new Map<string, { targets: ColourGroup["targets"]; templateColours: Set<string | null>; chosen: Set<string>; timings: Set<string> }>();
   for (const scene of scenePlans) {
     for (const mapping of scene.mappings) {
       if (mapping.placeholderClassification.value !== "color" || mapping.manifestPlaceholderId === null) {
@@ -53,22 +61,33 @@ export function collectColourGroups(scenePlans: readonly ScenePlanEntry[], manif
         continue;
       }
       const name = mapping.placeholderName ?? placeholder.layerName;
-      const group = groups.get(name) ?? { targets: [], templateColours: new Set<string | null>(), chosen: new Set<string>() };
+      const group = groups.get(name) ?? { targets: [], templateColours: new Set<string | null>(), chosen: new Set<string>(), timings: new Set<string>() };
       group.targets.push({ scenePlanId: scene.id, mappingId: mapping.id });
+      group.timings.add(typeof placeholder.startTimeSeconds === "number" && typeof placeholder.durationSeconds === "number" ? `${placeholder.startTimeSeconds}|${placeholder.durationSeconds}` : "?");
       group.templateColours.add(colorControl?.currentColorHex ?? null);
       group.chosen.add(mapping.colorHex ?? "");
       groups.set(name, group);
     }
   }
-  return [...groups.entries()].map(([name, group]) => ({
-    name,
-    targets: group.targets,
-    templateColorHex: group.templateColours.size === 1 ? ([...group.templateColours][0] ?? null) : null,
-    chosenColorHex: group.chosen.size === 1 ? ([...group.chosen][0] as string) : null
-  }));
+  return [...groups.entries()].map(([name, group]) => {
+    const timing = group.timings.size === 1 && ![...group.timings].includes("?") ? ([...group.timings][0] as string).split("|").map(Number) : null;
+    return {
+      name,
+      targets: group.targets,
+      templateColorHex: group.templateColours.size === 1 ? ([...group.templateColours][0] ?? null) : null,
+      chosenColorHex: group.chosen.size === 1 ? ([...group.chosen][0] as string) : null,
+      shownFromSeconds: timing === null ? null : (timing[0] as number),
+      shownForSeconds: timing === null ? null : (timing[1] as number)
+    };
+  });
 }
 
 const HEX = /^#[0-9A-Fa-f]{6}$/;
+
+function formatClock(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
 
 export function WholeVideoColours({
   scenePlans,
@@ -123,6 +142,8 @@ export function WholeVideoColours({
     }
   }
 
+  // The video's length, for telling a colour shown throughout from one shown for a moment.
+  const videoSeconds = Math.max(0, ...manifest.compositions.filter((composition) => !composition.isNestedOnlyReferenced).map((composition) => composition.durationSeconds));
   return (
     <Card className="whole-video-colours">
         <h3 className="whole-video-colours__title">{t.simpleScenes.wholeVideoColours.title}</h3>
@@ -148,6 +169,10 @@ export function WholeVideoColours({
                   {/* The name can carry the path of the control it sits under; the last part is the layer itself. */}
                   <span title={group.name}>{group.name.split("›").pop()?.trim() ?? group.name}</span>
                   <span className="whole-video-colours__places">{t.simpleScenes.wholeVideoColours.places(group.targets.length)}</span>
+                  {/* A colour on screen for only part of the video says when - so a 1.5-second fade is never taken for the background. */}
+                  {group.shownFromSeconds !== null && group.shownForSeconds !== null && group.shownForSeconds < videoSeconds * 0.9 ? (
+                    <span className="whole-video-colours__places">{t.simpleScenes.wholeVideoColours.shownAt(formatClock(group.shownFromSeconds), group.shownForSeconds)}</span>
+                  ) : null}
                 </label>
                 {/* 2026-10-07: a line under every swatch ("Template's colour", a hex code) was eight lines of nothing to decide; said only where a colour was chosen or differs. */}
                 {draft[group.name] === "" ? (

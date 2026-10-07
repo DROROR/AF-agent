@@ -1287,6 +1287,7 @@ export const he: Dictionary = {
       places: (n: number): string => (n === 1 ? "במקום אחד" : `ב-${n} מקומות`),
       templateColour: "צבע התבנית",
       chosen: "הצבע שלכם",
+      shownAt: (at: string, seconds: number): string => `רק ב-${at}, למשך ${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, "") : Math.round(seconds)} שנ׳`,
       reset: "איפוס",
       backToTemplate: "חזרה לצבע התבנית",
       mixed: "שונה בין הסצנות",

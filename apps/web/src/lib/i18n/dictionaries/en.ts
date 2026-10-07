@@ -1469,6 +1469,7 @@ export const en = {
       places: (n: number): string => (n === 1 ? "in 1 place" : `in ${n} places`),
       templateColour: "Template's colour",
       chosen: "Your colour",
+      shownAt: (at: string, seconds: number): string => `only at ${at}, for ${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, "") : Math.round(seconds)} s`,
       reset: "Reset",
       backToTemplate: "Back to the template's colour",
       mixed: "Different in different scenes",

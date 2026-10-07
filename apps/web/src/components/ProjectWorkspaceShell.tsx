@@ -258,6 +258,21 @@ export function ProjectWorkspaceShell({
           const label = t.projectWorkspace.tabs[tab.labelKey];
           return (
             <span key={tab.href} className="workspace-tab-slot">
+              {/* 2026-10-07: a locked tab carried a lock yet opened on a click (the operator: "why do locked tabs open?"). It is no link while locked - unless the person is already on it, so the page they stand on keeps its tab. */}
+              {isLocked && pathname !== tab.href ? (
+                <span
+                  className="workspace-tab"
+                  data-locked="true"
+                  role="link"
+                  aria-disabled="true"
+                  aria-label={`${label} ${t.projectWorkspace.tabLockedAriaSuffix}`}
+                  title={lockHint ?? undefined}
+                  {...(lockHint ? { "aria-describedby": hintId } : {})}
+                >
+                  {label}
+                  <Lock aria-hidden="true" size={12} className="workspace-tab__lock" />
+                </span>
+              ) : (
               <Link
                 href={tab.href}
                 className="workspace-tab"
@@ -270,6 +285,7 @@ export function ProjectWorkspaceShell({
                 {label}
                 {isLocked ? <Lock aria-hidden="true" size={12} className="workspace-tab__lock" /> : null}
               </Link>
+              )}
               {/* Outside the <a> on purpose: the badge is decoration, and
                   folding "Next" into the link's own text content would change
                   every tab's accessible name and its textContent. Assistive

@@ -2089,3 +2089,18 @@ still the template's. The AI plan was given each place's own template words and 
 them in this order. Not established: whether the suggestions or the client's own typing put
 them there, and what the worker's text fitting does with a sentence in a one-word place.
 Nothing was changed on the client's project.
+
+## 2026-10-07 - "the background was set as white and it is not appearing" (client project 3241977f)
+Read from the plan, the manifest and the last EXECUTE_FRAME job (11:25 UTC, SUCCEEDED, 84
+operations). The colour named "BLACK" that the client set to #F7F7F7 is a solid in the
+master that is on screen from 0:43 for 1.5 s - the fade at the very end - not the scenes'
+background. The worker was sent SET_BRAND_COLOR #F7F7F7 for it and reported success. The
+dark background behind every scene is the picture place "Your_image" (the background
+picture), which holds his logo file; it has no colour control. Nothing on screen said when
+"BLACK" shows, so it was the obvious choice. Not changed on the client's project.
+- Web: a colour tile now says "only at 0:43, for 1.5 s" when a colour is on screen for less
+  than most of the video (from the template reading's start/duration).
+- Open: the real background is a picture; a white background means a white image in that
+  place. Nothing offers that.
+- Open (unverified): in the first frame of scene 8 the small paragraph sits over the phone
+  and is tiny - the text frame-fit (cbd43c6) on After Effects has not been checked by us.
