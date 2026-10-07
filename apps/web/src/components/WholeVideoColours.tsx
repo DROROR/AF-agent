@@ -144,13 +144,11 @@ export function WholeVideoColours({
 
   // The video's length, for telling a colour shown throughout from one shown for a moment.
   const videoSeconds = Math.max(0, ...manifest.compositions.filter((composition) => !composition.isNestedOnlyReferenced).map((composition) => composition.durationSeconds));
-  return (
-    <Card className="whole-video-colours">
-        <h3 className="whole-video-colours__title">{t.simpleScenes.wholeVideoColours.title}</h3>
-        <p className="whole-video-colours__hint">{t.simpleScenes.wholeVideoColours.hint}</p>
-        {error ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={error} /> : null}
-        <ul className="whole-video-colours__list">
-          {groups.map((group) => {
+  // On screen for less than a tenth of the video: a moment, not the video's look.
+  const isBrief = (group: ColourGroup): boolean => group.shownForSeconds !== null && videoSeconds > 0 && group.shownForSeconds < videoSeconds * 0.1;
+  const mainGroups = groups.filter((group) => !isBrief(group));
+  const briefGroups = groups.filter(isBrief);
+  const renderTile = (group: ColourGroup): ReactElement => {
             const value = draft[group.name] ?? group.chosenColorHex ?? "";
             const shown = HEX.test(value) ? value : (group.templateColorHex ?? "#000000");
             const inputId = `whole-video-colour-${group.name.replace(/[^A-Za-z0-9]+/g, "-")}`;
@@ -190,8 +188,27 @@ export function WholeVideoColours({
                 ) : null}
               </li>
             );
-          })}
+  };
+  return (
+    <Card className="whole-video-colours">
+        <h3 className="whole-video-colours__title">{t.simpleScenes.wholeVideoColours.title}</h3>
+        <p className="whole-video-colours__hint">{t.simpleScenes.wholeVideoColours.hint}</p>
+        {error ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={error} /> : null}
+        {/*
+          2026-10-07, the operator: "why are we making the client set what the
+          template already had?" A colour on screen for a moment (a fade at the
+          end) stood beside the colours of the whole video, and was taken for
+          the background. Those fold away; what is left is what the video is.
+        */}
+        <ul className="whole-video-colours__list">
+          {mainGroups.map(renderTile)}
         </ul>
+        {briefGroups.length > 0 ? (
+          <details className="advanced-details whole-video-colours__brief">
+            <summary>{t.simpleScenes.wholeVideoColours.briefToggle(briefGroups.length)}</summary>
+            <ul className="whole-video-colours__list">{briefGroups.map(renderTile)}</ul>
+          </details>
+        ) : null}
         <div className="overview-actions">
           <Button variant="primary" disabled={disabled || isSaving || changed.length === 0} disabledReason={changed.length === 0 ? t.simpleScenes.wholeVideoColours.nothingChangedReason : undefined} onClick={() => void handleApply()}>
             {isSaving ? t.projectWorkspace.savingLabel : t.simpleScenes.wholeVideoColours.applyAction}

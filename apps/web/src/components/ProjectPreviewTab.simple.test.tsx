@@ -694,7 +694,8 @@ describe("Simple Preview tab - the banner above follows what happens on the tab"
  */
 describe("Simple Preview tab - approving the full video unlocks Export at once and goes there", () => {
   const exportTab = (): HTMLElement =>
-    Array.from(document.querySelectorAll(".workspace-tabs a")).find((link) => link.getAttribute("href") === `/projects/${PROJECT_ID}/export`) as HTMLElement;
+    // 2026-10-07: while locked the tab is no link at all, so it is found by its name.
+    Array.from(document.querySelectorAll(".workspace-tabs .workspace-tab")).find((tab) => (tab.textContent ?? "").trim().startsWith("Export")) as HTMLElement;
 
   function stubApproval(approveReply: Reply): void {
     const ready = approvedSession();

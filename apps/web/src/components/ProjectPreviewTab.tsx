@@ -741,6 +741,23 @@ export function ProjectPreviewTab(): ReactElement | null {
       <div className="overview-grid">
         <Card className="overview-section first-frame-card">
           <CardHeader title={sp.firstFrameTitle} />
+          {/*
+            REAL 2026-10-07 (client project 3241977f): he flipped a picture in
+            a scene, came back here, and the frame was unchanged - it was made
+            from the plan as it was before the flip, and nothing said so. A
+            change to the scenes starts the plan afresh; the frame on screen
+            is then from before it, and says so, with the way to a new one.
+          */}
+          {session !== null && plan && plan.plan.status === "DRAFT" && plan.plan.revision > session.planRevision ? (
+            <div className="first-frame__outdated" role="status">
+              <p>
+                <strong>{sp.frameOutdatedTitle}</strong> {sp.frameOutdatedDescription}
+              </p>
+              <Link href={`/projects/${projectId}/scenes`} className="btn btn--primary btn--sm">
+                {sp.frameOutdatedAction}
+              </Link>
+            </div>
+          ) : null}
           {workerEmptyState}
           {failure ? (
             failure.kind === "job" ? (

@@ -682,6 +682,9 @@ export const en = {
       frameNoAction: "No, something is wrong",
       goToExportAction: "Go to Export",
       frameApprovedNote: "You said this frame looks right.",
+      frameOutdatedTitle: "This frame is from before your last change.",
+      frameOutdatedDescription: "You changed the scenes after it was made (a picture, a text or a flip). To see the change: press \"Approve Scenes\" on the Scenes tab, then \"Build my video\" here.",
+      frameOutdatedAction: "Go to Scenes",
       /** Neutral on purpose: a session can stop for reasons other than a "no", and this must not put words in anyone's mouth. */
       frameRejectedTitle: "This frame was not approved",
       frameRejectedDescription:
@@ -1102,7 +1105,7 @@ export const en = {
         coloursHint: "Leave these alone to keep the template's own colours."
       },
       orientationLabel: "Is the picture the wrong way round in the video?",
-      orientationHint: "Use this only if the preview shows this picture mirrored, sideways or upside down. Save, then make the preview again to see it.",
+      orientationHint: "Use this only if the preview shows this picture mirrored, sideways or upside down. After saving, press \"Approve Scenes\" and then \"Build my video\" on the Preview tab to see it.",
       orientationFlip: "Flip it left to right",
       orientationTurnNone: "Do not turn it",
       orientationTurnRight: "Turn it a quarter to the right",
@@ -1469,6 +1472,7 @@ export const en = {
       places: (n: number): string => (n === 1 ? "in 1 place" : `in ${n} places`),
       templateColour: "Template's colour",
       chosen: "Your colour",
+      briefToggle: (n: number): string => (n === 1 ? "1 more colour, on screen only for a moment" : `${n} more colours, on screen only for a moment`),
       shownAt: (at: string, seconds: number): string => `only at ${at}, for ${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, "") : Math.round(seconds)} s`,
       reset: "Reset",
       backToTemplate: "Back to the template's colour",

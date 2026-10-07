@@ -623,6 +623,9 @@ export const he: Dictionary = {
       frameNoAction: "לא, משהו לא בסדר",
       goToExportAction: "מעבר לייצוא",
       frameApprovedNote: "אמרתם שהפריים הזה נראה נכון.",
+      frameOutdatedTitle: "הפריים הזה הוא מלפני השינוי האחרון שלכם.",
+      frameOutdatedDescription: "שיניתם את הסצנות אחרי שהוא נוצר (תמונה, טקסט או היפוך). כדי לראות את השינוי: לחצו על \"אישור הסצנות\" בלשונית הסצנות, ואז על \"ליצור את הסרטון שלי\" כאן.",
+      frameOutdatedAction: "לסצנות",
       frameRejectedTitle: "הפריים הזה לא אושר",
       frameRejectedDescription:
         "אם התוכן שגוי, חזרו ללשונית הסצנות ושנו אותו. אם התמונה רק צולמה ברגע לא מוצלח, פתחו את \"הצגת רגע אחר\" למטה.",
@@ -1287,6 +1290,7 @@ export const he: Dictionary = {
       places: (n: number): string => (n === 1 ? "במקום אחד" : `ב-${n} מקומות`),
       templateColour: "צבע התבנית",
       chosen: "הצבע שלכם",
+      briefToggle: (n: number): string => (n === 1 ? "עוד צבע אחד, שמופיע רק לרגע" : `עוד ${n} צבעים, שמופיעים רק לרגע`),
       shownAt: (at: string, seconds: number): string => `רק ב-${at}, למשך ${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, "") : Math.round(seconds)} שנ׳`,
       reset: "איפוס",
       backToTemplate: "חזרה לצבע התבנית",

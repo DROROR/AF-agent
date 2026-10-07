@@ -312,3 +312,17 @@ changes". Changed, nothing removed:
   what comes first, "Go to Preview") instead of a setup form for a step not yet reached.
 - **Done:** colours are tiles - a circle, the name, how many places; "Your colour" and
   "Reset" only where a colour is chosen.
+
+## 2026-10-07 - "the flips do not work" / "why set what the template already had" (client, operator)
+- The flips were saved (plan revisions 38 and 39, 13:34 and 13:41 UTC) but the frame on the
+  Preview tab was made at 11:25 from revision 37; editing the scenes sends the plan back
+  to Draft and nothing on the Preview tab said the frame was older than the scenes.
+  **Done:** the first-frame card says "This frame is from before your last change" with
+  the way to a new one (Approve Scenes, then Build my video); the flip hint in the panel
+  names those buttons.
+- **Done:** a colour on screen for less than a tenth of the video (the fade at the end) is
+  folded under "N more colours, on screen only for a moment"; a tile says when such a
+  colour shows.
+- **Done:** a locked tab is no link while locked.
+- **Open:** approving the scenes again and building the frame again after one flip is two
+  presses on two tabs; one "Update my frame" would be better, but it is a server change.
