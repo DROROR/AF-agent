@@ -184,6 +184,11 @@ export function useProjectGuidance(): ProjectGuidance {
   return context;
 }
 
+/** The guidance where one is mounted, else null - for a tab that is also rendered on its own. */
+export function useProjectGuidanceIfPresent(): ProjectGuidance | null {
+  return useContext(ProjectGuidanceContext);
+}
+
 const NO_GUIDANCE_TO_REFRESH = (): void => {};
 
 /**

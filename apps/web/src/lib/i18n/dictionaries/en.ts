@@ -1054,6 +1054,9 @@ export const en = {
       renderingDescription:
         "A final video can take 30 to 40 minutes. The finished video appears just below by itself, ready to download - you can leave this page and come back.",
       reelsToggle: "Also make a tall version for phones",
+      lockedTitle: "Your video is not made yet",
+      lockedDescription: "First look at the first frame on the Preview tab and say whether it looks right. The full video is made after that, and this tab opens by itself.",
+      lockedAction: "Go to Preview",
       renderFailedTitle: (variantLabel: string): string => `Your final ${variantLabel} video could not be made`,
       renderFailedDescription: "Your editing computer stopped before the video was finished. Nothing is lost. Press Try again - if it stops again, send the technical details below to support.",
       renderNotStartedTitle: "The final video could not be started",

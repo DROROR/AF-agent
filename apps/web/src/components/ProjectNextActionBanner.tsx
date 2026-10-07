@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowRight, CircleAlert, CircleHelp } from "lucide-react";
+import { ArrowRight, Check, CircleAlert, CircleHelp, Lock } from "lucide-react";
 import type { ReactElement } from "react";
 import { useProjectGuidance } from "./ProjectGuidanceProvider";
+import { useWorkspaceModeIfPresent } from "./WorkspaceModeProvider";
 import { useLocale } from "./LocaleProvider";
 import type { NextActionTab } from "../lib/project-next-action";
 
@@ -55,8 +56,9 @@ function tabHref(projectId: string, tab: NextActionTab): string {
 export function ProjectNextActionBanner({ projectId }: { projectId: string }): ReactElement {
   const { t } = useLocale();
   const pathname = usePathname();
-  const { nextAction, stateUnknown, loadFailed } = useProjectGuidance();
+  const { nextAction, stateUnknown, loadFailed, steps, currentStepIndex } = useProjectGuidance();
   const copy = t.projectWorkspace.nextAction;
+  const isSimple = useWorkspaceModeIfPresent() === "simple";
 
   if (stateUnknown || nextAction.id === "unknown") {
     // "Could not load" and "still loading" are genuinely different facts and
@@ -80,10 +82,31 @@ export function ProjectNextActionBanner({ projectId }: { projectId: string }): R
   const isHere = href !== null && pathname === href;
 
   return (
-    <aside className="next-action" aria-live="polite" data-action={nextAction.id}>
-      <ArrowRight aria-hidden="true" size={18} />
+    <aside className="next-action" aria-live="polite" data-action={nextAction.id} data-simple={isSimple ? "true" : undefined}>
+      {/*
+        2026-10-07, the operator: "one section that tells the client what is
+        done, what is left and what comes next". In Simple view the seven
+        steps of the video stand above the action, each done, current or not
+        yet - the same facts the front page's checklist reads, nothing new.
+      */}
+      {isSimple ? (
+        <ol className="next-action__steps" aria-label={t.projectWorkspace.stepper.ariaLabel}>
+          {steps.map((step, index) => {
+            const isCurrent = index === currentStepIndex;
+            return (
+              <li key={step.id} className="next-action__step" data-state={step.state} data-current={isCurrent ? "true" : undefined}>
+                <span className="next-action__step-marker">
+                  {step.state === "complete" ? <Check aria-hidden="true" size={12} /> : step.state === "locked" ? <Lock aria-hidden="true" size={11} /> : index + 1}
+                </span>
+                <span className="next-action__step-title">{t.projectWorkspace.stepper.steps[step.id].title}</span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+      <ArrowRight aria-hidden="true" size={18} className="next-action__arrow" />
       <div className="next-action__body">
-        <p className="next-action__heading">{copy.heading}</p>
+        <p className="next-action__heading">{isSimple ? t.projectWorkspace.checklist.progress(steps.filter((step) => step.state === "complete").length, steps.length) : copy.heading}</p>
         <p className="next-action__title">{action.title}</p>
         <p className="next-action__description">{action.description}</p>
       </div>

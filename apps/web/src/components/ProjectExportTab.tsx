@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { Fragment, useEffect, useState, type ReactElement } from "react";
 import type { JobDto } from "@dyo/schemas";
 import { type ExecutionSessionDto, type RenderOutputConfig, type RenderOutputVariant } from "@dyo/schemas";
@@ -15,7 +17,7 @@ import { useLocale } from "./LocaleProvider";
 import { dispatchJob, fetchCurrentExecutionSession, fetchJobHistory, fetchJobStatus } from "../lib/projects-api-client";
 import { BusyNotice } from "./ui/BusyNotice";
 import { ProblemNotice } from "./ui/ProblemNotice";
-import { useProjectGuidanceRefresh } from "./ProjectGuidanceProvider";
+import { useProjectGuidanceIfPresent, useProjectGuidanceRefresh } from "./ProjectGuidanceProvider";
 
 const TERMINAL_JOB_STATUSES = new Set<JobDto["status"]>(["SUCCEEDED", "FAILED", "CANCELLED"]);
 const LIVE_JOB_STATUSES = new Set<string>(["QUEUED", "CLAIMED", "RUNNING"]);
@@ -70,6 +72,7 @@ export function ProjectExportTab(): ReactElement | null {
   // read again and the new one appears by itself.
   const [outputsVersion, setOutputsVersion] = useState(0);
   const refreshGuidance = useProjectGuidanceRefresh();
+  const guidance = useProjectGuidanceIfPresent();
 
   const projectIdForEffect = project?.project.projectId ?? null;
   useEffect(() => {
@@ -155,6 +158,21 @@ export function ProjectExportTab(): ReactElement | null {
   };
   const variantSections: Record<RenderOutputVariant, ReactElement> = { LANDSCAPE: sectionFor("LANDSCAPE"), REELS: sectionFor("REELS") };
   const reelsAlreadySetUp = (plan.plan.renderOutputs.REELS ?? null) !== null;
+
+  // 2026-10-07: the tab carried a lock in the nav, yet opened onto "Landscape
+  // master", "Render Settings template name" - a setup form for a step the
+  // client had not reached, with nothing saying so. While the lock holds, in
+  // Simple view, one plain card says what comes first and where.
+  if (isSimple && guidance !== null && guidance.tabLocks.export) {
+    return (
+      <Card className="overview-section export-tab__locked">
+        <EmptyState title={t.projectWorkspace.export.lockedTitle} description={t.projectWorkspace.export.lockedDescription} />
+        <Link href={`/projects/${projectId}/preview`} className="btn btn--primary">
+          {t.projectWorkspace.export.lockedAction}
+        </Link>
+      </Card>
+    );
+  }
 
   return (
     <div className="overview-grid">

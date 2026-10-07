@@ -302,3 +302,13 @@ changes". Changed, nothing removed:
 - Colour chips: swatch, name, count; "Your colour" and "Reset" only where a colour is
   chosen. The caption under every frame is said once above the cards.
 - New project: Back on the first step leaves the wizard; a waiting Next says it needs a name.
+
+## 2026-10-07 - one orientation section; Export says why it waits; colour tiles (operator)
+- **Done:** in Simple view the seven steps of the video stand in one row at the top of every
+  tab (done / now / not yet), with the step to do now and its button right under them - the
+  old "What to do next" banner is merged into it, so one section says what is done, what is
+  left and what comes next.
+- **Done:** the Export tab, while locked, is one plain card ("Your video is not made yet",
+  what comes first, "Go to Preview") instead of a setup form for a step not yet reached.
+- **Done:** colours are tiles - a circle, the name, how many places; "Your colour" and
+  "Reset" only where a colour is chosen.

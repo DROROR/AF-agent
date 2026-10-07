@@ -4380,3 +4380,26 @@ a.workflow-stepper__step:hover {
 .whole-video-colours__state { font-size: 0.78rem; }
 .whole-video-colours__row > .btn { font-size: 0.75rem; padding-block: 0; min-height: 0; }
 .whole-video-colours__row > .btn { justify-self: start; text-align: left; white-space: nowrap; }
+
+/* Colour tiles, 2026-10-07: a circle, the name, how many places; a chosen one shows a ring, "Your colour" and Reset. */
+.whole-video-colours__list { grid-template-columns: repeat(auto-fill, minmax(7.75rem, 1fr)); gap: var(--space-2); }
+.whole-video-colours__row { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.25rem; padding: var(--space-2); }
+.whole-video-colours__row > input[type="color"] { width: 2.75rem; height: 2.75rem; }
+.whole-video-colours__row[data-changed="true"] > input[type="color"] { box-shadow: 0 0 0 3px var(--color-primary, #4f6fe8); }
+.whole-video-colours__name { display: flex; flex-direction: column; align-items: center; gap: 0; font-size: 0.85rem; line-height: 1.25; }
+.whole-video-colours__places { font-size: 0.72rem; }
+.whole-video-colours__state { font-size: 0.72rem; }
+.whole-video-colours__row > .btn { justify-self: center; text-align: center; font-size: 0.72rem; }
+.export-tab__locked { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+
+/* The one orientation section, 2026-10-07: the seven steps in a row, then the step to do now. */
+.next-action[data-simple="true"] { flex-wrap: wrap; row-gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.next-action__steps { flex: 1 1 100%; list-style: none; margin: 0 0 var(--space-1); padding: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.next-action__step { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap; }
+.next-action__step-marker { width: 1.25rem; height: 1.25rem; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; }
+.next-action__step[data-state="complete"] { color: var(--color-success, #1f8a4c); }
+.next-action__step[data-state="complete"] .next-action__step-marker { background: var(--color-success, #1f8a4c); border-color: transparent; color: #fff; }
+.next-action__step[data-current="true"] { color: var(--color-text); font-weight: 600; }
+.next-action__step[data-current="true"] .next-action__step-marker { background: var(--color-primary, #4f6fe8); border-color: transparent; color: #fff; }
+.next-action__step[data-state="locked"] { opacity: 0.6; }
+.next-action[data-simple="true"] .next-action__arrow { margin-top: 0.15rem; }

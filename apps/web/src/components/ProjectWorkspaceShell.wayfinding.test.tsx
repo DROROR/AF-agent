@@ -353,7 +353,8 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     renderShell("he");
     await screen.findByText("יצירת הווידאו המלא");
 
-    within(banner()).getByText("מה לעשות עכשיו");
+    // 2026-10-07: in Simple view the heading is the step count, and the seven steps stand above the action - all in Hebrew.
+    within(banner()).getByText(/מתוך 7/);
     within(banner()).getByRole("link", { name: "מעבר לתצוגה מקדימה" });
     // The one phrase the English copy would have produced here.
     expect(banner().textContent).not.toContain("Make the full video");
