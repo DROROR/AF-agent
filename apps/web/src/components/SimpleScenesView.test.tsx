@@ -225,14 +225,9 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       suggestions: [mappingSuggestionFixture({ id: "s-1", scenePlanId: "scene-parent", mappingId: "mapping-1", suggestedText: "New headline" })]
     });
     renderView();
-    await screen.findByText("On this page");
-    await waitFor(() => {
-      // 2026-10-07: only the step to do now speaks, in its own line above the folded list.
-      const now = document.querySelector(".scenes-guide__now") as HTMLElement | null;
-      expect(now?.getAttribute("data-state")).toBe("now");
-      expect(now?.textContent).toContain("Put your plan on the scenes.");
-      expect(now?.textContent).toContain('Press "Use everything from my plan (1)" below.');
-    });
+    // 2026-10-07: the page's own guide is gone (the seven steps at the top of every tab say it); what to do first is the one primary button.
+    const takePlan = await screen.findByRole("button", { name: "Use everything from my plan (1)" });
+    expect(takePlan.className).toContain("btn--primary");
     // The card's label - and, since later the same day, the storyboard
     // strip's caption too, which used to show the template's own name.
     // 2026-10-04 (later): the plain name is the card's TITLE now; the template's own name stays on hover.
@@ -488,7 +483,8 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     await screen.findByRole("heading", { name: "Scene 1" });
 
     await screen.findByText("You changed this scene, so this picture is from before your change. The new one is made at Preview.");
-    await screen.findByText("Updating previews for scenes you just changed - this only takes a moment, no action needed.");
+    // 2026-10-07: the guide is gone; the running update says so with its own clock.
+    await screen.findByText(/Updating previews…/);
     expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -705,7 +701,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         await waitFor(() => expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(false), {
           timeout: 20_000
         });
-        expect(screen.queryByText("Updating previews for scenes you just changed - this only takes a moment, no action needed.")).toBeNull();
+        expect(screen.queryByText(/Updating previews…/)).toBeNull();
       },
       30_000
     );
@@ -858,7 +854,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
 
         fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
 
-        await screen.findByText("Scenes approved - the next step is on the Preview tab.", {}, { timeout: 10_000 });
+        await screen.findByRole("link", { name: "Go to Preview" }, { timeout: 10_000 });
         const sent = writes();
         expect(sent.map((w) => `${w.method} ${w.url}`)).toEqual([
           `PATCH /api/projects/${PROJECT_ID}/execution-plan`,
@@ -932,7 +928,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
 
         fireEvent.click(screen.getByRole("button", { name: "Approve Scenes" }));
 
-        await screen.findByText("Scenes approved - the next step is on the Preview tab.", {}, { timeout: 10_000 });
+        await screen.findByRole("link", { name: "Go to Preview" }, { timeout: 10_000 });
         expect(writes().map((w) => `${w.method} ${w.url}`)).toEqual([
           `PATCH /api/projects/${PROJECT_ID}/execution-plan`,
           `POST /api/projects/${PROJECT_ID}/execution-plan/approve`
@@ -952,7 +948,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         fireEvent.click(button);
         fireEvent.click(button);
 
-        await screen.findByText("Scenes approved - the next step is on the Preview tab.", {}, { timeout: 10_000 });
+        await screen.findByRole("link", { name: "Go to Preview" }, { timeout: 10_000 });
         expect(writes()).toHaveLength(2);
         expect(screen.queryByText(/not DRAFT/)).toBeNull();
       },

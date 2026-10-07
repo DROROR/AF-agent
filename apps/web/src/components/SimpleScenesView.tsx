@@ -16,7 +16,7 @@ import { isScenePreviewSettled, useScenePreviewQueue } from "../lib/use-scene-pr
 import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { findPendingPictureSlots, SlotBulkReview } from "./SlotBulkReview";
-import { ScenesGuide, type GuideStep } from "./ScenesGuide";
+import type { GuideStep } from "./ScenesGuide";
 import { BrandNeeds } from "./BrandNeeds";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
@@ -365,14 +365,8 @@ export function SimpleScenesView(): ReactElement {
       ) : null}
 
 
-      <Card className="simple-scenes__approve-bar">
-        <ScenesGuide
-          steps={guideSteps}
-          heading={t.simpleScenes.guide.heading}
-          progress={t.simpleScenes.guide.progress(guideSteps.filter((step) => step.done).length, guideSteps.length)}
-          summary={t.simpleScenes.guide.summary(realScenes.length - quietCards.size, scenesWaiting)}
-          allStepsLabel={t.simpleScenes.guide.allSteps}
-        />
+      <Card className="simple-scenes__approve-bar simple-scenes__approve-bar--slim">
+        {/* 2026-10-07, the operator: the seven steps at the top of every tab say it all; this bar holds only the two controls. The guide's steps still decide which button is primary. */}
         {/*
           The ASK half of the Mapping Assistant, in the view that exists to be
           the easy path. Simple mode already accepted and rejected suggestions

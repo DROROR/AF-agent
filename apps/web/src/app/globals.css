@@ -4418,3 +4418,8 @@ video.scene-card__picture-thumb, video.layer-plan-card__thumb { object-fit: cove
 .scenes-guide__all { margin-top: 0.4rem; }
 .scenes-guide__all ol { margin-top: 0.4rem; }
 .scenes-guide__all li { font-size: 0.85rem; }
+
+/* Scenes: a slim bar - suggestions on one side, the one step button on the other. */
+.simple-scenes__approve-bar--slim { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); }
+.simple-scenes__approve-bar--slim .simple-scenes__more { flex: 0 1 auto; }
+.simple-scenes__approve-bar--slim > .btn, .simple-scenes__approve-bar--slim > a.btn { margin-inline-start: auto; }
