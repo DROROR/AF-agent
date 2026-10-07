@@ -15,11 +15,16 @@ export interface GuideStep {
   done: boolean;
 }
 
-export function ScenesGuide({ steps, heading }: { steps: readonly GuideStep[]; heading: string }): ReactElement {
+export function ScenesGuide({ steps, heading, summary, progress }: { steps: readonly GuideStep[]; heading: string; summary?: string; progress?: string }): ReactElement {
   const currentIndex = steps.findIndex((step) => !step.done);
   return (
     <div className="scenes-guide">
-      <p className="scenes-guide__heading">{heading}</p>
+      {/* 2026-10-07: five full sentences at the top of the page read as a wall. A done step is now one short line; only the step to do now carries its words; the counts say where things stand. */}
+      <div className="scenes-guide__head">
+        <p className="scenes-guide__heading">{heading}</p>
+        {progress ? <span className="scenes-guide__progress">{progress}</span> : null}
+      </div>
+      {summary ? <p className="scenes-guide__summary">{summary}</p> : null}
       <ol>
         {steps.map((step, index) => {
           const state = step.done ? "done" : index === currentIndex ? "now" : "later";
@@ -30,8 +35,8 @@ export function ScenesGuide({ steps, heading }: { steps: readonly GuideStep[]; h
               </span>
               <span>
                 <strong>{step.title}</strong>
-                {/* A later step shows only its name: its instruction would be about a screen the client is not at yet. */}
-                {state === "later" ? null : <span className="scenes-guide__detail"> {step.detail}</span>}
+                {/* Only the step to do now carries its instruction: a later one is about a screen the client is not at yet, a done one needs no words. */}
+                {state === "now" || (currentIndex === -1 && index === steps.length - 1) ? <span className="scenes-guide__detail"> {step.detail}</span> : null}
               </span>
             </li>
           );

@@ -116,7 +116,7 @@ function PreviewBeforeAfter({
     <div className="scene-card__preview">
       <div className="scene-card__preview-pane">
         <img src={sceneEvidencePreviewFileUrl(projectId, realScene.scenePlan.id)} alt={realScene.sceneName} className="scene-card__preview-media" />
-        <span className="scene-card__preview-badge">{t.simpleScenes.aePreviewLabel}</span>
+        {/* 2026-10-07: "The template, before your changes" under every one of nine frames; said once above the cards instead (SimpleScenesView). */}
         {previewEntry.isStale ? <p className="scene-card__preview-hint">{t.simpleScenes.outdatedPreviewHint}</p> : null}
       </div>
     </div>

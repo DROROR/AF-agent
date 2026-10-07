@@ -348,7 +348,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       }
     });
     renderView();
-    await screen.findByText("The template, before your changes");
+    await screen.findByText(/Each card shows the template before your changes/);
     // 2026-10-06: the second, made-up "rough sketch" picture is gone - one real frame per card.
     expect(screen.queryByText("A rough sketch - the real picture is made at Preview")).toBeNull();
     expect(screen.getAllByText("Track every workout").length).toBeGreaterThan(0);
@@ -428,7 +428,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
 
     await waitFor(
       () => {
-        expect(screen.queryByText("The template, before your changes")).not.toBeNull();
+        expect(screen.queryByText(/Each card shows the template before your changes/)).not.toBeNull();
       },
       { timeout: 10_000 }
     );
@@ -623,7 +623,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
       // Both eventually reach a real, AE-sourced preview.
       await waitFor(
         () => {
-          expect(screen.getAllByText("The template, before your changes")).toHaveLength(2);
+          expect(document.querySelectorAll(".scene-card__preview-media")).toHaveLength(2);
         },
         { timeout: 10_000 }
       );
@@ -763,7 +763,7 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         renderView();
         await screen.findByRole("heading", { name: "Scene 1" });
 
-        await screen.findByText("The template, before your changes", {}, { timeout: 20_000 });
+        await waitFor(() => expect(document.querySelector(".scene-card__preview-media")).not.toBeNull(), { timeout: 20_000 });
         expect(screen.queryByText(/already has a live/)).toBeNull();
         const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
         expect(fetchMock.mock.calls.filter((call: unknown[]) => call[0] === "/api/jobs").length).toBe(2);
@@ -865,7 +865,9 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
         // Only the included scene is approved - never an excluded one.
         expect(sent[0]!.body).toEqual({ baseRevision: 3, operations: [{ type: "APPROVE_SCENE", scenePlanId: "scene-parent" }] });
         expect(sent[1]!.body).toEqual({ baseRevision: 4 });
-        expect((screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement).disabled).toBe(true);
+        // 2026-10-07: once approved, the way on is offered in the button's place - not a greyed button.
+        expect(screen.queryByRole("button", { name: "Approve Scenes" })).toBeNull();
+        expect(screen.getByRole("link", { name: "Go to Preview" }).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/preview`);
       },
       20_000
     );

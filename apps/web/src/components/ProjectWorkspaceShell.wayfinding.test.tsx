@@ -207,6 +207,8 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
 
   it("says 'you are on the right tab' instead of a link when the action lives on the page you are already looking at", async () => {
     currentPathname = `/projects/${PROJECT_ID}/scenes`;
+    // 2026-10-07: in Simple view the Scenes tab's own guide says this, and the banner stands down there - so this is the Advanced view's banner.
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubAll();
     renderShell();
     await screen.findByText("Review each scene");

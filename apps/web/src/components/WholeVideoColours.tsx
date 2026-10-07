@@ -149,20 +149,20 @@ export function WholeVideoColours({
                   <span title={group.name}>{group.name.split("›").pop()?.trim() ?? group.name}</span>
                   <span className="whole-video-colours__places">{t.simpleScenes.wholeVideoColours.places(group.targets.length)}</span>
                 </label>
-                <span className="whole-video-colours__state">
-                  {draft[group.name] === ""
-                    ? t.simpleScenes.wholeVideoColours.backToTemplate
-                    : HEX.test(value)
-                      ? value.toUpperCase()
-                      : group.chosenColorHex === null
-                        ? t.simpleScenes.wholeVideoColours.mixed
-                        : t.simpleScenes.wholeVideoColours.templateColour}
-                </span>
-                {value === "" && group.chosenColorHex !== null ? null : (
+                {/* 2026-10-07: a line under every swatch ("Template's colour", a hex code) was eight lines of nothing to decide; said only where a colour was chosen or differs. */}
+                {draft[group.name] === "" ? (
+                  <span className="whole-video-colours__state">{t.simpleScenes.wholeVideoColours.backToTemplate}</span>
+                ) : HEX.test(value) ? (
+                  <span className="whole-video-colours__state">{t.simpleScenes.wholeVideoColours.chosen}</span>
+                ) : group.chosenColorHex === null ? (
+                  <span className="whole-video-colours__state">{t.simpleScenes.wholeVideoColours.mixed}</span>
+                ) : null}
+                {/* A way back wherever a colour is chosen, or the places differ - never under a swatch still on the template's colour. */}
+                {(draft[group.name] !== undefined ? draft[group.name] !== "" : group.chosenColorHex !== "") ? (
                   <Button size="sm" variant="ghost" disabled={disabled || isSaving} onClick={() => setDraft((current) => ({ ...current, [group.name]: "" }))}>
-                    {t.projectWorkspace.editDrawer.colorClearAction}
+                    {t.simpleScenes.wholeVideoColours.reset}
                   </Button>
-                )}
+                ) : null}
               </li>
             );
           })}

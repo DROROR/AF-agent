@@ -96,7 +96,7 @@ describe("WholeVideoColours", () => {
     const { scenes, manifest } = fixture("#112233");
     const applyEdit = vi.fn(async () => ({ ok: true }));
     renderWithLocale(<WholeVideoColours scenePlans={scenes} manifest={manifest} disabled={false} applyEdit={applyEdit} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Use the template's colour" })[0] as HTMLElement);
+    fireEvent.click(screen.getAllByRole("button", { name: "Reset" })[0] as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Apply to the whole video" }));
     await waitFor(() => expect(applyEdit).toHaveBeenCalledTimes(1));
     expect(applyEdit).toHaveBeenCalledWith([

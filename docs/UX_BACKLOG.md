@@ -285,3 +285,20 @@ preview; nothing removed, every control still there.
   client's picture in it - that needs the frame rendered after the picture is placed.
 - **Open:** text boxes are listed smallest first (needs text size from the template reading).
 - **Open:** "This is my logo" in the brand box has no undo.
+
+## 2026-10-07 - Scenes tab, "why is it still complex" (operator)
+Seen in a local preview on both projects. What was on screen before the first card: a
+"What to do next" banner, a "What to do on this page" list of five full sentences, an
+orange Claude button, "Approve Scenes", eight colour chips each with a hex code and "Use
+the template's colour", and under every one of nine frames "The template, before your
+changes". Changed, nothing removed:
+- One "what to do": the banner stands down on the Scenes tab in Simple view.
+- The guide carries counts ("4 of 5 done", "9 scenes - 5 still need your choice"); a done
+  step is one short line; only the step to do now has its words; the last step keeps its
+  words once everything is done.
+- The Claude button and "Use everything from my plan" show at their own step; afterwards
+  they fold under "Ask Claude for suggestions again". Once approved, "Go to Preview"
+  stands where "Approve Scenes" was, instead of a greyed button.
+- Colour chips: swatch, name, count; "Your colour" and "Reset" only where a colour is
+  chosen. The caption under every frame is said once above the cards.
+- New project: Back on the first step leaves the wizard; a waiting Next says it needs a name.

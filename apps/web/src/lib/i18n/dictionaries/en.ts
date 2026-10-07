@@ -1462,9 +1462,11 @@ export const en = {
     wholeVideoColours: {
       nothingChangedReason: "Click a colour above first - this saves what you changed.",
       title: "Colours for the whole video",
-      hint: "Click a colour to change it. It changes in every scene that uses it. Leave them alone to keep the template's colours.",
+      hint: "Optional. Click a circle to change that colour everywhere it appears.",
       places: (n: number): string => (n === 1 ? "in 1 place" : `in ${n} places`),
       templateColour: "Template's colour",
+      chosen: "Your colour",
+      reset: "Reset",
       backToTemplate: "Back to the template's colour",
       mixed: "Different in different scenes",
       applyAction: "Apply to the whole video",
@@ -1498,6 +1500,7 @@ export const en = {
     advancedDetailsToggle: "Advanced details",
     plannedPreviewLabel: "A rough sketch - the real picture is made at Preview",
     aePreviewLabel: "The template, before your changes",
+    framesNote: "Each card shows the template before your changes, then what you put on it. Your real frame is made on the Preview tab.",
     outdatedPreviewHint: "You changed this scene, so this picture is from before your change. The new one is made at Preview.",
 /* 2026-10-04: this told people to click "Preview Scene" - a button this card does not have. Previews are made automatically. */
     noPreviewYetHint: "No preview yet. After Effects makes one automatically - there is nothing to press.",
@@ -1539,6 +1542,9 @@ export const en = {
     },
     guide: {
       heading: "What to do on this page",
+      progress: (done: number, total: number): string => `${done} of ${total} done`,
+      summary: (scenes: number, waiting: number): string =>
+        waiting === 0 ? `${scenes} scenes - all settled.` : `${scenes} scenes - ${waiting} still need your choice.`,
       planTitle: "Put your plan on the scenes.",
       planNow: (n: number): string => `Press "Use everything from my plan (${n})" below. Your texts and pictures go onto every scene; you can still change any of them after.`,
       planAsk: "Press \"Claude — Generate suggestions\" below to fill the scenes from your plan.",
@@ -1559,6 +1565,8 @@ export const en = {
       approveTitle: "Approve.",
       approveNow: "Press \"Approve Scenes\". Then the Preview tab opens and the real video frame is made."
     },
+    moreActionsToggle: "Ask Claude for suggestions again",
+    goToPreviewAction: "Go to Preview",
     wholeVideoLabel: "The whole video",
     sceneNumberLabel: (n: number): string => `Scene ${n}`,
     quietCardsToggle: (n: number): string => (n === 1 ? "1 part of the template with nothing for you to change" : `${n} parts of the template with nothing for you to change`),

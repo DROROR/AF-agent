@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useRouter } from "next/navigation";
 import { useState, type ReactElement } from "react";
 import type { MappingSuggestion } from "@dyo/schemas";
@@ -364,7 +366,12 @@ export function SimpleScenesView(): ReactElement {
 
 
       <Card className="simple-scenes__approve-bar">
-        <ScenesGuide steps={guideSteps} heading={t.simpleScenes.guide.heading} />
+        <ScenesGuide
+          steps={guideSteps}
+          heading={t.simpleScenes.guide.heading}
+          progress={t.simpleScenes.guide.progress(guideSteps.filter((step) => step.done).length, guideSteps.length)}
+          summary={t.simpleScenes.guide.summary(realScenes.length - quietCards.size, scenesWaiting)}
+        />
         {/*
           The ASK half of the Mapping Assistant, in the view that exists to be
           the easy path. Simple mode already accepted and rejected suggestions
@@ -375,6 +382,9 @@ export function SimpleScenesView(): ReactElement {
           real Anthropic call is what happens on the click. The full panel,
           with its evidence and review history, stays in Advanced.
         */}
+        {/* 2026-10-07: these belong to step 1 alone; after it they sat beside Approve at full size and the page had two loud buttons. Folded away once their step is done. */}
+        {currentGuideStep === GUIDE_PLAN || allProposals.length > 0 ? (
+          <div className="simple-scenes__plan-actions">
         {aiAvailable ? null : (
           // Never a dead button: with no provider connected, say what would
           // connect one instead of offering an action that cannot happen.
@@ -402,6 +412,41 @@ export function SimpleScenesView(): ReactElement {
             {t.simpleScenes.useWholePlanAction(allProposals.length)}
           </Button>
         ) : null}
+          </div>
+        ) : (
+          <details className="advanced-details simple-scenes__more">
+            <summary>{t.simpleScenes.moreActionsToggle}</summary>
+            <div className="simple-scenes__plan-actions">
+        {aiAvailable ? null : (
+          // Never a dead button: with no provider connected, say what would
+          // connect one instead of offering an action that cannot happen.
+          <p className="simple-scenes__ai-hint">{t.mappingAssistant.connectProviderHint}</p>
+        )}
+        {aiAvailable ? (
+          <ClaudeActionButton
+            label={t.mappingAssistant.generateAction}
+            busyLabel={t.mappingAssistant.generating}
+            busy={isGenerating}
+            disabled={isStale}
+            quiet={currentGuideStep !== GUIDE_PLAN}
+            onClick={() => void generate()}
+          />
+        ) : null}
+        {/*
+          REAL 2026-10-04: a plan the client had already read and continued
+          from on the AI Plan tab had to be taken again here card by card -
+          eight presses for eight scenes. One press takes every line that
+          proposes something; each stays changeable on its card afterwards,
+          and nothing is approved by it - Approve Scenes is still its own step.
+        */}
+        {allProposals.length > 0 ? (
+          <Button variant={currentGuideStep === GUIDE_PLAN ? "primary" : "secondary"} disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
+            {t.simpleScenes.useWholePlanAction(allProposals.length)}
+          </Button>
+        ) : null}
+            </div>
+          </details>
+        )}
         {/*
           2026-10-04: with every decision made, "Approve Scenes" sat greyed
           out behind one sentence while previews were re-made, and nothing
@@ -416,14 +461,21 @@ export function SimpleScenesView(): ReactElement {
           />
         ) : null}
         {isApproving ? <BusyNotice compact title={t.simpleScenes.approvingScenes} description={t.simpleScenes.previewBusy.approvingHint} /> : null}
+        {/* 2026-10-07: after approval the button stayed on screen greyed out, with no word of what comes next; the way on is offered instead. */}
+        {scenesApproved ? (
+          <Link href={`/projects/${projectId}/preview`} className="btn btn--primary">
+            {t.simpleScenes.goToPreviewAction}
+          </Link>
+        ) : (
         <Button
           variant={currentGuideStep === guideSteps.length - 1 || currentGuideStep === -1 ? "primary" : "secondary"}
-          disabled={scenesApproved || !allReady || isApproving || isStale}
+          disabled={!allReady || isApproving || isStale}
           disabledReason={approveDisabledReason}
           onClick={() => void handleApprove()}
         >
           {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
         </Button>
+        )}
       </Card>
 
       {/*
@@ -444,6 +496,8 @@ export function SimpleScenesView(): ReactElement {
           <EmptyState title={t.simpleScenes.emptyTitle} description={t.simpleScenes.emptyDescription} />
         </Card>
       ) : (
+        <>
+        <p className="simple-scenes__frames-note">{t.simpleScenes.framesNote}</p>
         <div className="simple-scenes__grid">
           {realScenes.filter((realScene) => !quietCards.has(realScene.scenePlan.id)).map((realScene) => (
             <SceneCard
@@ -483,6 +537,7 @@ export function SimpleScenesView(): ReactElement {
             />
           ))}
         </div>
+        </>
       )}
       {/*
         Parts of the template with nothing a client can change (a music

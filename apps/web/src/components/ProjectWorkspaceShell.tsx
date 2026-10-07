@@ -221,7 +221,8 @@ export function ProjectWorkspaceShell({
         than repeating it a second time on the same screen.
       */}
       {SIMPLIFIED_PROJECT_WORKSPACE ? null : <ProjectWorkflowStepper />}
-      {isProjectFrontPage && SIMPLIFIED_PROJECT_WORKSPACE ? null : <ProjectNextActionBanner projectId={projectId} />}
+      {/* 2026-10-07: on the Scenes tab the guide at the top of the page already says what to do; the banner above it said the same thing a second time. */}
+      {(isProjectFrontPage || (mode === "simple" && pathname === `/projects/${projectId}/scenes`)) && SIMPLIFIED_PROJECT_WORKSPACE ? null : <ProjectNextActionBanner projectId={projectId} />}
       {/*
         REAL 2026-09-25 INCIDENT: a tab someone was not allowed to use yet
         looked exactly like one they were. data-locked plus a real, visible

@@ -4359,3 +4359,24 @@ a.workflow-stepper__step:hover {
 .btn--claude-quiet:hover { opacity: 1; }
 .slot-bulk-review__grid figcaption { display: flex; align-items: center; gap: 8px; }
 .slot-bulk-review__chosen { width: 36px; height: 36px; object-fit: contain; border-radius: 6px; background: #fff; border: 1px solid var(--color-border, #d8dded); flex: none; }
+
+/* Scenes guide, 2026-10-07: counts in the head, done steps one short line, only the current step speaks. */
+.scenes-guide__head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.scenes-guide__progress { font-size: 0.8rem; font-weight: 600; color: var(--color-text-muted); white-space: nowrap; }
+.scenes-guide__summary { margin: 0 0 0.6rem; font-size: 0.9rem; color: var(--color-text-muted); }
+.scenes-guide li[data-state="done"] { font-size: 0.85rem; opacity: 0.6; }
+.scenes-guide li[data-state="done"] .scenes-guide__marker, .scenes-guide li[data-state="later"] .scenes-guide__marker { width: 1.25rem; height: 1.25rem; flex-basis: 1.25rem; font-size: 0.72rem; }
+.scenes-guide li[data-state="now"] { padding: 0.5rem 0.75rem; margin-inline: -0.75rem; border-radius: var(--radius-md, 0.5rem); background: var(--color-surface-sunken, rgba(79, 111, 232, 0.08)); }
+.simple-scenes__plan-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.simple-scenes__more { flex: 1 1 100%; }
+.simple-scenes__frames-note { margin: 0 0 var(--space-2); font-size: 0.85rem; color: var(--color-text-muted); }
+.whole-video-colours__list { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
+.whole-video-colours__row { padding: var(--space-1) var(--space-2); }
+.whole-video-colours__row > input[type="color"] { width: 2.25rem; height: 2.25rem; }
+
+/* Colour chips, 2026-10-07: swatch, then name and count on one line; the state and the reset only where a colour is chosen. */
+.whole-video-colours__row { grid-template-columns: auto 1fr; grid-template-areas: "swatch name" "swatch state" "swatch reset"; row-gap: 0; align-items: center; }
+.whole-video-colours__name { grid-area: name; display: flex; flex-wrap: wrap; gap: 0 0.4rem; align-items: baseline; font-weight: 600; font-size: 0.9rem; }
+.whole-video-colours__state { font-size: 0.78rem; }
+.whole-video-colours__row > .btn { font-size: 0.75rem; padding-block: 0; min-height: 0; }
+.whole-video-colours__row > .btn { justify-self: start; text-align: left; white-space: nowrap; }

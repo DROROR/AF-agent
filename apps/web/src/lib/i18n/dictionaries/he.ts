@@ -1280,9 +1280,11 @@ export const he: Dictionary = {
     wholeVideoColours: {
       nothingChangedReason: "קודם לחצו על צבע למעלה - הכפתור שומר את מה ששיניתם.",
       title: "צבעים לכל הסרטון",
-      hint: "לחצו על צבע כדי לשנות אותו. הוא ישתנה בכל סצנה שמשתמשת בו. השאירו כמו שהם כדי לשמור על צבעי התבנית.",
+      hint: "לא חובה. לחצו על עיגול כדי לשנות את הצבע הזה בכל מקום שהוא מופיע.",
       places: (n: number): string => (n === 1 ? "במקום אחד" : `ב-${n} מקומות`),
       templateColour: "צבע התבנית",
+      chosen: "הצבע שלכם",
+      reset: "איפוס",
       backToTemplate: "חזרה לצבע התבנית",
       mixed: "שונה בין הסצנות",
       applyAction: "החלה על כל הסרטון",
@@ -1315,6 +1317,7 @@ export const he: Dictionary = {
     editAction: "שינוי תמונה או טקסט",
     advancedDetailsToggle: "פרטים מתקדמים",
     plannedPreviewLabel: "סקיצה בלבד - התמונה האמיתית נוצרת בשלב התצוגה המקדימה",
+    framesNote: "כל כרטיס מציג את התבנית לפני השינויים שלכם, ואז את מה ששמתם עליה. הפריים האמיתי שלכם נעשה בלשונית התצוגה המקדימה.",
     aePreviewLabel: "תצוגה מקדימה מ-After Effects",
     outdatedPreviewHint: "שיניתם את הסצנה, ולכן התמונה הזו היא מלפני השינוי. התמונה החדשה נוצרת בשלב התצוגה המקדימה.",
     noPreviewYetHint: "אין עדיין תצוגה מקדימה. After Effects יוצר אותה אוטומטית - אין צורך ללחוץ על דבר.",
@@ -1354,6 +1357,8 @@ export const he: Dictionary = {
     },
     guide: {
       heading: "מה עושים בעמוד הזה",
+      progress: (done: number, total: number): string => `${done} מתוך ${total} בוצעו`,
+      summary: (scenes: number, waiting: number): string => (waiting === 0 ? `${scenes} סצנות - הכול מסודר.` : `${scenes} סצנות - ${waiting} עדיין מחכות להחלטה שלכם.`),
       planTitle: "שימו את התוכנית על הסצנות.",
       planNow: (n: number): string => `לחצו למטה על "להשתמש בכל התוכנית שלי (${n})". הטקסטים והתמונות ייכנסו לכל הסצנות; אפשר לשנות כל אחד מהם גם אחר כך.`,
       planAsk: "לחצו למטה על \"Claude — יצירת הצעות\" כדי למלא את הסצנות מהתוכנית שלכם.",
@@ -1374,6 +1379,8 @@ export const he: Dictionary = {
       approveTitle: "אישור.",
       approveNow: "לחצו על \"אישור הסצנות\". אחר כך נפתחת לשונית התצוגה המקדימה ונוצרת התמונה האמיתית מהסרטון."
     },
+    moreActionsToggle: "לבקש מ-Claude הצעות שוב",
+    goToPreviewAction: "לתצוגה המקדימה",
     wholeVideoLabel: "הסרטון כולו",
     sceneNumberLabel: (n: number): string => `סצנה ${n}`,
     quietCardsToggle: (n: number): string => (n === 1 ? "חלק אחד של התבנית שאין בו מה לשנות" : `${n} חלקים של התבנית שאין בהם מה לשנות`),
