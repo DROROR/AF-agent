@@ -4403,3 +4403,7 @@ a.workflow-stepper__step:hover {
 .next-action__step[data-current="true"] .next-action__step-marker { background: var(--color-primary, #4f6fe8); border-color: transparent; color: #fff; }
 .next-action__step[data-state="locked"] { opacity: 0.6; }
 .next-action[data-simple="true"] .next-action__arrow { margin-top: 0.15rem; }
+
+/* A video's first frame drawn wherever a still would be. */
+.asset-card__thumb video { max-width: 100%; max-height: 100%; object-fit: contain; }
+video.scene-card__picture-thumb, video.layer-plan-card__thumb { object-fit: cover; background: #000; }

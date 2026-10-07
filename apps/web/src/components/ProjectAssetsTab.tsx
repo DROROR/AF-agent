@@ -6,6 +6,7 @@ import type { AssetDto, MediaKind } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectAssets } from "../lib/use-project-assets";
 import { assetFileUrl } from "../lib/projects-api-client";
+import { AssetThumb } from "./ui/AssetThumb";
 import { Card, CardHeader } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { BusyNotice, currentTimeMs } from "./ui/BusyNotice";
@@ -201,8 +202,8 @@ function AssetCard({
   return (
     <div className="asset-card">
       <div className="asset-card__thumb">
-        {PREVIEWABLE_KINDS.includes(asset.mediaKind) ? (
-          <img src={assetFileUrl(projectId, asset.id)} alt={asset.label ?? asset.originalFilename} />
+        {PREVIEWABLE_KINDS.includes(asset.mediaKind) || asset.mimeType.startsWith("video/") ? (
+          <AssetThumb asset={asset} alt={asset.label ?? asset.originalFilename} />
         ) : (
           <span className="asset-card__kind-badge">{t.assetsTab.mediaKind[asset.mediaKind]}</span>
         )}

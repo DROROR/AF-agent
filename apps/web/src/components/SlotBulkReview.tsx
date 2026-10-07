@@ -56,6 +56,7 @@ export interface PendingSlot {
   /** The client's chosen file for this place - its name, and a thumbnail when it is a still image. */
   assetName: string | null;
   assetThumbUrl: string | null;
+  assetIsVideo: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -140,7 +141,8 @@ export function findPendingPictureSlots(
         window: framed?.evidenceFrameWindowSeconds ?? null,
         canBeShown: framed !== undefined && framed.evidenceFrameAtSeconds !== null,
         assetName: asset === null ? null : (asset.label !== null && asset.label.trim() !== "" ? asset.label : asset.originalFilename),
-        assetThumbUrl: asset !== null && asset.mimeType.startsWith("image/") ? assetFileUrl(asset.projectId, asset.id) : null
+        assetThumbUrl: asset !== null && (asset.mimeType.startsWith("image/") || asset.mimeType.startsWith("video/")) ? assetFileUrl(asset.projectId, asset.id) : null,
+        assetIsVideo: asset !== null && asset.mimeType.startsWith("video/")
       });
     }
   }
@@ -359,7 +361,11 @@ export function SlotBulkReview({
               {/* The template's own names stay on hover, for matching a picture to After Effects. */}
               <figcaption title={slot.label}>
                 {/* 2026-10-07, the client: "it should present the new screenshot, or just the image itself" - the spot alone showed the template's frame without his picture. The chosen file is shown beside it. */}
-                {slot.assetThumbUrl !== null ? <img className="slot-bulk-review__chosen" src={slot.assetThumbUrl} alt="" /> : null}
+                {slot.assetThumbUrl === null ? null : slot.assetIsVideo ? (
+                  <video className="slot-bulk-review__chosen" src={`${slot.assetThumbUrl}#t=0.1`} muted playsInline preload="metadata" />
+                ) : (
+                  <img className="slot-bulk-review__chosen" src={slot.assetThumbUrl} alt="" />
+                )}
                 <span>{t.simpleScenes.slotBulk.goesInto(slot.assetName ?? "", captionOf(slot))}</span>
               </figcaption>
             </figure>

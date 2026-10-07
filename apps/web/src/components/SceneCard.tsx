@@ -5,6 +5,7 @@ import type { AssetDto, MappingSuggestion, PlaceholderMapping } from "@dyo/schem
 import type { RealScene } from "../lib/real-scene-grouping";
 import type { ScenePreviewEntry, ScenePreviewState } from "../lib/use-scene-preview-queue";
 import { assetFileUrl, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
+import { AssetThumb } from "./ui/AssetThumb";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { BusyNotice } from "./ui/BusyNotice";
@@ -301,7 +302,7 @@ export function SceneCard({
         <div>
           <dt>{t.simpleScenes.screenLabel}</dt>
           <dd className="scene-card__picture">
-            {asset && asset.mediaKind !== "VIDEO" ? <img src={assetFileUrl(projectId, asset.id)} alt="" className="scene-card__picture-thumb" /> : null}
+            {asset ? <AssetThumb asset={asset} className="scene-card__picture-thumb" /> : null}
             <span>{asset ? (asset.label ?? asset.originalFilename) : status === "noChangeNeeded" ? t.simpleScenes.originalContentKept : t.simpleScenes.noAssetAssigned}</span>
           </dd>
         </div>

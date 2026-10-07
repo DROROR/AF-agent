@@ -3,6 +3,7 @@
 import type { ReactElement } from "react";
 import type { AssetDto, TemplateManifest, WorkMapAiSummary, WorkMapEntry } from "@dyo/schemas";
 import { assetFileUrl } from "../lib/projects-api-client";
+import { AssetThumb } from "./ui/AssetThumb";
 import {
   computeSimpleAiPlanSummary,
   filterWorkMapEntriesForSimpleMode,
@@ -179,7 +180,7 @@ export function LayerPlanCard({ group, assetById, projectId }: { group: LayerPla
                   </span>
                 ) : null}
                 {row.entry.desiredText !== null ? <strong className="layer-plan-card__now">{row.entry.desiredText}</strong> : null}
-                {asset && projectId && isShowableImage(asset) ? <img className="layer-plan-card__thumb" src={assetFileUrl(projectId, asset.id)} alt={asset.label ?? asset.originalFilename} /> : null}
+                {asset && projectId ? <AssetThumb asset={asset} className="layer-plan-card__thumb" alt={asset.label ?? asset.originalFilename} /> : null}
                 {row.entry.desiredText === null ? <span>{resolveAssetLabel(row.entry, assetById) ?? row.entry.instructions ?? "—"}</span> : null}
               </dd>
             </div>
