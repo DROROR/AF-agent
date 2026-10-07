@@ -1540,6 +1540,9 @@ export const en = {
       leftoverNow: (n: number): string =>
         n === 1 ? "1 scene still needs you. Open it below and answer what it asks." : `${n} scenes still need you. Open each one below and answer what it asks.`,
       leftoverDone: "Done.",
+      brandTitle: "Add what every DYO video needs.",
+      brandNow: (n: number): string => (n === 1 ? "1 thing is missing. The box below says what, and fixes it with one press." : `${n} things are missing. The box below says what, and fixes each with one press.`),
+      brandDone: "Done.",
       approveTitle: "Approve.",
       approveNow: "Press \"Approve Scenes\". Then the Preview tab opens and the real video frame is made."
     },
@@ -1549,6 +1552,20 @@ export const en = {
     leftoverTextTitle: (n: number): string => (n === 1 ? "1 text here has not been decided" : `${n} texts here have not been decided`),
     leftoverTextHint: "The video would still show the template's own words here.",
     leftoverTextTemplateSays: (words: string): string => `"${words}"`,
+    brandNeeds: {
+      title: "Every DYO video needs these",
+      intro: (n: number): string => (n === 1 ? "1 thing is still missing. \"Approve Scenes\" works once it is here." : `${n} things are still missing. \"Approve Scenes\" works once they are here.`),
+      logoTitle: "Your logo",
+      logoPickHint: "Is one of the pictures already in your video your logo? Press it.",
+      logoPickAction: "This is my logo",
+      logoUnplacedHint: (names: string): string => `Or put the logo you uploaded (${names}) on a picture place: press "Change picture or text" on a scene and choose it.`,
+      logoUploadHint: "Or upload your logo on the Files tab, then choose it on a scene with \"Change picture or text\".",
+      lineTitle: "The \"by DYO App\" line",
+      lineHint: "One text in the video must contain this line:",
+      linePickLabel: "Choose the text to add it to",
+      lineAddAction: "Add the line to this text",
+      lineAside: "Or type it yourself into any text with \"Change picture or text\"."
+    },
     leftoverTextWriteAction: "Write my own text",
     leftoverTextNoTextAction: "No text here",
     leftoverTextKeepWordsAction: (words: string): string => `Keep "${words}"`,

@@ -1355,6 +1355,9 @@ export const he: Dictionary = {
       leftoverNow: (n: number): string =>
         n === 1 ? "סצנה אחת עדיין מחכה לכם. פתחו אותה למטה וענו על מה שהיא שואלת." : `${n} סצנות עדיין מחכות לכם. פתחו כל אחת למטה וענו על מה שהיא שואלת.`,
       leftoverDone: "בוצע.",
+      brandTitle: "להוסיף את מה שכל סרטון DYO צריך.",
+      brandNow: (n: number): string => (n === 1 ? "חסר דבר אחד. התיבה למטה מסבירה מה, ומתקנת בלחיצה אחת." : `חסרים ${n} דברים. התיבה למטה מסבירה מה, ומתקנת כל אחד בלחיצה אחת.`),
+      brandDone: "בוצע.",
       approveTitle: "אישור.",
       approveNow: "לחצו על \"אישור הסצנות\". אחר כך נפתחת לשונית התצוגה המקדימה ונוצרת התמונה האמיתית מהסרטון."
     },
@@ -1364,6 +1367,20 @@ export const he: Dictionary = {
     leftoverTextTitle: (n: number): string => (n === 1 ? "טקסט אחד כאן עדיין לא הוחלט" : `${n} טקסטים כאן עדיין לא הוחלטו`),
     leftoverTextHint: "בסרטון עדיין יופיע כאן הטקסט של התבנית.",
     leftoverTextTemplateSays: (words: string): string => `"${words}"`,
+    brandNeeds: {
+      title: "כל סרטון DYO צריך את אלה",
+      intro: (n: number): string => (n === 1 ? "עדיין חסר דבר אחד. \"אישור הסצנות\" יעבוד כשהוא יהיה כאן." : `עדיין חסרים ${n} דברים. \"אישור הסצנות\" יעבוד כשהם יהיו כאן.`),
+      logoTitle: "הלוגו שלכם",
+      logoPickHint: "האם אחת התמונות שכבר בסרטון היא הלוגו שלכם? לחצו עליה.",
+      logoPickAction: "זה הלוגו שלי",
+      logoUnplacedHint: (names: string): string => `או שימו את הלוגו שהעליתם (${names}) במקום של תמונה: לחצו על \"שינוי תמונה או טקסט\" בסצנה ובחרו בו.`,
+      logoUploadHint: "או העלו את הלוגו בלשונית הקבצים, ואז בחרו בו בסצנה בעזרת \"שינוי תמונה או טקסט\".",
+      lineTitle: "השורה של DYO App",
+      lineHint: "אחד הטקסטים בסרטון חייב להכיל את השורה הזו:",
+      linePickLabel: "בחרו לאיזה טקסט להוסיף אותה",
+      lineAddAction: "להוסיף את השורה לטקסט הזה",
+      lineAside: "או הקלידו אותה בעצמכם בכל טקסט בעזרת \"שינוי תמונה או טקסט\"."
+    },
     leftoverTextWriteAction: "לכתוב טקסט משלי",
     leftoverTextNoTextAction: "בלי טקסט כאן",
     leftoverTextKeepWordsAction: (words: string): string => `להשאיר "${words}"`,

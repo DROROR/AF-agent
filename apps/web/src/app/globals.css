@@ -4334,3 +4334,21 @@ a.workflow-stepper__step:hover {
 /* Marks a text box in the panel that nobody has filled in yet. */
 .edit-drawer-open-mark { margin-inline-start: 8px; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; background: var(--color-warning-soft, #fff1d6); color: var(--color-warning-strong, #8a5300); }
 .edit-drawer-no-text { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.9rem; }
+
+/* What every DYO video must carry, shown before approval with the control that settles each. */
+.brand-needs { display: flex; flex-direction: column; gap: 14px; }
+.brand-needs__title { margin: 0; font-size: 1.05rem; }
+.brand-needs__intro, .brand-needs__item p { margin: 0; }
+.brand-needs__item { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--color-border, #d8dded); }
+.brand-needs__item h3 { margin: 0; font-size: 0.95rem; }
+.brand-needs__choices { display: flex; flex-wrap: wrap; gap: 10px; }
+.brand-needs__choice { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 132px; padding: 8px; border: 1px solid var(--color-border, #d8dded); border-radius: 10px; background: transparent; color: inherit; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.brand-needs__choice:hover:not(:disabled) { border-color: currentColor; }
+.brand-needs__choice:disabled { opacity: 0.6; cursor: default; }
+.brand-needs__choice img { width: 100%; height: 72px; object-fit: contain; border-radius: 6px; background: #fff; }
+.brand-needs__choice span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brand-needs__choice-action { font-weight: 600; text-decoration: underline; }
+.brand-needs__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.brand-needs__row select { max-width: 100%; min-width: 0; flex: 1 1 240px; }
+.brand-needs__line { font-size: 1.05rem; user-select: all; }
+.brand-needs__aside { font-size: 0.85rem; opacity: 0.75; }

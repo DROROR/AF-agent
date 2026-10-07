@@ -6,9 +6,26 @@ export const createExecutionPlanRequestSchema = z.object({});
 export type CreateExecutionPlanRequest = z.infer<typeof createExecutionPlanRequestSchema>;
 
 /** Every execution-plan response carries both the raw plan (for editing/persistence) and the derived flat Dynamic Scene Table rows (for the dashboard), so a client never has to re-flatten it independently. */
+export const BRAND_NEED_RULES = ["LOGO_PRESENCE", "REQUIRED_HEBREW_TEXT", "DYO_BLUE_USAGE"] as const;
+/**
+ * One permanent brand rule the plan does not meet yet (2026-10-07). The same
+ * check the approval gate runs, reported with the plan itself so the dashboard
+ * can say it BEFORE "Approve" is pressed - a client had every step ticked and
+ * met both rules only as one refusal. `requiredText` is the exact configured
+ * line when the rule is about a text, so no screen ever types it out itself.
+ */
+export const brandNeedSchema = z.object({
+  rule: z.enum(BRAND_NEED_RULES),
+  message: z.string().min(1),
+  requiredText: z.string().min(1).nullable()
+});
+export type BrandNeed = z.infer<typeof brandNeedSchema>;
+
 export const executionPlanResponseSchema = z.object({
   plan: executionPlanSchema,
-  sceneTable: z.array(sceneTableRowSchema)
+  sceneTable: z.array(sceneTableRowSchema),
+  /** Brand rules a DRAFT plan does not meet yet. Absent on responses built before this existed; empty when nothing is missing. */
+  brandNeeds: z.array(brandNeedSchema).optional()
 });
 export type ExecutionPlanResponse = z.infer<typeof executionPlanResponseSchema>;
 

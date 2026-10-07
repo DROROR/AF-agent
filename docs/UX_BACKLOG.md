@@ -245,3 +245,10 @@ but the file had been uploaded as a picture, and only a file uploaded as a logo 
 - **Open:** nothing tells a client that a logo uploaded in the picture box does not count,
   and a file's kind cannot be changed after upload.
 - **Open:** two refusals arrive as one run-on paragraph.
+
+**Done 2026-10-07, seen in a local preview on the client's plan (the server's list simulated
+in the browser; not yet seen against the deployed API):** the plan response now carries what
+the approval gate would refuse (`brandNeeds`), the Scenes guide has a step for it before
+"Approve", and a card under the guide settles each one: "This is my logo" on a picture
+already in the video, and "Add the line to this text" with the exact line from the server.
+Marking a picture as the logo also makes it fit whole inside its place, as any logo does.

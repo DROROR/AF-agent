@@ -15,6 +15,7 @@ import { SceneCard } from "./SceneCard";
 import { SceneEditDrawer } from "./SceneEditDrawer";
 import { findPendingPictureSlots, SlotBulkReview } from "./SlotBulkReview";
 import { ScenesGuide, type GuideStep } from "./ScenesGuide";
+import { BrandNeeds } from "./BrandNeeds";
 import { Card } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { BusyNotice } from "./ui/BusyNotice";
@@ -175,6 +176,7 @@ export function SimpleScenesView(): ReactElement {
   // Nothing left to take from the plan - or the scenes are already settled
   // without it, in which case there is nothing to send the client back for.
   const planStepDone = allProposals.length === 0 && (!nothingChosenYet || reviewsReady);
+  const brandNeeds = plan.plan.status === "DRAFT" ? (plan.brandNeeds ?? []) : [];
   const guideSteps: GuideStep[] = [
     {
       title: t.simpleScenes.guide.planTitle,
@@ -195,6 +197,11 @@ export function SimpleScenesView(): ReactElement {
       detail: scenesWaiting > 0 ? t.simpleScenes.guide.leftoverNow(scenesWaiting) : t.simpleScenes.guide.leftoverDone,
       done: scenesWaiting === 0
     },
+    // The two things every DYO video must carry, said as a step of their own
+    // BEFORE approval - they used to appear only as approval's refusal.
+    ...(brandNeeds.length > 0 || plan.brandNeeds !== undefined
+      ? [{ title: t.simpleScenes.guide.brandTitle, detail: brandNeeds.length > 0 ? t.simpleScenes.guide.brandNow(brandNeeds.length) : t.simpleScenes.guide.brandDone, done: brandNeeds.length === 0 }]
+      : []),
     {
       title: t.simpleScenes.guide.approveTitle,
       detail: scenesApproved ? t.simpleScenes.scenesApprovedHint : !previewsReady && reviewsReady ? t.simpleScenes.previewsUpdatingHint : t.simpleScenes.guide.approveNow,
@@ -425,6 +432,8 @@ export function SimpleScenesView(): ReactElement {
         colours card is a real, open card (it was a collapsed line the client
         was told about and could not see).
       */}
+      {/* Right under the guide that names it as the step to do now. */}
+      {plan && project ? <BrandNeeds projectId={projectId} needs={brandNeeds} scenePlans={plan.plan.scenePlans} assets={assets} disabled={isStale} applyEdit={applyEdit} /> : null}
       {plan && project ? <WholeVideoColours scenePlans={plan.plan.scenePlans} manifest={project.manifest} disabled={isStale} applyEdit={applyEdit} /> : null}
 
       <SlotBulkReview isCurrentStep={currentGuideStep === GUIDE_PICTURES} sceneLabelFor={(slot) => cardLabels.get(homes.cardIdByMappingId.get(slot.mappingId) ?? slot.scenePlanId) ?? null} />

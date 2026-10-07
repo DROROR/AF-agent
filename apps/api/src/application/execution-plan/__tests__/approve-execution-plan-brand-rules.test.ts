@@ -8,6 +8,8 @@ import { createProject } from "../../project/create-project.js";
 import { createExecutionPlan } from "../create-execution-plan.js";
 import { updateExecutionPlan } from "../update-execution-plan.js";
 import { approveExecutionPlan } from "../approve-execution-plan.js";
+import { getExecutionPlan } from "../get-execution-plan.js";
+import { loadBrandRulesConfig } from "../../../domain/brand-rules/brand-rules-config.js";
 import type { BrandRulesConfig } from "../../../domain/brand-rules/validate-brand-rules.js";
 
 const NOW = new Date("2026-08-29T00:00:00.000Z");
@@ -105,6 +107,15 @@ describe("approveExecutionPlan - permanent DYO brand rules (real backend gate, n
 
     const stillDraft = await executionPlanRepository.findCurrentByProjectId(project.projectId);
     expect(stillDraft?.status).toBe("DRAFT");
+  });
+
+  it("the plan itself reports what is missing while it is a draft, with the exact configured line - before approval is ever tried", async () => {
+    const { executionPlanRepository, project } = await setup();
+    const response = await getExecutionPlan({ executionPlanRepository }, project.projectId);
+    const config = loadBrandRulesConfig();
+    expect(response.brandNeeds?.map((need) => need.rule)).toEqual(["LOGO_PRESENCE", "REQUIRED_HEBREW_TEXT"]);
+    expect(response.brandNeeds?.find((need) => need.rule === "REQUIRED_HEBREW_TEXT")?.requiredText).toBe(config.requiredHebrewText);
+    expect(response.brandNeeds?.find((need) => need.rule === "LOGO_PRESENCE")?.requiredText).toBeNull();
   });
 
   it("approves once the required logo and the exact Hebrew text are both mapped", async () => {
