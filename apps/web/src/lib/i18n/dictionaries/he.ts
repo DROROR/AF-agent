@@ -646,6 +646,8 @@ export const he: Dictionary = {
       makingDescription: "זה לוקח בדרך כלל כמה דקות. הווידאו יופיע כאן בעצמו - אפשר לעזוב את העמוד ולחזור.",
       suggestionLine: (compositionName: string, projectName: string): string =>
         `הווידאו המלא ייווצר מתוך "${compositionName}", עם אותן הגדרות פלט כמו בפרויקט שלכם "${projectName}".`,
+      suggestionLineBuiltIn: (compositionName: string): string =>
+        `הווידאו המלא ייווצר מתוך "${compositionName}", עם הגדרות הפלט הרגילות של After Effects.`,
       setupNeededTitle: "דרוש דבר אחד לפני שאפשר ליצור את הווידאו המלא",
       setupNeededDescription: "בחרו איזה חלק בתבנית הוא הווידאו המוגמר כולו, מלאו את הטופס שלמטה ולחצו על שמירה. הכפתור ליצירת הווידאו יופיע מיד אחרי השמירה.",
       fullVideoFailedTitle: "לא ניתן היה ליצור את הווידאו המלא",

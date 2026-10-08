@@ -708,6 +708,8 @@ export const en = {
       makingDescription: "This usually takes a few minutes. The video appears here by itself - you can leave this page and come back.",
       suggestionLine: (compositionName: string, projectName: string): string =>
         `The full video will be made from "${compositionName}", with the same output settings as your project "${projectName}".`,
+      suggestionLineBuiltIn: (compositionName: string): string =>
+        `The full video will be made from "${compositionName}", with After Effects' standard output settings.`,
       setupNeededTitle: "One thing is needed before the full video can be made",
       setupNeededDescription: "Choose which part of the template is the whole finished video, fill in the form below and press Save. The button to make the video appears as soon as it is saved.",
       fullVideoFailedTitle: "The full video could not be made",

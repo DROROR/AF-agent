@@ -1371,7 +1371,11 @@ function FinalPreviewCard({
               ) : (
                 <>
                   <p>{sp.fullVideoIntro}</p>
-                  {needsSetup && suggestion ? <p className="field__hint">{sp.suggestionLine(suggestion.compositionName, suggestion.basedOnProjectName)}</p> : null}
+                  {needsSetup && suggestion ? (
+                    <p className="field__hint">
+                      {suggestion.basedOnProjectName === null ? sp.suggestionLineBuiltIn(suggestion.compositionName) : sp.suggestionLine(suggestion.compositionName, suggestion.basedOnProjectName)}
+                    </p>
+                  ) : null}
                   <div className="overview-actions">
                     <Button variant="primary" onClick={() => void handleCreatePreview()}>
                       {failure ? sp.tryAgainAction : sp.makeFullVideoAction}

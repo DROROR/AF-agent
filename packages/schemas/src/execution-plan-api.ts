@@ -94,7 +94,13 @@ export const renderOutputSuggestionResponseSchema = z
         compositionName: z.string().min(1),
         renderSettingsTemplateName: z.string().min(1),
         outputModuleTemplateName: z.string().min(1),
-        basedOnProjectName: z.string().min(1)
+        /**
+         * The project on the same worker whose names these are - or null when
+         * they are After Effects' own built-in templates (2026-10-08: a client's
+         * first project on a machine had nothing to copy from, was shown a form
+         * for two template names, and typed a name that did not exist).
+         */
+        basedOnProjectName: z.string().min(1).nullable()
       })
       .strict()
       .nullable()

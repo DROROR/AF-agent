@@ -525,6 +525,20 @@ describe("Simple Preview tab - the Landscape output is never a trip to another t
     expect(dispatchesOf(calls, "CREATE_PREVIEW")).toHaveLength(0);
   });
 
+  // REAL 2026-10-08: a first project on a machine has no sibling to copy names
+  // from; After Effects' built-in templates are offered and said to be so.
+  it("with a built-in suggestion (no sibling project): says the standard After Effects settings will be used, and offers the button", async () => {
+    stubApi({
+      ...baseHandlers({ session: approvedSession(), landscape: null }),
+      [`GET ${SUGGESTION_URL}`]: { status: 200, body: { suggestion: { ...suggestion, renderSettingsTemplateName: "Best Settings", outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps", basedOnProjectName: null } } }
+    });
+    renderPreview();
+
+    await screen.findByText(`The full video will be made from "Whole Video", with After Effects' standard output settings.`);
+    screen.getByRole("button", { name: "Make my full video" });
+    expect(screen.queryByLabelText("Master composition")).toBeNull();
+  });
+
   it("with NO suggestion: shows the setup form right here - never a pointer to another tab, and no button that could only be refused", async () => {
     const calls = stubApi({
       ...baseHandlers({ session: approvedSession(), landscape: null }),

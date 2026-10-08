@@ -113,38 +113,74 @@ describe("suggestRenderOutputConfig", () => {
     expect(await suggest(projectId)).toEqual({ suggestion: null });
   });
 
-  it("offers nothing when no other project on the worker has this output set up", async () => {
+  // REAL 2026-10-08: the client's first project on his machine had nothing to
+  // copy from, was shown the form, and typed a template name After Effects
+  // does not have. With no sibling's names, After Effects' own built-in
+  // templates are offered, said to be built-in (basedOnProjectName null).
+  it("offers After Effects' built-in templates when no other project on the worker has this output set up", async () => {
     const { addProject, suggest } = harness();
     await addProject("Earlier Project", WORKER_A);
     const projectId = await addProject("New Project", WORKER_A);
 
-    expect(await suggest(projectId)).toEqual({ suggestion: null });
+    expect(await suggest(projectId)).toEqual({
+      suggestion: {
+        manifestCompositionId: "comp-whole",
+        compositionName: "Whole Video",
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps",
+        basedOnProjectName: null
+      }
+    });
   });
 
-  it("offers nothing when the project has no recorded source worker - names cannot be known to exist on an unknown machine", async () => {
+  it("offers the built-in templates, never a sibling's names, when the project has no recorded source worker - a sibling's names cannot be known to exist on an unknown machine", async () => {
     const { addProject, configure, suggest } = harness();
     const sibling = await addProject("Earlier Project", null);
     await configure(sibling, "Settings One", "Module One");
     const projectId = await addProject("New Project", null);
 
-    expect(await suggest(projectId)).toEqual({ suggestion: null });
+    expect(await suggest(projectId)).toEqual({
+      suggestion: {
+        manifestCompositionId: "comp-whole",
+        compositionName: "Whole Video",
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps",
+        basedOnProjectName: null
+      }
+    });
   });
 
-  it("never takes names from a project inspected on a DIFFERENT worker", async () => {
+  it("never takes names from a project inspected on a DIFFERENT worker - the built-in templates are offered instead", async () => {
     const { addProject, configure, suggest } = harness();
     const elsewhere = await addProject("Other Machine Project", WORKER_B);
     await configure(elsewhere, "Settings One", "Module One");
     const projectId = await addProject("New Project", WORKER_A);
 
-    expect(await suggest(projectId)).toEqual({ suggestion: null });
+    expect(await suggest(projectId)).toEqual({
+      suggestion: {
+        manifestCompositionId: "comp-whole",
+        compositionName: "Whole Video",
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps",
+        basedOnProjectName: null
+      }
+    });
   });
 
-  it("never suggests from the project itself, even when it is the only one configured", async () => {
+  it("never suggests from the project itself, even when it is the only one configured - the built-in templates are offered instead", async () => {
     const { addProject, configure, suggest } = harness();
     const projectId = await addProject("Only Project", WORKER_A);
     await configure(projectId, "Settings One", "Module One");
 
-    expect(await suggest(projectId)).toEqual({ suggestion: null });
+    expect(await suggest(projectId)).toEqual({
+      suggestion: {
+        manifestCompositionId: "comp-whole",
+        compositionName: "Whole Video",
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps",
+        basedOnProjectName: null
+      }
+    });
   });
 
   it("takes the most recently updated sibling that has the output set up, skipping newer ones that do not", async () => {

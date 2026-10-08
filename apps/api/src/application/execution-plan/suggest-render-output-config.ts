@@ -3,6 +3,26 @@ import { ProjectNotFoundError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
 
+/**
+ * The Render Settings and Output Module templates After Effects installs with,
+ * by their exact names (seen in the Render Queue of every AE 2026 install this
+ * project has met, and listed by INSPECT_RENDER_CAPABILITIES on 2026-09-17 -
+ * docs/ACCEPTANCE.md). The Output Module is the H.264 one because the complete
+ * preview and the render are written as .mp4.
+ *
+ * REAL 2026-10-08 (client project 3241977f): the client's first project on his
+ * machine had no sibling to copy names from, so the full form was shown; he
+ * typed a name that does not exist in After Effects and picked one scene as
+ * the master, and the render failed with "No render settings template was
+ * found". Then the form was gone (it hides once something is saved) and he
+ * had nowhere to put it right. These names are offered when no sibling
+ * project has names of its own; a sibling's names still come first.
+ */
+export const AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES = {
+  renderSettingsTemplateName: "Best Settings",
+  outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps"
+} as const;
+
 export interface SuggestRenderOutputConfigDeps {
   executionPlanRepository: ExecutionPlanRepository;
   projectRepository: ProjectRepository;
@@ -36,8 +56,11 @@ export async function suggestRenderOutputConfig(
 
   const masters = project.manifest.compositions.filter((composition) => !composition.isNestedOnlyReferenced);
   const master = masters.length === 1 ? masters[0] : undefined;
-  if (!master || project.sourceWorkerId === null || project.sourceWorkerId === undefined) {
+  if (!master) {
     return { suggestion: null };
+  }
+  if (project.sourceWorkerId === null || project.sourceWorkerId === undefined) {
+    return builtIn(master);
   }
 
   const others = (await deps.projectRepository.findAll())
@@ -58,5 +81,16 @@ export async function suggestRenderOutputConfig(
       };
     }
   }
-  return { suggestion: null };
+  return builtIn(master);
+}
+
+function builtIn(master: { compositionId: string; name: string }): RenderOutputSuggestionResponse {
+  return {
+    suggestion: {
+      manifestCompositionId: master.compositionId,
+      compositionName: master.name,
+      ...AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES,
+      basedOnProjectName: null
+    }
+  };
 }
