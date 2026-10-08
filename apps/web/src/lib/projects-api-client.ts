@@ -450,7 +450,9 @@ export async function createAiWorkMapDraft(projectId: string, instructions: stri
   );
   if (status !== 201) {
     if (timedOut) {
-      return { ok: false, status, code: null, message: "Creating your video plan took too long. Please try again." };
+      // code TIMED_OUT, not null: use-work-map.ts reads it to know this
+      // call ended without the server's answer (see ai-draft-settle.ts).
+      return { ok: false, status, code: "TIMED_OUT", message: "Creating your video plan took too long. Please try again." };
     }
     return toErrorResult(status, json);
   }

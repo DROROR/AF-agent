@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { WorkMap, WorkMapEntry } from "@dyo/schemas";
 import { createAiWorkMapDraft, fetchWorkMap, updateWorkMap as saveWorkMap, type ApiResult } from "./projects-api-client";
+import { settleAiWorkMapDraft } from "./ai-draft-settle";
 
 export interface WorkMapMutationOutcome {
   ok: boolean;
@@ -66,7 +67,18 @@ export function useWorkMap(projectId: string): WorkMapState {
 
   const createAiDraft = useCallback(
     async (instructions: string): Promise<WorkMapMutationOutcome> => {
-      const result: ApiResult<WorkMap> = await createAiWorkMapDraft(projectId, instructions);
+      // The revision from BEFORE the request, read fresh from the server
+      // so a draft finished after the browser stopped waiting is
+      // recognised by its newer revision (ai-draft-settle.ts). If that
+      // read fails, the state's own revision is the best baseline there is.
+      const before = await fetchWorkMap(projectId);
+      const baselineRevision = before.ok ? (before.data?.revision ?? 0) : (workMap?.revision ?? 0);
+      const result: ApiResult<WorkMap> = await settleAiWorkMapDraft(baselineRevision, {
+        post: () => createAiWorkMapDraft(projectId, instructions),
+        poll: () => fetchWorkMap(projectId),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        now: () => Date.now()
+      });
       if (result.ok) {
         setWorkMap(result.data);
         setIsStale(false);
@@ -74,7 +86,7 @@ export function useWorkMap(projectId: string): WorkMapState {
       }
       return { ok: false, message: result.message };
     },
-    [projectId]
+    [projectId, workMap]
   );
 
   return { workMap, isLoading, error, isStale, refetch: load, save, createAiDraft };
