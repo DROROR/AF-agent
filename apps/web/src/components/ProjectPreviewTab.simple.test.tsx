@@ -628,6 +628,36 @@ describe("Simple Preview tab - building the video", () => {
     await screen.findByText("Your video is being built…");
     expect(screen.queryByRole("button", { name: "Build my video" })).toBeNull();
   });
+
+  // REAL 2026-10-07 (client project 3241977f): the build stopped inside After
+  // Effects; after a reload the page showed a plain "Build my video" with no
+  // word of it. The failed build is read back from the history.
+  it("a reload after a failed build still says the build stopped, with the worker's words and Try again", async () => {
+    const raw = "operation 52 (SET_TEXT) failed: TOOL_ERROR: [AE_TIMEOUT] Timed out after 30000ms waiting for After Effects";
+    const failed = { ...historyRow("EXECUTE_FRAME"), status: "FAILED", error: { code: "NOT_AVAILABLE", message: raw }, completedAt: new Date(Date.now() - 60_000).toISOString() };
+    stubApi({
+      ...baseHandlers({ session: sessionFixture({ status: "PREPARING", latestWorkingProjectSha256: null, completedScenePlanIds: [], hasPreview: false, latestPreviewScenePlanId: null, latestPreviewCapturedAt: null }) }),
+      "GET /api/jobs": { status: 200, body: { jobs: [failed] } }
+    });
+    renderPreview();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("The video could not be built");
+    expect(alert.querySelector("pre")?.textContent).toBe(raw);
+    screen.getByRole("button", { name: "Try again" });
+  });
+
+  it("a failed build older than the frame on screen is not brought up again", async () => {
+    const failed = { ...historyRow("EXECUTE_FRAME"), status: "FAILED", error: { code: "NOT_AVAILABLE", message: "old" }, completedAt: new Date(Date.now() - 3_600_000).toISOString() };
+    stubApi({
+      ...baseHandlers({ session: sessionFixture({ latestPreviewCapturedAt: new Date(Date.now() - 60_000).toISOString() }) }),
+      "GET /api/jobs": { status: 200, body: { jobs: [failed] } }
+    });
+    renderPreview();
+
+    await screen.findByText(/does this frame look right/i);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });
 
 /**

@@ -2104,3 +2104,8 @@ picture), which holds his logo file; it has no colour control. Nothing on screen
   place. Nothing offers that.
 - Open (unverified): in the first frame of scene 8 the small paragraph sits over the phone
   and is tiny - the text frame-fit (cbd43c6) on After Effects has not been checked by us.
+
+### 2026-10-08 - a failed frame build disappeared on reload (client project 3241977f)
+- Seen: the client's frame build of 2026-10-07 14:40 stopped two minutes in (After Effects did not answer a SET_TEXT within 30 s: `AE_TIMEOUT`; earlier that minute AE held unsaved changes in the working copy). The notice is shown only while the page watches the job; after a reload the Preview tab showed a plain "Build my video" and nothing said a build had been tried. The session stayed `PREPARING`.
+- Fix (web only): the Preview tab reads the newest frame build from the job history it already loads; if it failed and no frame newer than it exists, the same "The video could not be built" notice (with the worker's words behind Technical details and "Try again") is shown after a reload. It goes away once a build starts or a newer frame exists.
+- Still open (worker side, not changed): why After Effects on the client's PC stopped answering. The client was in After Effects with the working copy open at the time.

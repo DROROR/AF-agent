@@ -157,7 +157,9 @@ export function ProjectPreviewTab(): ReactElement | null {
   const { mode } = useWorkspaceMode();
   const isSimple = mode === "simple";
   const refreshGuidance = useProjectGuidanceRefresh();
-  const [failure, setFailure] = useState<TabFailure | null>(null);
+  const [ownFailure, setFailure] = useState<TabFailure | null>(null);
+  /** The newest frame build in the job history, when it failed - see the history effect below. */
+  const [lastFrameBuild, setLastFrameBuild] = useState<{ completedAt: string; message: string } | null>(null);
   const [dispatchSuccess, setDispatchSuccess] = useState<string | null>(null);
   // When the build now running began - what the "being built… 0:42" clock
   // counts from. Null whenever no build is running (an approve/reject call
@@ -239,7 +241,16 @@ export function ProjectPreviewTab(): ReactElement | null {
         setInFlightJobId((current) => current ?? live.jobId);
         setBuildStartedAt((current) => current ?? live.createdAt);
         setIsDispatching(true);
+        return;
       }
+      // REAL 2026-10-07 (client project 3241977f): his build stopped inside
+      // After Effects two minutes in, and by the time he looked again the
+      // page had been reloaded - the notice was gone, the button was back,
+      // and nothing said a build had been tried. The newest frame build in
+      // the history is remembered; if it failed, it is shown below until a
+      // frame newer than it exists or a new build starts.
+      const newest = result.data.jobs.find((job) => job.projectId === projectIdForEffect && job.operation === "EXECUTE_FRAME") ?? null;
+      setLastFrameBuild(newest && newest.status === "FAILED" ? { completedAt: newest.completedAt ?? newest.updatedAt, message: newest.error?.message ?? "Job failed" } : null);
     });
     return () => {
       cancelled = true;
@@ -736,6 +747,13 @@ export function ProjectPreviewTab(): ReactElement | null {
     // Everything removed here is still in Advanced, unchanged.
     const frameApproved = activeSession?.firstPreviewApproved ?? false;
     const wasNotApproved = session !== null && session.status === "FAILED" && canRegeneratePreview;
+    // A failed build read back from the history counts as this page's own
+    // failure, unless a frame made after it exists or a build is under way.
+    const staleFailedBuild =
+      lastFrameBuild !== null && !isDispatching && inFlightJobId === null && (session?.latestPreviewCapturedAt ?? "") < lastFrameBuild.completedAt
+        ? ({ kind: "job", message: lastFrameBuild.message } satisfies TabFailure)
+        : null;
+    const failure = ownFailure ?? staleFailedBuild;
     const showExecuteButton = !awaitingFrameDecision && !allScenesComplete && !canRegeneratePreview && !isBuilding;
     return (
       <div className="overview-grid">
@@ -880,7 +898,7 @@ export function ProjectPreviewTab(): ReactElement | null {
         ) : null}
 
         {workerEmptyState}
-        {failure ? <ErrorState title={t.jobDispatch.failedTitle} description={failure.message} /> : null}
+        {ownFailure ? <ErrorState title={t.jobDispatch.failedTitle} description={ownFailure.message} /> : null}
         {isBuilding ? <BusyNotice compact title={sp.buildingTitle} startedAt={buildStartedAt} /> : null}
         {dispatchSuccess ? <p role="status">{dispatchSuccess}</p> : null}
 
