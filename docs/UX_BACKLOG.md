@@ -330,3 +330,8 @@ changes". Changed, nothing removed:
 ## 2026-10-08 - the head of a project page was too tall
 - Seen (operator, Dror's project): back link, name, facts line, the orientation section with an arrow and three stacked lines, then the tabs - the tabs sat below the fold on a laptop.
 - Done: the back link shares the name's row; the orientation section is two lines (the steps, then "n of 7 done · step · what to do" with the button at its end), no arrow; the facts line pulls up; the tabs stay under the top bar while the page scrolls. Head height at 1440 px: ~400 → 294 px.
+
+## 2026-10-08 - Scenes: the two controls sit at the end of the tab row; the tab row no longer scrolls
+- Seen (operator): a whole card, with a fold, for one button; and the tabs "scrolling".
+- Measured on the page: the tab row was 38 px tall with 74 px of content. The lock hint under a locked tab sat inside a row with `overflow-x: auto`, which makes the other axis scroll too, so the row moved up and down under the wheel.
+- Done: the suggestions button and the step button are drawn into a slot at the end of the tab row (`useTabsEndSlot`); the card and the fold are gone; the row does not scroll on either axis and wraps on a narrow screen.

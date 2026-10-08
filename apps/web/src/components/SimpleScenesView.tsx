@@ -3,7 +3,9 @@
 import Link from "next/link";
 
 import { useRouter } from "next/navigation";
-import { useState, type ReactElement } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useTabsEndSlot } from "./ProjectWorkspaceShell";
 import type { MappingSuggestion } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { WholeVideoColours } from "./WholeVideoColours";
@@ -46,9 +48,15 @@ import { useLocale } from "./LocaleProvider";
  * a separate bucket this view never renders (see MappingAssistantPanel's
  * own `resolved` split for the Advanced-mode equivalent).
  */
+/** Draws the controls at the end of the tab row when the shell offers that place; on their own (tests, no shell) they stand in a plain row. */
+function portalInto(slot: HTMLElement | null, children: ReactNode): ReactNode {
+  return slot ? createPortal(<span className="workspace-tabs__controls">{children}</span>, slot) : <div className="simple-scenes__controls">{children}</div>;
+}
+
 export function SimpleScenesView(): ReactElement {
   const { t } = useLocale();
   const router = useRouter();
+  const tabsEnd = useTabsEndSlot();
   const { project, plan, approveScenes, isStale, createPlan, refetch, applyEdit } = useProjectWorkspaceContext();
   // 2026-09-28: Simple mode consumed suggestions but could never ASK for
   // them - `generate` lived only in MappingAssistantPanel, which Advanced
@@ -365,113 +373,56 @@ export function SimpleScenesView(): ReactElement {
       ) : null}
 
 
-      <Card className="simple-scenes__approve-bar simple-scenes__approve-bar--slim">
-        {/* 2026-10-07, the operator: the seven steps at the top of every tab say it all; this bar holds only the two controls. The guide's steps still decide which button is primary. */}
-        {/*
-          The ASK half of the Mapping Assistant, in the view that exists to be
-          the easy path. Simple mode already accepted and rejected suggestions
-          per scene; it simply had no way to request any, so every scene read
-          "Needs your choice" with nothing proposed. It sits in this existing
-          bar rather than a row of its own, beside the action it feeds, and
-          carries the same Claude affordance Advanced uses - because the same
-          real Anthropic call is what happens on the click. The full panel,
-          with its evidence and review history, stays in Advanced.
-        */}
-        {/* 2026-10-07: these belong to step 1 alone; after it they sat beside Approve at full size and the page had two loud buttons. Folded away once their step is done. */}
-        {currentGuideStep === GUIDE_PLAN || allProposals.length > 0 ? (
-          <div className="simple-scenes__plan-actions">
-        {aiAvailable ? null : (
-          // Never a dead button: with no provider connected, say what would
-          // connect one instead of offering an action that cannot happen.
-          <p className="simple-scenes__ai-hint">{t.mappingAssistant.connectProviderHint}</p>
-        )}
-        {aiAvailable ? (
-          <ClaudeActionButton
-            label={t.mappingAssistant.generateAction}
-            busyLabel={t.mappingAssistant.generating}
-            busy={isGenerating}
-            disabled={isStale}
-            quiet={currentGuideStep !== GUIDE_PLAN}
-            onClick={() => void generate()}
-          />
-        ) : null}
-        {/*
-          REAL 2026-10-04: a plan the client had already read and continued
-          from on the AI Plan tab had to be taken again here card by card -
-          eight presses for eight scenes. One press takes every line that
-          proposes something; each stays changeable on its card afterwards,
-          and nothing is approved by it - Approve Scenes is still its own step.
-        */}
-        {allProposals.length > 0 ? (
-          <Button variant={currentGuideStep === GUIDE_PLAN ? "primary" : "secondary"} disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
-            {t.simpleScenes.useWholePlanAction(allProposals.length)}
-          </Button>
-        ) : null}
-          </div>
-        ) : (
-          <details className="advanced-details simple-scenes__more">
-            <summary>{t.simpleScenes.moreActionsToggle}</summary>
-            <div className="simple-scenes__plan-actions">
-        {aiAvailable ? null : (
-          // Never a dead button: with no provider connected, say what would
-          // connect one instead of offering an action that cannot happen.
-          <p className="simple-scenes__ai-hint">{t.mappingAssistant.connectProviderHint}</p>
-        )}
-        {aiAvailable ? (
-          <ClaudeActionButton
-            label={t.mappingAssistant.generateAction}
-            busyLabel={t.mappingAssistant.generating}
-            busy={isGenerating}
-            disabled={isStale}
-            quiet={currentGuideStep !== GUIDE_PLAN}
-            onClick={() => void generate()}
-          />
-        ) : null}
-        {/*
-          REAL 2026-10-04: a plan the client had already read and continued
-          from on the AI Plan tab had to be taken again here card by card -
-          eight presses for eight scenes. One press takes every line that
-          proposes something; each stays changeable on its card afterwards,
-          and nothing is approved by it - Approve Scenes is still its own step.
-        */}
-        {allProposals.length > 0 ? (
-          <Button variant={currentGuideStep === GUIDE_PLAN ? "primary" : "secondary"} disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
-            {t.simpleScenes.useWholePlanAction(allProposals.length)}
-          </Button>
-        ) : null}
-            </div>
-          </details>
-        )}
-        {/*
-          2026-10-04: with every decision made, "Approve Scenes" sat greyed
-          out behind one sentence while previews were re-made, and nothing
-          showed that anything was happening or how far along it was.
-        */}
-        {reviewsReady && !previewsReady && !scenesApproved ? (
-          <BusyNotice
-            compact
-            title={t.simpleScenes.previewBusy.updatingCount(previewsSettledCount, realScenes.length)}
-            description={t.simpleScenes.previewBusy.updatingHint}
-            startedAt={previewsBusySince}
-          />
-        ) : null}
-        {isApproving ? <BusyNotice compact title={t.simpleScenes.approvingScenes} description={t.simpleScenes.previewBusy.approvingHint} /> : null}
-        {/* 2026-10-07: after approval the button stayed on screen greyed out, with no word of what comes next; the way on is offered instead. */}
-        {scenesApproved ? (
-          <Link href={`/projects/${projectId}/preview`} className="btn btn--primary">
-            {t.simpleScenes.goToPreviewAction}
-          </Link>
-        ) : (
-        <Button
-          variant={currentGuideStep === guideSteps.length - 1 || currentGuideStep === -1 ? "primary" : "secondary"}
-          disabled={!allReady || isApproving || isStale}
-          disabledReason={approveDisabledReason}
-          onClick={() => void handleApprove()}
-        >
-          {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
-        </Button>
-        )}
-      </Card>
+      {/*
+        2026-10-08, the operator: "one button does not need a whole card, and
+        why fold it away" - the two controls sit at the end of the tab row
+        (through the shell's slot) and nothing else is left of the bar.
+        The notices about work under way stay here, in the page.
+      */}
+      {portalInto(
+        tabsEnd,
+        <>
+          {aiAvailable ? (
+            <ClaudeActionButton
+              label={t.mappingAssistant.generateAction}
+              busyLabel={t.mappingAssistant.generating}
+              busy={isGenerating}
+              disabled={isStale}
+              quiet={currentGuideStep !== GUIDE_PLAN}
+              onClick={() => void generate()}
+            />
+          ) : null}
+          {allProposals.length > 0 ? (
+            <Button variant={currentGuideStep === GUIDE_PLAN ? "primary" : "secondary"} disabled={busySuggestionId !== null || isStale} onClick={() => void handleAcceptMany(allProposals)}>
+              {t.simpleScenes.useWholePlanAction(allProposals.length)}
+            </Button>
+          ) : null}
+          {scenesApproved ? (
+            <Link href={`/projects/${projectId}/preview`} className="btn btn--primary">
+              {t.simpleScenes.goToPreviewAction}
+            </Link>
+          ) : (
+            <Button
+              variant={currentGuideStep === guideSteps.length - 1 || currentGuideStep === -1 ? "primary" : "secondary"}
+              disabled={!allReady || isApproving || isStale}
+              disabledReason={approveDisabledReason}
+              onClick={() => void handleApprove()}
+            >
+              {isApproving ? t.simpleScenes.approvingScenes : t.simpleScenes.approveScenesAction}
+            </Button>
+          )}
+        </>
+      )}
+      {aiAvailable ? null : <p className="simple-scenes__ai-hint">{t.mappingAssistant.connectProviderHint}</p>}
+      {reviewsReady && !previewsReady && !scenesApproved ? (
+        <BusyNotice
+          compact
+          title={t.simpleScenes.previewBusy.updatingCount(previewsSettledCount, realScenes.length)}
+          description={t.simpleScenes.previewBusy.updatingHint}
+          startedAt={previewsBusySince}
+        />
+      ) : null}
+      {isApproving ? <BusyNotice compact title={t.simpleScenes.approvingScenes} description={t.simpleScenes.previewBusy.approvingHint} /> : null}
 
       {/*
         2026-10-06, after the client still called this page complicated: it

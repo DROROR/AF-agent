@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useId, useState, type ReactElement, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactElement, type ReactNode } from "react";
 import { Lock, Trash2 } from "lucide-react";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useProjectGuidance } from "./ProjectGuidanceProvider";
@@ -92,6 +92,22 @@ function tabsFor(projectId: string, mode: "simple" | "advanced"): TabDef[] {
  * per-tab) and renders the header facts + tab nav required by the
  * dashboard-integration task, using only real API values.
  */
+const TABS_END_ID = "workspace-tabs-end";
+
+/**
+ * The place at the end of the tab row where the page standing under it may put
+ * its one or two controls (2026-10-08: the Scenes page's suggestions control
+ * and its step button). Null until the row is on screen, and on pages shown
+ * without the shell.
+ */
+export function useTabsEndSlot(): HTMLElement | null {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setSlot(document.getElementById(TABS_END_ID));
+  }, []);
+  return slot;
+}
+
 export function ProjectWorkspaceShell({
   projectId,
   children
@@ -304,6 +320,8 @@ export function ProjectWorkspaceShell({
             </span>
           );
         })}
+        {/* 2026-10-08: a page's own controls sit at the end of this row (see useTabsEndSlot). */}
+        <span className="workspace-tabs__end" id={TABS_END_ID} />
       </nav>
       {children}
     </>

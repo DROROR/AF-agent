@@ -254,6 +254,23 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     expect(document.querySelectorAll("button.btn--primary")).toHaveLength(1);
   });
 
+  // 2026-10-08, the operator: "one button does not need a whole card - show it at the end of the tab row".
+  it("puts its controls into the tab row's end slot when the page has one, and draws no bar of its own", async () => {
+    const slot = document.createElement("span");
+    slot.id = "workspace-tabs-end";
+    document.body.appendChild(slot);
+    try {
+      stubWorkspace({});
+      renderView();
+      await waitFor(() => expect(slot.querySelector("button, a.btn")).not.toBeNull());
+      expect(slot.textContent).toContain("Approve Scenes");
+      expect(document.querySelector(".simple-scenes__approve-bar")).toBeNull();
+      expect(document.querySelector(".simple-scenes__controls")).toBeNull();
+    } finally {
+      slot.remove();
+    }
+  });
+
   it("shows no whole-plan button when nothing is proposed", async () => {
     stubWorkspace({ suggestions: [] });
     renderView();

@@ -4407,8 +4407,13 @@ a.workflow-stepper__step:hover {
 /* The back link sits in the name's row; the facts line pulls up under it. */
 .workspace-header__back { padding-inline-end: var(--space-3); border-inline-end: 1px solid var(--color-border); }
 .workspace-header__details { margin-top: calc(-1 * var(--space-2)); }
-/* The tabs stay in view under the top bar while the page scrolls. */
-.workspace-tabs { position: sticky; top: var(--topbar-height); z-index: 5; background: var(--color-bg); }
+/* The tabs stay in view under the top bar while the page scrolls.
+   2026-10-08, measured on the live page: the row was 38 px tall with 74 px of
+   content - the lock hint under a locked tab sat inside a row that scrolled
+   (overflow-x: auto makes the other axis scroll too), so the row itself moved
+   up and down under the wheel. The row no longer scrolls on either axis; on a
+   narrow screen its tabs wrap to a second line, and the hint shows below it. */
+.workspace-tabs { position: sticky; top: var(--topbar-height); z-index: 5; background: var(--color-bg); overflow: visible; flex-wrap: wrap; align-items: center; }
 .next-action__step { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap; }
 .next-action__step-marker { width: 1.25rem; height: 1.25rem; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; }
 .next-action__step[data-state="complete"] { color: var(--color-success, #1f8a4c); }
@@ -4433,6 +4438,8 @@ video.scene-card__picture-thumb, video.layer-plan-card__thumb { object-fit: cove
 .scenes-guide__all li { font-size: 0.85rem; }
 
 /* Scenes: a slim bar - suggestions on one side, the one step button on the other. */
-.simple-scenes__approve-bar--slim { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3); }
-.simple-scenes__approve-bar--slim .simple-scenes__more { flex: 0 1 auto; }
-.simple-scenes__approve-bar--slim > .btn, .simple-scenes__approve-bar--slim > a.btn { margin-inline-start: auto; }
+/* 2026-10-08: a page's controls at the end of the tab row; the same controls in a plain row when there is no row to join. */
+.workspace-tabs__end { margin-inline-start: auto; display: inline-flex; align-items: center; flex-shrink: 0; }
+.workspace-tabs__controls { display: inline-flex; align-items: center; gap: var(--space-2); padding-block: 2px; }
+.workspace-tabs__controls .btn { padding-block: 0.3rem; }
+.simple-scenes__controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); }
