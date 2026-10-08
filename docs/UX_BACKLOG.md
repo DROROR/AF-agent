@@ -326,3 +326,7 @@ changes". Changed, nothing removed:
 - **Done:** a locked tab is no link while locked.
 - **Open:** approving the scenes again and building the frame again after one flip is two
   presses on two tabs; one "Update my frame" would be better, but it is a server change.
+
+## 2026-10-08 - the head of a project page was too tall
+- Seen (operator, Dror's project): back link, name, facts line, the orientation section with an arrow and three stacked lines, then the tabs - the tabs sat below the fold on a laptop.
+- Done: the back link shares the name's row; the orientation section is two lines (the steps, then "n of 7 done · step · what to do" with the button at its end), no arrow; the facts line pulls up; the tabs stay under the top bar while the page scrolls. Head height at 1440 px: ~400 → 294 px.

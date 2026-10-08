@@ -4392,9 +4392,23 @@ a.workflow-stepper__step:hover {
 .whole-video-colours__row > .btn { justify-self: center; text-align: center; font-size: 0.72rem; }
 .export-tab__locked { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); }
 
-/* The one orientation section, 2026-10-07: the seven steps in a row, then the step to do now. */
-.next-action[data-simple="true"] { flex-wrap: wrap; row-gap: var(--space-2); padding: var(--space-3) var(--space-4); }
-.next-action__steps { flex: 1 1 100%; list-style: none; margin: 0 0 var(--space-1); padding: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); border-bottom: 1px solid var(--color-border); }
+/* The one orientation section, 2026-10-07: the seven steps in a row, then the step to do now.
+   2026-10-08, the operator: the head of the page ate the screen and the tabs fell below the
+   fold. The section is two lines now - the steps, then "n of 7 done · step · what to do" on
+   one line with the button at its end - and the arrow is gone. */
+.next-action[data-simple="true"] { flex-wrap: wrap; row-gap: var(--space-1); padding: var(--space-2) var(--space-3); }
+.next-action__steps { flex: 1 1 100%; list-style: none; margin: 0; padding: 0 0 var(--space-1); display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.next-action[data-simple="true"] .next-action__arrow { display: none; }
+.next-action[data-simple="true"] .next-action__body { flex: 1 1 0; min-width: 16rem; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); }
+.next-action[data-simple="true"] .next-action__description { flex: 1 1 24rem; min-width: 0; }
+.next-action[data-simple="true"] .next-action__title { font-size: 0.92rem; }
+.next-action[data-simple="true"] .next-action__description { margin: 0; }
+.next-action[data-simple="true"] .next-action__link { align-self: center; }
+/* The back link sits in the name's row; the facts line pulls up under it. */
+.workspace-header__back { padding-inline-end: var(--space-3); border-inline-end: 1px solid var(--color-border); }
+.workspace-header__details { margin-top: calc(-1 * var(--space-2)); }
+/* The tabs stay in view under the top bar while the page scrolls. */
+.workspace-tabs { position: sticky; top: var(--topbar-height); z-index: 5; background: var(--color-bg); }
 .next-action__step { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--color-text-muted); white-space: nowrap; }
 .next-action__step-marker { width: 1.25rem; height: 1.25rem; border-radius: 50%; border: 1px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; }
 .next-action__step[data-state="complete"] { color: var(--color-success, #1f8a4c); }
@@ -4402,7 +4416,6 @@ a.workflow-stepper__step:hover {
 .next-action__step[data-current="true"] { color: var(--color-text); font-weight: 600; }
 .next-action__step[data-current="true"] .next-action__step-marker { background: var(--color-primary, #4f6fe8); border-color: transparent; color: #fff; }
 .next-action__step[data-state="locked"] { opacity: 0.6; }
-.next-action[data-simple="true"] .next-action__arrow { margin-top: 0.15rem; }
 
 /* A video's first frame drawn wherever a still would be. */
 .asset-card__thumb video { max-width: 100%; max-height: 100%; object-fit: contain; }

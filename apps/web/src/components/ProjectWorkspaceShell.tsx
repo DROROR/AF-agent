@@ -147,9 +147,6 @@ export function ProjectWorkspaceShell({
 
   return (
     <>
-      <Link href="/projects" className="workspace-header__back">
-        {t.projectWorkspace.backToProjects}
-      </Link>
       {/*
         The top of the page is now the project's name and how its plan
         stands, and nothing else. It previously also carried a Simple/
@@ -160,6 +157,10 @@ export function ProjectWorkspaceShell({
         see the footer block below.
       */}
       <div className="workspace-header">
+        {/* 2026-10-08: the back link shares the name's row - it used to be a row of its own above it. */}
+        <Link href="/projects" className="workspace-header__back">
+          {t.projectWorkspace.backToProjects}
+        </Link>
         <h1>{project.project.name}</h1>
         <div className="workspace-header__actions">
           {plan ? <PlanStatusBadge status={plan.plan.status} /> : null}
