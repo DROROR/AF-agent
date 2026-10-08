@@ -318,6 +318,13 @@ export function resolveRtlFontPostScriptName(templateFontPostScriptName: string 
 
 /** A replaced text line is never shrunk below this fraction of its template scale - below it the operation fails instead of producing unreadably small text. */
 export const TEXT_AUTO_FIT_MIN_FACTOR = 0.6;
+/**
+ * The floor for a line that is cut by a matte (2026-10-08): the template's
+ * headline "APP" sat inside a shape the designer sized for three letters, and
+ * a twenty-letter Hebrew line in its place showed one letter. Inside the
+ * matte at a third of the size is a headline; outside it is nothing.
+ */
+export const TEXT_AUTO_FIT_MATTE_MIN_FACTOR = 0.35;
 
 /**
  * BIDIRECTIONAL TEXT (2026-09-18, generic - no template, language or layer
@@ -628,12 +635,47 @@ function buildTextAutoFit(): string {
             // its scale, which leaves every keyframe untouched.
             var __fitTime = (Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __fitComp.duration)) / 2;
             var __fitTransformAnimated = __fitScaleProp.numKeys > 0 || __fitAnchorProp.numKeys > 0 || __fitPositionProp.numKeys > 0 || __fitRotationProp.numKeys > 0;
+            // REAL 2026-10-08 (client project 3241977f): every text of that
+            // template is the child of a null, and this fit stepped aside for
+            // any parented layer. A layer that can map its own points into
+            // the composition (sourcePointToComp, After Effects 13.2+) is
+            // measured that way, parent chain and all; only the same-colour
+            // blockers below still need an unparented layer.
+            var __canMapToComp = false;
+            try { __canMapToComp = typeof __layer.sourcePointToComp === "function"; } catch (__mapProbeError) { __canMapToComp = false; }
             var __fitSupported =
-              !__layer.threeDLayer && !__layer.parent &&
+              !__layer.threeDLayer && (!__layer.parent || __canMapToComp) &&
               __fitRotationProp.valueAtTime(__fitTime, false) === 0 && __fitScaleProp.valueAtTime(__fitTime, false)[0] > 0 && __fitScaleProp.valueAtTime(__fitTime, false)[1] > 0;
             if (__fitSupported) {
               var __textRect = __layer.sourceRectAtTime(__fitTime, false);
               var __fs = __fitScaleProp.valueAtTime(__fitTime, false), __fa = __fitAnchorProp.valueAtTime(__fitTime, false), __fp = __fitPositionProp.valueAtTime(__fitTime, false);
+              // Composition-space bounds of a layer-space rectangle, through the
+              // layer's own mapping (parent chain included) when it has one; null otherwise.
+              var __fitPrevTime = null;
+              var __compBoundsOf = function (__lyr, __rect) {
+                if (!__rect) { return null; }
+                try {
+                  if (typeof __lyr.sourcePointToComp !== "function") { return null; }
+                  if (__fitPrevTime === null) { __fitPrevTime = __fitComp.time; __fitComp.time = __fitTime; }
+                  var __pts = [[__rect.left, __rect.top], [__rect.left + __rect.width, __rect.top], [__rect.left, __rect.top + __rect.height], [__rect.left + __rect.width, __rect.top + __rect.height]];
+                  var __out = null;
+                  for (var __pi = 0; __pi < __pts.length; __pi++) {
+                    var __c = __lyr.sourcePointToComp(__pts[__pi]);
+                    if (__out === null) { __out = { left: __c[0], right: __c[0], top: __c[1], bottom: __c[1] }; }
+                    __out.left = Math.min(__out.left, __c[0]); __out.right = Math.max(__out.right, __c[0]);
+                    __out.top = Math.min(__out.top, __c[1]); __out.bottom = Math.max(__out.bottom, __c[1]);
+                  }
+                  return __out;
+                } catch (__mapError) { return null; }
+              };
+              var __anchorInComp = null;
+              try {
+                if (__canMapToComp) {
+                  if (__fitPrevTime === null) { __fitPrevTime = __fitComp.time; __fitComp.time = __fitTime; }
+                  var __ac = __layer.sourcePointToComp([__fa[0], __fa[1]]);
+                  __anchorInComp = [__ac[0], __ac[1]];
+                }
+              } catch (__anchorMapError) { __anchorInComp = null; }
               // Offsets of the text's rendered edges from its anchor at the current scale.
               var __dLeft = (__textRect.left - __fa[0]) * __fs[0] / 100;
               var __dRight = (__textRect.left + __textRect.width - __fa[0]) * __fs[0] / 100;
@@ -641,7 +683,7 @@ function buildTextAutoFit(): string {
               var __dBottom = (__textRect.top + __textRect.height - __fa[1]) * __fs[1] / 100;
               var __margin = Math.max(8, __fitComp.width * 0.0125);
               var __factor = 1;
-              for (var __li = __layer.index + 1; __li <= __fitComp.numLayers; __li++) {
+              for (var __li = __layer.parent ? __fitComp.numLayers + 1 : __layer.index + 1; __li <= __fitComp.numLayers; __li++) {
                 var __other = __fitComp.layer(__li);
                 if (!__other || !__other.enabled || __other.threeDLayer || __other.parent || __other instanceof TextLayer) { continue; }
                 // REAL 2026-10-04 FAILURE (job b36a353f): a full-frame ADJUSTMENT
@@ -693,7 +735,24 @@ function buildTextAutoFit(): string {
               // frame edge (an animation entering, a deliberate bleed) is left
               // alone: there the edge is the design.
               var __frameFactor = 1;
-              if (__fitFailureReason === null && __rectBeforeSet !== null) {
+              // Shrink about the anchor until the text's edges are inside a box, by at most one margin; 1 when it already is.
+              var __factorInto = function (__text, __anchor, __box) {
+                var __f = 1;
+                if (__text.left < __box.left + __margin && __anchor[0] > __box.left + __margin) { __f = Math.min(__f, (__anchor[0] - (__box.left + __margin)) / (__anchor[0] - __text.left)); }
+                if (__text.right > __box.right - __margin && __anchor[0] < __box.right - __margin) { __f = Math.min(__f, ((__box.right - __margin) - __anchor[0]) / (__text.right - __anchor[0])); }
+                if (__text.top < __box.top + __margin && __anchor[1] > __box.top + __margin) { __f = Math.min(__f, (__anchor[1] - (__box.top + __margin)) / (__anchor[1] - __text.top)); }
+                if (__text.bottom > __box.bottom - __margin && __anchor[1] < __box.bottom - __margin) { __f = Math.min(__f, ((__box.bottom - __margin) - __anchor[1]) / (__text.bottom - __anchor[1])); }
+                return __f;
+              };
+              var __textInComp = __canMapToComp ? __compBoundsOf(__layer, __textRect) : null;
+              var __templateInComp = __canMapToComp ? __compBoundsOf(__layer, __rectBeforeSet) : null;
+              var __compBox = { left: 0, top: 0, right: __fitComp.width, bottom: __fitComp.height };
+              if (__fitFailureReason === null && __textInComp !== null && __templateInComp !== null && __anchorInComp !== null) {
+                // The same rule as below, measured through the layer's own mapping.
+                if (__templateInComp.left >= 0 && __templateInComp.top >= 0 && __templateInComp.right <= __fitComp.width && __templateInComp.bottom <= __fitComp.height) {
+                  __frameFactor = __factorInto(__textInComp, __anchorInComp, __compBox);
+                }
+              } else if (__fitFailureReason === null && __rectBeforeSet !== null && !__layer.parent) {
                 var __pLeft = __fp[0] + (__rectBeforeSet.left - __fa[0]) * __fs[0] / 100;
                 var __pRight = __fp[0] + (__rectBeforeSet.left + __rectBeforeSet.width - __fa[0]) * __fs[0] / 100;
                 var __pTop = __fp[1] + (__rectBeforeSet.top - __fa[1]) * __fs[1] / 100;
@@ -706,8 +765,55 @@ function buildTextAutoFit(): string {
                 }
               }
               __factor = Math.min(__factor, Math.max(__frameFactor, ${TEXT_AUTO_FIT_MIN_FACTOR}));
+              // REAL 2026-10-08 (client project 3241977f): the headline is cut by
+              // a matte - a "Set Matte" effect taking another layer, or a track
+              // matte - sized by the designer for the template's own word. The
+              // text is shrunk about its anchor until it sits inside the matte's
+              // bounds (its ADD masks, else its rendered rectangle), never
+              // below TEXT_AUTO_FIT_MATTE_MIN_FACTOR, never a failure.
+              var __matteFactor = 1;
+              var __matteLayer = null;
+              try {
+                var __fxParade = __layer.property("ADBE Effect Parade");
+                for (var __mx = 1; __fxParade && __mx <= __fxParade.numProperties; __mx++) {
+                  var __mfx = __fxParade.property(__mx);
+                  if (__mfx && __mfx.matchName === "ADBE Set Matte3" && __mfx.enabled) {
+                    var __matteIndex = __mfx.property("ADBE Set Matte3-0001").value;
+                    if (__matteIndex > 0) { __matteLayer = __fitComp.layer(__matteIndex); }
+                  }
+                }
+                if (__matteLayer === null && __layer.hasTrackMatte === true) {
+                  __matteLayer = (__layer.trackMatteLayer !== undefined && __layer.trackMatteLayer !== null) ? __layer.trackMatteLayer : __fitComp.layer(__layer.index - 1);
+                }
+              } catch (__matteLookupError) { __matteLayer = null; }
+              if (__fitFailureReason === null && __matteLayer !== null && __matteLayer !== __layer && __textInComp !== null && __anchorInComp !== null) {
+                var __matteRect = null;
+                try {
+                  var __matteMasks = __matteLayer.property("ADBE Mask Parade");
+                  for (var __mm = 1; __matteMasks && __mm <= __matteMasks.numProperties; __mm++) {
+                    var __mmask = __matteMasks.property(__mm);
+                    if (!__mmask || __mmask.maskMode !== MaskMode.ADD || __mmask.inverted) { continue; }
+                    var __mverts = __mmask.property("ADBE Mask Shape").valueAtTime(__fitTime, false).vertices;
+                    for (var __mv = 0; __mv < __mverts.length; __mv++) {
+                      if (__matteRect === null) { __matteRect = { left: __mverts[__mv][0], top: __mverts[__mv][1], width: 0, height: 0 }; }
+                      var __mr = __matteRect.left + __matteRect.width, __mb = __matteRect.top + __matteRect.height;
+                      __matteRect.left = Math.min(__matteRect.left, __mverts[__mv][0]); __matteRect.top = Math.min(__matteRect.top, __mverts[__mv][1]);
+                      __matteRect.width = Math.max(__mr, __mverts[__mv][0]) - __matteRect.left; __matteRect.height = Math.max(__mb, __mverts[__mv][1]) - __matteRect.top;
+                    }
+                  }
+                  if (__matteRect === null) { __matteRect = __matteLayer.sourceRectAtTime(__fitTime, false); }
+                } catch (__matteRectError) { __matteRect = null; }
+                var __matteInComp = __compBoundsOf(__matteLayer, __matteRect);
+                if (__matteInComp !== null) {
+                  __matteFactor = Math.max(__factorInto(__textInComp, __anchorInComp, __matteInComp), ${TEXT_AUTO_FIT_MATTE_MIN_FACTOR});
+                }
+              }
+              __factor = Math.min(__factor, __matteFactor);
+              if (__fitPrevTime !== null) { try { __fitComp.time = __fitPrevTime; } catch (__timeRestoreError) {} }
               if (__fitFailureReason === null && __factor < 1) {
-                if (__fitTransformAnimated) {
+                // A parented layer, or one whose matte is its own child, must not
+                // be scaled: the children would shrink with it. The glyphs do.
+                if (__fitTransformAnimated || __layer.parent || __matteFactor < 1) {
                   // Keyframes stay as they are: the glyphs themselves get smaller.
                   var __fitDoc = __layer.sourceText.value;
                   __fitDoc.fontSize = __fitDoc.fontSize * __factor;

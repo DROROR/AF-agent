@@ -3950,3 +3950,88 @@ describe("SET_TEXT - a right-to-left line is set in a font that has its glyphs, 
     expect(script).not.toContain("__fitScaleProp.numKeys === 0 && __fitAnchorProp.numKeys === 0");
   });
 });
+
+// REAL 2026-10-08 (client project 3241977f, read with describeLayerAtTime on the
+// template itself): Scene_01 "Text A" is Montserrat-Black 151 pt, the child of
+// "Text_null", with a "Set Matte" effect taking layer 12 ("A", a shape that is
+// the text's own child, ~611 x 108 px in the text's space) - sized for "APP".
+// The twenty-letter Hebrew headline put there showed one letter and some dots.
+describe("SET_TEXT auto-fit - a parented text cut by a matte is shrunk through its text size to sit inside the matte (2026-10-08)", () => {
+  const HEBREW = "נבחרת האמהות החטובות";
+  const setup = (options: { textLeft: number; textWidth: number }) => `
+    function CompItem() {}
+    function AVLayer() {}
+    function TextLayer() {}
+    TextLayer.prototype = new AVLayer();
+    function SolidSource() {}
+    var MaskMode = { NONE: 6812, ADD: 6813, SUBTRACT: 6814 };
+    function prop(value, keys) { return { numKeys: keys || 0, value: value, valueAtTime: function () { return this.value; }, setValue: function (v) { this.value = v; } }; }
+    var __nullLayer = new AVLayer(); __nullLayer.name = "Text_null"; __nullLayer.index = 4;
+    // The text: parented, animated position, Set Matte from layer 12, Fill effect.
+    var __textProps = { "ADBE Scale": prop([97.2, 97.2, 100]), "ADBE Anchor Point": prop([0, 0, 0]), "ADBE Position": prop([170, -136, 0], 3), "ADBE Rotate Z": prop(0) };
+    var __text = new TextLayer();
+    __text.name = "Text A"; __text.index = 13; __text.enabled = true; __text.threeDLayer = false; __text.parent = __nullLayer; __text.inPoint = 0.07; __text.outPoint = 60.07; __text.locked = false;
+    __text.sourceText = { value: { text: "APP", font: "Montserrat-Black", fontSize: 151, applyFill: true, fillColor: [1, 1, 1] }, setValue: function (v) { this.value = v; } };
+    __text.sourceRectAtTime = function () {
+      if (this.sourceText.value.text === "APP") { return { left: -143, top: -92, width: 286, height: 92 }; }
+      return { left: ${options.textLeft}, top: -92, width: ${options.textWidth}, height: 92 };
+    };
+    // Layer space -> composition space: the null sits at (1000, 500).
+    __text.sourcePointToComp = function (pt) { return [1000 + pt[0], 500 + pt[1]]; };
+    var __setMatte = { matchName: "ADBE Set Matte3", enabled: true, property: function (n) { return n === "ADBE Set Matte3-0001" ? { value: 12 } : null; } };
+    var __fill = { matchName: "ADBE Fill", enabled: true, property: function (n) { return n === "ADBE Fill-0002" ? { value: [1, 1, 1] } : null; } };
+    __text.property = function (n) {
+      if (n === "ADBE Transform Group") { return { property: function (inner) { return __textProps[inner] || null; } }; }
+      if (n === "ADBE Effect Parade") { return { numProperties: 2, property: function (i) { return i === 1 ? __setMatte : __fill; } }; }
+      return null;
+    };
+    // The matte "A": the text's child; its rendered rectangle maps to 700..1300 x 300..520 in the composition (the text, 408..500 tall, sits inside it).
+    var __matte = new AVLayer();
+    __matte.name = "A"; __matte.index = 12; __matte.enabled = true; __matte.parent = __text;
+    __matte.sourceRectAtTime = function () { return { left: 279, top: -226, width: 244.5, height: 132.5 }; };
+    __matte.sourcePointToComp = function (pt) { return [700 + (pt[0] - 279) / 244.5 * 600, 300 + (pt[1] + 226) / 132.5 * 220]; };
+    __matte.property = function (n) { return n === "ADBE Mask Parade" ? { numProperties: 0, property: function () { return null; } } : null; };
+    var __comp = new CompItem();
+    __comp.name = "Scene_01"; __comp.width = 1920; __comp.height = 1080; __comp.duration = 7; __comp.numLayers = 13; __comp.time = 0;
+    var __layers = { 4: __nullLayer, 12: __matte, 13: __text };
+    __comp.layer = function (i) { return __layers[i] || null; };
+    __text.containingComp = __comp;
+    var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 3 ? __comp : null; } } };
+    var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };
+    var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };
+  `;
+
+  function run(options: { textLeft: number; textWidth: number }) {
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-a", layerIndex: 13, nestedTarget: null, text: HEBREW };
+    const script = buildOperationScript(3, "Scene_01", op);
+    const probed = script.replace(/return __result;\s*$/, `; __result = JSON.stringify({ step: __result, scale: __textProps["ADBE Scale"].value, fontSize: __text.sourceText.value.fontSize, font: __text.sourceText.value.font, compTime: __comp.time });\n  return __result;`);
+    expect(probed).not.toBe(script);
+    const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup(options)));
+    return { ...outcome, step: JSON.parse(outcome.step) };
+  }
+
+  it("a headline wider than its matte is shrunk about its anchor until it sits one margin inside the matte - through the text size, the scale (and so the matte, its child) untouched", () => {
+    // In the composition: text 300..1700 around the anchor at 1000; matte 700..1300; margin 24.
+    const outcome = run({ textLeft: -700, textWidth: 1400 });
+    expect(outcome.step).toMatchObject({ ok: true, resultingValue: HEBREW });
+    const factor = (1000 - (700 + 24)) / (1000 - 300);
+    expect(factor).toBeGreaterThan(0.35);
+    expect(outcome.fontSize).toBeCloseTo(151 * factor, 6);
+    expect(outcome.scale).toEqual([97.2, 97.2, 100]);
+    expect(outcome.font).toBe("Heebo-Black");
+    expect(outcome.compTime).toBe(0);
+  });
+
+  it("never below the matte floor, and still succeeds", () => {
+    const outcome = run({ textLeft: -5000, textWidth: 10000 });
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.fontSize).toBeCloseTo(151 * 0.35, 6);
+  });
+
+  it("leaves a line alone when it already sits inside the matte", () => {
+    const outcome = run({ textLeft: -200, textWidth: 400 });
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.fontSize).toBe(151);
+    expect(outcome.scale).toEqual([97.2, 97.2, 100]);
+  });
+});
