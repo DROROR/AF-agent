@@ -18,7 +18,11 @@ import {
   buildReopenProjectFromDiskScript,
   buildDescribeLayerAtTimeScript,
   buildDescribeProjectFontsScript,
-  buildDescribeChainStructureScript
+  buildDescribeChainStructureScript,
+  resolveRtlFontPostScriptName,
+  RTL_TEXT_FONT_FAMILY,
+  RTL_TEXT_FALLBACK_FONTS,
+  RTL_TEXT_WEIGHT_TABLE
 } from "../jsx-templates.js";
 
 const COMP_NAME = "Test Comp";
@@ -3897,5 +3901,52 @@ describe("buildDescribeChainStructureScript resolves compositions by their stabl
     expect(parsed.ok).toBe(false);
     expect(parsed.failureReason).toContain("does not match the expected next step id 20");
     expect(parsed.failureReason).toContain("refusing to guess");
+  });
+});
+
+// REAL 2026-10-08 (client project 3241977f, first full video): the template's
+// Montserrat has no Hebrew glyphs, so After Effects drew every Hebrew line in a
+// fallback serif, lines left the frame, headlines showed one letter and dots.
+describe("SET_TEXT - a right-to-left line is set in a font that has its glyphs, in the template's weight (2026-10-08)", () => {
+  it("maps the template font's style word to the shipped family's weight, most specific word first; no word means Regular", () => {
+    expect(resolveRtlFontPostScriptName("Montserrat-Black")).toBe("Heebo-Black");
+    expect(resolveRtlFontPostScriptName("Montserrat-Medium")).toBe("Heebo-Medium");
+    expect(resolveRtlFontPostScriptName("Montserrat-Regular")).toBe("Heebo-Regular");
+    expect(resolveRtlFontPostScriptName("Montserrat-ExtraBoldItalic")).toBe("Heebo-ExtraBold");
+    expect(resolveRtlFontPostScriptName("OpenSans-SemiBold")).toBe("Heebo-SemiBold");
+    expect(resolveRtlFontPostScriptName("Arial-BoldMT")).toBe("Heebo-Bold");
+    expect(resolveRtlFontPostScriptName("HelveticaNeue-UltraLight")).toBe("Heebo-ExtraLight");
+    expect(resolveRtlFontPostScriptName("HelveticaNeue")).toBe("Heebo-Regular");
+    expect(resolveRtlFontPostScriptName(null)).toBe("Heebo-Regular");
+  });
+
+  it("for a Hebrew line: sets the shipped weight, falls back to Arial, then keeps the template's font - and never fails the operation over a font", () => {
+    const script = buildOperationScript(0, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "שלום עולם" });
+    expect(script).toContain("var __requiresBidi = true");
+    expect(script).toContain(JSON.stringify(RTL_TEXT_FONT_FAMILY));
+    expect(script).toContain("app.fonts.getFontsByPostScriptName(__psName)");
+    expect(script).toContain("__td.font = __fontChoices[__fc]");
+    expect(script).toContain(JSON.stringify(RTL_TEXT_FALLBACK_FONTS.regular));
+    expect(script).toContain(JSON.stringify(RTL_TEXT_FALLBACK_FONTS.bold));
+    expect(script).toContain("the template's own font was kept");
+    expect(script).toContain("fontFallback: __fontFallback");
+    // The font step produces evidence, never a failure reason.
+    expect(script).not.toMatch(/__dirFailureReason = "[^"]*font/);
+    // The weight table the script carries is the same one the TypeScript mapping uses.
+    expect(script).toContain(JSON.stringify(RTL_TEXT_WEIGHT_TABLE));
+  });
+
+  it("for a line with no right-to-left character: the template's font is left alone (the font step is inside the bidi branch)", () => {
+    const script = buildOperationScript(0, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "Hello" });
+    expect(script).toContain("var __requiresBidi = false");
+    expect(script).toContain("if (__requiresBidi) {");
+  });
+
+  it("the frame fit no longer steps aside for an animated transform: it measures at the fit time and shrinks the text size, leaving keyframes alone", () => {
+    const script = buildOperationScript(0, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "שלום עולם" });
+    expect(script).toContain("__fitScaleProp.valueAtTime(__fitTime, false)");
+    expect(script).toContain("__fitDoc.fontSize = __fitDoc.fontSize * __factor");
+    expect(script).toContain("__fitScaleProp.setValue(__newTextScale)");
+    expect(script).not.toContain("__fitScaleProp.numKeys === 0 && __fitAnchorProp.numKeys === 0");
   });
 });

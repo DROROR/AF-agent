@@ -79,6 +79,10 @@ copyDistExcludingTests(
   path.join(REPO_ROOT, "apps", "worker", "dist"),
   path.join(WORKER_APP_DIR, "dist")
 );
+// Fonts the worker sets right-to-left text in (jsx-templates.ts,
+// RTL_TEXT_FONT_FAMILY) - installed on the client machine by
+// DYO-Worker-Update.ps1 from worker-app\fonts.
+cpSync(path.join(REPO_ROOT, "deploy", "windows-worker", "fonts"), path.join(WORKER_APP_DIR, "fonts"), { recursive: true });
 writeJson(path.join(WORKER_APP_DIR, "package.json"), {
   name: "dyo-windows-worker-runtime",
   version: workerSrcPkg.version,

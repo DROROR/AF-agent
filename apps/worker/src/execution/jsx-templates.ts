@@ -248,6 +248,74 @@ function buildSetTextBody(text: string): string {
   return withTargetLayerUnlocked(buildSetTextMutation(text));
 }
 
+/**
+ * THE FONT A RIGHT-TO-LEFT LINE IS SET IN (2026-10-08, generic).
+ *
+ * REAL 2026-10-08 (client project 3241977f, first full video): every Hebrew
+ * line rendered in a serif face, lines were cut at both ends, and the big
+ * headlines showed one letter and some dots. The template's fonts are
+ * Montserrat Black/Medium/Regular, which have no Hebrew glyphs at all; SET_TEXT
+ * kept the template's font on purpose ("never override the template's
+ * typography"), so After Effects drew the Hebrew letters in whatever fallback
+ * it chose, with that face's widths and line metrics. No template font can be
+ * expected to carry Hebrew, so for any text with right-to-left characters the
+ * line is set in a family the worker itself ships (deploy/windows-worker/fonts,
+ * installed by DYO-Worker-Update.ps1), in the weight nearest the template's
+ * own: Montserrat-Black becomes Heebo-Black, Montserrat-Medium becomes
+ * Heebo-Medium. Text with no right-to-left character keeps the template's font
+ * exactly as before.
+ *
+ * Never fails a build over a font (the operator, 2026-10-08: "keep a fallback,
+ * but the video must not break"): the shipped weight is used when After
+ * Effects reports it installed (not a substitute) and reads it back; otherwise
+ * Arial (on every Windows, carries Hebrew: ArialMT, or Arial-BoldMT for the
+ * heavier weights); otherwise the template's own font stays. Which one was
+ * used, and why, is in the operation's evidence (`fontApplied`,
+ * `fontFallback`).
+ */
+export const RTL_TEXT_FONT_FAMILY = "Heebo";
+/** The second choice, present on every Windows installation, with Hebrew glyphs. */
+export const RTL_TEXT_FALLBACK_FONTS = { regular: "ArialMT", bold: "Arial-BoldMT" } as const;
+/** Shipped-family weights that fall back to the bold Arial rather than the regular one. */
+export const RTL_TEXT_BOLD_WEIGHTS: readonly string[] = ["SemiBold", "Bold", "ExtraBold", "Black"];
+
+/**
+ * Template font style words, most specific first, and the shipped family's
+ * weight each maps to. Matched case-insensitively against the template font's
+ * PostScript name (its style suffix, e.g. "Montserrat-ExtraBoldItalic").
+ * "ExtraBold" must come before "Bold", "SemiBold" before "Bold", "ExtraLight"
+ * before "Light": the first word found wins.
+ */
+export const RTL_TEXT_WEIGHT_TABLE: ReadonlyArray<readonly [styleWord: string, weight: string]> = [
+  ["extrablack", "Black"],
+  ["ultrablack", "Black"],
+  ["black", "Black"],
+  ["heavy", "Black"],
+  ["extrabold", "ExtraBold"],
+  ["ultrabold", "ExtraBold"],
+  ["semibold", "SemiBold"],
+  ["demibold", "SemiBold"],
+  ["bold", "Bold"],
+  ["medium", "Medium"],
+  ["extralight", "ExtraLight"],
+  ["ultralight", "ExtraLight"],
+  ["light", "Light"],
+  ["hairline", "Thin"],
+  ["thin", "Thin"]
+];
+
+/** The PostScript name of the shipped family's weight nearest a template font's own (null template font, or no style word, gives Regular). */
+export function resolveRtlFontPostScriptName(templateFontPostScriptName: string | null): string {
+  const lower = (templateFontPostScriptName ?? "").toLowerCase().replace(/[\s_]/g, "");
+  const style = lower.includes("-") ? lower.slice(lower.lastIndexOf("-") + 1) : lower;
+  for (const [word, weight] of RTL_TEXT_WEIGHT_TABLE) {
+    if (style.includes(word)) {
+      return `${RTL_TEXT_FONT_FAMILY}-${weight}`;
+    }
+  }
+  return `${RTL_TEXT_FONT_FAMILY}-Regular`;
+}
+
 /** A replaced text line is never shrunk below this fraction of its template scale - below it the operation fails instead of producing unreadably small text. */
 export const TEXT_AUTO_FIT_MIN_FACTOR = 0.6;
 
@@ -320,6 +388,37 @@ function buildSetTextMutation(text: string): string {
           var __appliedComposer = null;
           var __wantedDirection = null;
           var __wantedComposer = null;
+          var __fontBefore = null;
+          var __wantedFont = null;
+          var __fontApplied = null;
+          var __rtlWeightTable = ${JSON.stringify(RTL_TEXT_WEIGHT_TABLE)};
+          var __fontFallback = null;
+          var __rtlIsBoldWeight = function (__psName) {
+            var __bold = ${JSON.stringify(RTL_TEXT_BOLD_WEIGHTS)};
+            for (var __b = 0; __b < __bold.length; __b++) { if (String(__psName).indexOf("-" + __bold[__b]) >= 0) { return true; } }
+            return false;
+          };
+          // true = installed (not a substitute); false = not installed; null = cannot tell (no font API).
+          var __rtlFontInstalled = function (__psName) {
+            try {
+              if (app.fonts && typeof app.fonts.getFontsByPostScriptName === "function") {
+                var __fontMatches = app.fonts.getFontsByPostScriptName(__psName);
+                for (var __fm = 0; __fontMatches && __fm < __fontMatches.length; __fm++) {
+                  if (__fontMatches[__fm] && __fontMatches[__fm].isSubstitute !== true) { return true; }
+                }
+                return false;
+              }
+            } catch (__fontListError) { return null; }
+            return null;
+          };
+          var __rtlFontFor = function (__templateFont) {
+            var __lower = String(__templateFont === null || __templateFont === undefined ? "" : __templateFont).toLowerCase().replace(/[\s_]/g, "");
+            var __style = __lower.indexOf("-") >= 0 ? __lower.substring(__lower.lastIndexOf("-") + 1) : __lower;
+            for (var __w = 0; __w < __rtlWeightTable.length; __w++) {
+              if (__style.indexOf(__rtlWeightTable[__w][0]) >= 0) { return ${JSON.stringify(RTL_TEXT_FONT_FAMILY)} + "-" + __rtlWeightTable[__w][1]; }
+            }
+            return ${JSON.stringify(RTL_TEXT_FONT_FAMILY)} + "-Regular";
+          };
           __td.text = ${textLiteral};
           if (__requiresBidi) {
             if (typeof ParagraphDirection === "undefined" || ParagraphDirection.${wantedDirectionMember} === undefined) {
@@ -340,6 +439,29 @@ function buildSetTextMutation(text: string): string {
                 } catch (__composerWriteError) {
                   __dirFailureReason = "this text contains right-to-left characters, but its composer engine could not be set to the Middle-Eastern-capable engine: " + (__composerWriteError && __composerWriteError.toString ? __composerWriteError.toString() : String(__composerWriteError));
                 }
+              }
+              // The font: a family that has these glyphs, in the template's
+              // weight (see RTL_TEXT_FONT_FAMILY above).
+              if (__dirFailureReason === null) {
+                try { __fontBefore = String(__td.font); } catch (__fontReadError) { __fontBefore = null; }
+                __wantedFont = __rtlFontFor(__fontBefore);
+                // Shipped weight first; Arial when that is not installed;
+                // the template's own font when neither can be set.
+                var __fontChoices = [__wantedFont, __rtlIsBoldWeight(__wantedFont) ? ${JSON.stringify(RTL_TEXT_FALLBACK_FONTS.bold)} : ${JSON.stringify(RTL_TEXT_FALLBACK_FONTS.regular)}];
+                var __fontSet = null;
+                for (var __fc = 0; __fc < __fontChoices.length && __fontSet === null; __fc++) {
+                  if (__rtlFontInstalled(__fontChoices[__fc]) === false) { continue; }
+                  try {
+                    __td.font = __fontChoices[__fc];
+                    __fontSet = __fontChoices[__fc];
+                  } catch (__fontWriteError) { __fontSet = null; }
+                }
+                if (__fontSet === null) {
+                  __fontFallback = "no font with these glyphs could be set (" + __fontChoices.join(", ") + " not installed) - the template's own font was kept";
+                } else if (__fontSet !== __wantedFont) {
+                  __fontFallback = __wantedFont + " is not installed on this editing computer - " + __fontSet + " was used instead (run DYO-Worker-Update.bat to install the worker's fonts)";
+                }
+                __wantedFont = __fontSet === null ? __fontBefore : __fontSet;
               }
             }
           }
@@ -367,6 +489,11 @@ function buildSetTextMutation(text: string): string {
             }
             var __directionVerified = __requiresBidi ? __appliedDirection !== null && __appliedDirection === __wantedDirection : true;
             var __composerVerified = __requiresBidi ? __appliedComposer !== null && __appliedComposer === __wantedComposer : true;
+            try { __fontApplied = String(__storedDoc.font); } catch (__fontAppliedReadError) { __fontApplied = null; }
+            var __fontVerified = __requiresBidi ? __fontApplied !== null && __fontApplied === __wantedFont : true;
+            if (__requiresBidi && !__fontVerified && __fontFallback === null) {
+              __fontFallback = "After Effects reported " + (__fontApplied === null ? "an unreadable font" : __fontApplied) + " after writing " + __wantedFont + " - the text is drawn in that font";
+            }
             if (!__requiresBidi) {
               __dirNote = "text contains no right-to-left character - the template's own paragraph direction and composer were left unchanged";
             }
@@ -388,6 +515,10 @@ function buildSetTextMutation(text: string): string {
               appliedComposerEngine: __requiresBidi ? __appliedComposer : null,
               directionVerified: __directionVerified,
               composerVerified: __composerVerified,
+              fontBefore: __fontBefore,
+              fontApplied: __requiresBidi ? __fontApplied : null,
+              fontVerified: __fontVerified,
+              fontFallback: __fontFallback,
               textCodeUnitsVerified: __textVerified,
               codeUnitCount: __expectedCodeUnits.length,
               note: __dirNote
@@ -488,14 +619,21 @@ function buildTextAutoFit(): string {
             }
             // A text with no readable colour has no same-colour blockers (the
             // comparison below is false for it) but is still kept inside the frame.
+            // REAL 2026-10-08 (client project 3241977f, finished video): every
+            // headline of the template flies in - its transform has keyframes -
+            // and this fit used to step aside for any keyframe at all, so the
+            // long Hebrew lines left the frame at both ends. The transform is
+            // now read at the moment measured (valueAtTime), and a layer whose
+            // transform is animated is shrunk through its text size instead of
+            // its scale, which leaves every keyframe untouched.
+            var __fitTime = (Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __fitComp.duration)) / 2;
+            var __fitTransformAnimated = __fitScaleProp.numKeys > 0 || __fitAnchorProp.numKeys > 0 || __fitPositionProp.numKeys > 0 || __fitRotationProp.numKeys > 0;
             var __fitSupported =
               !__layer.threeDLayer && !__layer.parent &&
-              __fitScaleProp.numKeys === 0 && __fitAnchorProp.numKeys === 0 && __fitPositionProp.numKeys === 0 && __fitRotationProp.numKeys === 0 &&
-              __fitRotationProp.value === 0 && __fitScaleProp.value[0] > 0 && __fitScaleProp.value[1] > 0;
+              __fitRotationProp.valueAtTime(__fitTime, false) === 0 && __fitScaleProp.valueAtTime(__fitTime, false)[0] > 0 && __fitScaleProp.valueAtTime(__fitTime, false)[1] > 0;
             if (__fitSupported) {
-              var __fitTime = (Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __fitComp.duration)) / 2;
               var __textRect = __layer.sourceRectAtTime(__fitTime, false);
-              var __fs = __fitScaleProp.value, __fa = __fitAnchorProp.value, __fp = __fitPositionProp.value;
+              var __fs = __fitScaleProp.valueAtTime(__fitTime, false), __fa = __fitAnchorProp.valueAtTime(__fitTime, false), __fp = __fitPositionProp.valueAtTime(__fitTime, false);
               // Offsets of the text's rendered edges from its anchor at the current scale.
               var __dLeft = (__textRect.left - __fa[0]) * __fs[0] / 100;
               var __dRight = (__textRect.left + __textRect.width - __fa[0]) * __fs[0] / 100;
@@ -569,9 +707,16 @@ function buildTextAutoFit(): string {
               }
               __factor = Math.min(__factor, Math.max(__frameFactor, ${TEXT_AUTO_FIT_MIN_FACTOR}));
               if (__fitFailureReason === null && __factor < 1) {
-                var __newTextScale = [__fs[0] * __factor, __fs[1] * __factor];
-                if (__fs.length > 2) { __newTextScale.push(__fs[2]); }
-                __fitScaleProp.setValue(__newTextScale);
+                if (__fitTransformAnimated) {
+                  // Keyframes stay as they are: the glyphs themselves get smaller.
+                  var __fitDoc = __layer.sourceText.value;
+                  __fitDoc.fontSize = __fitDoc.fontSize * __factor;
+                  __layer.sourceText.setValue(__fitDoc);
+                } else {
+                  var __newTextScale = [__fs[0] * __factor, __fs[1] * __factor];
+                  if (__fs.length > 2) { __newTextScale.push(__fs[2]); }
+                  __fitScaleProp.setValue(__newTextScale);
+                }
               }
             }
           } catch (__fitError) {
