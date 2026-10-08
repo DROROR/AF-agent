@@ -281,6 +281,8 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       ...(request.previewTimingDescribeLayerTransforms !== undefined
         ? { previewTimingDescribeLayerTransforms: request.previewTimingDescribeLayerTransforms }
         : {}),
+      ...(request.previewTimingDescribeLayerAtTime !== undefined ? { previewTimingDescribeLayerAtTime: request.previewTimingDescribeLayerAtTime } : {}),
+      ...(request.previewTimingDescribeFonts !== undefined ? { previewTimingDescribeFonts: request.previewTimingDescribeFonts } : {}),
       ...(request.slotEvidenceMappingId !== undefined ? { slotEvidenceMappingId: request.slotEvidenceMappingId } : {})
     });
     if (!resolved.ok) {

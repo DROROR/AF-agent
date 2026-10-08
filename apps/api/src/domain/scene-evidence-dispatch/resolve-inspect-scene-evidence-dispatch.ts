@@ -41,6 +41,10 @@ export interface ResolveInspectSceneEvidenceDispatchInput {
   slotEvidenceMappingId?: string;
   /** Real 2026-09-11 nested-content audit (session a7fee3d9) - a FOURTH thing previewTimingDiscoverCompositionId can be used for: run the SAME generic describeLayerTransforms scan (buildInspectLayerTransformScript, position/scale/rotation/anchorPoint/camera-zoom keyframes plus effects per top-level layer) against an ARBITRARY manifest composition. Mutually exclusive with the other three sub-modes by construction - see the branch below. */
   previewTimingDescribeLayerTransforms?: boolean;
+  /** 2026-10-08: one layer's text facts at one time, against the composition previewTimingDiscoverCompositionId names - see job-dispatch.ts. */
+  previewTimingDescribeLayerAtTime?: { layerIndex: number; timeSeconds: number };
+  /** 2026-10-08: the project's font report, with the composition previewTimingDiscoverCompositionId names as the capture target. */
+  previewTimingDescribeFonts?: boolean;
 }
 
 export type ResolveInspectSceneEvidenceDispatchResult =
@@ -98,6 +102,8 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
     previewTimingDescribeCompositionSummary,
     previewTimingDiscoverLayerDetails,
     previewTimingDescribeLayerTransforms,
+    previewTimingDescribeLayerAtTime,
+    previewTimingDescribeFonts,
     slotEvidenceMappingId
   } = input;
 
@@ -195,6 +201,24 @@ export function resolveInspectSceneEvidenceDispatch(input: ResolveInspectSceneEv
           layerIndices: [],
           previewTimestampSeconds: null,
           discoverLayerDetails: true
+        }
+      };
+    }
+    // 2026-10-08: the two typography reads (see job-dispatch.ts). One
+    // layer at one time, and/or the project's fonts. Read-only on the worker.
+    if (previewTimingDescribeLayerAtTime !== undefined || previewTimingDescribeFonts === true) {
+      return {
+        ok: true,
+        payload: {
+          sourceProjectPath: currentProjectManifest.sourceProject.path,
+          sourceProjectSha256: currentPlan.sourceProjectSha256,
+          manifestCompositionId: previewTimingDiscoverCompositionId,
+          aeProjectItemIndex: parentComposition.aeProjectItemIndex,
+          compositionName: parentComposition.name,
+          layerIndices: [],
+          previewTimestampSeconds: null,
+          ...(previewTimingDescribeLayerAtTime !== undefined ? { describeLayerAtTime: previewTimingDescribeLayerAtTime } : {}),
+          ...(previewTimingDescribeFonts === true ? { describeFonts: true } : {})
         }
       };
     }

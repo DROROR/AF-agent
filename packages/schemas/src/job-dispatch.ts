@@ -248,7 +248,23 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * Mutually exclusive with the other three sub-modes by
        * construction - the resolver never sets more than one.
        */
-      previewTimingDescribeLayerTransforms: z.boolean().optional()
+      previewTimingDescribeLayerTransforms: z.boolean().optional(),
+      /**
+       * 2026-10-08 (client project 3241977f): the finished video showed Hebrew
+       * headlines as one letter and some dots, and lines cut at both ends, and
+       * nothing reachable from the dashboard could say why - the worker's
+       * read-only describeLayerAtTime (font, size, box text, animators, masks,
+       * matte of ONE layer at ONE time) and describeFonts (which fonts the
+       * project asks for and which After Effects substitutes) existed but no
+       * dispatch could ask for them. Both ride on previewTimingDiscoverCompositionId
+       * (any manifest composition, not only a scene's own). Read-only on the
+       * worker by construction.
+       */
+      previewTimingDescribeLayerAtTime: z
+        .object({ layerIndex: z.number().int().positive(), timeSeconds: z.number().nonnegative() })
+        .strict()
+        .optional(),
+      previewTimingDescribeFonts: z.boolean().optional()
     })
     .strict(),
   z.object({

@@ -958,3 +958,49 @@ describe("resolveInspectSceneEvidenceDispatch - slot evidence", () => {
     expect(result.ok === false && result.reason).toMatch(/has no mapping/);
   });
 });
+
+// 2026-10-08 (client project 3241977f): the finished video's Hebrew headlines
+// were one letter and some dots, and nothing reachable from the dashboard
+// could read the layer's font, animators or masks. The two read-only
+// typography reads ride on previewTimingDiscoverCompositionId.
+describe("resolveInspectSceneEvidenceDispatch - previewTimingDiscoverCompositionId + the typography reads (2026-10-08)", () => {
+  const manifest = validManifest({
+    compositions: [
+      { compositionId: "comp-210", aeProjectItemIndex: 2, name: "!Render", widthPx: 1080, heightPx: 1920, durationSeconds: 45, frameRate: 29.97, isNestedOnlyReferenced: false, parentCompositionIds: [] },
+      { compositionId: "comp-7", aeProjectItemIndex: 9, name: "Texts 07", widthPx: 1920, heightPx: 1080, durationSeconds: 5, frameRate: 30, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-210"] }
+    ]
+  });
+
+  it("describes one layer at one time of ANY manifest composition, with no frame capture and no layer scan", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: manifest,
+      previewTimingDiscoverCompositionId: "comp-7",
+      previewTimingDescribeLayerAtTime: { layerIndex: 13, timeSeconds: 2.5 }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.compositionName).toBe("Texts 07");
+    expect(result.payload.aeProjectItemIndex).toBe(9);
+    expect(result.payload.layerIndices).toEqual([]);
+    expect(result.payload.previewTimestampSeconds).toBeNull();
+    expect(result.payload.describeLayerAtTime).toEqual({ layerIndex: 13, timeSeconds: 2.5 });
+    expect(result.payload.describeFonts).toBeUndefined();
+    expect(result.payload.discoverLayerDetails).toBeUndefined();
+  });
+
+  it("reads the project's fonts, alone or with the layer read", () => {
+    const result = resolveInspectSceneEvidenceDispatch({
+      scenePlanId: "scene-1",
+      currentPlan: validPlan(),
+      currentProjectManifest: manifest,
+      previewTimingDiscoverCompositionId: "comp-210",
+      previewTimingDescribeFonts: true
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.describeFonts).toBe(true);
+    expect(result.payload.describeLayerAtTime).toBeUndefined();
+  });
+});
