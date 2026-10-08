@@ -44,6 +44,7 @@ import { WORKER_LOG_RELATIVE_PATH, PREVIOUS_WORKER_LOG_RELATIVE_PATH } from "./d
 import { listDyoProcessesViaCim } from "./diagnostics/list-dyo-processes.js";
 import { redactSecrets } from "./diagnostics/redact.js";
 import { runJobCycle, type JobCycleEvent } from "./runtime/job-cycle.js";
+import { BridgeHold } from "./runtime/bridge-hold.js";
 import { shutdownGracefully } from "./runtime/shutdown.js";
 import { JobExecutionRegistry } from "./runtime/job-execution-registry.js";
 import { reconcileAbandonedJobs } from "./runtime/reconcile-abandoned-jobs.js";
@@ -233,10 +234,15 @@ async function main(): Promise<void> {
     logger: workerLogger
   });
 
+  // 2026-10-08: a job and the heartbeat's bridge probe must never use the
+  // bridge at once - see runtime/bridge-hold.ts for the real incident.
+  const bridgeHold = new BridgeHold();
   const mcpAdapter = new AeMcpRoundTripAdapter({
     aeMcpPath: env.aeMcpPath,
     createClient: (aeMcpPath, timeoutMs) => new HeroicSwanMcpClient({ aeMcpPath, timeoutMs }),
-    bridgeReconnector
+    bridgeReconnector,
+    isBridgeHeldByJob: () => bridgeHold.isHeld(),
+    logger: workerLogger
   });
 
   // Real 2026-09-12 release blocker: after a Windows restart the client was
@@ -471,6 +477,9 @@ async function main(): Promise<void> {
       reportJobStatus: (jobId, body) =>
         apiClient.reportJobStatus(credentials.workerId, credentials.workerToken, jobId, body),
       executeJob: (job) =>
+        bridgeHold.run(
+          () => mcpAdapter.whenNoProbeIsRunning(),
+          () =>
         executeJobWithWatchdog(
           {
             diagnostics: diagnosticsDeps,
@@ -524,6 +533,7 @@ async function main(): Promise<void> {
           job,
           jobExecutionRegistry,
           workerLogger
+        )
         ),
       onEvent: (event) => {
         if (event.type === "job_cycle_failed") {

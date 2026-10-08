@@ -365,6 +365,15 @@ export class HeroicSwanSceneEvidenceInspector implements SceneEvidenceInspector 
 
       return await this.runInspection(client, request, hashResult.value.sha256);
     } finally {
+      // REAL 2026-10-08 (client PC, GET_DYO_PROCESS_TREE): fourteen
+      // `ae-mcp serve` processes were alive, each started at the second an
+      // INSPECT_SCENE_EVIDENCE job began - successful ones included. This
+      // call only ever closed its client when connect() failed; after a real
+      // inspection the child was left running for the life of the worker.
+      // close() is idempotent and never throws (HeroicSwanMcpClient.terminate),
+      // and it runs before the owner is unregistered so a watchdog can still
+      // reach the child while it is being closed.
+      await client.close();
       unregister?.();
     }
   }

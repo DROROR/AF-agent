@@ -102,7 +102,36 @@ export interface AeMcpRoundTripAdapterConfig {
    * and nothing is attempted.
    */
   bridgeReconnector?: AeBridgeReconnector;
+  /**
+   * True while a job of this worker is using the bridge.
+   *
+   * REAL 2026-10-08 (client PC, frame builds a6434832 and a85dd7d1): the same
+   * 84 operations failed at operation 52 one day and operation 39 the next,
+   * each with the bridge's own "[AE_TIMEOUT] Timed out after 30000ms", while
+   * After Effects was alive and answering minutes later. The bridge keeps ONE
+   * command file and ONE result file per After Effects instance, and
+   * serialises callers only inside one ae-mcp process (upstream
+   * src/bridge/client.ts, src/broker/broker.ts). This probe runs in its own
+   * ae-mcp process; started while a job's process had a command waiting to be
+   * read, it overwrote that command (or deleted the unread result), and the
+   * job waited out the full thirty seconds for an answer that could not come.
+   *
+   * So no probe is started while this returns true: the last real answer is
+   * reported until the job is done. Optional, so every existing caller and
+   * test keeps its exact behaviour.
+   */
+  isBridgeHeldByJob?: () => boolean;
+  /**
+   * Optional. One line when a real probe starts and one when it ends.
+   * Until 2026-10-08 a probe left no trace in worker.log at all, so whether
+   * one had been running at the moment a job lost a command could only be
+   * inferred from heartbeat times.
+   */
+  logger?: { info: (meta: Record<string, unknown>, message: string) => void };
 }
+
+/** A probe that stood down because a job took the bridge. Not a measurement of the bridge, so it is never cached and never counted as a failed probe. */
+const STOPPED_FOR_JOB_DETAIL = "probe-stopped-for-job";
 
 interface CachedResult {
   at: number;
@@ -113,6 +142,13 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
   private readonly aeMcpPath: string | undefined;
   private readonly callTimeoutMs: number;
   private readonly bridgeReconnector: AeBridgeReconnector | undefined;
+  private readonly isBridgeHeldByJob: () => boolean;
+  private readonly logger: { info: (meta: Record<string, unknown>, message: string) => void } | undefined;
+  /** Numbers each probe, so one that blew its hard deadline can be told to make no further attempt. */
+  private probeSerial = 0;
+  private abandonedUpToSerial = 0;
+  /** The kill of a blown-deadline probe's child, so a job can wait for it to be over. */
+  private abandoning: Promise<void> | null = null;
   private readonly maxAttempts: number;
   private readonly retryBackoffMs: number;
   private readonly onlineCacheTtlMs: number;
@@ -140,6 +176,28 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     this.hardDeadlineMs = config.hardDeadlineMs ?? DEFAULT_HARD_DEADLINE_MS;
     this.failuresBeforeDowngrade = config.failuresBeforeDowngrade ?? DEFAULT_FAILURES_BEFORE_DOWNGRADE;
     this.bridgeReconnector = config.bridgeReconnector;
+    this.isBridgeHeldByJob = config.isBridgeHeldByJob ?? (() => false);
+    this.logger = config.logger;
+  }
+
+  /**
+   * Resolves once no probe is running - at once when none is. A job awaits
+   * this before its first bridge call, having already raised the flag
+   * `isBridgeHeldByJob` reads, so a probe started by the very heartbeat that
+   * triggered the job cannot still be writing to the bridge underneath it.
+   * Bounded by the probe's own hard deadline; never rejects.
+   */
+  async whenNoProbeIsRunning(): Promise<void> {
+    const running = this.inFlight;
+    if (running) {
+      await running.catch(() => undefined);
+    }
+    // A probe that blew its hard deadline has its child killed separately;
+    // that kill is waited for too, so the child cannot still be writing.
+    const abandoning = this.abandoning;
+    if (abandoning) {
+      await abandoning.catch(() => undefined);
+    }
   }
 
   /**
@@ -170,12 +228,27 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     const cacheIsFresh =
       cached !== null && cached.result.mcpStatus === "ONLINE" && this.now() - cached.at < this.onlineCacheTtlMs;
 
+    // A job is using the bridge: no probe is started (see isBridgeHeldByJob).
+    // The last real answer stands, said to be held; with none yet, nothing
+    // is claimed about the bridge at all.
+    if (this.isBridgeHeldByJob()) {
+      return cached
+        ? { ...cached.result, mcpProbeDetail: `${cached.result.mcpProbeDetail}-held-while-job-runs` }
+        : { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "probe-waits-for-job" };
+    }
+
     // Refresh in the background unless a confirmed-ONLINE answer is still
     // fresh, or a probe is already running. Deliberately not awaited.
     if (!cacheIsFresh && !this.inFlight) {
+      const startedAt = this.now();
+      this.logger?.info({}, "bridge probe started");
       this.inFlight = this.probeWithHardDeadline(scriptPath);
       void this.inFlight
         .then((result) => {
+          this.logger?.info({ mcpStatus: result.mcpStatus, mcpProbeDetail: result.mcpProbeDetail, durationMs: this.now() - startedAt }, "bridge probe finished");
+          if (result.mcpProbeDetail === STOPPED_FOR_JOB_DETAIL) {
+            return;
+          }
           this.cached = { at: this.now(), result: this.debounce(result) };
         })
         .catch(() => {
@@ -231,9 +304,19 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
    */
   private async probeWithHardDeadline(scriptPath: string): Promise<McpHealthResult> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const serial = ++this.probeSerial;
     const deadline = new Promise<McpHealthResult>((resolve) => {
       timer = setTimeout(() => {
-        void this.abandonActiveClient("probe exceeded its hard deadline");
+        // The probe's own loop goes on running behind this race; it is told
+        // to make no further attempt, or it would start another bridge
+        // process after this probe has been reported over.
+        this.abandonedUpToSerial = serial;
+        const abandoning = this.abandonActiveClient("probe exceeded its hard deadline").finally(() => {
+          if (this.abandoning === abandoning) {
+            this.abandoning = null;
+          }
+        });
+        this.abandoning = abandoning;
         resolve({
           mcpStatus: "UNKNOWN",
           mcpConfiguredPath: scriptPath,
@@ -242,7 +325,7 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
       }, this.hardDeadlineMs);
     });
     try {
-      return await Promise.race([this.probe(scriptPath), deadline]);
+      return await Promise.race([this.probe(scriptPath, serial), deadline]);
     } catch {
       return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: "probe-threw" };
     } finally {
@@ -270,9 +353,14 @@ export class AeMcpRoundTripAdapter implements McpAdapter {
     }
   }
 
-  private async probe(scriptPath: string): Promise<McpHealthResult> {
+  private async probe(scriptPath: string, serial: number): Promise<McpHealthResult> {
     let lastDetail = "no-attempt";
     for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      // A further attempt starts another bridge process. None is started
+      // once a job has taken the bridge, or once this probe was abandoned.
+      if (attempt > 1 && (this.isBridgeHeldByJob() || serial <= this.abandonedUpToSerial)) {
+        return { mcpStatus: "UNKNOWN", mcpConfiguredPath: scriptPath, mcpProbeDetail: STOPPED_FOR_JOB_DETAIL };
+      }
       const outcome = await this.attemptOnce(scriptPath);
       if (outcome.terminal) {
         return outcome.result;

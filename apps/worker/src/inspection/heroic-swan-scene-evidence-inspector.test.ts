@@ -311,6 +311,27 @@ describe("HeroicSwanSceneEvidenceInspector - real spawned MCP server, not mocked
     expect(layer?.evidenceSource).toBe("AE_GET_LAYER");
   });
 
+  // REAL 2026-10-08 (client PC): fourteen ae-mcp processes left behind, one per scene check.
+  it("stops the bridge process it started once the inspection is over", async () => {
+    await writeFakeServer(dir);
+    const owners: { pid: () => number | null }[] = [];
+    const registry = {
+      registerMcpOwner: (owner: unknown) => {
+        owners.push(owner as { pid: () => number | null });
+        return () => undefined;
+      }
+    };
+    const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir, jobExecutionRegistry: registry as never });
+    const result = await inspector.inspect(baseRequest());
+    expect(result.kind).toBe("evidence");
+
+    expect(owners).toHaveLength(1);
+    const client = owners[0] as unknown as { pid: number | null; terminate: (reason: string) => Promise<{ outcome: string }> };
+    // The client has already let go of its process; a repeated terminate reports what the first one proved.
+    expect(client.pid).toBeNull();
+    expect((await client.terminate("test")).outcome).toBe("terminated");
+  });
+
   it("rejects (fails honestly, reports no evidence/layers) when aeProjectItemIndex resolves to a composition whose real name does not match the expected compositionName - canonical composition addressing safety net", async () => {
     await writeFakeServer(dir);
     const inspector = new HeroicSwanSceneEvidenceInspector({ aeMcpPath: dir });

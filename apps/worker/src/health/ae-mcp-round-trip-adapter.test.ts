@@ -426,3 +426,73 @@ describe("AeMcpRoundTripAdapter - real 2026-09-12 incident: a healthy bridge rep
     expect(factory.created).toBe(1);
   });
 });
+
+describe("AeMcpRoundTripAdapter - real 2026-10-08: a probe started during a frame build overwrote the build's command and the build failed with AE_TIMEOUT", () => {
+  it("starts no probe while a job holds the bridge, and says so instead of claiming a status", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const factory = fakeClientFactory([{}]);
+    let held = true;
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, isBridgeHeldByJob: () => held });
+
+    const during = await settledHealth(adapter);
+    expect(factory.created).toBe(0);
+    expect(during).toEqual({ mcpStatus: "UNKNOWN", mcpConfiguredPath: join(aeMcpPath, "dist", "index.js"), mcpProbeDetail: "probe-waits-for-job" });
+
+    held = false;
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
+    expect(factory.created).toBe(1);
+  });
+
+  it("reports the last real answer, marked as held, while a job holds the bridge", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    const factory = fakeClientFactory([{}]);
+    let held = false;
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, isBridgeHeldByJob: () => held, onlineCacheTtlMs: 0 });
+    expect((await settledHealth(adapter)).mcpStatus).toBe("ONLINE");
+    const before = factory.created;
+
+    held = true;
+    const during = await settledHealth(adapter);
+    expect(during.mcpStatus).toBe("ONLINE");
+    expect(during.mcpProbeDetail).toBe("round-trip-ok-held-while-job-runs");
+    expect(factory.created).toBe(before);
+  });
+
+  it("whenNoProbeIsRunning waits for the probe in flight, and a retry is not attempted once a job has taken the bridge", async () => {
+    const aeMcpPath = makeAeMcpInstall();
+    let held = false;
+    const factory = fakeClientFactory([
+      {
+        connect: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          throw new Error("spawn hiccup");
+        }
+      }
+    ]);
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath, createClient: factory.create, isBridgeHeldByJob: () => held, retryBackoffMs: 1 });
+
+    await adapter.checkHealth();
+    held = true;
+    const startedWaiting = Date.now();
+    await adapter.whenNoProbeIsRunning();
+    expect(Date.now() - startedWaiting).toBeGreaterThanOrEqual(25);
+    // One attempt failed; the retry would have spawned a second bridge process under the job.
+    expect(factory.created).toBe(1);
+    expect(factory.closed()).toBe(1);
+    // Standing down for a job is not a failed probe: nothing was cached.
+    held = false;
+    expect((await adapter.checkHealth()).mcpProbeDetail).toBe("probe-pending");
+  });
+
+  it("whenNoProbeIsRunning resolves at once when no probe is running", async () => {
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath: makeAeMcpInstall(), createClient: fakeClientFactory([{}]).create });
+    await expect(adapter.whenNoProbeIsRunning()).resolves.toBeUndefined();
+  });
+
+  it("logs when a probe starts and finishes", async () => {
+    const lines: string[] = [];
+    const adapter = new AeMcpRoundTripAdapter({ aeMcpPath: makeAeMcpInstall(), createClient: fakeClientFactory([{}]).create, logger: { info: (_meta, message) => lines.push(message) } });
+    await settledHealth(adapter);
+    expect(lines).toEqual(["bridge probe started", "bridge probe finished"]);
+  });
+});
