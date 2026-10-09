@@ -1631,6 +1631,11 @@ export const en = {
     approveRefusedPictures: (n: number, scenes: readonly string[]): string =>
       `${n === 1 ? "1 picture is" : `${n} pictures are`} waiting for you to look at the spot it goes into${scenes.length > 0 ? ` (${scenes.join(", ")}, marked in red below)` : ""}. Press "${n === 1 ? "Show me the spot" : `Show me all ${n} spots`}" above, look at each one, and confirm. Then press Approve Scenes again.`,
     cardNeedsConfirmation: "A picture here still needs your confirmation - see \"Check where your pictures will appear\" above.",
+    /** 2026-10-09: a picture or text on a layer that cannot hold it (the template's camera) - held, marked on its card, removed with one press. */
+    approveNeedsRemoval: (n: number): string =>
+      n === 1 ? "First remove the picture or text marked in red below - it sits on a part of the template that cannot hold it." : `First remove the ${n} pictures or texts marked in red below - they sit on parts of the template that cannot hold them.`,
+    removePictureAction: "Remove the picture",
+    removeTextAction: "Remove the text",
     allScenesReadyHint: "Every scene is ready - approve to continue.",
     scenesApprovedHint: "Scenes approved - the next step is on the Preview tab.",
     usePlanFirstHint: "Start here: press \"Use everything from my plan\" to put your texts and pictures on every scene. You can still change any of them after.",

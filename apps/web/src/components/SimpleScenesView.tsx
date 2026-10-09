@@ -27,6 +27,7 @@ import { ClaudeActionButton } from "./ui/ClaudeActionButton";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { Skeleton } from "./ui/Skeleton";
+import { findNonContentContentProblems, type NonContentContentProblem } from "@dyo/schemas";
 import { useLocale } from "./LocaleProvider";
 
 /*
@@ -276,9 +277,23 @@ export function SimpleScenesView(): ReactElement {
   // the only explanation.
   const cardsNeedingConfirmation = new Set(pendingPictures.map((slot) => homes.cardIdByMappingId.get(slot.mappingId) ?? slot.scenePlanId));
   const picturesHold = !scenesApproved && picturesWaiting > 0;
+  // REAL 2026-10-09, the operator: "why is the problem not marked where it
+  // is - the next tab reports the previous tab's issue". A picture or text
+  // on a layer that is not a place for content (the template's camera) is
+  // found here with the same rule the gate and the build use, holds Approve
+  // in plain words, marks the card, and is removed with one press.
+  const contentProblems = findNonContentContentProblems(plan.plan.scenePlans, project.manifest);
+  const contentProblemsByCard = new Map<string, typeof contentProblems>();
+  for (const problem of contentProblems) {
+    const cardId = homes.cardIdByMappingId.get(problem.mappingId) ?? problem.scenePlanId;
+    contentProblemsByCard.set(cardId, [...(contentProblemsByCard.get(cardId) ?? []), problem]);
+  }
+  const contentHold = !scenesApproved && contentProblems.length > 0;
   const approveDisabledReason = scenesApproved
     ? undefined
-    : picturesHold
+    : contentHold
+      ? t.simpleScenes.approveNeedsRemoval(contentProblems.length)
+      : picturesHold
       ? t.simpleScenes.approveNeedsPictures(picturesWaiting)
       : !allReady
         ? undefined
@@ -330,6 +345,21 @@ export function SimpleScenesView(): ReactElement {
    * findings, then records KEEP_TEMPLATE_TEXT for each text layer named, in
    * the reviewer's name. One plan edit for all of them.
    */
+  /** One press removes a picture or text from a layer that cannot hold it - the same CLEAR edit the drawer would make. */
+  async function handleRemoveContent(problem: NonContentContentProblem): Promise<void> {
+    setBusySuggestionId(`remove-${problem.mappingId}`);
+    setActionError(null);
+    const result = await applyEdit([
+      problem.what === "text"
+        ? { type: "CLEAR_TEXT" as const, scenePlanId: problem.scenePlanId, mappingId: problem.mappingId }
+        : { type: "CLEAR_ASSET" as const, scenePlanId: problem.scenePlanId, mappingId: problem.mappingId }
+    ]);
+    setBusySuggestionId(null);
+    if (!result.ok) {
+      setActionError(result.message ?? null);
+    }
+  }
+
   async function handleKeepTemplateText(mappingIds: string[], findings: MappingSuggestion[], decision: "KEEP_TEMPLATE_TEXT" | "NO_TEXT" = "KEEP_TEMPLATE_TEXT"): Promise<void> {
     setBusySuggestionId(findings[0]?.id ?? "keep-template-text");
     setActionError(null);
@@ -440,7 +470,7 @@ export function SimpleScenesView(): ReactElement {
           ) : (
             <Button
               variant={currentGuideStep === guideSteps.length - 1 || currentGuideStep === -1 ? "primary" : "secondary"}
-              disabled={!allReady || isApproving || isStale || picturesHold}
+              disabled={!allReady || isApproving || isStale || picturesHold || contentHold}
               disabledReason={approveDisabledReason}
               onClick={() => void handleApprove()}
             >
@@ -494,6 +524,8 @@ export function SimpleScenesView(): ReactElement {
               quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
               needsConfirmation={cardsNeedingConfirmation.has(realScene.scenePlan.id)}
+              contentProblems={contentProblemsByCard.get(realScene.scenePlan.id) ?? []}
+              onRemoveContent={(problem) => void handleRemoveContent(problem)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
               onEdit={(focusMappingId) => {
                 setFocusMappingId(focusMappingId ?? null);
@@ -545,6 +577,8 @@ export function SimpleScenesView(): ReactElement {
               quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
               needsConfirmation={cardsNeedingConfirmation.has(realScene.scenePlan.id)}
+              contentProblems={contentProblemsByCard.get(realScene.scenePlan.id) ?? []}
+              onRemoveContent={(problem) => void handleRemoveContent(problem)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
               onEdit={(focusMappingId) => {
                 setFocusMappingId(focusMappingId ?? null);

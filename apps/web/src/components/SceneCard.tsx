@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
-import type { AssetDto, MappingSuggestion, PlaceholderMapping } from "@dyo/schemas";
+import type { AssetDto, MappingSuggestion, NonContentContentProblem, PlaceholderMapping } from "@dyo/schemas";
 import type { RealScene } from "../lib/real-scene-grouping";
 import type { ScenePreviewEntry, ScenePreviewState } from "../lib/use-scene-preview-queue";
 import { assetFileUrl, sceneEvidencePreviewFileUrl } from "../lib/projects-api-client";
@@ -147,6 +147,9 @@ export interface SceneCardProps {
   cardMappings?: readonly PlaceholderMapping[];
   /** A picture on this card still waits for the person's confirmation in the "check where your pictures will appear" box (2026-10-09): the card is marked and says so. */
   needsConfirmation?: boolean;
+  /** Pictures or texts on this card's layers that cannot hold them (the template's camera, a helper) - each shown with its sentence and removed with one press (2026-10-09). */
+  contentProblems?: readonly NonContentContentProblem[];
+  onRemoveContent?: (problem: NonContentContentProblem) => void;
   /**
    * Records "keep the template's text" for these text layers, and settles any
    * no-change findings about them. Absent: the older behaviour, where
@@ -195,7 +198,9 @@ export function SceneCard({
   onNoText,
   templateTextOf,
   quietActions = false,
-  needsConfirmation = false
+  needsConfirmation = false,
+  contentProblems = [],
+  onRemoveContent
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
   const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
@@ -274,8 +279,18 @@ export function SceneCard({
   const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
 
   return (
-    <Card className={needsConfirmation ? "scene-card scene-card--needs-confirmation" : "scene-card"} data-needs-confirmation={needsConfirmation ? "true" : undefined}>
+    <Card className={needsConfirmation || contentProblems.length > 0 ? "scene-card scene-card--needs-confirmation" : "scene-card"} data-needs-confirmation={needsConfirmation || contentProblems.length > 0 ? "true" : undefined}>
       {needsConfirmation ? <p className="scene-card__attention">{t.simpleScenes.cardNeedsConfirmation}</p> : null}
+      {contentProblems.map((problem) => (
+        <div key={problem.mappingId} className="scene-card__problem" role="alert">
+          <p className="scene-card__attention">{problem.sentence}</p>
+          {onRemoveContent ? (
+            <Button variant="primary" size="sm" disabled={suggestionsBusy} onClick={() => onRemoveContent(problem)}>
+              {problem.what === "text" ? t.simpleScenes.removeTextAction : t.simpleScenes.removePictureAction}
+            </Button>
+          ) : null}
+        </div>
+      ))}
       {/*
         2026-10-04 audit: the card's big title was the template author's name
         ("Transition_scene_03", "!MAIN") with "Scene 3" as a small label above

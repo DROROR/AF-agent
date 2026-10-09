@@ -1104,3 +1104,72 @@ describe("SimpleScenesView - pictures still waiting for confirmation hold Approv
     expect(he.simpleScenes.approveNeedsPictures(1)).toContain(he.simpleScenes.slotBulk.showAllAction(1));
   });
 });
+
+// REAL 2026-10-09, the operator: "why is the problem not marked where it is -
+// the next tab reports the previous tab's issue". A picture on the template's
+// camera was approved and failed at the Preview tab. It is now found on the
+// Scenes tab with the same rule the gate uses, holds Approve, marks the card,
+// and is removed with one press.
+describe("SimpleScenesView - a picture on a layer that cannot hold it is marked on its card and removed with one press (2026-10-09)", () => {
+  function setupWithPictureOnCamera(calls: Parameters<typeof stubFetchByUrl>[1]): void {
+    const manifest = manifestWithNested() as ReturnType<typeof manifestFixture>;
+    // The finder is scene-scoped: the manifest scene must be the plan scene's composition.
+    manifest.scenes[0]!.compositionId = "comp-parent";
+    manifest.scenes[0]!.placeholders.push(
+      placeholderFixture({
+        placeholderId: "ph-camera",
+        compositionId: "comp-parent",
+        layerName: "Camera 1",
+        placeholderType: "unknown",
+        editable: false,
+        sourceType: "CameraLayer",
+        originalText: undefined
+      }) as never
+    );
+    const scenes = [
+      sceneFixture({
+        id: "scene-parent",
+        manifestCompositionId: "comp-parent",
+        compositionName: "App Features",
+        approvalState: "READY_FOR_APPROVAL",
+        unresolvedReasons: [],
+        mappings: [mappingFixture({ id: "m-cam", manifestPlaceholderId: "ph-camera", placeholderName: "Camera 1", selectedAssetId: "asset-1", selectedAssetType: "image" })]
+      }),
+      sceneFixture({ id: "scene-nested", manifestCompositionId: "comp-nested", compositionName: "Phone Frame", mappings: [], approvalState: "READY_FOR_APPROVAL", unresolvedReasons: [] })
+    ];
+    stubFetchByUrl(
+      {
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } },
+        [`/api/projects/${PROJECT_ID}/mapping-suggestions`]: { status: 200, body: { suggestions: [], aiAvailable: false, sceneEvidenceAvailability: {} } },
+        [`/api/projects/${PROJECT_ID}/assets`]: { status: 200, body: { assets: [assetFixture({ width: 600, height: 1200 })] } },
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: [
+          { status: 200, body: { plan: planFixture({}, scenes), sceneTable: [] } },
+          { status: 200, body: { plan: planFixture({ revision: 2 }, scenes), sceneTable: [] } }
+        ],
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest } },
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } }
+      },
+      calls
+    );
+  }
+
+  it("holds Approve, says why in the button's reason, and marks the card with the sentence and a Remove button that sends the CLEAR edit", async () => {
+    const calls: NonNullable<Parameters<typeof stubFetchByUrl>[1]> = [];
+    setupWithPictureOnCamera(calls);
+    renderView();
+    const card = (await screen.findByRole("heading", { name: "Scene 1" })).closest(".scene-card")!;
+    await waitFor(() => expect(card.classList.contains("scene-card--needs-confirmation")).toBe(true));
+    expect(screen.getByText(/"Camera 1" is part of the template's own setup \(a camera\) and cannot hold a picture/)).toBeTruthy();
+    const approve = screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(approve.getAttribute("title")).toContain("First remove the picture or text marked in red below");
+    fireEvent.click(screen.getByRole("button", { name: "Remove the picture" }));
+    await waitFor(() => {
+      const edit = calls.find((call) => call.url.endsWith("/execution-plan") && call.method === "PATCH");
+      expect(edit).toBeTruthy();
+      expect(JSON.stringify(edit!.body)).toContain('"type":"CLEAR_ASSET"');
+      expect(JSON.stringify(edit!.body)).toContain('"mappingId":"m-cam"');
+    });
+  });
+});

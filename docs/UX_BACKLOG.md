@@ -347,3 +347,9 @@ Done: the Simple view already knows which pictures the gate means (the same list
 - **One size for every header, one for every subheader.** Each template text keeps its own size and the fit shrinks each independently. The client expects headers to match across scenes. Needs a decision: a per-plan "header size" that overrides the template, or leave the template's typography.
 - **Where is the background colour?** "Colours for the whole video" lists the colours inspection found; the client asks that the background and the background elements be named as such. Verify on his template which solids/controls those are, and label them.
 - **Two-line text in the planner.** Works today by typing a line break in the text (reaches After Effects as a carriage return) and, since the box layout, by wrapping inside the template's width. The AI planner should be told the template's line count per text so it writes lines that fit.
+
+## 2026-10-09 - a problem must be marked where it is fixed, not one tab later (done)
+
+The operator, on the QA project: the Preview tab said `"Camera 1" ... cannot hold a picture - remove the picture from it on the Scenes tab`, which is true and plain, but it is the Scenes tab's problem reported on the next tab, with nothing marked. His words: "why is the problem not highlighted with clearance where it is".
+
+Done: the Scenes tab runs the same rule the gate and the build use (`findNonContentContentProblems`, one function in `@dyo/schemas`). While any picture or text sits on a layer that cannot hold it, "Approve Scenes" is held with the reason, the scene's card is outlined in red and carries the sentence, and a "Remove the picture" / "Remove the text" button fixes it in one press (the same CLEAR edit the drawer would make). The Preview tab's refusal stays as a backstop for an older plan. English and Hebrew.

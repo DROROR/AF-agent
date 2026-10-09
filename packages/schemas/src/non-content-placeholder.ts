@@ -53,3 +53,42 @@ export function mappingCarriesContent(mapping: { selectedAssetId: string | null;
   }
   return null;
 }
+
+/** One plan mapping that carries a picture or text on a layer the template reading marks as not a place for content, with the sentence to say about it. */
+export interface NonContentContentProblem {
+  scenePlanId: string;
+  mappingId: string;
+  placeholderName: string;
+  what: "a picture" | "text";
+  sentence: string;
+}
+
+/**
+ * Every used-scene mapping carrying content on a non-content layer - the one
+ * list the Scenes tab (hold Approve, mark the card, offer "remove it"), the
+ * approval gate and the dispatcher all read, so the problem is shown where
+ * it can be fixed and never first reported one tab later.
+ */
+export function findNonContentContentProblems(
+  scenePlans: readonly { id: string; use: boolean; manifestCompositionId: string; mappings: readonly { id: string; manifestPlaceholderId: string | null; selectedAssetId: string | null; text: string | null }[] }[],
+  manifest: { scenes: readonly { compositionId: string; placeholders: readonly { placeholderId: string; editable: boolean; layerName: string; sourceType: string | null }[] }[] }
+): NonContentContentProblem[] {
+  const problems: NonContentContentProblem[] = [];
+  for (const scene of scenePlans) {
+    if (!scene.use) {
+      continue;
+    }
+    const manifestScene = manifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
+    for (const mapping of scene.mappings) {
+      const what = mappingCarriesContent(mapping);
+      if (what === null || mapping.manifestPlaceholderId === null) {
+        continue;
+      }
+      const placeholder = manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId);
+      if (placeholder && isNonContentPlaceholder(placeholder)) {
+        problems.push({ scenePlanId: scene.id, mappingId: mapping.id, placeholderName: placeholder.layerName, what, sentence: describeNonContentPlaceholderRefusal(placeholder, what) });
+      }
+    }
+  }
+  return problems;
+}

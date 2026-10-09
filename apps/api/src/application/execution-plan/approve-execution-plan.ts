@@ -1,8 +1,6 @@
 import {
-  describeNonContentPlaceholderRefusal,
+  findNonContentContentProblems,
   getExecutionPlanReadiness,
-  isNonContentPlaceholder,
-  mappingCarriesContent,
   type ApproveExecutionPlanRequest,
   type ExecutionPlanResponse,
   type ScenePlanEntry,
@@ -162,22 +160,5 @@ export async function approveExecutionPlan(
 
 /** One plain sentence per used-scene mapping that carries a picture or text on a layer the template reading marks as not a place for content. */
 export function findNonContentPlaceholderBlockers(scenePlans: readonly ScenePlanEntry[], manifest: TemplateManifest): string[] {
-  const blockers: string[] = [];
-  for (const scene of scenePlans) {
-    if (!scene.use) {
-      continue;
-    }
-    const manifestScene = manifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
-    for (const mapping of scene.mappings) {
-      const what = mappingCarriesContent(mapping);
-      if (what === null || mapping.manifestPlaceholderId === null) {
-        continue;
-      }
-      const placeholder = manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId);
-      if (placeholder && isNonContentPlaceholder(placeholder)) {
-        blockers.push(describeNonContentPlaceholderRefusal(placeholder, what));
-      }
-    }
-  }
-  return blockers;
+  return findNonContentContentProblems(scenePlans, manifest).map((problem) => problem.sentence);
 }
