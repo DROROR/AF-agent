@@ -33,3 +33,19 @@ describe("fieldsForLayerKind", () => {
     expect(fieldsForLayerKind("image", { hasAsset: false, hasText: true, hasTimestamp: false })).toEqual({ asset: true, text: true, timestamp: false });
   });
 });
+
+// REAL 2026-10-09: the template's camera, with no kind, was "offered everything" and given a picture; the first frame then failed.
+describe("fieldsForLayerKind - a layer that is not a place for content", () => {
+  it("offers nothing, whatever its kind says", () => {
+    expect(fieldsForLayerKind(null, nothingSet, { nonContent: true })).toEqual({ asset: false, text: false, timestamp: false });
+    expect(fieldsForLayerKind("image", nothingSet, { nonContent: true })).toEqual({ asset: false, text: false, timestamp: false });
+  });
+
+  it("still shows a value already saved on it, so it can be cleared", () => {
+    expect(fieldsForLayerKind(null, { hasAsset: true, hasText: false, hasTimestamp: false }, { nonContent: true })).toEqual({ asset: true, text: false, timestamp: false });
+  });
+
+  it("an unknown kind that IS a place for content is offered everything, as before", () => {
+    expect(fieldsForLayerKind(null, nothingSet)).toEqual({ asset: true, text: true, timestamp: true });
+  });
+});

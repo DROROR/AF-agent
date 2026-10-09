@@ -1,4 +1,13 @@
-import { getExecutionPlanReadiness, type ApproveExecutionPlanRequest, type ExecutionPlanResponse } from "@dyo/schemas";
+import {
+  describeNonContentPlaceholderRefusal,
+  getExecutionPlanReadiness,
+  isNonContentPlaceholder,
+  mappingCarriesContent,
+  type ApproveExecutionPlanRequest,
+  type ExecutionPlanResponse,
+  type ScenePlanEntry,
+  type TemplateManifest
+} from "@dyo/schemas";
 import {
   ExecutionPlanNotFoundError,
   PreconditionNotMetError,
@@ -77,6 +86,16 @@ export async function approveExecutionPlan(
     );
   }
 
+  // CONTENT ON A LAYER THAT IS NOT A PLACE FOR CONTENT (real 2026-10-09): a
+  // picture saved onto the template's camera passed every gate and failed
+  // the first frame with a sentence nobody could act on. The manifest's own
+  // `editable: false` is the rule (non-content-placeholder.ts); refused here
+  // in the same words the edit and the dispatcher use.
+  const nonContentBlockers = findNonContentPlaceholderBlockers(current.scenePlans, project.manifest);
+  if (nonContentBlockers.length > 0) {
+    throw new PreconditionNotMetError(nonContentBlockers.join(" | "));
+  }
+
   // LEFTOVER TEMPLATE COPY (2026-09-18 real incident): a text mapping that
   // still says exactly what the purchased template said - or differs only in
   // case/whitespace - blocks approval until a human explicitly decides to
@@ -139,4 +158,26 @@ export async function approveExecutionPlan(
     throw new StaleExecutionPlanRevisionError(request.baseRevision, current.revision);
   }
   return toExecutionPlanResponse(updated);
+}
+
+/** One plain sentence per used-scene mapping that carries a picture or text on a layer the template reading marks as not a place for content. */
+export function findNonContentPlaceholderBlockers(scenePlans: readonly ScenePlanEntry[], manifest: TemplateManifest): string[] {
+  const blockers: string[] = [];
+  for (const scene of scenePlans) {
+    if (!scene.use) {
+      continue;
+    }
+    const manifestScene = manifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
+    for (const mapping of scene.mappings) {
+      const what = mappingCarriesContent(mapping);
+      if (what === null || mapping.manifestPlaceholderId === null) {
+        continue;
+      }
+      const placeholder = manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId);
+      if (placeholder && isNonContentPlaceholder(placeholder)) {
+        blockers.push(describeNonContentPlaceholderRefusal(placeholder, what));
+      }
+    }
+  }
+  return blockers;
 }

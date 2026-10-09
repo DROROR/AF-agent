@@ -1176,6 +1176,8 @@ export const en = {
       colorSwatchLabel: "Pick a colour",
       colorHint: "Only solid-colour layers can be recoloured. Clear the field to leave the template's own colour untouched.",
       layerKindLabels: { text: "Text", image: "Picture", logo: "Logo", phone_screen: "Phone screen", video: "Video", color: "Colour" },
+      /** 2026-10-09: a camera or helper layer is not a place for a picture or text - said instead of offering inputs that the build would then refuse. */
+      nonContentLayerHint: (kind: string): string => `This is part of the template's own setup (${kind}). It cannot hold a picture or text - nothing to do here.`,
       colorControlHint: (templateColor: string): string => `The template uses ${templateColor} here. Pick a colour to change it, or leave it empty to keep the template's.`,
       colorClearAction: "Use the template's colour",
       colorNestedUnsupported:

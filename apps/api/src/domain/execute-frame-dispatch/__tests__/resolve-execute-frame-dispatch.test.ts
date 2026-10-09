@@ -2080,3 +2080,74 @@ describe("resolveExecuteFrameDispatch - a structural placeholder is not content 
     expect(result.ok).toBe(false);
   });
 });
+
+// REAL 2026-10-09 (QA project `mega`): a picture was saved onto the template's
+// camera - a placeholder with no type and editable:false - and the first frame
+// failed with "no resolved classification (null)". The refusal is now the
+// sentence a person can act on, and the same one the edit and the gate use.
+describe("resolveExecuteFrameDispatch - content on a layer that is not a place for content (2026-10-09)", () => {
+  function withCamera(): TemplateManifest {
+    const base = validManifest();
+    const scene = base.scenes[0]!;
+    const camera = {
+      ...scene.placeholders[1]!,
+      placeholderId: "ph-camera",
+      layerName: "Camera 1",
+      layerIndex: 9,
+      placeholderType: "unknown" as const,
+      editable: false,
+      sourceType: "CameraLayer",
+      dimensions: null
+    };
+    delete (camera as { slotFacts?: unknown }).slotFacts;
+    delete (camera as { slotSemantics?: unknown }).slotSemantics;
+    delete (camera as { originalText?: unknown }).originalText;
+    return { ...base, scenes: [{ ...scene, placeholders: [...scene.placeholders, camera] }] };
+  }
+
+  const cameraMapping = (content: { selectedAssetId?: string; text?: string }) => ({
+    id: "map-camera",
+    manifestPlaceholderId: "ph-camera",
+    placeholderName: "Camera 1",
+    placeholderClassification: { value: null, source: "MANIFEST" as const, evidence: [] },
+    selectedAssetId: content.selectedAssetId ?? null,
+    selectedAssetType: content.selectedAssetId ? ("image" as const) : null,
+    text: content.text ?? null,
+    colorHex: null,
+    assetTimestamp: null,
+    layerVisible: null,
+    freezeAtSeconds: null,
+    layerDurationSeconds: null,
+    humanLayerIndex: null,
+    humanNestedTarget: null,
+    keepTemplateText: null,
+    slotReview: null,
+    confidence: null,
+    mappingSource: "MANIFEST" as const,
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString()
+  });
+
+  it("refuses a picture on the camera in a client's words - which layer, what it is, what to do", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: withCamera(),
+        currentPlan: validPlan({
+          scenePlans: [validScene({ mappings: [textMapping({ text: "Reviewed wording" }), cameraMapping({ selectedAssetId: ASSET_ID })] as never })]
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toBe('"Camera 1" is part of the template\'s own setup (a camera) and cannot hold a picture - remove the picture from it on the Scenes tab');
+  });
+
+  it("a camera carrying nothing is still skipped, exactly as before", () => {
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: withCamera(),
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ text: "Reviewed wording" }), cameraMapping({})] as never })] })
+      })
+    );
+    expect(result.ok).toBe(true);
+  });
+});

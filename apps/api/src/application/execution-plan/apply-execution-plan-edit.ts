@@ -1,4 +1,4 @@
-import { isIdentityOrientation, sha256Hex } from "@dyo/schemas";
+import { describeNonContentPlaceholderRefusal, isIdentityOrientation, isNonContentPlaceholder, sha256Hex } from "@dyo/schemas";
 import { randomUUID } from "node:crypto";
 import type { ExecutionPlanEditOperation, NestedTargetStep, PlaceholderMapping, ScenePlanEntry, TemplateManifest } from "@dyo/schemas";
 import { computeSceneUnresolvedReasons } from "../../domain/execution-plan/compute-scene-unresolved-reasons.js";
@@ -243,6 +243,8 @@ function applyExecutionPlanEditRaw(
     }
 
     case "MAP_ASSET": {
+      const nonContentRefusal = refuseNonContentPlaceholder(currentManifest, scene, operation.mappingId, "a picture");
+      if (nonContentRefusal) return nonContentRefusal;
       const result = updateMapping(scene, operation.mappingId, (m) => ({
         ...m,
         selectedAssetId: operation.selectedAssetId,
@@ -265,6 +267,8 @@ function applyExecutionPlanEditRaw(
     }
 
     case "SET_TEXT": {
+      const nonContentRefusal = operation.text.trim() === "" ? null : refuseNonContentPlaceholder(currentManifest, scene, operation.mappingId, "text");
+      if (nonContentRefusal) return nonContentRefusal;
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, text: operation.text, updatedAt: timestamp }));
       if (!result.ok) return result;
       return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
@@ -618,6 +622,35 @@ export function applyExecutionPlanEdit(
  * the dispatch-time guard still refuses independently - this is the earlier,
  * friendlier of two checks, never the only one.
  */
+/**
+ * REAL 2026-10-09: a picture was saved onto the template's camera and the
+ * first frame failed in words nobody could act on. A layer the template
+ * reading marks as not a place for content (see non-content-placeholder.ts)
+ * refuses the picture or text the moment it is offered, in plain words.
+ * Without a manifest (a caller with no project repository) the approval gate
+ * and the dispatcher still refuse independently.
+ */
+function refuseNonContentPlaceholder(
+  currentManifest: TemplateManifest | undefined,
+  scene: ScenePlanEntry,
+  mappingId: string,
+  what: "a picture" | "text"
+): { ok: false; reason: string } | null {
+  if (!currentManifest) {
+    return null;
+  }
+  const mapping = scene.mappings.find((candidate) => candidate.id === mappingId);
+  if (!mapping || mapping.manifestPlaceholderId === null) {
+    return null;
+  }
+  const manifestScene = currentManifest.scenes.find((s) => s.compositionId === scene.manifestCompositionId);
+  const placeholder = manifestScene?.placeholders.find((p) => p.placeholderId === mapping.manifestPlaceholderId);
+  if (!placeholder || !isNonContentPlaceholder(placeholder)) {
+    return null;
+  }
+  return { ok: false, reason: describeNonContentPlaceholderRefusal(placeholder, what) };
+}
+
 function isColorControlPlaceholder(currentManifest: TemplateManifest | undefined, scene: ScenePlanEntry, manifestPlaceholderId: string | null): boolean {
   if (!currentManifest || manifestPlaceholderId === null) {
     return false;

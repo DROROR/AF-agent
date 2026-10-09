@@ -1,5 +1,5 @@
 import { describeTemplateCopyBlockers, findTemplateCopyBlockers } from "../execution-plan/evaluate-template-copy.js";
-import { computeEffectiveVisibility, describeSlotBlockers, findSlotBlockers, isIdentityOrientation, isNoTextDecision, selectScenePreviewFrameSeconds } from "@dyo/schemas";
+import { computeEffectiveVisibility, describeNonContentPlaceholderRefusal, describeSlotBlockers, findSlotBlockers, isIdentityOrientation, isNoTextDecision, isNonContentPlaceholder, mappingCarriesContent, selectScenePreviewFrameSeconds } from "@dyo/schemas";
 import type { AssetOrientation } from "@dyo/schemas";
 import type {
   ExecuteSceneEditRequest,
@@ -476,6 +476,17 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
         ok: false,
         reason: `Mapping "${mapping.id}" references manifestPlaceholderId "${mapping.manifestPlaceholderId}" which no longer exists in the current manifest`
       };
+    }
+
+    // REAL 2026-10-09: a picture saved onto the template's camera reached
+    // this point and failed as "no resolved classification (null)". The
+    // manifest's own `editable: false` names such a layer; the refusal is
+    // the same sentence the edit and the approval gate use, so a plan that
+    // slipped past both (an older revision) still fails in words a person
+    // can act on.
+    const carried = mappingCarriesContent(mapping);
+    if (carried !== null && isNonContentPlaceholder(placeholder)) {
+      return { ok: false, reason: describeNonContentPlaceholderRefusal(placeholder, carried) };
     }
 
     // Defensive against a plan revision persisted before these four fields

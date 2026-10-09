@@ -23,9 +23,17 @@ export interface MappingCurrentValues {
 
 const STILL_KINDS: ReadonlySet<string> = new Set(["image", "logo", "phone_screen"]);
 
-export function fieldsForLayerKind(kind: string | null, current: MappingCurrentValues): MappingFieldVisibility {
-  const base: MappingFieldVisibility =
-    kind === "text"
+/**
+ * REAL 2026-10-09: the template's camera - no kind, "offered everything" - was
+ * given a picture, and the first frame failed. A layer the template reading
+ * marks as not a place for content (`editable: false`, see @dyo/schemas
+ * non-content-placeholder.ts) offers nothing; a value already saved on it is
+ * still shown so it can be cleared.
+ */
+export function fieldsForLayerKind(kind: string | null, current: MappingCurrentValues, options: { nonContent?: boolean } = {}): MappingFieldVisibility {
+  const base: MappingFieldVisibility = options.nonContent
+    ? { asset: false, text: false, timestamp: false }
+    : kind === "text"
       ? { asset: false, text: true, timestamp: false }
       : kind === "video"
         ? { asset: true, text: false, timestamp: true }

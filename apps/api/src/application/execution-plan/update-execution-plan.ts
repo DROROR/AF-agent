@@ -72,7 +72,12 @@ export async function updateExecutionPlan(
     "SET_BRAND_COLOR",
     "SET_LAYER_VISIBILITY",
     "SET_TIME_REMAP_FREEZE",
-    "SET_LAYER_DURATION"
+    "SET_LAYER_DURATION",
+    // 2026-10-09: a picture or text offered to a layer the template reading
+    // marks as not a place for content is refused at edit time (see
+    // apply-execution-plan-edit.ts refuseNonContentPlaceholder).
+    "MAP_ASSET",
+    "SET_TEXT"
   ]);
   const requiresManifest = request.operations.some((operation) => operation.type === "ADD_MAPPING" && operation.humanNestedTarget != null);
   const benefitsFromManifest = request.operations.some((operation) => nestedSensitiveEditTypes.has(operation.type));

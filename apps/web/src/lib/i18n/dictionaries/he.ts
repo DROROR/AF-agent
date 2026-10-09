@@ -1014,6 +1014,7 @@ export const he: Dictionary = {
       colorSwatchLabel: "בחרו צבע",
       colorHint: "רק שכבות בצבע אחיד ניתנות לצביעה מחדש. נקו את השדה כדי להשאיר את הצבע של התבנית.",
       layerKindLabels: { text: "טקסט", image: "תמונה", logo: "לוגו", phone_screen: "מסך טלפון", video: "וידאו", color: "צבע" },
+      nonContentLayerHint: (kind: string): string => `זה חלק מההגדרות של התבנית עצמה (${kind}). אי אפשר לשים כאן תמונה או טקסט - אין מה לעשות כאן.`,
       colorControlHint: (templateColor: string): string => `התבנית משתמשת כאן ב-${templateColor}. בחרו צבע כדי לשנות, או השאירו ריק כדי לשמור על צבע התבנית.`,
       colorClearAction: "השתמשו בצבע של התבנית",
       colorNestedUnsupported:

@@ -2,6 +2,7 @@
 
 import { useWorkspaceModeIfPresent } from "./WorkspaceModeProvider";
 import { useEffect, useState, type ReactElement } from "react";
+import { describeLayerKindPlainly, isNonContentPlaceholder } from "@dyo/schemas";
 import {
   assessMappingSlot,
   assessTemplateCopy,
@@ -335,14 +336,40 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
     return scene!.mappings.find((candidate) => candidate.id === mappingId)?.placeholderClassification.value ?? null;
   }
 
+  /** The manifest placeholder a mapping came from - null for a human-added mapping or a manifest that no longer holds it. */
+  function manifestPlaceholderFor(mappingId: string): { editable: boolean; layerName: string; sourceType: string | null } | null {
+    const mapping = scene!.mappings.find((candidate) => candidate.id === mappingId);
+    if (!mapping || mapping.manifestPlaceholderId === null) {
+      return null;
+    }
+    for (const manifestScene of project?.manifest.scenes ?? []) {
+      for (const placeholder of manifestScene.placeholders) {
+        if (placeholder.placeholderId === mapping.manifestPlaceholderId) {
+          return placeholder;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** True when the template reading says this layer is not a place for a picture or text (a camera, a light, a helper) - 2026-10-09. */
+  function isNonContentLayer(mappingId: string): boolean {
+    const placeholder = manifestPlaceholderFor(mappingId);
+    return placeholder !== null && isNonContentPlaceholder(placeholder);
+  }
+
   /** What this layer's section offers - decided by the layer's own kind, see mapping-field-visibility.ts. */
   function fieldsFor(mappingId: string): MappingFieldVisibility {
     const original = scene!.mappings.find((candidate) => candidate.id === mappingId);
-    return fieldsForLayerKind(classificationFor(mappingId), {
-      hasAsset: (original?.selectedAssetId ?? null) !== null,
-      hasText: (original?.text ?? "") !== "",
-      hasTimestamp: (original?.assetTimestamp ?? null) !== null
-    });
+    return fieldsForLayerKind(
+      classificationFor(mappingId),
+      {
+        hasAsset: (original?.selectedAssetId ?? null) !== null,
+        hasText: (original?.text ?? "") !== "",
+        hasTimestamp: (original?.assetTimestamp ?? null) !== null
+      },
+      { nonContent: isNonContentLayer(mappingId) }
+    );
   }
 
   /** Assessed with the SAME pure function the backend gate uses, against the text currently typed in the form - so the warning tracks what the reviewer is actually about to save. */
@@ -788,6 +815,11 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
               name the template's author gave the place, so Simple view shows
               it, as the template's word and not as ours.
             */}
+            {isNonContentLayer(mapping.mappingId) ? (
+              <p className="field__hint">
+                {t.projectWorkspace.editDrawer.nonContentLayerHint(describeLayerKindPlainly(manifestPlaceholderFor(mapping.mappingId)?.sourceType ?? null))}
+              </p>
+            ) : null}
             {isSimple && fieldsFor(mapping.mappingId).asset && (manifestLayerPathFor(mapping.mappingId) ?? []).length > 0 ? (
               <p className="field__hint">{t.projectWorkspace.editDrawer.simple.templatePlaceName(String((manifestLayerPathFor(mapping.mappingId) ?? []).slice(-1)[0]))}</p>
             ) : null}

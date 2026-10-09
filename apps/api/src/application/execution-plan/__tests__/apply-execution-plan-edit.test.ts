@@ -807,3 +807,68 @@ describe("nested manifest placeholders - edit-time refusal", () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// REAL 2026-10-09 (QA project `mega`): a picture was saved onto the template's
+// camera - editable:false in the manifest - and the first frame then failed in
+// words nobody could act on. The edit refuses it the moment it is offered.
+describe("applyExecutionPlanEdit - a layer that is not a place for content refuses a picture or text (2026-10-09)", () => {
+  function manifestWithCamera(): TemplateManifest {
+    const base = nestedTargetManifest();
+    return {
+      ...base,
+      scenes: [
+        {
+          sceneId: "scene-comp-1",
+          compositionId: "comp-1",
+          displayName: null,
+          durationSeconds: 5,
+          placeholders: [
+            {
+              placeholderId: "ph-camera",
+              displayLabel: null,
+              compositionId: "comp-1",
+              layerName: "Camera 1",
+              layerIndex: 1,
+              layerPath: [],
+              placeholderType: "unknown",
+              editable: false,
+              sourceType: "CameraLayer",
+              dimensions: null,
+              startTimeSeconds: 0,
+              durationSeconds: 5,
+              evidence: { source: "unknown", reason: "no confident structural signal matched a known placeholder type" }
+            } as never
+          ]
+        } as never
+      ]
+    };
+  }
+  const cameraScene = () => scene({ mappings: [mapping({ id: "map-camera", manifestPlaceholderId: "ph-camera", placeholderName: "Camera 1" })] });
+
+  it("refuses a picture on the camera, naming the layer and what to do", () => {
+    const result = applyExecutionPlanEdit(
+      [cameraScene()],
+      { type: "MAP_ASSET", scenePlanId: "scene-1", mappingId: "map-camera", selectedAssetId: "11111111-1111-1111-1111-111111111111", selectedAssetType: "image" },
+      fixedNow,
+      manifestWithCamera()
+    );
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.reason).toBe('"Camera 1" is part of the template\'s own setup (a camera) and cannot hold a picture - remove the picture from it on the Scenes tab');
+  });
+
+  it("refuses text on it too, but a blank text (clearing) is always allowed", () => {
+    const refused = applyExecutionPlanEdit([cameraScene()], { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "map-camera", text: "שלום" }, fixedNow, manifestWithCamera());
+    expect(refused.ok).toBe(false);
+    const cleared = applyExecutionPlanEdit([cameraScene()], { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "map-camera", text: "" }, fixedNow, manifestWithCamera());
+    expect(cleared.ok).toBe(true);
+  });
+
+  it("without a manifest the edit cannot judge and accepts as before - the approval gate and the dispatcher still refuse", () => {
+    const result = applyExecutionPlanEdit(
+      [cameraScene()],
+      { type: "MAP_ASSET", scenePlanId: "scene-1", mappingId: "map-camera", selectedAssetId: "11111111-1111-1111-1111-111111111111", selectedAssetType: "image" },
+      fixedNow
+    );
+    expect(result.ok).toBe(true);
+  });
+});

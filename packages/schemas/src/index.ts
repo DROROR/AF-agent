@@ -30,4 +30,5 @@ export * from "./template-copy.js";
 export * from "./disposable-inspection.js";
 export * from "./slot-semantics.js";
 export * from "./slot-readiness.js";
+export * from "./non-content-placeholder.js";
 export * from "./output-layout-proposal.js";
