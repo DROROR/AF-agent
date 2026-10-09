@@ -202,6 +202,23 @@ export const textDirectionEvidenceSchema = z
     /** Read back from the project AFTER the write. False for RTL text fails the operation closed - it is never reported as a successful edit. */
     directionVerified: z.boolean(),
     composerVerified: z.boolean(),
+    /**
+     * The font step (2026-10-08): the template's font before, the font After
+     * Effects reported after writing a right-to-left text, whether that is the
+     * one asked for, and in plain words why not. Optional: records written
+     * before the font step existed carry none of these. REAL 2026-10-09: this
+     * schema is strict and had no such fields, so a worker that reported them
+     * had its whole evidence record dropped on the way into the job result -
+     * the first Hebrew build after the font fix showed no text evidence at all.
+     */
+    fontBefore: z.string().nullable().optional(),
+    fontApplied: z.string().nullable().optional(),
+    fontVerified: z.boolean().optional(),
+    fontFallback: z.string().nullable().optional(),
+    /** The paragraph justification before and after the write, and whether it was mirrored because the base direction flipped (2026-10-09). */
+    justificationBefore: z.string().nullable().optional(),
+    justificationApplied: z.string().nullable().optional(),
+    justificationMirrored: z.boolean().optional(),
     /** The stored text's code-unit sequence was compared with the requested one, position by position. */
     textCodeUnitsVerified: z.boolean(),
     codeUnitCount: z.number().int().nonnegative(),

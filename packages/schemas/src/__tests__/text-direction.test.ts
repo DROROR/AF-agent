@@ -167,6 +167,33 @@ describe("textDirectionEvidenceSchema", () => {
     expect(parsed.requiredDirection).toBe("RTL");
   });
 
+  it("accepts the font and justification fields a 2026-10 worker reports - the strict schema used to drop the whole record over them (real 2026-10-09)", () => {
+    const parsed = textDirectionEvidenceSchema.parse({
+      requiredDirection: "RTL",
+      rtlScripts: ["Hebrew"],
+      isMixed: false,
+      requiresBidiHandling: true,
+      previousDirection: "10211",
+      previousComposerEngine: "10412",
+      appliedDirection: "10212",
+      appliedComposerEngine: "10413",
+      directionVerified: true,
+      composerVerified: true,
+      fontBefore: "Montserrat-Medium",
+      fontApplied: "Heebo-Medium",
+      fontVerified: true,
+      fontFallback: null,
+      justificationBefore: "7413",
+      justificationApplied: "7414",
+      justificationMirrored: true,
+      textCodeUnitsVerified: true,
+      codeUnitCount: 45,
+      note: null
+    });
+    expect(parsed.fontApplied).toBe("Heebo-Medium");
+    expect(parsed.justificationMirrored).toBe(true);
+  });
+
   it("defaults the optional evidence fields so an older worker's record still parses", () => {
     const parsed = textDirectionEvidenceSchema.parse({
       requiredDirection: "LTR",

@@ -419,7 +419,7 @@ function buildSetTextMutation(text: string): string {
             return null;
           };
           var __rtlFontFor = function (__templateFont) {
-            var __lower = String(__templateFont === null || __templateFont === undefined ? "" : __templateFont).toLowerCase().replace(/[\s_]/g, "");
+            var __lower = String(__templateFont === null || __templateFont === undefined ? "" : __templateFont).toLowerCase().replace(/[\\s_]/g, "");
             var __style = __lower.indexOf("-") >= 0 ? __lower.substring(__lower.lastIndexOf("-") + 1) : __lower;
             for (var __w = 0; __w < __rtlWeightTable.length; __w++) {
               if (__style.indexOf(__rtlWeightTable[__w][0]) >= 0) { return ${JSON.stringify(RTL_TEXT_FONT_FAMILY)} + "-" + __rtlWeightTable[__w][1]; }
@@ -472,12 +472,42 @@ function buildSetTextMutation(text: string): string {
               }
             }
           }
+          // REAL 2026-10-09 (client project 3241977f, Scene_03, measured on
+          // the template and seen in the built frame): After Effects lays a
+          // right-to-left paragraph out from its anchor towards the LEFT when
+          // the paragraph is left-justified - the mirror image of the same
+          // left-justified Latin line, which runs to the right. So the Hebrew
+          // headline and paragraph of a template whose texts sit to the right
+          // of their anchor ran leftwards, over the phones, and the headline
+          // left its reveal matte (which lies to the right) entirely. When the
+          // base direction flips, the justification is mirrored with it -
+          // LEFT <-> RIGHT, and the last line of a fully justified paragraph
+          // likewise - so the text keeps the template's own side of the
+          // anchor. Centred text needs nothing. Recorded in the evidence.
+          var __justBefore = null;
+          var __justApplied = null;
+          var __justMirrored = false;
+          var __readJustification = function (__doc) {
+            try { return __doc.justification === undefined || __doc.justification === null ? null : String(__doc.justification); } catch (__justReadError) { return null; }
+          };
+          __justBefore = __readJustification(__td);
+          if (__requiresBidi && __dirFailureReason === null && __previousDirection !== __wantedDirection && typeof ParagraphJustification !== "undefined") {
+            var __mirrorPairs = [["LEFT_JUSTIFY", "RIGHT_JUSTIFY"], ["RIGHT_JUSTIFY", "LEFT_JUSTIFY"], ["FULL_JUSTIFY_LASTLINE_LEFT", "FULL_JUSTIFY_LASTLINE_RIGHT"], ["FULL_JUSTIFY_LASTLINE_RIGHT", "FULL_JUSTIFY_LASTLINE_LEFT"]];
+            for (var __mp = 0; __mp < __mirrorPairs.length; __mp++) {
+              var __from = ParagraphJustification[__mirrorPairs[__mp][0]], __to = ParagraphJustification[__mirrorPairs[__mp][1]];
+              if (__from !== undefined && __to !== undefined && __td.justification === __from) {
+                try { __td.justification = __to; __justMirrored = true; } catch (__justWriteError) { __justMirrored = false; }
+                break;
+              }
+            }
+          }
           if (__dirFailureReason !== null) {
             __result = JSON.stringify({ ok: false, failureReason: __dirFailureReason });
           } else {
             __layer.sourceText.setValue(__td);
             var __storedDoc = __layer.sourceText.value;
             var __storedText = __storedDoc.text;
+            __justApplied = __readJustification(__storedDoc);
             __appliedDirection = __readDirection(__storedDoc);
             __appliedComposer = __readComposer(__storedDoc);
             var __textVerified = true;
@@ -526,6 +556,9 @@ function buildSetTextMutation(text: string): string {
               fontApplied: __requiresBidi ? __fontApplied : null,
               fontVerified: __fontVerified,
               fontFallback: __fontFallback,
+              justificationBefore: __justBefore,
+              justificationApplied: __justApplied,
+              justificationMirrored: __justMirrored,
               textCodeUnitsVerified: __textVerified,
               codeUnitCount: __expectedCodeUnits.length,
               note: __dirNote

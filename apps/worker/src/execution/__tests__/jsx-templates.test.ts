@@ -4035,3 +4035,84 @@ describe("SET_TEXT auto-fit - a parented text cut by a matte is shrunk through i
     expect(outcome.scale).toEqual([97.2, 97.2, 100]);
   });
 });
+
+// REAL 2026-10-09 (client project 3241977f, Scene_03, measured with
+// describeLayerAtTime on the template and seen in the built frame): "Text C" is
+// a LEFT_JUSTIFY paragraph whose anchor sits at the left of the template's own
+// English lines, which run to the right of it. After Effects lays the same
+// paragraph out to the LEFT of the anchor once its base direction is
+// right-to-left - so the Hebrew ran over the phones, and the headline left its
+// reveal matte (which lies to the right of the anchor) entirely.
+describe("SET_TEXT - the justification is mirrored when the base direction flips (2026-10-09)", () => {
+  const setup = (justification: string, direction: string) => `
+    function CompItem() {}
+    function AVLayer() {}
+    function TextLayer() {}
+    TextLayer.prototype = new AVLayer();
+    function SolidSource() {}
+    var MaskMode = { NONE: 6812, ADD: 6813, SUBTRACT: 6814 };
+    var ParagraphJustification = { LEFT_JUSTIFY: "LEFT_JUSTIFY", RIGHT_JUSTIFY: "RIGHT_JUSTIFY", CENTER_JUSTIFY: "CENTER_JUSTIFY", FULL_JUSTIFY_LASTLINE_LEFT: "FULL_JUSTIFY_LASTLINE_LEFT", FULL_JUSTIFY_LASTLINE_RIGHT: "FULL_JUSTIFY_LASTLINE_RIGHT", FULL_JUSTIFY_LASTLINE_CENTER: "FULL_JUSTIFY_LASTLINE_CENTER", FULL_JUSTIFY_LASTLINE_FULL: "FULL_JUSTIFY_LASTLINE_FULL" };
+    var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };
+    var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };
+    function prop(value) { return { numKeys: 0, value: value, valueAtTime: function () { return this.value; }, setValue: function (v) { this.value = v; } }; }
+    var __textProps = { "ADBE Scale": prop([237, 237, 100]), "ADBE Anchor Point": prop([0, 0, 0]), "ADBE Position": prop([168, 17, 0]), "ADBE Rotate Z": prop(0) };
+    var __text = new TextLayer();
+    __text.name = "Text C"; __text.index = 4; __text.enabled = true; __text.threeDLayer = true; __text.parent = null; __text.inPoint = 1; __text.outPoint = 8; __text.locked = false;
+    __text.sourceText = { value: { text: "This project is suitable for all.", font: "Montserrat-Medium", fontSize: 10, justification: ${JSON.stringify(justification)}, direction: ${JSON.stringify(direction)}, composerEngine: "LATIN_COMPOSER_ENGINE" }, setValue: function (v) { this.value = v; } };
+    __text.sourceRectAtTime = function () { return { left: 0, top: -6, width: 158, height: 32 }; };
+    __text.property = function (n) {
+      if (n === "ADBE Transform Group") { return { property: function (inner) { return __textProps[inner] || null; } }; }
+      if (n === "ADBE Effect Parade") { return { numProperties: 0, property: function () { return null; } }; }
+      return null;
+    };
+    var __comp = new CompItem();
+    __comp.name = "Scene_03"; __comp.width = 1920; __comp.height = 1080; __comp.duration = 7; __comp.numLayers = 4; __comp.time = 0;
+    __comp.layer = function (i) { return i === 4 ? __text : null; };
+    __text.containingComp = __comp;
+    var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 6 ? __comp : null; } } };
+  `;
+
+  function run(text: string, justification: string, direction = "DIRECTION_LEFT_TO_RIGHT") {
+    const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-c", layerIndex: 4, nestedTarget: null, text };
+    const script = buildOperationScript(6, "Scene_03", op);
+    const probed = script.replace(/return __result;\s*$/, `; __result = JSON.stringify({ step: __result, justification: __text.sourceText.value.justification, direction: __text.sourceText.value.direction });\n  return __result;`);
+    expect(probed).not.toBe(script);
+    const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup(justification, direction)));
+    return { ...outcome, step: JSON.parse(outcome.step) };
+  }
+
+  it("a left-justified Latin paragraph replaced by Hebrew becomes right-to-left AND right-justified, so it keeps the template's side of the anchor - and the evidence says so", () => {
+    const outcome = run("ספריית אימונים עשירה, לכל רמת כושר, בזמן שלך.", "LEFT_JUSTIFY");
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.direction).toBe("DIRECTION_RIGHT_TO_LEFT");
+    expect(outcome.justification).toBe("RIGHT_JUSTIFY");
+    expect(outcome.step.textDirection).toMatchObject({ justificationBefore: "LEFT_JUSTIFY", justificationApplied: "RIGHT_JUSTIFY", justificationMirrored: true, fontApplied: "Heebo-Medium" });
+  });
+
+  it("a right-justified Latin line becomes left-justified Hebrew, and the last line of a fully justified paragraph swaps the same way", () => {
+    expect(run("שלום עולם", "RIGHT_JUSTIFY").justification).toBe("LEFT_JUSTIFY");
+    expect(run("שלום עולם", "FULL_JUSTIFY_LASTLINE_LEFT").justification).toBe("FULL_JUSTIFY_LASTLINE_RIGHT");
+    expect(run("שלום עולם", "FULL_JUSTIFY_LASTLINE_RIGHT").justification).toBe("FULL_JUSTIFY_LASTLINE_LEFT");
+  });
+
+  it("centred text, a template already right-to-left, and Latin text are left exactly as they are", () => {
+    const centred = run("שלום עולם", "CENTER_JUSTIFY");
+    expect(centred.justification).toBe("CENTER_JUSTIFY");
+    expect(centred.step.textDirection.justificationMirrored).toBe(false);
+    const alreadyRtl = run("שלום עולם", "RIGHT_JUSTIFY", "DIRECTION_RIGHT_TO_LEFT");
+    expect(alreadyRtl.justification).toBe("RIGHT_JUSTIFY");
+    expect(alreadyRtl.step.textDirection.justificationMirrored).toBe(false);
+    const latin = run("Hello world", "LEFT_JUSTIFY");
+    expect(latin.justification).toBe("LEFT_JUSTIFY");
+    expect(latin.direction).toBe("DIRECTION_LEFT_TO_RIGHT");
+    expect(latin.step.textDirection.justificationMirrored).toBe(false);
+  });
+});
+
+describe("SET_TEXT - the font-name normaliser the script carries strips whitespace, not the letter s (2026-10-09 lint find)", () => {
+  it("the generated script contains a real \\s class, so 'OpenSans-SemiBold' maps to the SemiBold weight inside After Effects too", () => {
+    const script = buildOperationScript(0, COMP_NAME, { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: "שלום" });
+    expect(script).toContain('.replace(/[\\s_]/g, "")');
+    expect(script).not.toContain('.replace(/[s_]/g, "")');
+  });
+});
