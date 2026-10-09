@@ -404,29 +404,53 @@ Write-CheckResult $true "Updated DYO Worker program files"
 # current user" does. After Effects reads the font list when it starts, and
 # this update restarts it. A font that cannot be installed is reported and
 # never stops the update: the worker then uses Arial for such a line.
+# REAL 2026-10-09 (the client's second update): all nine fonts reported
+# "could not install", although the first update had installed them. This
+# script stops the Worker but leaves After Effects running, and After
+# Effects holds the font files it loaded at start - so copying the same
+# file over a font in use fails. A font already present with the same
+# content now counts as installed (nothing to copy), and a real failure
+# prints After Effects'/Windows' own reason instead of only the file name.
 $fontSource = Join-Path $InstallDir "fonts"
 if (Test-Path $fontSource) {
-  $userFontDir = Join-Path $env:LOCALAPPDATA "Microsoft\Windows\Fonts"
+  $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+  if (-not $localAppData) { $localAppData = $env:LOCALAPPDATA }
+  $userFontDir = Join-Path $localAppData "Microsoft\Windows\Fonts"
   $fontRegistry = "HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts"
   if (-not (Test-Path $userFontDir)) { New-Item -ItemType Directory -Path $userFontDir -Force | Out-Null }
   if (-not (Test-Path $fontRegistry)) { New-Item -Path $fontRegistry -Force | Out-Null }
   $fontsInstalled = 0
+  $fontsAlreadyPresent = 0
   $fontsFailed = @()
+  $firstFontError = $null
   foreach ($fontFile in Get-ChildItem -Path $fontSource -Filter "*.ttf") {
     try {
       $target = Join-Path $userFontDir $fontFile.Name
-      Copy-Item -Path $fontFile.FullName -Destination $target -Force
+      $alreadyPresent = $false
+      if (Test-Path $target) {
+        $sourceHash = (Get-FileHash -Path $fontFile.FullName -Algorithm SHA256).Hash
+        $targetHash = (Get-FileHash -Path $target -Algorithm SHA256).Hash
+        $alreadyPresent = ($sourceHash -eq $targetHash)
+      }
+      if (-not $alreadyPresent) {
+        Copy-Item -Path $fontFile.FullName -Destination $target -Force
+      }
       $registryName = "$($fontFile.BaseName) (TrueType)"
       New-ItemProperty -Path $fontRegistry -Name $registryName -Value $target -PropertyType String -Force | Out-Null
-      $fontsInstalled++
+      if ($alreadyPresent) { $fontsAlreadyPresent++ } else { $fontsInstalled++ }
     } catch {
       $fontsFailed += $fontFile.Name
+      if ($null -eq $firstFontError) { $firstFontError = $_.Exception.Message }
     }
   }
   if ($fontsFailed.Count -eq 0) {
-    Write-CheckResult $true "Installed $fontsInstalled fonts for the current user"
+    if ($fontsInstalled -eq 0) {
+      Write-CheckResult $true "Fonts - all $fontsAlreadyPresent already installed for the current user"
+    } else {
+      Write-CheckResult $true "Installed $fontsInstalled fonts for the current user ($fontsAlreadyPresent were already there)"
+    }
   } else {
-    Write-CheckResult $false "Fonts" ("$fontsInstalled installed; could not install: " + ($fontsFailed -join ", ") + " - Hebrew text will use Arial until this is fixed")
+    Write-CheckResult $false "Fonts" ("$fontsInstalled installed, $fontsAlreadyPresent already there; could not install: " + ($fontsFailed -join ", ") + " - reason: " + $firstFontError + " - a Hebrew line then uses Arial. Close After Effects and run this update again, or double-click each .ttf in " + $fontSource + " and press Install")
   }
 } else {
   Write-Host "[OK] This release ships no fonts folder - nothing to install"

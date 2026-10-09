@@ -2188,3 +2188,9 @@ The client installed b5cc2a8 and rebuilt: "now the text is appearing". Eight fra
 **(4) sizes.** Template sizes differ per scene by design (Scene_01 151 pt, Scene_03 47 pt, Scene_07 90 pt), and the fit shrinks each text independently to its own frame or matte. With wrapping, far less shrinking should be needed; whether the client wants one size for every header across a template is a product decision, not a defect, and is in the UX backlog.
 
 **(5) colours.** The Simple view already has "Colours for the whole video" (WholeVideoColours), which lists the template's solid and Color Control colours; whether the background is among them depends on how the template author built it. In the UX backlog to verify on this template and name the background explicitly.
+
+### 2026-10-09 - the client's update log: "Fonts - 0 installed; could not install: Heebo-*.ttf" (build 80cab9d installed)
+
+The 80cab9d update installed the Worker cleanly ("exactly one process tree") but reported all nine Heebo fonts as not installable. The script stops the Worker and leaves After Effects running; After Effects holds the font files it loaded at start, and the previous update (b5cc2a8) had put those same files there. Copying a file over a font in use fails, and the script swallowed the reason and counted every font as failed. The fonts were, in all likelihood, already installed - the next frame's evidence (`fontApplied`) says for sure; a Hebrew line falls back to Arial only when Heebo is genuinely absent.
+
+**Fix (update script).** A font already present with identical content counts as installed and is not copied; a real failure prints Windows' own reason and the two ways out (close After Effects and run the update again, or double-click the .ttf files). The user font folder is resolved through the .NET special-folder API with `LOCALAPPDATA` as fallback. Not runnable here (no PowerShell on this host); the client's next update log is the test.
