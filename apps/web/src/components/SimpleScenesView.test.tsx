@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { classifySlotSemantics, type SlotStructuralFacts } from "@dyo/schemas";
+import { DICTIONARIES } from "../lib/i18n/dictionaries";
 import { SimpleScenesView } from "./SimpleScenesView";
 import { ProjectWorkspaceProvider } from "./ProjectWorkspaceProvider";
 import { DashboardStatusProvider } from "./DashboardStatusProvider";
@@ -10,6 +12,7 @@ import {
   assetFixture,
   manifestFixture,
   mappingSuggestionFixture,
+  placeholderFixture,
   planFixture,
   projectDtoFixture,
   sceneFixture,
@@ -989,5 +992,115 @@ describe("SimpleScenesView - real-scene cards (client-facing UX redesign)", () =
     expect(screen.queryByText(/\bJobs\b/)).toBeNull();
     expect(screen.queryByText(/\bQueue\b/)).toBeNull();
     expect(screen.queryByText(/INSPECT_SCENE_EVIDENCE/)).toBeNull();
+  });
+});
+
+// REAL 2026-10-09 (QA project, read by a non-technical person): "Approve
+// Scenes" was enabled while two pictures still waited for confirmation, and
+// the refusal was a red paragraph of codes and layer names. The page knows
+// which pictures the gate means - the same list its own "check where your
+// pictures will appear" box draws - so it says so and marks the cards.
+describe("SimpleScenesView - pictures still waiting for confirmation hold Approve, in plain words, and mark their scene (2026-10-09)", () => {
+  const UNSURE_SLOT: SlotStructuralFacts = {
+    slotCompositionId: "c-slot",
+    slotLayerIndex: 1,
+    slotLayerName: null,
+    slotCompositionName: null,
+    widthPx: 600,
+    heightPx: 1200,
+    hostDepth: 1,
+    hosts: [
+      {
+        compositionId: "comp-parent",
+        layerIndex: 3,
+        layerName: null,
+        threeDLayer: false,
+        hasTrackMatte: false,
+        trackMatteType: "NO_TRACK_MATTE",
+        matteSource: "NONE",
+        parentLayerIndex: null,
+        parentIsAnimated: null,
+        siblingPreRenderedPass: null,
+        scalePercent: 100,
+        rotationDegrees: 0,
+        enabled: true,
+        inFrame: true,
+        windowSeconds: { startSeconds: 1, endSeconds: 3 },
+        opacityPercentAtInPoint: 100,
+        opacityKeyframes: null
+      }
+    ],
+    reusedByHostCount: 1,
+    transformedBounds: null,
+    visibleWindowSeconds: { startSeconds: 1, endSeconds: 3 }
+  };
+
+  function setupWithWaitingPicture(): void {
+    const manifest = manifestWithNested() as ReturnType<typeof manifestFixture>;
+    const unsurePlaceholder = placeholderFixture({
+      placeholderId: "ph-pic",
+      layerName: "slot",
+      placeholderType: "image",
+      sourceType: "AVLayer",
+      originalText: undefined,
+      slotFacts: UNSURE_SLOT,
+      slotSemantics: classifySlotSemantics(UNSURE_SLOT)
+    });
+    manifest.scenes[0]!.placeholders.push(unsurePlaceholder as never);
+    stubWorkspace({
+      manifest,
+      assets: [assetFixture({ width: 600, height: 1200, hasAlphaChannel: false, hasTransparentPixels: false, transparentPixelRatio: 0, visibleCoverageRatio: 1 })],
+      scenes: [
+        sceneFixture({
+          id: "scene-parent",
+          manifestCompositionId: "comp-parent",
+          compositionName: "App Features",
+          approvalState: "READY_FOR_APPROVAL",
+          unresolvedReasons: [],
+          mappings: [
+            mappingFixture({
+              id: "m-pic",
+              manifestPlaceholderId: "ph-pic",
+              placeholderName: "Picture",
+              placeholderClassification: { value: "image", source: "MANIFEST", evidence: [] },
+              selectedAssetId: "asset-1",
+              selectedAssetType: "image"
+            })
+          ]
+        }),
+        sceneFixture({ id: "scene-nested", manifestCompositionId: "comp-nested", compositionName: "Phone Frame", mappings: [], approvalState: "READY_FOR_APPROVAL", unresolvedReasons: [] })
+      ],
+      extra: {
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-parent/preview-status`]: { status: 200, body: { preview: null } },
+        [`/api/projects/${PROJECT_ID}/execution-plan/scenes/scene-nested/preview-status`]: { status: 200, body: { preview: null } }
+      }
+    });
+  }
+
+  it("holds Approve Scenes with a reason that names the button to press, and marks the scene's card in red", async () => {
+    setupWithWaitingPicture();
+    renderView();
+    const card = (await screen.findByRole("heading", { name: "Scene 1" })).closest(".scene-card");
+    expect(card).not.toBeNull();
+    await waitFor(() => expect(card!.classList.contains("scene-card--needs-confirmation")).toBe(true));
+    expect(screen.getByText(/A picture here still needs your confirmation/)).toBeTruthy();
+    const approve = screen.getByRole("button", { name: "Approve Scenes" }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(approve.getAttribute("title")).toContain("First confirm where 1 picture will appear");
+    expect(approve.getAttribute("title")).toContain('press "Show me the spot" above');
+  });
+
+  it("the words used for the gate's own refusal name the pictures, the scenes and the button - never a code", () => {
+    const { en } = DICTIONARIES;
+    const plain = en.simpleScenes.approveRefusedPictures(2, ["Scene 1", "Scene 3"]);
+    expect(plain).toContain("2 pictures are waiting");
+    expect(plain).toContain("Scene 1, Scene 3");
+    expect(plain).toContain('Press "Show me all 2 spots" above');
+    expect(plain).not.toMatch(/[A-Z_]{6,}/);
+    expect(en.simpleScenes.approveRefusedPictures(1, [])).toContain('Press "Show me the spot" above');
+    // The Hebrew wording names the same button the Hebrew page draws.
+    const { he } = DICTIONARIES;
+    expect(he.simpleScenes.approveRefusedPictures(2, [])).toContain(he.simpleScenes.slotBulk.showAllAction(2));
+    expect(he.simpleScenes.approveNeedsPictures(1)).toContain(he.simpleScenes.slotBulk.showAllAction(1));
   });
 });

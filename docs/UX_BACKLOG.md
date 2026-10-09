@@ -335,3 +335,9 @@ changes". Changed, nothing removed:
 - Seen (operator): a whole card, with a fold, for one button; and the tabs "scrolling".
 - Measured on the page: the tab row was 38 px tall with 74 px of content. The lock hint under a locked tab sat inside a row with `overflow-x: auto`, which makes the other axis scroll too, so the row moved up and down under the wheel.
 - Done: the suggestions button and the step button are drawn into a slot at the end of the tab row (`useTabsEndSlot`); the card and the fold are gone; the row does not scroll on either axis and wraps on a narrow screen.
+
+## 2026-10-09 - the slot gate's refusal was unreadable to the client (done)
+
+On the QA project the operator pressed "Approve Scenes" with two pictures still waiting for their "show me the spot" confirmation. The button was enabled, and the refusal came back as one red paragraph of codes and layer names (`SLOT_CLASSIFICATION_UNCERTAIN`, `UNSAFE_FIT`, "Slideshow Main / Screen Shot 2020-12-30 at 12.17.08.jpg") that said nothing about where to go or what to press. His words: "where the error is, we cannot even mark it red; the client is not technical."
+
+Done: the Simple view already knows which pictures the gate means (the same list its "check where your pictures will appear" box draws). "Approve Scenes" is now held while any of them waits, with the reason naming the button to press ("First confirm where 2 pictures will appear - press 'Show me all 2 spots' above"); the scenes holding those pictures are outlined in red with one line saying so; and if the server's refusal still arrives, it is said in the same words with the scenes named, the raw sentence kept behind "Technical details". English and Hebrew; the Hebrew names the same button the Hebrew page draws.

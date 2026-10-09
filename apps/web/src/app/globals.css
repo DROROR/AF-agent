@@ -3284,6 +3284,32 @@ a.workflow-stepper__step:hover {
   gap: var(--space-3);
 }
 
+/* 2026-10-09: a scene whose picture still waits for confirmation is marked, so the refusal has a place on screen. */
+.scene-card--needs-confirmation {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 2px var(--color-danger);
+}
+
+.scene-card__attention {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.simple-scenes__refusal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.simple-scenes__refusal-raw {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+}
+
 .scene-card__header {
   display: flex;
   align-items: center;

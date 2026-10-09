@@ -145,6 +145,8 @@ export interface SceneCardProps {
    * exactly as before.
    */
   cardMappings?: readonly PlaceholderMapping[];
+  /** A picture on this card still waits for the person's confirmation in the "check where your pictures will appear" box (2026-10-09): the card is marked and says so. */
+  needsConfirmation?: boolean;
   /**
    * Records "keep the template's text" for these text layers, and settles any
    * no-change findings about them. Absent: the older behaviour, where
@@ -192,7 +194,8 @@ export function SceneCard({
   onKeepTemplateText,
   onNoText,
   templateTextOf,
-  quietActions = false
+  quietActions = false,
+  needsConfirmation = false
 }: SceneCardProps): ReactElement {
   const { t } = useLocale();
   const shownMappings = cardMappings ?? realScene.scenePlan.mappings;
@@ -271,7 +274,8 @@ export function SceneCard({
   const canRegenerate = previewEntry.state === "idle" || previewEntry.state === "ready" || previewEntry.state === "unavailable";
 
   return (
-    <Card className="scene-card">
+    <Card className={needsConfirmation ? "scene-card scene-card--needs-confirmation" : "scene-card"} data-needs-confirmation={needsConfirmation ? "true" : undefined}>
+      {needsConfirmation ? <p className="scene-card__attention">{t.simpleScenes.cardNeedsConfirmation}</p> : null}
       {/*
         2026-10-04 audit: the card's big title was the template author's name
         ("Transition_scene_03", "!MAIN") with "Scene 3" as a small label above

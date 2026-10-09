@@ -77,6 +77,8 @@ export function SimpleScenesView(): ReactElement {
   const [focusMappingId, setFocusMappingId] = useState<string | null>(null);
   const [busySuggestionId, setBusySuggestionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // True when the refusal above is the slot gate and this page can name the pictures it means (see cardsNeedingConfirmation).
+  const [actionErrorIsPictures, setActionErrorIsPictures] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isCreatingPlan, setIsCreatingPlan] = useState(false);
 
@@ -176,7 +178,8 @@ export function SimpleScenesView(): ReactElement {
   // tab with nothing saying where to start or what came next. Each step is
   // derived from the same state the buttons below already act on, so the
   // guide can never say something the screen then contradicts.
-  const picturesWaiting = findPendingPictureSlots(project, plan.plan.scenePlans, assets).length;
+  const pendingPictures = findPendingPictureSlots(project, plan.plan.scenePlans, assets);
+  const picturesWaiting = pendingPictures.length;
   const nothingChosenYet = plan.plan.scenePlans.every((scene) => scene.mappings.every((m) => m.text === null && m.selectedAssetId === null && m.colorHex === null));
   const scenesWaiting = realScenes.filter(
     (scene) =>
@@ -262,7 +265,29 @@ export function SimpleScenesView(): ReactElement {
   // flight - now state themselves on the control itself. Evaluated in the
   // same order as the `disabled` expression below, so the stated reason is
   // always the one really holding the button.
-  const approveDisabledReason = scenesApproved || !allReady ? undefined : isStale ? t.projectWorkspace.disabledReason.staleRevision : isApproving ? t.projectWorkspace.disabledReason.working : undefined;
+  // REAL 2026-10-09 (QA project, a non-technical reader): "Approve Scenes"
+  // was enabled while two pictures still waited for their confirmation, and
+  // the server's refusal came back as one red paragraph of codes and layer
+  // names - "SLOT_CLASSIFICATION_UNCERTAIN", "UNSAFE_FIT" - that said
+  // nothing about where to go or what to press. The gate is right; the
+  // page knows exactly which pictures it means (pendingPictures, the same
+  // list the box above draws), so it now says so in the button's own
+  // reason, marks those scenes' cards, and never lets the raw refusal be
+  // the only explanation.
+  const cardsNeedingConfirmation = new Set(pendingPictures.map((slot) => homes.cardIdByMappingId.get(slot.mappingId) ?? slot.scenePlanId));
+  const picturesHold = !scenesApproved && picturesWaiting > 0;
+  const approveDisabledReason = scenesApproved
+    ? undefined
+    : picturesHold
+      ? t.simpleScenes.approveNeedsPictures(picturesWaiting)
+      : !allReady
+        ? undefined
+        : isStale
+          ? t.projectWorkspace.disabledReason.staleRevision
+          : isApproving
+            ? t.projectWorkspace.disabledReason.working
+            : undefined;
+  const confirmationCardLabels = [...cardsNeedingConfirmation].map((cardId) => cardLabels.get(cardId) ?? null).filter((label): label is string => label !== null);
 
   async function handleAccept(suggestion: MappingSuggestion): Promise<void> {
     setBusySuggestionId(suggestion.id);
@@ -351,6 +376,7 @@ export function SimpleScenesView(): ReactElement {
     setIsApproving(false);
     if (!result.ok) {
       setActionError(result.message ?? null);
+      setActionErrorIsPictures(picturesWaiting > 0 && /unresolved slot findings/i.test(result.message ?? ""));
       return;
     }
     // 2026-10-04: after a successful approval the page stayed exactly where
@@ -365,7 +391,17 @@ export function SimpleScenesView(): ReactElement {
   return (
     <>
       {isStale ? <ErrorState title={t.projectWorkspace.staleRevisionTitle} description={t.projectWorkspace.staleRevisionDescription} /> : null}
-      {actionError ? <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} /> : null}
+      {actionError && actionErrorIsPictures ? (
+        <div className="simple-scenes__refusal">
+          <ErrorState title={t.simpleScenes.approveRefusedPicturesTitle} description={t.simpleScenes.approveRefusedPictures(picturesWaiting, confirmationCardLabels)} />
+          <details className="advanced-details">
+            <summary>{t.common.technicalDetails}</summary>
+            <p className="simple-scenes__refusal-raw">{actionError}</p>
+          </details>
+        </div>
+      ) : actionError ? (
+        <ErrorState title={t.projectWorkspace.saveFailedTitle} description={actionError} />
+      ) : null}
 
 
       {suggestionsError ? (
@@ -404,7 +440,7 @@ export function SimpleScenesView(): ReactElement {
           ) : (
             <Button
               variant={currentGuideStep === guideSteps.length - 1 || currentGuideStep === -1 ? "primary" : "secondary"}
-              disabled={!allReady || isApproving || isStale}
+              disabled={!allReady || isApproving || isStale || picturesHold}
               disabledReason={approveDisabledReason}
               onClick={() => void handleApprove()}
             >
@@ -457,6 +493,7 @@ export function SimpleScenesView(): ReactElement {
               suggestionsBusy={busySuggestionId !== null}
               quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
+              needsConfirmation={cardsNeedingConfirmation.has(realScene.scenePlan.id)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
               onEdit={(focusMappingId) => {
                 setFocusMappingId(focusMappingId ?? null);
@@ -507,6 +544,7 @@ export function SimpleScenesView(): ReactElement {
               suggestionsBusy={busySuggestionId !== null}
               quietActions={currentGuideStep !== GUIDE_LEFTOVER}
               cardMappings={(homes.mappingsByCardId.get(realScene.scenePlan.id) ?? []).map((hosted) => hosted.mapping)}
+              needsConfirmation={cardsNeedingConfirmation.has(realScene.scenePlan.id)}
               // onEdit={() => setEditingSceneId(realScene.scenePlan.id)}
               onEdit={(focusMappingId) => {
                 setFocusMappingId(focusMappingId ?? null);

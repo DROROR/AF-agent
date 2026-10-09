@@ -1622,6 +1622,13 @@ export const en = {
       count === 1 ? "OK - leave it as it is" : `OK - leave all ${count} as they are`,
     approveScenesAction: "Approve Scenes",
     approvingScenes: "Approving…",
+    /** 2026-10-09: the slot gate, said in the client's words - which pictures, and where on this page to go. */
+    approveNeedsPictures: (n: number): string =>
+      n === 1 ? "First confirm where 1 picture will appear - press \"Show me the spot\" above." : `First confirm where ${n} pictures will appear - press "Show me all ${n} spots" above.`,
+    approveRefusedPicturesTitle: "Not yet - some pictures still need your confirmation",
+    approveRefusedPictures: (n: number, scenes: readonly string[]): string =>
+      `${n === 1 ? "1 picture is" : `${n} pictures are`} waiting for you to look at the spot it goes into${scenes.length > 0 ? ` (${scenes.join(", ")}, marked in red below)` : ""}. Press "${n === 1 ? "Show me the spot" : `Show me all ${n} spots`}" above, look at each one, and confirm. Then press Approve Scenes again.`,
+    cardNeedsConfirmation: "A picture here still needs your confirmation - see \"Check where your pictures will appear\" above.",
     allScenesReadyHint: "Every scene is ready - approve to continue.",
     scenesApprovedHint: "Scenes approved - the next step is on the Preview tab.",
     usePlanFirstHint: "Start here: press \"Use everything from my plan\" to put your texts and pictures on every scene. You can still change any of them after.",
