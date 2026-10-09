@@ -25,6 +25,7 @@ import { registerJobRoutes } from "./routes/jobs.js";
 import { registerWorkerRoutes } from "./routes/workers.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerAssetRoutes } from "./routes/assets.js";
+import type { VideoFactsProbe } from "./domain/asset/probe-video-facts.js";
 import { registerWorkMapRoutes } from "./routes/work-map.js";
 import { registerMappingAssistantRoutes } from "./routes/mapping-assistant.js";
 import { registerRenderArtifactRoutes } from "./routes/render-artifacts.js";
@@ -55,6 +56,8 @@ export interface AppDependencies {
   executionPlanRepository: ExecutionPlanRepository;
   assetRepository: AssetRepository;
   assetStorage: AssetStorage;
+  /** Measures an uploaded video's size and duration; production wires ffprobe (index.ts). */
+  probeVideoFacts?: VideoFactsProbe;
   workMapRepository: WorkMapRepository;
   mappingSuggestionRepository: MappingSuggestionRepository;
   sceneEvidenceRepository: SceneEvidenceRepository;
@@ -213,7 +216,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
     maxUploadBytes: deps.env.ASSET_MAX_UPLOAD_BYTES,
-    ...(deps.now ? { now: deps.now } : {})
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.probeVideoFacts ? { probeVideoFacts: deps.probeVideoFacts } : {})
   });
   registerWorkMapRoutes(app, {
     workMapRepository: deps.workMapRepository,

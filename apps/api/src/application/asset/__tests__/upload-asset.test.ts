@@ -240,3 +240,63 @@ describe("uploadAsset", () => {
     expect(assetStorage.has(assetStorage.deletedKeys[0] as string)).toBe(false);
   });
 });
+
+describe("uploadAsset - a video's size and duration (real 2026-10-09: a video in a picture slot could never be approved)", () => {
+  it("records what the video probe measured, so the slot gate can judge fit", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const calls: string[] = [];
+    const asset = await uploadAsset(
+      {
+        assetRepository,
+        assetStorage,
+        projectRepository,
+        maxUploadBytes: 1000,
+        now: fixedNow,
+        probeVideoFacts: async (_buffer, mimeType) => {
+          calls.push(mimeType);
+          return { widthPx: 1920, heightPx: 1080, durationSeconds: 44.8 };
+        }
+      },
+      project.projectId,
+      { originalFilename: "output.mp4", mimeType: "video/mp4", buffer: Buffer.from("mp4 bytes"), requestedMediaKind: null }
+    );
+    expect(calls).toEqual(["video/mp4"]);
+    expect(asset.mediaKind).toBe("VIDEO");
+    expect(asset.width).toBe(1920);
+    expect(asset.height).toBe(1080);
+    expect(asset.durationSeconds).toBe(44.8);
+  });
+
+  it("a probe that measures nothing leaves the size unknown - the upload still succeeds, and the gate keeps blocking honestly", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    const asset = await uploadAsset(
+      { assetRepository, assetStorage, projectRepository, maxUploadBytes: 1000, now: fixedNow, probeVideoFacts: async () => null },
+      project.projectId,
+      { originalFilename: "output.mp4", mimeType: "video/mp4", buffer: Buffer.from("mp4 bytes"), requestedMediaKind: null }
+    );
+    expect(asset.width).toBeNull();
+    expect(asset.height).toBeNull();
+    expect(asset.durationSeconds).toBeNull();
+  });
+
+  it("the video probe is never asked about a picture", async () => {
+    const { projectRepository, assetRepository, assetStorage, project } = await setup();
+    let asked = false;
+    await uploadAsset(
+      {
+        assetRepository,
+        assetStorage,
+        projectRepository,
+        maxUploadBytes: 10_000,
+        now: fixedNow,
+        probeVideoFacts: async () => {
+          asked = true;
+          return null;
+        }
+      },
+      project.projectId,
+      { originalFilename: "hero.png", mimeType: "image/png", buffer: realImageBytes("pngTransparentLogo"), requestedMediaKind: null }
+    );
+    expect(asked).toBe(false);
+  });
+});

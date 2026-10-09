@@ -6,6 +6,7 @@ import type { AssetStorage } from "../../domain/asset-storage/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
 import { extensionForMime, resolveMediaKindForUpload } from "../../domain/asset/mime-allowlist.js";
 import { probeImageFacts } from "../../domain/asset/probe-image-facts.js";
+import type { VideoFactsProbe } from "../../domain/asset/probe-video-facts.js";
 import { toAssetDto } from "./asset-dto-mapper.js";
 
 export interface UploadAssetDeps {
@@ -14,6 +15,8 @@ export interface UploadAssetDeps {
   projectRepository: ProjectRepository;
   maxUploadBytes: number;
   now: () => Date;
+  /** Measures a video's size and duration (ffprobe in production, see probe-video-facts.ts). Optional: without it a video's dimensions stay unknown and the slot gate keeps blocking, as before 2026-10-09. */
+  probeVideoFacts?: VideoFactsProbe;
 }
 
 export interface UploadAssetInput {
@@ -57,6 +60,9 @@ export async function uploadAsset(deps: UploadAssetDeps, projectId: string, inpu
   // filename, so these are the only dimensions/transparency facts this system
   // ever has. A format this host cannot honestly measure stays null.
   const measured = probeImageFacts(input.buffer, input.mimeType);
+  // A video (2026-10-09): its size comes from a real demuxer, or stays
+  // unknown - a probe that fails never fails the upload.
+  const measuredVideo = resolved.mediaKind === "VIDEO" && deps.probeVideoFacts ? await deps.probeVideoFacts(input.buffer, input.mimeType) : null;
 
   const stored = await deps.assetStorage.store({ projectId, buffer: input.buffer, extension });
 
@@ -71,15 +77,15 @@ export async function uploadAsset(deps: UploadAssetDeps, projectId: string, inpu
         mimeType: input.mimeType,
         byteSize: stored.byteSize,
         sha256: stored.sha256,
-        width: measured?.widthPx ?? null,
-        height: measured?.heightPx ?? null,
+        width: measured?.widthPx ?? measuredVideo?.widthPx ?? null,
+        height: measured?.heightPx ?? measuredVideo?.heightPx ?? null,
         hasAlphaChannel: measured?.hasAlphaChannel ?? null,
         pixelAnalysis: measured?.pixelAnalysis ?? null,
         hasTransparentPixels: measured?.hasTransparentPixels ?? null,
         transparentPixelRatio: measured?.transparentPixelRatio ?? null,
         visibleCoverageRatio: measured?.visibleCoverageRatio ?? null,
         visibleContentBounds: measured?.visibleContentBounds ?? null,
-        durationSeconds: null,
+        durationSeconds: measuredVideo?.durationSeconds ?? null,
         label: null,
         notes: null
       },

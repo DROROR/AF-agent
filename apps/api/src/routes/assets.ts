@@ -10,6 +10,7 @@ import { verifySessionSecret } from "../infrastructure/auth/session-token.js";
 import { requireSessionUser } from "../application/auth/require-session-user.js";
 import { AppError, PayloadTooLargeError } from "../errors/app-error.js";
 import { uploadAsset } from "../application/asset/upload-asset.js";
+import type { VideoFactsProbe } from "../domain/asset/probe-video-facts.js";
 import { listAssets } from "../application/asset/list-assets.js";
 import { getAsset } from "../application/asset/get-asset.js";
 import { getAssetFile } from "../application/asset/get-asset-file.js";
@@ -25,6 +26,7 @@ export interface AssetsRouteDeps {
   sessionRepository: SessionRepository;
   maxUploadBytes: number;
   now?: () => Date;
+  probeVideoFacts?: VideoFactsProbe;
 }
 
 const projectIdParamsSchema = z.object({ projectId: z.string().uuid() });
@@ -98,7 +100,8 @@ export function registerAssetRoutes(app: FastifyInstance, deps: AssetsRouteDeps)
         assetStorage: deps.assetStorage,
         projectRepository: deps.projectRepository,
         maxUploadBytes: deps.maxUploadBytes,
-        now
+        now,
+        ...(deps.probeVideoFacts ? { probeVideoFacts: deps.probeVideoFacts } : {})
       },
       projectId,
       { originalFilename, mimeType, buffer: fileBuffer, requestedMediaKind }

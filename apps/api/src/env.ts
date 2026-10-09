@@ -24,6 +24,8 @@ const envSchema = z.object({
   /** Never /tmp - a real, persistent directory outside the repo tree. No default: a missing value is a real configuration error, not silently assumed. */
   ASSET_STORAGE_ROOT: z.string().min(1, "ASSET_STORAGE_ROOT is required"),
   ASSET_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(200 * 1024 * 1024),
+  /** ffprobe, used to measure an uploaded video's size and duration (2026-10-09). A bare name resolves through PATH; unset means "ffprobe". A missing binary never breaks an upload - the video's size just stays unknown. */
+  FFPROBE_PATH: z.string().min(1).default("ffprobe"),
   /** Rendered videos are far larger than typical input assets - a separate, larger ceiling (render-delivery phase section 4). Default 2GB. */
   RENDER_ARTIFACT_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024 * 1024),
   /**

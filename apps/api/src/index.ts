@@ -18,6 +18,7 @@ import { DrizzleFullPreviewArtifactRepository } from "./infrastructure/db/drizzl
 import { DrizzleSceneEvidencePreviewRepository } from "./infrastructure/db/drizzle-scene-evidence-preview-repository.js";
 import { DrizzleExecutionSessionRepository } from "./infrastructure/db/drizzle-execution-session-repository.js";
 import { LocalFilesystemAssetStorage } from "./infrastructure/storage/local-filesystem-asset-storage.js";
+import { createFfprobeVideoFactsProbe } from "./domain/asset/probe-video-facts.js";
 import { DrizzleUserAiProviderRepository } from "./infrastructure/db/drizzle-user-ai-provider-repository.js";
 
 async function main(): Promise<void> {
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
     executionPlanRepository: new DrizzleExecutionPlanRepository(db),
     assetRepository: new DrizzleAssetRepository(db),
     assetStorage: new LocalFilesystemAssetStorage(env.ASSET_STORAGE_ROOT),
+    probeVideoFacts: createFfprobeVideoFactsProbe(env.FFPROBE_PATH),
     workMapRepository: new DrizzleWorkMapRepository(db),
     mappingSuggestionRepository: new DrizzleMappingSuggestionRepository(db),
     sceneEvidenceRepository: new DrizzleSceneEvidenceRepository(db),

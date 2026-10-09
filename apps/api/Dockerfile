@@ -3,6 +3,10 @@
 # sibling packages/schemas + packages/database.
 FROM node:22-alpine
 
+# ffprobe measures an uploaded video's size and duration (2026-10-09, see
+# apps/api/src/domain/asset/probe-video-facts.ts).
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /repo
 
 COPY package.json package-lock.json ./
