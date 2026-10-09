@@ -219,6 +219,9 @@ export const textDirectionEvidenceSchema = z
     justificationBefore: z.string().nullable().optional(),
     justificationApplied: z.string().nullable().optional(),
     justificationMirrored: z.boolean().optional(),
+    /** How a right-to-left text was laid out (2026-10-09): "box" = paragraph text over the template's own rectangle, "mirror" = justification flipped on point text, "none" = left as the template had it. */
+    layout: z.enum(["box", "mirror", "none"]).optional(),
+    boxTextSize: z.tuple([z.number(), z.number()]).nullable().optional(),
     /** The stored text's code-unit sequence was compared with the requested one, position by position. */
     textCodeUnitsVerified: z.boolean(),
     codeUnitCount: z.number().int().nonnegative(),

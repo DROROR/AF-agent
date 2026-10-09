@@ -169,7 +169,8 @@ describe("buildOperationScript", () => {
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: 1, nestedTarget: null, text: nasty };
     // Must not throw, and must produce valid embeddable JSON for the value.
     const script = buildOperationScript(0, COMP_NAME, op);
-    expect(script).toContain(JSON.stringify(nasty));
+    // A typed line break reaches After Effects as a carriage return (2026-10-09); everything else is embedded verbatim.
+    expect(script).toContain(JSON.stringify(nasty.replace("\n", "\r")));
   });
 
   it("SET_TEXT preserves style by mutating only sourceText.value.text, never replacing the whole TextDocument", () => {
@@ -4041,10 +4042,12 @@ describe("SET_TEXT auto-fit - a parented text cut by a matte is shrunk through i
 // a LEFT_JUSTIFY paragraph whose anchor sits at the left of the template's own
 // English lines, which run to the right of it. After Effects lays the same
 // paragraph out to the LEFT of the anchor once its base direction is
-// right-to-left - so the Hebrew ran over the phones, and the headline left its
-// reveal matte (which lies to the right of the anchor) entirely.
-describe("SET_TEXT - the justification is mirrored when the base direction flips (2026-10-09)", () => {
-  const setup = (justification: string, direction: string) => `
+// right-to-left. And the client's second frame (b5cc2a8) showed the rest: a
+// point text cannot wrap, cannot align to an edge that is not its anchor, and
+// is cut when too long. So a right-to-left replacement becomes box text over
+// the template's own rectangle (see RTL_BOX_JUSTIFICATION).
+describe("SET_TEXT - a right-to-left text is laid out as a box over the template's own rectangle (2026-10-09)", () => {
+  const setup = (justification: string, direction: string, boxWritable = true) => `
     function CompItem() {}
     function AVLayer() {}
     function TextLayer() {}
@@ -4054,12 +4057,15 @@ describe("SET_TEXT - the justification is mirrored when the base direction flips
     var ParagraphJustification = { LEFT_JUSTIFY: "LEFT_JUSTIFY", RIGHT_JUSTIFY: "RIGHT_JUSTIFY", CENTER_JUSTIFY: "CENTER_JUSTIFY", FULL_JUSTIFY_LASTLINE_LEFT: "FULL_JUSTIFY_LASTLINE_LEFT", FULL_JUSTIFY_LASTLINE_RIGHT: "FULL_JUSTIFY_LASTLINE_RIGHT", FULL_JUSTIFY_LASTLINE_CENTER: "FULL_JUSTIFY_LASTLINE_CENTER", FULL_JUSTIFY_LASTLINE_FULL: "FULL_JUSTIFY_LASTLINE_FULL" };
     var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };
     var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };
+    var BoxAutoFitPolicy = { NONE: "NONE", HEIGHT_PRECISE: "HEIGHT_PRECISE" };
     function prop(value) { return { numKeys: 0, value: value, valueAtTime: function () { return this.value; }, setValue: function (v) { this.value = v; } }; }
     var __textProps = { "ADBE Scale": prop([237, 237, 100]), "ADBE Anchor Point": prop([0, 0, 0]), "ADBE Position": prop([168, 17, 0]), "ADBE Rotate Z": prop(0) };
     var __text = new TextLayer();
     __text.name = "Text C"; __text.index = 4; __text.enabled = true; __text.threeDLayer = true; __text.parent = null; __text.inPoint = 1; __text.outPoint = 8; __text.locked = false;
-    __text.sourceText = { value: { text: "This project is suitable for all.", font: "Montserrat-Medium", fontSize: 10, justification: ${JSON.stringify(justification)}, direction: ${JSON.stringify(direction)}, composerEngine: "LATIN_COMPOSER_ENGINE" }, setValue: function (v) { this.value = v; } };
-    __text.sourceRectAtTime = function () { return { left: 0, top: -6, width: 158, height: 32 }; };
+    var __doc = { text: "This project is suitable for all.", font: "Montserrat-Medium", fontSize: 10, justification: ${JSON.stringify(justification)}, direction: ${JSON.stringify(direction)}, composerEngine: "LATIN_COMPOSER_ENGINE" };
+    ${boxWritable ? "__doc.boxText = false;" : "Object.defineProperty(__doc, 'boxText', { get: function () { return false; }, set: function () { throw new Error('boxText is read-only in this After Effects'); } });"}
+    __text.sourceText = { value: __doc, setValue: function (v) { this.value = v; } };
+    __text.sourceRectAtTime = function () { return { left: 2, top: -6, width: 158, height: 32 }; };
     __text.property = function (n) {
       if (n === "ADBE Transform Group") { return { property: function (inner) { return __textProps[inner] || null; } }; }
       if (n === "ADBE Effect Parade") { return { numProperties: 0, property: function () { return null; } }; }
@@ -4072,40 +4078,61 @@ describe("SET_TEXT - the justification is mirrored when the base direction flips
     var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 6 ? __comp : null; } } };
   `;
 
-  function run(text: string, justification: string, direction = "DIRECTION_LEFT_TO_RIGHT") {
+  function run(text: string, justification: string, direction = "DIRECTION_LEFT_TO_RIGHT", boxWritable = true) {
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-c", layerIndex: 4, nestedTarget: null, text };
     const script = buildOperationScript(6, "Scene_03", op);
-    const probed = script.replace(/return __result;\s*$/, `; __result = JSON.stringify({ step: __result, justification: __text.sourceText.value.justification, direction: __text.sourceText.value.direction });\n  return __result;`);
+    const probed = script.replace(/return __result;\s*$/, `; var __d = __text.sourceText.value; __result = JSON.stringify({ step: __result, justification: __d.justification, direction: __d.direction, boxText: __d.boxText === true, boxTextSize: __d.boxTextSize || null, boxTextPos: __d.boxTextPos || null, autoFit: __d.boxAutoFitPolicy || null, text: __d.text });\n  return __result;`);
     expect(probed).not.toBe(script);
-    const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup(justification, direction)));
+    const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup(justification, direction, boxWritable)));
     return { ...outcome, step: JSON.parse(outcome.step) };
   }
 
-  it("a left-justified Latin paragraph replaced by Hebrew becomes right-to-left AND right-justified, so it keeps the template's side of the anchor - and the evidence says so", () => {
+  it("a left-justified Latin line replaced by Hebrew becomes a right-to-left BOX over the template's rectangle, aligned to its right edge, with room to wrap - and the evidence says so", () => {
     const outcome = run("ספריית אימונים עשירה, לכל רמת כושר, בזמן שלך.", "LEFT_JUSTIFY");
     expect(outcome.step.ok).toBe(true);
     expect(outcome.direction).toBe("DIRECTION_RIGHT_TO_LEFT");
-    expect(outcome.justification).toBe("RIGHT_JUSTIFY");
-    expect(outcome.step.textDirection).toMatchObject({ justificationBefore: "LEFT_JUSTIFY", justificationApplied: "RIGHT_JUSTIFY", justificationMirrored: true, fontApplied: "Heebo-Medium" });
+    expect(outcome.boxText).toBe(true);
+    expect(outcome.boxTextSize).toEqual([158, 64]);
+    expect(outcome.boxTextPos).toEqual([2, -6]);
+    expect(outcome.autoFit).toBe("HEIGHT_PRECISE");
+    expect(outcome.justification).toBe("LEFT_JUSTIFY");
+    expect(outcome.step.textDirection).toMatchObject({ justificationBefore: "LEFT_JUSTIFY", layout: "box", boxTextSize: [158, 64], justificationMirrored: false, fontApplied: "Heebo-Medium" });
   });
 
-  it("a right-justified Latin line becomes left-justified Hebrew, and the last line of a fully justified paragraph swaps the same way", () => {
-    expect(run("שלום עולם", "RIGHT_JUSTIFY").justification).toBe("LEFT_JUSTIFY");
-    expect(run("שלום עולם", "FULL_JUSTIFY_LASTLINE_LEFT").justification).toBe("FULL_JUSTIFY_LASTLINE_RIGHT");
-    expect(run("שלום עולם", "FULL_JUSTIFY_LASTLINE_RIGHT").justification).toBe("FULL_JUSTIFY_LASTLINE_LEFT");
+  it("a right-justified Latin line gets the same box, so every Hebrew text aligns the same way", () => {
+    const outcome = run("שלום עולם", "RIGHT_JUSTIFY");
+    expect(outcome.boxText).toBe(true);
+    expect(outcome.justification).toBe("LEFT_JUSTIFY");
+    expect(outcome.step.textDirection.layout).toBe("box");
+  });
+
+  it("when this After Effects cannot write box text, the justification is mirrored instead (the b5cc2a8 layout) - never a failure", () => {
+    const outcome = run("שלום עולם", "LEFT_JUSTIFY", "DIRECTION_LEFT_TO_RIGHT", false);
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.boxText).toBe(false);
+    expect(outcome.justification).toBe("RIGHT_JUSTIFY");
+    expect(outcome.step.textDirection).toMatchObject({ layout: "mirror", justificationMirrored: true, boxTextSize: null });
   });
 
   it("centred text, a template already right-to-left, and Latin text are left exactly as they are", () => {
     const centred = run("שלום עולם", "CENTER_JUSTIFY");
     expect(centred.justification).toBe("CENTER_JUSTIFY");
-    expect(centred.step.textDirection.justificationMirrored).toBe(false);
+    expect(centred.boxText).toBe(false);
+    expect(centred.step.textDirection.layout).toBe("none");
     const alreadyRtl = run("שלום עולם", "RIGHT_JUSTIFY", "DIRECTION_RIGHT_TO_LEFT");
     expect(alreadyRtl.justification).toBe("RIGHT_JUSTIFY");
-    expect(alreadyRtl.step.textDirection.justificationMirrored).toBe(false);
+    expect(alreadyRtl.boxText).toBe(false);
     const latin = run("Hello world", "LEFT_JUSTIFY");
     expect(latin.justification).toBe("LEFT_JUSTIFY");
-    expect(latin.direction).toBe("DIRECTION_LEFT_TO_RIGHT");
-    expect(latin.step.textDirection.justificationMirrored).toBe(false);
+    expect(latin.boxText).toBe(false);
+    expect(latin.step.textDirection.layout).toBe("none");
+  });
+
+  it("a line break typed in the plan reaches After Effects as a carriage return, and the stored text is verified against that", () => {
+    const outcome = run("שורה ראשונה\nשורה שנייה", "LEFT_JUSTIFY");
+    expect(outcome.step.ok).toBe(true);
+    expect(outcome.text).toBe("שורה ראשונה\rשורה שנייה");
+    expect(outcome.step.resultingValue).toBe("שורה ראשונה\rשורה שנייה");
   });
 });
 
