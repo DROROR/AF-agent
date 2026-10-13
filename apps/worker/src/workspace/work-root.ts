@@ -66,11 +66,14 @@ export function jobWorkspacePath(root: string, jobId: string): string {
  * every scene's own EXECUTE_FRAME job and both output renders - distinct
  * from jobWorkspacePath above, which is scoped to ONE job only.
  */
+/** The folder under the work root that holds every execution session's workspace - one name, used to build the path and to recognise it. */
+export const EXECUTION_SESSIONS_DIRNAME = "execution-sessions";
+
 export function sessionWorkspacePath(root: string, executionSessionId: string): string {
   if (!EXECUTION_SESSION_ID_PATTERN.test(executionSessionId)) {
     throw new UnsafePathError(`Execution session ID is not a safe path segment: ${executionSessionId}`, "invalid-segment");
   }
-  return safeJoin(root, "execution-sessions", executionSessionId);
+  return safeJoin(root, EXECUTION_SESSIONS_DIRNAME, executionSessionId);
 }
 
 /**

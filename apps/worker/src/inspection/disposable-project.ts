@@ -15,6 +15,8 @@ import {
   buildOpenProjectScript,
   type FixedJsxScript
 } from "../execution/jsx-templates.js";
+import { WORKING_COPY_FILENAME } from "../workspace/working-copy.js";
+import { EXECUTION_SESSIONS_DIRNAME } from "../workspace/work-root.js";
 import { DISPOSABLE_COPY_FILENAME_MARKER, DISPOSABLE_COPY_QUARANTINE_SUFFIX } from "@dyo/schemas";
 import { canonicalizeWindowsPath, windowsPathsEqual } from "./canonical-windows-path.js";
 import { hashSourceProject } from "./hash-source-project.js";
@@ -150,6 +152,33 @@ export function disposableCopyPathFor(targetPath: string, id: string = randomUUI
 }
 
 /** True only for a path this wrapper itself would have created - the sole basis for any stale-copy recovery. */
+/**
+ * REAL 2026-10-13 (client project 3241977f): every scene preview failed with
+ * "After Effects is holding unsaved changes in working-copy.aep". That file
+ * is this worker's OWN session working copy, left open by the last frame
+ * build (scrubbing and capturing mark a project dirty after its checkpoint
+ * was saved). Its saved state on disk is the record; what After Effects
+ * holds beyond it is never a person's work. The frame build already closes
+ * such a copy without saving (jsx-templates.ts, "sibling session copy");
+ * the inspector now recognises it the same way - by WHERE it lives, the
+ * working copy's own file name inside the execution-sessions folder -
+ * never by guessing, so a project a person opened themselves is still
+ * never touched.
+ */
+export function isWorkerSessionWorkingCopyPath(candidate: string): boolean {
+  if (!candidate) {
+    return false;
+  }
+  const api = pathApiFor(candidate);
+  const sessionDir = api.dirname(candidate);
+  const sessionsDir = api.dirname(sessionDir);
+  return (
+    api.basename(candidate).toLowerCase() === WORKING_COPY_FILENAME.toLowerCase() &&
+    api.basename(sessionsDir).toLowerCase() === EXECUTION_SESSIONS_DIRNAME.toLowerCase() &&
+    sessionDir !== sessionsDir
+  );
+}
+
 export function isDisposableCopyPath(candidate: string): boolean {
   const base = pathApiFor(candidate).basename(candidate).toLowerCase();
   return base.includes(DISPOSABLE_FILENAME_MARKER) && base.endsWith(".aep");
@@ -279,6 +308,7 @@ export async function withDisposableProject<T>(
   let disposablePath: string | null = null;
   let disposableMayStillBeOpen = false;
   let priorProjectToRestore: string | null = null;
+  let closedOwnWorkingCopy = false;
 
   try {
     // 1. HASH EVERY PROTECTED FILE FIRST - before anything is copied, opened
@@ -363,6 +393,20 @@ export async function withDisposableProject<T>(
         // A copy from an earlier operation of THIS wrapper: inert by
         // definition, safe to replace, and never restored afterwards.
         priorProjectToRestore = null;
+      } else if (isWorkerSessionWorkingCopyPath(priorState.projectPath ?? "")) {
+        // This worker's own session working copy (see
+        // isWorkerSessionWorkingCopyPath): closed without saving, through
+        // the same path-checked close the disposable copy gets, so nothing
+        // else can ever be closed by this branch. Its saved file on disk is
+        // what every later job reads; it is not reopened afterwards.
+        const closePrior = await deps.runScript(buildCloseDisposableProjectScript(priorState.projectPath ?? ""));
+        if (!closePrior.ok) {
+          return fail("AE_PROJECT_NOT_SAFE_TO_REPLACE", `After Effects is holding this worker's own session working copy, and it could not be closed (${closePrior.reason}) - close it in After Effects, then retry`);
+        }
+        priorProjectToRestore = null;
+        closedOwnWorkingCopy = true;
+        evidence.restorationNote = `After Effects was holding this worker's own session working copy ("${priorState.projectPath}", ${priorState.dirty === true ? "with" : "without"} unsaved changes); it was closed without saving - its saved file on disk is the record - and is not reopened`;
+        deps.logger?.info({ priorProjectPath: priorState.projectPath, dirty: priorState.dirty }, "closed this worker's own session working copy without saving before a safe inspection");
       } else if (!dirtyAvailable) {
         return fail(
           "AE_PROJECT_NOT_SAFE_TO_REPLACE",
@@ -511,7 +555,9 @@ export async function withDisposableProject<T>(
           : `the project After Effects held before this inspection (${priorProjectToRestore}) could not be reopened: ${restoreResult.reason}`;
         deps.logger?.warn({ priorProjectToRestore, note: evidence.restorationNote }, "could not restore the project After Effects held before this inspection");
       }
-    } else if (evidence.priorAeProjectState?.projectOpen !== true) {
+    } else if (evidence.priorAeProjectState?.projectOpen !== true || closedOwnWorkingCopy) {
+      // Nothing was open, or only this worker's own working copy, which is
+      // deliberately not reopened (its saved file is the record).
       evidence.restoration = "NOTHING_TO_RESTORE";
     }
 

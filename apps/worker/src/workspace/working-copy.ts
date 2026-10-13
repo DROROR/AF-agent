@@ -22,7 +22,7 @@ import { ensureWorkRoot, safeJoin, sessionWorkspacePath } from "./work-root.js";
  * chain-of-custody head (`expectedWorkingProjectSha256`, non-null) - see
  * WORKING_COPY_MISSING/WORKING_COPY_SHA_MISMATCH below (section 6/7).
  */
-const WORKING_COPY_FILENAME = "working-copy.aep";
+export const WORKING_COPY_FILENAME = "working-copy.aep";
 
 export function sessionWorkingCopyPath(workRoot: string, executionSessionId: string): string {
   return safeJoin(sessionWorkspacePath(workRoot, executionSessionId), WORKING_COPY_FILENAME);

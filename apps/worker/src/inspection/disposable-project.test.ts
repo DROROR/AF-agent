@@ -3,6 +3,7 @@ import {
   findStaleDisposableCopies,
   disposableCopyPathFor,
   isDisposableCopyPath,
+  isWorkerSessionWorkingCopyPath,
   withDisposableProject,
   DISPOSABLE_FILENAME_MARKER,
   QUARANTINE_SUFFIX,
@@ -323,6 +324,34 @@ describe("withDisposableProject - what After Effects is already holding", () => 
     // The copy it had already made is cleaned up.
     expect(fs.removed).toHaveLength(1);
     expect(result.evidence.cleanup).toBe("DELETED");
+  });
+
+  // REAL 2026-10-13 (client project 3241977f): every scene preview failed over
+  // the worker's own working copy left open, dirty, by the last frame build.
+  it("closes this worker's own session working copy without saving - even dirty - and goes on, saying so in the evidence", async () => {
+    const own = "C:\\DYO-Agent\\execution-sessions\\3494a3cc-b510-4c01-8707-9fc067bee643\\working-copy.aep";
+    const { result, ae } = await run({ state: openProject({ projectPath: own, projectName: "working-copy.aep", dirty: true }) });
+    expect(result.ok).toBe(true);
+    expect(ae.calls).toEqual(["state", "close", "open", "footage", "close"]);
+    expect(result.evidence.restoration).toBe("NOTHING_TO_RESTORE");
+    expect(result.evidence.restorationNote).toContain("this worker's own session working copy");
+    expect(result.evidence.restorationNote).toContain("with unsaved changes");
+  });
+
+  it("when its own working copy cannot be closed, refuses as before and opens nothing", async () => {
+    const own = "C:\\DYO-Agent\\execution-sessions\\abc\\working-copy.aep";
+    const { result, ae } = await run({ state: openProject({ projectPath: own, projectName: "working-copy.aep", dirty: true }), closeFails: true });
+    expect(result.ok === false && result.code).toBe("AE_PROJECT_NOT_SAFE_TO_REPLACE");
+    expect(ae.calls).toEqual(["state", "close"]);
+  });
+
+  it("a person's own file is never mistaken for the worker's copy, whatever it is called", () => {
+    expect(isWorkerSessionWorkingCopyPath("C:\\DYO-Agent\\execution-sessions\\abc\\working-copy.aep")).toBe(true);
+    expect(isWorkerSessionWorkingCopyPath("C:\\DYO-Agent\\execution-sessions\\abc\\Working-Copy.AEP")).toBe(true);
+    expect(isWorkerSessionWorkingCopyPath("C:\\Users\\Someone\\Documents\\working-copy.aep")).toBe(false);
+    expect(isWorkerSessionWorkingCopyPath("C:\\DYO-Agent\\execution-sessions\\working-copy.aep")).toBe(false);
+    expect(isWorkerSessionWorkingCopyPath("C:\\DYO-Agent\\execution-sessions\\abc\\their-project.aep")).toBe(false);
+    expect(isWorkerSessionWorkingCopyPath("")).toBe(false);
   });
 
   it("refuses an untitled, never-saved project", async () => {
