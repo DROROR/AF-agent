@@ -353,3 +353,9 @@ Done: the Simple view already knows which pictures the gate means (the same list
 The operator, on the QA project: the Preview tab said `"Camera 1" ... cannot hold a picture - remove the picture from it on the Scenes tab`, which is true and plain, but it is the Scenes tab's problem reported on the next tab, with nothing marked. His words: "why is the problem not highlighted with clearance where it is".
 
 Done: the Scenes tab runs the same rule the gate and the build use (`findNonContentContentProblems`, one function in `@dyo/schemas`). While any picture or text sits on a layer that cannot hold it, "Approve Scenes" is held with the reason, the scene's card is outlined in red and carries the sentence, and a "Remove the picture" / "Remove the text" button fixes it in one press (the same CLEAR edit the drawer would make). The Preview tab's refusal stays as a backstop for an older plan. English and Hebrew.
+
+## 2026-10-14 - from the client's full-video review (open)
+
+- **Alignment choice per text (left / right / centre).** The worker now right-aligns every right-to-left text and keeps centred text centred. The client asked to choose. A per-text setting in the Scenes drawer, carried on the plan, read by SET_TEXT.
+- **"Two rows" is automatic now** (wrapping to the template's line width) and a typed line break still wins. Say so in the drawer's text hint so the client knows both.
+- **A scene left in the template's English** ("EASY TO CUSTOMIZE"): the Scenes tab should make it obvious when a used scene's texts are all "keep the template's wording", so a client notices before the full video.

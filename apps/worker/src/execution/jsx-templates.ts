@@ -1,4 +1,4 @@
-import { analyseTextDirection, textCodeUnits } from "@dyo/schemas";
+import { analyseTextDirection } from "@dyo/schemas";
 import type { AssetOrientation, ResolvedNestedTargetStep, SceneEditOperation } from "@dyo/schemas";
 
 /**
@@ -327,28 +327,35 @@ export const TEXT_AUTO_FIT_MIN_FACTOR = 0.6;
 export const TEXT_AUTO_FIT_MATTE_MIN_FACTOR = 0.35;
 
 /**
- * REAL 2026-10-09, the client's second frame on the b5cc2a8 worker: the
- * Hebrew now sits where the template's text sat, but a template line that
- * was left-justified comes out left-aligned Hebrew (ragged right, read as
- * "aligned to the left" by a Hebrew reader), a long sentence never wraps,
- * and what does not fit is cut. All three are one thing: a POINT text has
- * no width, so it can neither wrap nor align to an edge that is not its
- * anchor.
+ * REAL 2026-10-09/14, the client's frames on b5cc2a8 and 80cab9d: the Hebrew
+ * sits where the template's text sat, but a left-justified template line
+ * comes out left-aligned Hebrew, a long sentence never wraps, and what does
+ * not fit is cut. One cause: a POINT text has no width, so it can neither
+ * wrap nor align to an edge that is not its anchor. Writing it as box text
+ * (80cab9d) was refused silently by the real After Effects (evidence
+ * `layout: "mirror"` on every text), so the layout is done on the point
+ * text itself, deterministically:
  *
- * A right-to-left replacement of a left- or right-justified template text
- * is therefore written as PARAGRAPH (box) text over exactly the rectangle
- * the template's own text occupied (sourceRectAtTime before the write), so
- * it wraps inside the template's width and aligns to the box's right edge.
- * In a right-to-left paragraph After Effects aligns LEFT_JUSTIFY to the
- * paragraph's START edge - the right - which is what the 2026-10-09 point
- * text measurement showed (a left-justified RTL line ran left of its
- * anchor). Centred text stays centred. When this After Effects cannot write
- * box text (older scripting API), the earlier mirrored-justification layout
- * is used instead, and the evidence says which one happened.
+ *  1. Direction right-to-left with LEFT_JUSTIFY, which After Effects lays
+ *     out as lines ending at the anchor and running left - right-aligned
+ *     lines (measured on the template, 2026-10-09).
+ *  2. A line wider than the template's own line is broken into two or three
+ *     lines at word boundaries, by the measured width per character, so it
+ *     is as wide as the template's line and never cut by its width.
+ *  3. A template whose text ran RIGHT of its anchor (left-justified Latin)
+ *     has its anchor moved to the template line's right edge, so the
+ *     right-aligned Hebrew occupies exactly the template's area; every
+ *     child of the text (a reveal matte) is moved back by the same amount,
+ *     so it still covers the text. A text whose anchor or children are
+ *     animated cannot be moved and falls back to the mirrored layout
+ *     (b5cc2a8), which keeps the template's side with left-aligned lines.
+ *  4. A reveal matte that is the text's own child is made as tall as the
+ *     number of lines, so a second line is not cut by it.
+ *
+ * Centred text stays centred. Every step is recorded in the evidence.
  */
-export const RTL_BOX_JUSTIFICATION = "LEFT_JUSTIFY";
-/** The box is as tall as the template's text times this, so a wrapped line has room; a height auto-fit policy is asked for first where the API has one. */
-export const RTL_BOX_HEIGHT_FACTOR = 2;
+export const RTL_WRAP_TOLERANCE = 1.05;
+export const RTL_WRAP_MAX_LINES = 3;
 
 /**
  * BIDIRECTIONAL TEXT (2026-09-18, generic - no template, language or layer
@@ -381,7 +388,6 @@ function buildSetTextMutation(requestedText: string): string {
   const text = requestedText.replace(/\r\n|\n/g, "\r");
   const textLiteral = JSON.stringify(text);
   const analysis = analyseTextDirection(text);
-  const expectedCodeUnits = JSON.stringify(textCodeUnits(text));
   // Any right-to-left character means a plain Latin composer cannot shape
   // this text correctly, whichever way the paragraph itself reads.
   const requiresBidi = analysis.requiresBidiHandling;
@@ -399,7 +405,6 @@ function buildSetTextMutation(requestedText: string): string {
             __rectBeforeSet = __layer.sourceRectAtTime((Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __layer.containingComp.duration)) / 2, false);
           } catch (__rectBeforeSetError) { __rectBeforeSet = null; }
           var __requiresBidi = ${requiresBidi ? "true" : "false"};
-          var __expectedCodeUnits = ${expectedCodeUnits};
           var __dirNote = null;
           var __dirFailureReason = null;
           var __readDirection = function (__doc) {
@@ -515,50 +520,121 @@ function buildSetTextMutation(requestedText: string): string {
           var __justApplied = null;
           var __justMirrored = false;
           var __layout = "none";
-          var __boxSize = null;
+          var __layoutNote = null;
+          var __wrapLines = 1;
+          var __shiftX = 0;
+          var __finalText = ${textLiteral};
+          var __templateRanRight = false;
           var __readJustification = function (__doc) {
             try { return __doc.justification === undefined || __doc.justification === null ? null : String(__doc.justification); } catch (__justReadError) { return null; }
           };
           __justBefore = __readJustification(__td);
           if (__requiresBidi && __dirFailureReason === null && __previousDirection !== __wantedDirection && typeof ParagraphJustification !== "undefined") {
             var __isCentred = __td.justification === ParagraphJustification.CENTER_JUSTIFY || __td.justification === ParagraphJustification.FULL_JUSTIFY_LASTLINE_CENTER;
-            var __boxDone = false;
-            // See RTL_BOX_JUSTIFICATION above: a box over the template's own
-            // rectangle, so the Hebrew wraps inside the template's width and
-            // aligns to the right edge. A template box is left as it is.
-            if (!__isCentred && __rectBeforeSet !== null && __rectBeforeSet.width > 0 && __rectBeforeSet.height > 0 && __td.boxText !== true) {
-              try {
-                __td.boxText = true;
-                if (__td.boxText === true) {
-                  __td.boxTextSize = [Math.ceil(__rectBeforeSet.width), Math.ceil(__rectBeforeSet.height * ${RTL_BOX_HEIGHT_FACTOR})];
-                  __td.boxTextPos = [__rectBeforeSet.left, __rectBeforeSet.top];
-                  try { if (typeof BoxAutoFitPolicy !== "undefined" && BoxAutoFitPolicy.HEIGHT_PRECISE !== undefined) { __td.boxAutoFitPolicy = BoxAutoFitPolicy.HEIGHT_PRECISE; } } catch (__autoFitError) {}
-                  __td.justification = ParagraphJustification.${RTL_BOX_JUSTIFICATION};
-                  __boxDone = true;
-                  __boxSize = [__td.boxTextSize[0], __td.boxTextSize[1]];
-                }
-              } catch (__boxError) { __boxDone = false; }
-            }
-            if (__boxDone) {
-              __layout = "box";
-            } else if (!__isCentred) {
-              // The earlier layout (b5cc2a8): the justification flips with the
-              // direction so the text keeps the template's side of the anchor.
-              var __mirrorPairs = [["LEFT_JUSTIFY", "RIGHT_JUSTIFY"], ["RIGHT_JUSTIFY", "LEFT_JUSTIFY"], ["FULL_JUSTIFY_LASTLINE_LEFT", "FULL_JUSTIFY_LASTLINE_RIGHT"], ["FULL_JUSTIFY_LASTLINE_RIGHT", "FULL_JUSTIFY_LASTLINE_LEFT"]];
-              for (var __mp = 0; __mp < __mirrorPairs.length; __mp++) {
-                var __from = ParagraphJustification[__mirrorPairs[__mp][0]], __to = ParagraphJustification[__mirrorPairs[__mp][1]];
-                if (__from !== undefined && __to !== undefined && __td.justification === __from) {
-                  try { __td.justification = __to; __justMirrored = true; } catch (__justWriteError) { __justMirrored = false; }
-                  break;
-                }
-              }
-              if (__justMirrored) { __layout = "mirror"; }
+            if (!__isCentred) {
+              // See RTL_WRAP_TOLERANCE above. Lines end at the anchor and run
+              // left: right-aligned Hebrew. Whether the template ran right of
+              // its anchor decides the move in step 3 below.
+              __templateRanRight = __td.justification === ParagraphJustification.LEFT_JUSTIFY || __td.justification === ParagraphJustification.FULL_JUSTIFY_LASTLINE_LEFT;
+              try { __td.justification = ParagraphJustification.LEFT_JUSTIFY; __layout = "point-rtl"; } catch (__justWriteError) { __layout = "none"; __layoutNote = "the justification could not be set: " + String(__justWriteError); }
             }
           }
           if (__dirFailureReason !== null) {
             __result = JSON.stringify({ ok: false, failureReason: __dirFailureReason });
           } else {
             __layer.sourceText.setValue(__td);
+            if (__layout === "point-rtl" && __rectBeforeSet !== null && __rectBeforeSet.width > 0) {
+              var __layoutMid = (Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __layer.containingComp.duration)) / 2;
+              // 2. Wrap to the template's own line width.
+              try {
+                var __r1 = __layer.sourceRectAtTime(__layoutMid, false);
+                var __W = __rectBeforeSet.width;
+                if (__r1 && __r1.width > __W * ${RTL_WRAP_TOLERANCE} && __finalText.indexOf("\\r") < 0 && __finalText.indexOf(" ") > 0) {
+                  var __perChar = __r1.width / Math.max(1, __finalText.length);
+                  var __words = __finalText.split(" ");
+                  var __lines = [];
+                  var __cur = "";
+                  for (var __wi = 0; __wi < __words.length; __wi++) {
+                    var __cand = __cur === "" ? __words[__wi] : __cur + " " + __words[__wi];
+                    if (__cur !== "" && __cand.length * __perChar > __W) { __lines.push(__cur); __cur = __words[__wi]; } else { __cur = __cand; }
+                  }
+                  if (__cur !== "") { __lines.push(__cur); }
+                  if (__lines.length > ${RTL_WRAP_MAX_LINES}) {
+                    // Too many short lines: share the words out over the maximum instead.
+                    var __per = Math.ceil(__words.length / ${RTL_WRAP_MAX_LINES});
+                    __lines = [];
+                    for (var __li2 = 0; __li2 < __words.length; __li2 += __per) { __lines.push(__words.slice(__li2, __li2 + __per).join(" ")); }
+                  }
+                  if (__lines.length > 1) {
+                    __finalText = __lines.join("\\r");
+                    var __wrapDoc = __layer.sourceText.value;
+                    __wrapDoc.text = __finalText;
+                    __layer.sourceText.setValue(__wrapDoc);
+                    __wrapLines = __lines.length;
+                  }
+                }
+              } catch (__wrapError) { __layoutNote = "could not wrap: " + String(__wrapError); }
+              // 3. Keep the template's area: move the anchor to the template line's right edge, and the text's children back by the same amount.
+              if (__templateRanRight) {
+                var __moved = false;
+                try {
+                  var __lt = __layer.property("ADBE Transform Group");
+                  var __lap = __lt.property("ADBE Anchor Point");
+                  var __D = __rectBeforeSet.left + __rectBeforeSet.width;
+                  var __kids = [];
+                  var __kidsOk = __lap.numKeys === 0;
+                  var __lcomp = __layer.containingComp;
+                  for (var __ki = 1; __kidsOk && __ki <= __lcomp.numLayers; __ki++) {
+                    var __kid = __lcomp.layer(__ki);
+                    if (!__kid || __kid === __layer || __kid.parent !== __layer) { continue; }
+                    var __kpos = __kid.property("ADBE Transform Group").property("ADBE Position");
+                    if (!__kpos || __kpos.numKeys > 0 || __kpos.dimensionsSeparated === true) { __kidsOk = false; break; }
+                    __kids.push(__kpos);
+                  }
+                  if (__kidsOk) {
+                    var __a = __lap.value;
+                    __lap.setValue(__a.length > 2 ? [__a[0] - __D, __a[1], __a[2]] : [__a[0] - __D, __a[1]]);
+                    for (var __kj = 0; __kj < __kids.length; __kj++) {
+                      var __pv = __kids[__kj].value;
+                      __kids[__kj].setValue(__pv.length > 2 ? [__pv[0] - __D, __pv[1], __pv[2]] : [__pv[0] - __D, __pv[1]]);
+                    }
+                    __shiftX = __D;
+                    __moved = true;
+                  }
+                } catch (__moveError) { __moved = false; __layoutNote = "could not move the anchor: " + String(__moveError); }
+                if (!__moved) {
+                  // The b5cc2a8 layout: keep the template's side, lines left-aligned.
+                  try {
+                    var __mirrorDoc = __layer.sourceText.value;
+                    __mirrorDoc.justification = ParagraphJustification.RIGHT_JUSTIFY;
+                    __layer.sourceText.setValue(__mirrorDoc);
+                    __justMirrored = true;
+                    __layout = "mirror";
+                    if (__layoutNote === null) { __layoutNote = "the anchor or a child of this text is animated, so the text keeps the template's side with left-aligned lines"; }
+                  } catch (__mirrorError) {}
+                }
+              }
+              // 4. A reveal matte that is this text's own child grows with the lines.
+              if (__wrapLines > 1) {
+                try {
+                  var __lfx = __layer.property("ADBE Effect Parade");
+                  for (var __mi = 1; __lfx && __mi <= __lfx.numProperties; __mi++) {
+                    var __mfx2 = __lfx.property(__mi);
+                    if (!__mfx2 || __mfx2.matchName !== "ADBE Set Matte3" || !__mfx2.enabled) { continue; }
+                    var __mIdx = __mfx2.property("ADBE Set Matte3-0001").value;
+                    var __mLayer = __mIdx > 0 ? __layer.containingComp.layer(__mIdx) : null;
+                    if (!__mLayer || __mLayer.parent !== __layer) { continue; }
+                    var __mScale = __mLayer.property("ADBE Transform Group").property("ADBE Scale");
+                    if (__mScale && __mScale.numKeys === 0) {
+                      var __sv = __mScale.value;
+                      __mScale.setValue(__sv.length > 2 ? [__sv[0], __sv[1] * __wrapLines, __sv[2]] : [__sv[0], __sv[1] * __wrapLines]);
+                    }
+                  }
+                } catch (__matteGrowError) {}
+              }
+            }
+            var __finalCodeUnits = [];
+            for (var __fu = 0; __fu < __finalText.length; __fu++) { __finalCodeUnits.push(__finalText.charCodeAt(__fu)); }
             var __storedDoc = __layer.sourceText.value;
             var __storedText = __storedDoc.text;
             __justApplied = __readJustification(__storedDoc);
@@ -566,12 +642,12 @@ function buildSetTextMutation(requestedText: string): string {
             __appliedComposer = __readComposer(__storedDoc);
             var __textVerified = true;
             var __mismatchAt = -1;
-            if (__storedText === null || __storedText === undefined || String(__storedText).length !== __expectedCodeUnits.length) {
+            if (__storedText === null || __storedText === undefined || String(__storedText).length !== __finalCodeUnits.length) {
               __textVerified = false;
             } else {
               var __storedString = String(__storedText);
-              for (var __u = 0; __u < __expectedCodeUnits.length; __u++) {
-                if (__storedString.charCodeAt(__u) !== __expectedCodeUnits[__u]) {
+              for (var __u = 0; __u < __finalCodeUnits.length; __u++) {
+                if (__storedString.charCodeAt(__u) !== __finalCodeUnits[__u]) {
                   __textVerified = false;
                   __mismatchAt = __u;
                   break;
@@ -614,9 +690,11 @@ function buildSetTextMutation(requestedText: string): string {
               justificationApplied: __justApplied,
               justificationMirrored: __justMirrored,
               layout: __layout,
-              boxTextSize: __boxSize,
+              layoutNote: __layoutNote,
+              wrapLines: __wrapLines,
+              shiftX: __shiftX,
               textCodeUnitsVerified: __textVerified,
-              codeUnitCount: __expectedCodeUnits.length,
+              codeUnitCount: __finalCodeUnits.length,
               note: __dirNote
             };
             if (__dirFailureReason !== null) {
@@ -626,7 +704,7 @@ function buildSetTextMutation(requestedText: string): string {
               // SET_TEXT - the stored text string. The direction evidence is
               // a SEPARATE, optional key, so no existing consumer of
               // resultingValue can be affected by it existing.
-              __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: ${textLiteral}, textDirection: __directionEvidence });
+              __result = JSON.stringify({ ok: true, previousValue: __previousText, resultingValue: __finalText, textDirection: __directionEvidence });
               ${text === "" ? "// An emptied text place has nothing to fit: no glyph can overlap or leave the frame." : buildTextAutoFit()}
             }
           }
