@@ -2222,3 +2222,11 @@ The client sent six frames with a note on each: a subtitle whose left letter is 
 2. The session stayed PREPARING after a SUCCEEDED frame: the deployed API's evidence schema (a9ca69a) did not know the new `layout: "point-rtl"` value, the strict parse of the whole frame result failed, and `recordExecuteFrameResult` returned without recording the scene. `layout` is a string now, and the lesson is recorded: evidence fields must never be able to drop a frame result.
 
 The frame with the texts visible is the next run, after this API is deployed.
+
+### 2026-10-14 - the point layout, second run on After Effects: the frame at 15 s (QA project `mega`, job 526a8441)
+
+With the moment fixed, the frame shows the polaroid and the Hebrew captions - the first right-to-left frame built by this system that a person could judge. It also showed the rule's gap: a one-line polaroid caption ("Mixkit photo") was wrapped into two lines and the second fell off the card; "Jan 21", a 70 px wide date, became three tiny lines, shrunk and cut. Wrapping "to the template's line width" is wrong where the template's line is a short word in a one-line slot.
+
+**Fix (worker): the layout is decided by the room the text has**, measured in the composition's own space: the span on the template's side of the anchor (to the composition's edge, one margin short); the lines that fit below the first before the bottom edge; the template's own line count. A line wider than its span is wrapped only into lines that have room below; what still does not fit is made smaller (floor `TEXT_AUTO_FIT_MIN_FACTOR`), never cut; the anchor moves so the block starts where the template's line started. So a caption at the bottom of a card stays one line and shrinks only as far as needed, while a headline beside a phone with the whole background below it wraps. Evidence adds `layoutShrunkTo`. The evidence schema no longer refuses unknown keys (the PREPARING defect above, made impossible for the next field).
+
+Not yet seen on After Effects: the next QA frame.

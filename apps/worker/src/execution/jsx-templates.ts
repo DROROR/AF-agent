@@ -545,23 +545,59 @@ function buildSetTextMutation(requestedText: string): string {
             __layer.sourceText.setValue(__td);
             if (__layout === "point-rtl" && __rectBeforeSet !== null && __rectBeforeSet.width > 0) {
               var __layoutMid = (Math.max(__layer.inPoint, 0) + Math.min(__layer.outPoint, __layer.containingComp.duration)) / 2;
-              // 2. Wrap to the template's own line width.
+              // 2-3. Where there is room decides everything (real 2026-10-14, first
+              // frame on After Effects: a one-line polaroid caption was wrapped into
+              // three tiny lines that fell off the card). Measured in the
+              // composition's own space when the layer can map its points there:
+              //  - the span the text may fill on the template's side of its anchor
+              //    (to the composition's edge, one margin short);
+              //  - the lines that fit below the first one before the bottom edge;
+              //  - the template's own line count.
+              // A line wider than the span is wrapped only into lines that have
+              // room below; what still does not fit is shrunk, never cut.
+              var __layoutPrevTime = null;
+              var __mapOk = false;
+              try { __mapOk = typeof __layer.sourcePointToComp === "function"; } catch (__mapProbeError2) { __mapOk = false; }
+              var __toComp = function (__pt) {
+                if (!__mapOk) { return __pt; }
+                if (__layoutPrevTime === null) { __layoutPrevTime = __layer.containingComp.time; __layer.containingComp.time = __layoutMid; }
+                var __c = __layer.sourcePointToComp(__pt);
+                return [__c[0], __c[1]];
+              };
+              var __compBox = function (__r) {
+                var __a = __toComp([__r.left, __r.top]), __b = __toComp([__r.left + __r.width, __r.top + __r.height]);
+                return { left: Math.min(__a[0], __b[0]), right: Math.max(__a[0], __b[0]), top: Math.min(__a[1], __b[1]), bottom: Math.max(__a[1], __b[1]) };
+              };
+              var __measure = function () { return __layer.sourceRectAtTime(__layoutMid, false); };
+              var __shrunkTo = 1;
               try {
-                var __r1 = __layer.sourceRectAtTime(__layoutMid, false);
-                var __W = __rectBeforeSet.width;
-                if (__r1 && __r1.width > __W * ${RTL_WRAP_TOLERANCE} && __finalText.indexOf("\\r") < 0 && __finalText.indexOf(" ") > 0) {
-                  var __perChar = __r1.width / Math.max(1, __finalText.length);
+                var __lcomp0 = __layer.containingComp;
+                var __margin0 = Math.max(8, __lcomp0.width * 0.0125);
+                var __tpl = __compBox(__rectBeforeSet);
+                var __r1 = __measure();
+                var __cur1 = __compBox(__r1);
+                var __w1 = __cur1.right - __cur1.left;
+                var __lineH = Math.max(1, __cur1.bottom - __cur1.top);
+                var __span = __templateRanRight ? (__lcomp0.width - __margin0 - __tpl.left) : (__tpl.right - __margin0);
+                if (!(__span > 0)) { __span = __tpl.right - __tpl.left; }
+                var __roomLines = 1 + Math.max(0, Math.floor((__lcomp0.height - __margin0 - __cur1.bottom) / __lineH));
+                var __templateLines = String(__previousText === null || __previousText === undefined ? "" : __previousText).split("\\r").length;
+                var __maxLines = Math.min(${RTL_WRAP_MAX_LINES}, Math.max(__templateLines, __roomLines));
+                var __needed = Math.ceil(__w1 / __span);
+                if (__needed > 1 && __maxLines > 1 && __finalText.indexOf("\\r") < 0 && __finalText.indexOf(" ") > 0) {
+                  var __lineCount = Math.min(__needed, __maxLines);
+                  var __perChar = __w1 / Math.max(1, __finalText.length);
+                  var __target = Math.max(__span, __w1 / __lineCount);
                   var __words = __finalText.split(" ");
                   var __lines = [];
                   var __cur = "";
                   for (var __wi = 0; __wi < __words.length; __wi++) {
                     var __cand = __cur === "" ? __words[__wi] : __cur + " " + __words[__wi];
-                    if (__cur !== "" && __cand.length * __perChar > __W) { __lines.push(__cur); __cur = __words[__wi]; } else { __cur = __cand; }
+                    if (__cur !== "" && __cand.length * __perChar > __target) { __lines.push(__cur); __cur = __words[__wi]; } else { __cur = __cand; }
                   }
                   if (__cur !== "") { __lines.push(__cur); }
-                  if (__lines.length > ${RTL_WRAP_MAX_LINES}) {
-                    // Too many short lines: share the words out over the maximum instead.
-                    var __per = Math.ceil(__words.length / ${RTL_WRAP_MAX_LINES});
+                  if (__lines.length > __lineCount) {
+                    var __per = Math.ceil(__words.length / __lineCount);
                     __lines = [];
                     for (var __li2 = 0; __li2 < __words.length; __li2 += __per) { __lines.push(__words.slice(__li2, __li2 + __per).join(" ")); }
                   }
@@ -573,14 +609,28 @@ function buildSetTextMutation(requestedText: string): string {
                     __wrapLines = __lines.length;
                   }
                 }
-              } catch (__wrapError) { __layoutNote = "could not wrap: " + String(__wrapError); }
-              // 3. Keep the template's area: move the anchor to the template line's right edge, and the text's children back by the same amount.
+                // Last resort: what is still wider than its span is made smaller, never cut.
+                var __r2 = __measure();
+                var __box2 = __compBox(__r2);
+                var __w2 = __box2.right - __box2.left;
+                if (__w2 > __span && __span > 0) {
+                  __shrunkTo = Math.max(${TEXT_AUTO_FIT_MIN_FACTOR}, __span / __w2);
+                  var __shrinkDoc = __layer.sourceText.value;
+                  __shrinkDoc.fontSize = __shrinkDoc.fontSize * __shrunkTo;
+                  __layer.sourceText.setValue(__shrinkDoc);
+                  __layoutNote = "wider than the room on its side even after wrapping - text size reduced to " + Math.round(__shrunkTo * 100) + "%";
+                }
+              } catch (__roomError) { __layoutNote = "could not measure the room: " + String(__roomError); }
+              // 3. A template whose text ran RIGHT of its anchor: the Hebrew's right
+              // edge goes where the text's own width ends, measured from the
+              // template line's left edge; its children follow.
               if (__templateRanRight) {
                 var __moved = false;
                 try {
                   var __lt = __layer.property("ADBE Transform Group");
                   var __lap = __lt.property("ADBE Anchor Point");
-                  var __D = __rectBeforeSet.left + __rectBeforeSet.width;
+                  var __rFinal = __measure();
+                  var __D = __rectBeforeSet.left + __rFinal.width;
                   var __kids = [];
                   var __kidsOk = __lap.numKeys === 0;
                   var __lcomp = __layer.containingComp;
@@ -614,6 +664,7 @@ function buildSetTextMutation(requestedText: string): string {
                   } catch (__mirrorError) {}
                 }
               }
+              if (__layoutPrevTime !== null) { try { __layer.containingComp.time = __layoutPrevTime; } catch (__timeBackError) {} }
               // 4. A reveal matte that is this text's own child grows with the lines.
               if (__wrapLines > 1) {
                 try {
@@ -693,6 +744,7 @@ function buildSetTextMutation(requestedText: string): string {
               layoutNote: __layoutNote,
               wrapLines: __wrapLines,
               shiftX: __shiftX,
+              layoutShrunkTo: __shrunkTo,
               textCodeUnitsVerified: __textVerified,
               codeUnitCount: __finalCodeUnits.length,
               note: __dirNote

@@ -227,11 +227,15 @@ export const textDirectionEvidenceSchema = z
     layoutNote: z.string().nullable().optional(),
     wrapLines: z.number().int().positive().optional(),
     shiftX: z.number().optional(),
+    /** 1 when the text kept its size; below 1 when it was made smaller to fit the room on its side (the last resort). */
+    layoutShrunkTo: z.number().optional(),
     /** The stored text's code-unit sequence was compared with the requested one, position by position. */
     textCodeUnitsVerified: z.boolean(),
     codeUnitCount: z.number().int().nonnegative(),
     /** Plain-words note when AE could not report something (e.g. an older build without a composer-engine API) - present even on success, so a degraded-but-accepted path is never invisible. */
     note: z.string().nullable().default(null)
   })
-  .strict();
+  // Unknown keys are dropped, never refused (2026-10-14): a newer worker's extra
+  // evidence field must never make an older API drop the whole frame result.
+  .strip();
 export type TextDirectionEvidence = z.infer<typeof textDirectionEvidenceSchema>;

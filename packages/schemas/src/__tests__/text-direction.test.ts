@@ -194,6 +194,25 @@ describe("textDirectionEvidenceSchema", () => {
     expect(parsed.justificationMirrored).toBe(true);
   });
 
+  it("a field this schema does not know yet is dropped, never refused - a newer worker must not break an older API (real 2026-10-14)", () => {
+    const parsed = textDirectionEvidenceSchema.parse({
+      requiredDirection: "RTL",
+      isMixed: false,
+      previousDirection: null,
+      previousComposerEngine: null,
+      appliedDirection: null,
+      appliedComposerEngine: null,
+      directionVerified: true,
+      composerVerified: true,
+      textCodeUnitsVerified: true,
+      codeUnitCount: 3,
+      layout: "a-layout-invented-next-month",
+      somethingNewer: { nested: true }
+    });
+    expect(parsed.layout).toBe("a-layout-invented-next-month");
+    expect("somethingNewer" in parsed).toBe(false);
+  });
+
   it("defaults the optional evidence fields so an older worker's record still parses", () => {
     const parsed = textDirectionEvidenceSchema.parse({
       requiredDirection: "LTR",

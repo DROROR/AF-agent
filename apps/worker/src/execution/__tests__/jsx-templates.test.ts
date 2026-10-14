@@ -4037,16 +4037,17 @@ describe("SET_TEXT auto-fit - a parented text cut by a matte is shrunk through i
   });
 });
 
-// REAL 2026-10-09/14 (client project 3241977f): a point text has no width -
-// it cannot wrap and its lines can only align at the anchor - and the real
-// After Effects refused box text silently. So a right-to-left replacement is
-// laid out on the point text itself: right-aligned lines (LEFT_JUSTIFY under
-// RTL), wrapped to the template's line width, the anchor moved to the
-// template line's right edge with the text's children moved back, and a
-// child reveal matte grown to the number of lines. See RTL_WRAP_TOLERANCE.
-describe("SET_TEXT - a right-to-left text is laid out on the point text: right-aligned, wrapped to the template's width, in the template's area (2026-10-14)", () => {
+// REAL 2026-10-09/14 (client project 3241977f, QA project mega): a point text
+// has no width - it cannot wrap and its lines can only align at the anchor -
+// and the real After Effects refused box text silently. So a right-to-left
+// replacement is laid out on the point text itself, by the ROOM it has:
+// right-aligned lines (LEFT_JUSTIFY under RTL); wrapped only into lines that
+// have room below, to the span on the template's side; shrunk as the last
+// resort; the anchor moved so the text occupies the template's side, with the
+// text's children moved back; a child reveal matte grown to the lines.
+describe("SET_TEXT - a right-to-left text is laid out on the point text by the room it has (2026-10-14)", () => {
   const CHAR_PX = 5;
-  const setup = (justification: string, direction: string, options: { anchorKeys?: number; kidKeys?: number } = {}) => `
+  const setup = (justification: string, direction: string, options: { anchorKeys?: number; kidKeys?: number; x?: number; y?: number } = {}) => `
     function CompItem() {}
     function AVLayer() {}
     function TextLayer() {}
@@ -4057,25 +4058,29 @@ describe("SET_TEXT - a right-to-left text is laid out on the point text: right-a
     var ParagraphDirection = { DIRECTION_LEFT_TO_RIGHT: "DIRECTION_LEFT_TO_RIGHT", DIRECTION_RIGHT_TO_LEFT: "DIRECTION_RIGHT_TO_LEFT" };
     var ComposerEngine = { LATIN_COMPOSER_ENGINE: "LATIN_COMPOSER_ENGINE", UNIVERSAL_TYPE_ENGINE: "UNIVERSAL_TYPE_ENGINE" };
     function prop(value, keys) { return { numKeys: keys || 0, value: value, valueAtTime: function () { return this.value; }, setValue: function (v) { this.value = v; } }; }
-    var __textProps = { "ADBE Scale": prop([100, 100, 100]), "ADBE Anchor Point": prop([0, 0, 0], ${options.anchorKeys ?? 0}), "ADBE Position": prop([1200, 560, 0]), "ADBE Rotate Z": prop(0) };
+    var __pos = [${options.x ?? 1700}, ${options.y ?? 560}, 0];
+    var __textProps = { "ADBE Scale": prop([100, 100, 100]), "ADBE Anchor Point": prop([0, 0, 0], ${options.anchorKeys ?? 0}), "ADBE Position": prop(__pos), "ADBE Rotate Z": prop(0) };
     var __text = new TextLayer();
     __text.name = "Text C"; __text.index = 4; __text.enabled = true; __text.threeDLayer = true; __text.parent = null; __text.inPoint = 1; __text.outPoint = 8; __text.locked = false;
     var __doc = { text: "This project is suitable for all.", font: "Montserrat-Medium", fontSize: 10, justification: ${JSON.stringify(justification)}, direction: ${JSON.stringify(direction)}, composerEngine: "LATIN_COMPOSER_ENGINE", boxText: false };
     __text.sourceText = { value: __doc, setValue: function (v) { this.value = v; } };
-    // Width follows the longest line, ${CHAR_PX} px a character; a right-to-left text runs left of the anchor.
+    // Width follows the longest line, ${CHAR_PX} px a character at size 10; a right-to-left text runs left of the anchor.
     __text.sourceRectAtTime = function () {
       var lines = String(this.sourceText.value.text).split("\\r"); var w = 0;
-      for (var i = 0; i < lines.length; i++) { if (lines[i].length * ${CHAR_PX} > w) { w = lines[i].length * ${CHAR_PX}; } }
+      for (var i = 0; i < lines.length; i++) { if (lines[i].length > w) { w = lines[i].length; } }
+      var scale = this.sourceText.value.fontSize / 10;
+      w = w * ${CHAR_PX} * scale;
       var rtl = this.sourceText.value.direction === "DIRECTION_RIGHT_TO_LEFT";
-      return { left: rtl ? -w : 2, top: -6, width: w, height: 32 * lines.length };
+      return { left: rtl ? -w : 2, top: -6, width: w, height: 32 * scale * lines.length };
     };
+    // Layer space -> composition space: scale 100, no rotation, anchor as currently set.
+    __text.sourcePointToComp = function (pt) { var a = __textProps["ADBE Anchor Point"].value; return [__pos[0] + pt[0] - a[0], __pos[1] + pt[1] - a[1]]; };
     var __setMatte = { matchName: "ADBE Set Matte3", enabled: true, property: function (n) { return n === "ADBE Set Matte3-0001" ? { value: 3 } : null; } };
     __text.property = function (n) {
       if (n === "ADBE Transform Group") { return { property: function (inner) { return __textProps[inner] || null; } }; }
       if (n === "ADBE Effect Parade") { return { numProperties: 1, property: function (i) { return i === 1 ? __setMatte : null; } }; }
       return null;
     };
-    // The reveal matte: the text's own child.
     var __matteProps = { "ADBE Position": prop([-4, 8, 0], ${options.kidKeys ?? 0}), "ADBE Scale": prop([389, 32, 100]), "ADBE Anchor Point": prop([279, -93, 0]), "ADBE Rotate Z": prop(0) };
     var __matte = new AVLayer();
     __matte.name = "B"; __matte.index = 3; __matte.enabled = false; __matte.parent = __text;
@@ -4088,47 +4093,63 @@ describe("SET_TEXT - a right-to-left text is laid out on the point text: right-a
     var app = { beginUndoGroup: function () {}, endUndoGroup: function () {}, project: { item: function (i) { return i === 6 ? __comp : null; } } };
   `;
 
-  function run(text: string, justification: string, direction = "DIRECTION_LEFT_TO_RIGHT", options: { anchorKeys?: number; kidKeys?: number } = {}) {
+  function run(text: string, justification: string, direction = "DIRECTION_LEFT_TO_RIGHT", options: { anchorKeys?: number; kidKeys?: number; x?: number; y?: number } = {}) {
     const op: SceneEditOperation = { type: "SET_TEXT", manifestPlaceholderId: "ph-c", layerIndex: 4, nestedTarget: null, text };
     const script = buildOperationScript(6, "Scene_03", op);
-    const probed = script.replace(/return __result;\s*$/, `; var __d = __text.sourceText.value; __result = JSON.stringify({ step: __result, justification: __d.justification, direction: __d.direction, text: __d.text, anchor: __textProps["ADBE Anchor Point"].value, mattePos: __matteProps["ADBE Position"].value, matteScale: __matteProps["ADBE Scale"].value });\n  return __result;`);
+    const probed = script.replace(/return __result;\s*$/, `; var __d = __text.sourceText.value; __result = JSON.stringify({ step: __result, justification: __d.justification, direction: __d.direction, text: __d.text, fontSize: __d.fontSize, anchor: __textProps["ADBE Anchor Point"].value, mattePos: __matteProps["ADBE Position"].value, matteScale: __matteProps["ADBE Scale"].value, compTime: __comp.time });\n  return __result;`);
     expect(probed).not.toBe(script);
     const outcome = JSON.parse(runFixedScriptWithoutNativeJson(probed, setup(justification, direction, options)));
     return { ...outcome, step: JSON.parse(outcome.step) };
   }
 
-  // The template line: "This project is suitable for all." = 33 characters = 165 px wide, from x 2 to 167.
-  const LONG = "ספריית אימונים עשירה לכל רמת כושר בזמן שלך ובקצב שלך"; // 51 characters = 255 px: wider than 165
+  // The template line "This project is suitable for all." is 33 characters = 165 px, from layer x 2 to 167.
+  // With the text at x 1700 the span on its right is 1920 - 24 - 1702 = 194 px.
+  const LONG = "ספריית אימונים עשירה לכל רמת כושר בזמן שלך ובקצב שלך"; // 52 characters = 260 px, wider than the 194 px span
 
-  it("a long Hebrew line replacing a left-justified Latin line: right-aligned, wrapped into two lines no wider than the template's line, anchor moved to the template line's right edge, the matte child moved back and grown - and the evidence says all of it", () => {
+  it("a long line with room below: wrapped into two right-aligned lines no wider than the span, anchor moved so the block starts at the template line's left edge, the matte child moved back and grown - and the evidence says all of it", () => {
     const outcome = run(LONG, "LEFT_JUSTIFY");
     expect(outcome.step.ok).toBe(true);
     expect(outcome.direction).toBe("DIRECTION_RIGHT_TO_LEFT");
     expect(outcome.justification).toBe("LEFT_JUSTIFY");
     const lines = String(outcome.text).split("\r");
     expect(lines.length).toBe(2);
-    for (const line of lines) { expect(line.length * CHAR_PX).toBeLessThanOrEqual(165); }
+    const widest = Math.max(...lines.map((line) => line.length)) * CHAR_PX;
+    expect(widest).toBeLessThanOrEqual(194);
     expect(lines.join(" ")).toBe(LONG);
-    expect(outcome.anchor).toEqual([-167, 0, 0]);
-    expect(outcome.mattePos).toEqual([-171, 8, 0]);
+    expect(outcome.fontSize).toBe(10);
+    expect(outcome.anchor).toEqual([-(2 + widest), 0, 0]);
+    expect(outcome.mattePos).toEqual([-4 - (2 + widest), 8, 0]);
     expect(outcome.matteScale).toEqual([389, 64, 100]);
+    expect(outcome.compTime).toBe(0);
     expect(outcome.step.resultingValue).toBe(lines.join("\r"));
-    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 2, shiftX: 167, justificationBefore: "LEFT_JUSTIFY", justificationApplied: "LEFT_JUSTIFY", codeUnitCount: LONG.length, textCodeUnitsVerified: true, fontApplied: "Heebo-Medium" });
+    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 2, shiftX: 2 + widest, layoutShrunkTo: 1, codeUnitCount: LONG.length, textCodeUnitsVerified: true, fontApplied: "Heebo-Medium" });
   });
 
-  it("a short Hebrew line is not wrapped but still moved into the template's area", () => {
+  it("REAL 2026-10-14 (polaroid caption): no room below means no wrapping - the line is made smaller to fit its span instead, never cut, and the evidence says by how much", () => {
+    const outcome = run(LONG, "LEFT_JUSTIFY", "DIRECTION_LEFT_TO_RIGHT", { y: 1060 });
+    expect(outcome.text).toBe(LONG);
+    const singleLineWidth = LONG.length * CHAR_PX;
+    expect(outcome.fontSize).toBeCloseTo(10 * (194 / singleLineWidth), 6);
+    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 1 });
+    expect(outcome.step.textDirection.layoutShrunkTo).toBeCloseTo(194 / singleLineWidth, 6);
+    expect(outcome.step.textDirection.layoutNote).toContain("text size reduced");
+  });
+
+  it("a short line is neither wrapped nor shrunk, and is moved so it starts where the template's line started", () => {
     const outcome = run("שלום עולם", "LEFT_JUSTIFY");
     expect(outcome.text).toBe("שלום עולם");
-    expect(outcome.anchor).toEqual([-167, 0, 0]);
+    expect(outcome.fontSize).toBe(10);
+    expect(outcome.anchor).toEqual([-(2 + 45), 0, 0]);
     expect(outcome.matteScale).toEqual([389, 32, 100]);
-    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 1, shiftX: 167 });
+    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 1, shiftX: 47, layoutShrunkTo: 1 });
   });
 
-  it("a right-justified Latin template already ran left of its anchor: right-aligned Hebrew needs no move", () => {
+  it("a right-justified Latin template already ran left of its anchor, with the whole width of the composition as its span: right-aligned Hebrew needs neither a move nor a wrap", () => {
     const outcome = run(LONG, "RIGHT_JUSTIFY");
     expect(outcome.justification).toBe("LEFT_JUSTIFY");
+    expect(outcome.text).toBe(LONG);
     expect(outcome.anchor).toEqual([0, 0, 0]);
-    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 2, shiftX: 0 });
+    expect(outcome.step.textDirection).toMatchObject({ layout: "point-rtl", wrapLines: 1, shiftX: 0 });
   });
 
   it("when the anchor or a child is animated the text cannot be moved: the mirrored layout keeps the template's side, and the evidence says why", () => {
