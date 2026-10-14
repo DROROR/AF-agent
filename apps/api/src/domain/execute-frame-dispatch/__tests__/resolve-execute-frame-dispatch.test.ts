@@ -1869,11 +1869,34 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
       })
     );
     expect(result.ok).toBe(true);
-    // Better the worker's own honest default than a named moment that renders nothing.
-    expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
+    // 2026-10-14: no measurable moment inside the 5 s composition - its middle, never t=0 (where a fade-in sits).
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(2.5);
   });
 
-  it("leaves the moment unset when nothing is measurable, so the worker's own default is unchanged", () => {
+  it("REAL 2026-10-14: a slot on screen past the end of a shorter composition votes for the part inside it, not for a moment past the end", () => {
+    // Slots "0-75 s" on a 30 s composition used to give 37.5 s, past the end, so
+    // the moment was dropped and t=0 captured the template's coloured fade-in.
+    const base = validManifest();
+    const sceneManifest = base.scenes[0]!;
+    const facts = cardSlotFacts({
+      hosts: [{ ...cardSlotFacts().hosts[0]!, compositionId: "comp-1", enabled: true, inFrame: true, windowSeconds: { startSeconds: 0, endSeconds: 75 } }],
+      visibleWindowSeconds: { startSeconds: 0, endSeconds: 75 }
+    });
+    const placeholders = sceneManifest.placeholders.map((placeholder) =>
+      placeholder.placeholderId === "ph-2" ? { ...placeholder, slotFacts: facts, slotSemantics: classifySlotSemantics(facts) } : placeholder
+    );
+    const compositions = base.compositions.map((c) => (c.compositionId === "comp-1" ? { ...c, durationSeconds: 30 } : c));
+    const result = resolveExecuteFrameDispatch(
+      baseInput({
+        currentProjectManifest: { ...base, compositions, scenes: [{ ...sceneManifest, placeholders }] },
+        currentPlan: validPlan({ scenePlans: [validScene({ mappings: [imageMapping()] })] })
+      })
+    );
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(15);
+  });
+
+  it("when nothing is measurable the moment is the composition's middle - never t=0, where a fade-in sits (2026-10-14)", () => {
     const base = validManifest();
     const scene = base.scenes[0]!;
     const placeholders = scene.placeholders.map((placeholder) => {
@@ -1890,10 +1913,10 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
       })
     );
     expect(result.ok).toBe(true);
-    expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(2.5);
   });
 
-  it("a text-only scene does not vote a moment into existence - text carries no slot facts by design", () => {
+  it("a text-only scene has no slot window to vote with - text carries no slot facts by design - so it gets the composition's middle", () => {
     const result = resolveExecuteFrameDispatch(
       baseInput({
         currentProjectManifest: manifestWithVisibleWindow(1, 5),
@@ -1901,7 +1924,7 @@ describe("resolveExecuteFrameDispatch - the approval preview must show what was 
       })
     );
     expect(result.ok).toBe(true);
-    expect(result.ok === true && "previewTimestampSeconds" in result.payload).toBe(false);
+    expect(result.ok === true && result.payload.previewTimestampSeconds).toBe(2.5);
   });
 });
 

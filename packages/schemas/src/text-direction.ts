@@ -220,7 +220,8 @@ export const textDirectionEvidenceSchema = z
     justificationApplied: z.string().nullable().optional(),
     justificationMirrored: z.boolean().optional(),
     /** How a right-to-left text was laid out (2026-10-09): "box" = paragraph text over the template's own rectangle, "mirror" = justification flipped on point text, "none" = left as the template had it. */
-    layout: z.enum(["point-rtl", "box", "mirror", "none"]).optional(),
+    /** A string, not an enum: a newer worker's layout name must never make an older API drop the whole frame result (real 2026-10-14: a session stayed PREPARING because "point-rtl" was unknown to the deployed schema). */
+    layout: z.string().optional(),
     boxTextSize: z.tuple([z.number(), z.number()]).nullable().optional(),
     /** 2026-10-14 point layout: why a step was skipped, how many lines the text was wrapped into, and by how much the anchor (and the text's children) moved. */
     layoutNote: z.string().nullable().optional(),

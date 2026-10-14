@@ -2212,3 +2212,13 @@ The client sent six frames with a note on each: a subtitle whose left letter is 
 **Not seen on real After Effects yet.** The next client frame decides it: `layout: "point-rtl"`, `wrapLines: 2` on the long subtitles, and the headline inside its band.
 
 **Still open from this review:** an alignment choice (left/right/centre) in the planner - Hebrew is right-aligned by this rule, centred stays centred; one scene ("EASY TO CUSTOMIZE") still shows the template's English, which the plan leaves as it is - whether the client wants it replaced is a plan question, not a defect.
+
+### 2026-10-14 - first real-After-Effects run of the point layout (QA project `mega`, worker FAHADNAKASH on fef6163, frame job c1b6dc4e)
+
+**The layout works on real After Effects.** Evidence: `layout: "point-rtl"` on both Hebrew texts, `wrapLines: 3` and `2`, `shiftX` 69.8 and 152.9 px, `fontApplied: Heebo-Regular`, text verified against the wrapped text. First time any of the right-to-left layout has been proven on After Effects rather than in the simulator.
+
+**Two defects found by looking at the frame, which was a solid red rectangle.**
+1. The moment: slots on screen "0-75 s" of a 30.3 s composition gave a midpoint past the end, the moment was dropped, and the worker's t=0 default landed inside the template's half-second "Fade in" solid, which the plan had just coloured `#C85151`. Fix: `choosePreviewMoment` - windows are clipped to the composition's duration before they vote, and when nothing measurable remains the moment is the composition's middle, never t=0. The three tests that pinned "unset, so the worker's default" now pin the middle.
+2. The session stayed PREPARING after a SUCCEEDED frame: the deployed API's evidence schema (a9ca69a) did not know the new `layout: "point-rtl"` value, the strict parse of the whole frame result failed, and `recordExecuteFrameResult` returned without recording the scene. `layout` is a string now, and the lesson is recorded: evidence fields must never be able to drop a frame result.
+
+The frame with the texts visible is the next run, after this API is deployed.

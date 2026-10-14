@@ -796,10 +796,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   // Only the slots this dispatch is actually editing vote here; the
   // regeneration path has no approved-mapping list of its own and falls back
   // to every manifest-linked slot in the scene (scenePreviewFrameSeconds).
-  const chosenPreviewSeconds = selectScenePreviewFrameSeconds(editedSlotWindows);
-  // Never name a moment past the end of the composition being rendered.
-  const previewTimestampSeconds =
-    chosenPreviewSeconds !== null && chosenPreviewSeconds >= composition.durationSeconds ? null : chosenPreviewSeconds;
+  const previewTimestampSeconds = choosePreviewMoment(editedSlotWindows, composition.durationSeconds);
 
   return {
     ok: true,
@@ -963,9 +960,41 @@ function scenePreviewFrameSeconds(
     return placeholder?.slotFacts ? computeEffectiveVisibility(placeholder.slotFacts, scene.manifestCompositionId) : null;
   });
   const composition = manifest.compositions.find((candidate) => candidate.compositionId === scene.manifestCompositionId);
-  const chosen = selectScenePreviewFrameSeconds(windows);
-  // Never name a moment past the end of what will be rendered.
-  return chosen !== null && composition !== undefined && chosen >= composition.durationSeconds ? null : chosen;
+  return choosePreviewMoment(windows, composition?.durationSeconds ?? null);
+}
+
+/**
+ * REAL 2026-10-14 (QA project `mega`, Mixkit "Polaroid Slideshow"): the
+ * approval frame was a solid red rectangle. The slots' windows were 0-75 s
+ * on a 30.3 s composition, so their midpoint (37.5 s) lay past the end, the
+ * moment was left unset, and the worker's t=0 default landed inside the
+ * template's half-second "fade in" solid - which the plan had just coloured.
+ * Two rules now, both bounded by the composition being rendered:
+ *  - a window is clipped to the composition's duration before it votes, so a
+ *    slot on screen "from 0 to 75 s" of a 30 s scene votes for 0-30 s;
+ *  - when nothing measurable remains, the moment is the composition's
+ *    middle - not t=0, which is where fades and reveals usually sit - so the
+ *    frame a person approves shows the scene, never its first frame.
+ * A composition of unknown duration keeps the worker's own default.
+ */
+export function choosePreviewMoment(
+  windows: readonly ({ startSeconds: number; endSeconds: number } | null)[],
+  compositionDurationSeconds: number | null
+): number | null {
+  const bounded =
+    compositionDurationSeconds === null || !(compositionDurationSeconds > 0)
+      ? windows
+      : windows.map((window) => {
+          if (window === null || window.startSeconds >= compositionDurationSeconds) {
+            return null;
+          }
+          return { startSeconds: window.startSeconds, endSeconds: Math.min(window.endSeconds, compositionDurationSeconds) };
+        });
+  const chosen = selectScenePreviewFrameSeconds(bounded);
+  if (chosen !== null && (compositionDurationSeconds === null || chosen < compositionDurationSeconds)) {
+    return chosen;
+  }
+  return compositionDurationSeconds !== null && compositionDurationSeconds > 0 ? compositionDurationSeconds / 2 : null;
 }
 
 /**
