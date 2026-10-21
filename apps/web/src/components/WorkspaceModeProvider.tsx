@@ -95,8 +95,3 @@ export function useWorkspaceMode(): WorkspaceModeContextValue {
 export function useWorkspaceModeIfPresent(): WorkspaceMode | null {
   return useContext(WorkspaceModeContext)?.mode ?? null;
 }
-
-/** The whole context when a provider is present (Settings reads the "Technical screens" switch through it), else null. */
-export function useWorkspaceModeControlsIfPresent(): WorkspaceModeContextValue | null {
-  return useContext(WorkspaceModeContext);
-}

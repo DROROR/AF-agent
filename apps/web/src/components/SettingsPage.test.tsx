@@ -76,4 +76,19 @@ describe("SettingsPage", () => {
     }
     expect(screen.getAllByRole("navigation")).toHaveLength(1);
   });
+
+  it("Appearance holds the Technical screens switch (2026-10-21): off by default, and turning it off also leaves the Advanced view", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
+    stubFetchByUrl({ "/api/settings/ai-provider": { status: 200, body: NOT_CONNECTED } });
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+
+    const box = screen.getByLabelText("Technical screens") as HTMLInputElement;
+    await waitFor(() => expect(box.checked).toBe(true));
+    fireEvent.click(box);
+    expect(window.localStorage.getItem("dyo-technical-screens")).toBeNull();
+    expect(window.localStorage.getItem("dyo-workspace-mode")).toBe("simple");
+    window.localStorage.clear();
+  });
 });

@@ -1,9 +1,9 @@
 "use client";
 
 import type { UserDto } from "@dyo/schemas";
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { useTheme } from "./ThemeProvider";
-import { useWorkspaceModeControlsIfPresent } from "./WorkspaceModeProvider";
+import { readTechnicalScreensEnabled, writeStoredWorkspaceMode, writeTechnicalScreensEnabled } from "../lib/workspace-mode";
 import { LanguageToggle } from "./LanguageToggle";
 import { useLocale } from "./LocaleProvider";
 import { Card, CardHeader } from "./ui/Card";
@@ -40,7 +40,30 @@ function sectionLabel(t: Dictionary, id: SettingsSectionId): string {
 export function SettingsPage({ user }: SettingsPageProps): ReactElement {
   const { theme, isExplicit, setTheme, useSystemTheme } = useTheme();
   const { t } = useLocale();
-  const workspaceMode = useWorkspaceModeControlsIfPresent();
+  // Settings > "Technical screens" (2026-10-21): per device, read from the
+  // same storage the project pages' WorkspaceModeProvider reads - that
+  // provider is mounted only under a project, so Settings reads storage itself.
+  const [technicalScreens, setTechnicalScreens] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    async function syncFromStorage(): Promise<void> {
+      await Promise.resolve();
+      if (!cancelled) {
+        setTechnicalScreens(readTechnicalScreensEnabled());
+      }
+    }
+    void syncFromStorage();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  function handleTechnicalScreens(enabled: boolean): void {
+    setTechnicalScreens(enabled);
+    writeTechnicalScreensEnabled(enabled);
+    if (!enabled) {
+      writeStoredWorkspaceMode("simple");
+    }
+  }
   const [loggingOut, setLoggingOut] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("ai-providers");
 
@@ -116,22 +139,15 @@ export function SettingsPage({ user }: SettingsPageProps): ReactElement {
               </Card>
 
               {/* 2026-10-21 simplification: the Advanced view is for support, offered only from here. */}
-              {workspaceMode ? (
-                <Card>
-                  <CardHeader title={t.settings.technicalScreens} />
-                  <label className="settings-switch" htmlFor="technical-screens">
-                    <input
-                      id="technical-screens"
-                      type="checkbox"
-                      checked={workspaceMode.technicalScreens}
-                      onChange={(event) => workspaceMode.setTechnicalScreens(event.target.checked)}
-                    />
-                    <span>{t.settings.technicalScreens}</span>
-                  </label>
-                  <p className="field__hint">{t.settings.technicalScreensHint}</p>
-                  <p className="field__hint">{t.settings.savedOnThisDevice}</p>
-                </Card>
-              ) : null}
+              <Card>
+                <CardHeader title={t.settings.technicalScreens} />
+                <label className="settings-switch" htmlFor="technical-screens">
+                  <input id="technical-screens" type="checkbox" checked={technicalScreens} onChange={(event) => handleTechnicalScreens(event.target.checked)} />
+                  <span>{t.settings.technicalScreens}</span>
+                </label>
+                <p className="field__hint">{t.settings.technicalScreensHint}</p>
+                <p className="field__hint">{t.settings.savedOnThisDevice}</p>
+              </Card>
             </>
           ) : null}
 
