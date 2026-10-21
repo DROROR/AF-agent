@@ -46,7 +46,7 @@ Runtime AI is optional. Deterministic code must control paths, timing, project c
 
 ## Permanent DYO Brand Rules
 - Client/company logo must appear at least once in every video.
-- Every video must include Hebrew text: `מבית DYO App` (By DYO App).
+- Required brand line: none since 2026-10-21 (the client withdrew `מבית DYO App`; `dyo-brand-rules.yaml` `requiredHebrewText` is null and can be set again without code).
 - DYO App branding must always use the official DYO blue supplied in configuration.
 - Remaining background/colors/visual language adapt to the client brand and chosen template.
 - Do not recolor client screenshots, client logos or phone hardware unless explicitly requested.

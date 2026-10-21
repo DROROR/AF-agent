@@ -54,13 +54,15 @@ export function validateBrandRules(
     }
   }
 
+  const requiredText = config.requiredHebrewText;
   const hasRequiredHebrewText =
-    config.requiredHebrewText.length === 0 ||
-    activeMappings.some((mapping) => mapping.text !== null && mapping.text.includes(config.requiredHebrewText));
+    requiredText === null ||
+    requiredText.length === 0 ||
+    activeMappings.some((mapping) => mapping.text !== null && mapping.text.includes(requiredText));
   if (!hasRequiredHebrewText) {
     violations.push({
       rule: "REQUIRED_HEBREW_TEXT",
-      message: `Every DYO video must show the line "${config.requiredHebrewText}" somewhere, and no scene has it yet. On a scene press \"Change picture or text\", put exactly that line in one of its texts, then approve again.`
+      message: `Every DYO video must show the line "${config.requiredHebrewText}" somewhere, and no scene has it yet. On a scene press "Change picture or text", put exactly that line in one of its texts, then approve again.`
     });
   }
 

@@ -6,7 +6,8 @@ import { z } from "zod";
 const brandRulesConfigSchema = z
   .object({
     requireLogoPresence: z.boolean(),
-    requiredHebrewText: z.string().min(1),
+    /** The line every video must carry, or null when no line is required - the client (DYO's owner) withdrew the "מבית DYO App" requirement on 2026-10-21. */
+    requiredHebrewText: z.string().nullable(),
     /** Null while the client has not yet supplied the real value - never a guessed/invented hex (CLAUDE.md, 2026-08-29 closure audit). */
     dyoBlueHex: z
       .string()

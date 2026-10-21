@@ -8,7 +8,8 @@ describe("loadBrandRulesConfig", () => {
     // parses, and satisfies the schema, not merely that the code compiles.
     const config = loadBrandRulesConfig();
     expect(config.requireLogoPresence).toBe(true);
-    expect(config.requiredHebrewText).toBe("מבית DYO App");
+    // 2026-10-21: the client withdrew the required line; the rule is off until a string is set again.
+    expect(config.requiredHebrewText).toBeNull();
     expect(config.rtlPreservedByConstruction).toBe(true);
     // Deliberately not asserting a specific dyoBlueHex value - it is null
     // until the client supplies the real one (see the yaml's own doc
@@ -33,6 +34,10 @@ describe("loadBrandRulesConfig", () => {
    */
   it("the required Hebrew text's own codepoint sequence is logically exactly מבית - never the reversed form", () => {
     const config = loadBrandRulesConfig();
+    if (config.requiredHebrewText === null) {
+      // No line is required since 2026-10-21; the codepoint proof applies the day a line is configured again.
+      return;
+    }
     const hebrewPrefix = config.requiredHebrewText.split(" ")[0]!;
     const codepoints = [...hebrewPrefix].map((char) => char.codePointAt(0));
     const CORRECT_CODEPOINTS = [0x05de, 0x05d1, 0x05d9, 0x05ea]; // מ ב י ת, in that logical order

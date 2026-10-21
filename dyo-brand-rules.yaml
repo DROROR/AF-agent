@@ -14,10 +14,13 @@
 # least once in every video."
 requireLogoPresence: true
 
-# Every approved plan's active scenes must include this exact text,
-# verbatim, on at least one mapping. Covers CLAUDE.md's "Every video must
-# include Hebrew text: מבית DYO App (By DYO App)."
-requiredHebrewText: "מבית DYO App"
+# A line every approved plan's active scenes must include verbatim on at
+# least one mapping, or null for no required line. Until 2026-10-21 this
+# was "מבית DYO App" (CLAUDE.md's original brand rule); on 2026-10-21 the
+# client (DYO's owner) asked for it to go: "Powered by DYO app - I don't
+# want that text, so we need to delete that section." Set a string here to
+# require a line again - no code change needed.
+requiredHebrewText: null
 
 # The official DYO blue, as a canonical #RRGGBB hex value - covers
 # CLAUDE.md's "DYO App branding must always use the official DYO blue

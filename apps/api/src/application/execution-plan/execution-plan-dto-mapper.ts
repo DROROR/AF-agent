@@ -33,7 +33,7 @@ export function toExecutionPlanResponse(record: ExecutionPlanRecord): ExecutionP
       ? validateBrandRules(plan, config).violations.map((violation) => ({
           rule: violation.rule,
           message: violation.message,
-          requiredText: violation.rule === "REQUIRED_HEBREW_TEXT" ? config.requiredHebrewText : null
+          requiredText: violation.rule === "REQUIRED_HEBREW_TEXT" && config.requiredHebrewText ? config.requiredHebrewText : null
         }))
       : [];
   return { plan, sceneTable: buildSceneTable(plan.scenePlans), brandNeeds };
