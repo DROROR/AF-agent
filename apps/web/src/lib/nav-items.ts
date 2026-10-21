@@ -1,13 +1,14 @@
-import { FolderKanban, Settings, type LucideIcon } from "lucide-react";
+import { FolderKanban, ListTodo, Server, Settings, type LucideIcon } from "lucide-react";
 
 /**
  * 2026-10-21 simplification (operator audit, after the client's first
  * finished videos): the sidebar carried eight entries and the client used
  * two. Overview duplicated the top bar's health line; Jobs / Queue, Workers,
  * Renders listed what the project pages already show; Approvals and
- * Activity had no API behind them. Only Projects and Settings remain.
+ * Activity had no API behind them. Jobs / Queue and Workers stay: the
+ * operator watches the editing computer and the job history there.
  */
-export type NavItemId = "projects" | "settings";
+export type NavItemId = "projects" | "jobs" | "workers" | "settings";
 
 export interface NavItem {
   href: string;
@@ -26,6 +27,8 @@ export interface NavItem {
 /** Single source of truth for sidebar nav and the topbar's page-title lookup - see TopBar.tsx. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/projects", label: "Projects", id: "projects", icon: FolderKanban },
+  { href: "/jobs", label: "Jobs / Queue", id: "jobs", icon: ListTodo },
+  { href: "/workers", label: "Workers", id: "workers", icon: Server },
   { href: "/settings", label: "Settings", id: "settings", icon: Settings }
 ];
 

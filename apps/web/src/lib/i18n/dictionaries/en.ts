@@ -30,7 +30,29 @@ export const en = {
   },
   nav: {
     projects: "Projects",
+    jobs: "Jobs / Queue",
+    workers: "Workers",
     settings: "Settings"
+  },
+  workers: {
+    title: "Workers",
+    description: "Registered Windows workers and their real-time health.",
+    unavailableTitle: "Workers unavailable",
+    tableCaption: "Registered workers",
+    nameColumn: "Name",
+    statusColumn: "Status",
+    aeStatusColumn: "AE status",
+    mcpStatusColumn: "MCP status",
+    aeVersionColumn: "AE version",
+    maxConcurrencyColumn: "Max concurrency",
+    currentJobColumn: "Current job",
+    capabilitiesColumn: "Capabilities",
+    lastHeartbeatColumn: "Last heartbeat",
+    viewDetailsAriaLabel: (name: string): string => `View details for ${name}`,
+    dataUnavailableTitle: "Worker data unavailable",
+    dataUnavailableDescription: "Could not load worker records from the API.",
+    emptyTitle: "No workers registered",
+    emptyDescription: "Once a Windows worker pairs with the API, it will appear here."
   },
   sidebar: {
     brandName: "AE Dyo Agent",

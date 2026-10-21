@@ -23,7 +23,29 @@ export const he: Dictionary = {
   },
   nav: {
     projects: "פרויקטים",
+    jobs: "משימות / תור",
+    workers: "עובדים",
     settings: "הגדרות"
+  },
+  workers: {
+    title: "עובדים",
+    description: "עובדי Windows רשומים והמצב שלהם בזמן אמת.",
+    unavailableTitle: "רשימת העובדים אינה זמינה",
+    tableCaption: "עובדים רשומים",
+    nameColumn: "שם",
+    statusColumn: "סטטוס",
+    aeStatusColumn: "סטטוס AE",
+    mcpStatusColumn: "סטטוס MCP",
+    aeVersionColumn: "גרסת AE",
+    maxConcurrencyColumn: "מקביליות מקסימלית",
+    currentJobColumn: "משימה נוכחית",
+    capabilitiesColumn: "יכולות",
+    lastHeartbeatColumn: "פעימת לב אחרונה",
+    viewDetailsAriaLabel: (name) => `הצגת פרטים עבור ${name}`,
+    dataUnavailableTitle: "נתוני העובד אינם זמינים",
+    dataUnavailableDescription: "לא ניתן היה לטעון את רשומות העובדים מה-API.",
+    emptyTitle: "לא רשומים עובדים",
+    emptyDescription: "לאחר שעובד Windows יתחבר ל-API, הוא יופיע כאן."
   },
   sidebar: {
     brandName: "AE Dyo Agent",

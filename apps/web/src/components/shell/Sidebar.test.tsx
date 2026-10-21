@@ -23,14 +23,15 @@ describe("Sidebar - dashboard navigation in Hebrew and RTL awareness", () => {
   it("renders real English nav labels by default", () => {
     renderWithLocale(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />, { locale: "en" });
     screen.getByText("Projects");
+    screen.getByText("Workers");
     screen.getByText("Settings");
     expect(screen.queryByText("Overview")).toBeNull();
-    expect(screen.queryByText("Workers")).toBeNull();
   });
 
   it("renders real Hebrew nav labels when the active locale is he (dashboard navigation in Hebrew)", () => {
     renderWithLocale(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />, { locale: "he" });
     screen.getByText("פרויקטים");
+    screen.getByText("עובדים");
     screen.getByText("הגדרות");
     // The active route (/settings) is still highlighted correctly in Hebrew mode.
     const activeLink = screen.getByText("הגדרות").closest("a");
