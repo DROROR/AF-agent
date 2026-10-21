@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { templateManifestSchema, type NestedTargetStep, type Placeholder, type TemplateManifest } from "@dyo/schemas";
-import { buildTemplateManifest, computeInspectionSummary, MAX_NESTED_COMPOSITION_DEPTH } from "./build-manifest.js";
+import { buildTemplateManifest, computeInspectionSummary, findSequentialSceneChildren, MAX_NESTED_COMPOSITION_DEPTH } from "./build-manifest.js";
 import type { CompositionFact, FootageFact, LayerFact, PrecompChildFact, ProjectFacts } from "./project-facts.js";
 
 /**
@@ -788,5 +788,108 @@ describe("buildTemplateManifest - nested traversal honesty and safety bounds", (
       fixedNow
     );
     expect(manifest.scenes[0]!.placeholders).toHaveLength(1);
+  });
+});
+
+/**
+ * REAL 2026-10-21 FINDING (the client's "Android App Promo" and his first
+ * template alike; every real template this product has met): the master
+ * composition "!MAIN" is one 44.8 s timeline made of eight precomps
+ * "Transition_scene_01..08" of 7 s each, laid end to end with a short
+ * cross-fade, plus a footer text and background solids of its own. The
+ * manifest reported ONE scene of 84 placeholders - "Text A / Text B /
+ * Text C" eight times over - and the client could not tell which text went
+ * where. Each sequential precomp is a scene of its own now.
+ */
+describe("buildTemplateManifest - sequential precomps on the master timeline are scenes of their own (2026-10-21)", () => {
+  const timed = (layerIndex: number, layerName: string, sourceCompositionId: string, inPoint: number, outPoint: number, extra: Partial<PrecompChildFact> = {}): PrecompChildFact => ({
+    ...precomp(layerIndex, layerName, sourceCompositionId),
+    inPointSeconds: inPoint,
+    outPointSeconds: outPoint,
+    ...extra
+  });
+
+  function androidShape(): CompositionFact[] {
+    return [
+      composition({
+        compositionId: "comp-main",
+        name: "!MAIN",
+        aeProjectItemIndex: 1,
+        durationSeconds: 21,
+        isNestedOnlyReferenced: false,
+        layers: [text(1, "Designed by Reflaxess", { durationSeconds: 21 })],
+        precompChildren: [
+          timed(2, "Transition_scene_03", "comp-t3", 13.5, 21),
+          timed(3, "Transition_scene_02", "comp-t2", 6.5, 14),
+          timed(4, "Transition_scene_01", "comp-t1", 0, 7),
+          // A background precomp spanning the whole video is part of the master, never a scene.
+          timed(5, "Background", "comp-bg", 0, 21)
+        ]
+      }),
+      composition({ compositionId: "comp-t1", name: "Transition_scene_01", durationSeconds: 7, parentCompositionIds: ["comp-main"], layers: [text(1, "Text A"), text(2, "Text B")], precompChildren: [precomp(3, "Screen_1", "comp-screen1")] }),
+      composition({ compositionId: "comp-screen1", name: "Screen_1", durationSeconds: 7, parentCompositionIds: ["comp-t1"], layers: [image(1, "Your_image.png")] }),
+      composition({ compositionId: "comp-t2", name: "Transition_scene_02", durationSeconds: 7, parentCompositionIds: ["comp-main"], layers: [text(1, "Text A"), text(2, "Text B")] }),
+      composition({ compositionId: "comp-t3", name: "Transition_scene_03", durationSeconds: 7, parentCompositionIds: ["comp-main"], layers: [text(1, "Text A")] }),
+      composition({ compositionId: "comp-bg", name: "Background", durationSeconds: 21, parentCompositionIds: ["comp-main"], layers: [text(1, "Watermark")] })
+    ];
+  }
+
+  it("lists the master and then each sequential precomp as a scene, in order of its in-point, with its own timing on the master", () => {
+    const manifest = buildTemplateManifest(facts(androidShape()), fixedNow);
+    expect(templateManifestSchema.safeParse(manifest).success).toBe(true);
+    expect(manifest.scenes.map((s) => [s.compositionId, s.originalOrderIndex, s.startTimeSeconds, s.durationSeconds])).toEqual([
+      ["comp-main", 0, 0, 21],
+      ["comp-t1", 1, 0, 7],
+      ["comp-t2", 2, 6.5, 7.5],
+      ["comp-t3", 3, 13.5, 7.5]
+    ]);
+    expect(new Set(manifest.scenes.map((s) => s.sceneId)).size).toBe(4);
+  });
+
+  it("gives each scene its own slots: the master keeps only its own layers and the background precomp, each scene its texts and the picture under it", () => {
+    const manifest = buildTemplateManifest(facts(androidShape()), fixedNow);
+    const names = (i: number) => manifest.scenes[i]!.placeholders.map((p) => [p.layerPath.join("/"), p.layerName].filter(Boolean).join("/"));
+    expect(names(0)).toEqual(["Designed by Reflaxess", "Background/Watermark"]);
+    expect(names(1)).toEqual(["Text A", "Text B", "Screen_1/Your_image.png"]);
+    expect(names(2)).toEqual(["Text A", "Text B"]);
+    expect(names(3)).toEqual(["Text A"]);
+    // A scene's own text is edited in the scene composition itself; the
+    // picture below it through the usual chain, whose first step is the
+    // first NESTED composition (the scene's own composition is never a step).
+    const scene1 = manifest.scenes[1]!;
+    expect(scene1.placeholders[0]!.compositionId).toBe("comp-t1");
+    expect(scene1.placeholders[0]!.nestedTarget).toBeNull();
+    expect(scene1.placeholders[2]!.nestedTarget).toEqual([{ compositionId: "comp-screen1", layerIndex: 1 }]);
+    // Nothing is listed twice across scenes.
+    const ids = manifest.scenes.flatMap((s) => s.placeholders.map((p) => p.placeholderId));
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(computeInspectionSummary(manifest).candidateSceneCount).toBe(4);
+  });
+
+  it("keeps a single scene when the precomps sit on top of each other, when only one is short, or when their timing is unknown", () => {
+    const stacked = androidShape();
+    stacked[0] = composition({ ...stacked[0]!, precompChildren: [timed(2, "A", "comp-t1", 0, 7), timed(3, "B", "comp-t2", 1, 8), timed(4, "C", "comp-t3", 2, 9)] });
+    expect(findSequentialSceneChildren(stacked[0]!)).toEqual([]);
+    expect(buildTemplateManifest(facts(stacked), fixedNow).scenes).toHaveLength(1);
+
+    const onlyOne = androidShape();
+    onlyOne[0] = composition({ ...onlyOne[0]!, precompChildren: [timed(2, "A", "comp-t1", 0, 7), timed(5, "Background", "comp-bg", 0, 21)] });
+    expect(buildTemplateManifest(facts(onlyOne), fixedNow).scenes).toHaveLength(1);
+
+    const untimed = androidShape();
+    untimed[0] = composition({ ...untimed[0]!, precompChildren: [precomp(2, "A", "comp-t1"), precomp(3, "B", "comp-t2"), precomp(4, "C", "comp-t3")] });
+    const manifest = buildTemplateManifest(facts(untimed), fixedNow);
+    expect(manifest.scenes).toHaveLength(1);
+    // The old shape, unchanged: everything under the master, as before this change.
+    expect(manifest.scenes[0]!.placeholders.map((p) => p.layerName)).toEqual(["Designed by Reflaxess", "Text A", "Text B", "Your_image.png", "Text A", "Text B", "Text A"]);
+  });
+
+  it("ignores a precomp shown through a matte and a disabled one when looking for scenes", () => {
+    const shape = androidShape();
+    shape[0] = composition({
+      ...shape[0]!,
+      precompChildren: [timed(2, "A", "comp-t1", 0, 7, { hasTrackMatte: true }), timed(3, "B", "comp-t2", 7, 14, { enabled: false }), timed(4, "C", "comp-t3", 14, 21)]
+    });
+    expect(findSequentialSceneChildren(shape[0]!)).toEqual([]);
   });
 });

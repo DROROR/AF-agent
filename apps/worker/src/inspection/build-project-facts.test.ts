@@ -260,8 +260,8 @@ describe("buildProjectFacts - inputs for nested composition traversal (2026-09-1
     });
 
     expect(facts.compositions[0]!.precompChildren).toEqual([
-      { layerIndex: 3, layerName: "Smartphone_01", sourceCompositionId: "comp-s01", enabled: null, hasTrackMatte: null },
-      { layerIndex: 4, layerName: "Smartphone_02", sourceCompositionId: "comp-s02", enabled: null, hasTrackMatte: null }
+      { layerIndex: 3, layerName: "Smartphone_01", sourceCompositionId: "comp-s01", enabled: null, hasTrackMatte: null, inPointSeconds: 0, outPointSeconds: 5 },
+      { layerIndex: 4, layerName: "Smartphone_02", sourceCompositionId: "comp-s02", enabled: null, hasTrackMatte: null, inPointSeconds: 0, outPointSeconds: 5 }
     ]);
     // Still excluded from the composition's own placeholder candidates.
     expect(facts.compositions[0]!.layers.map((l) => l.name)).not.toContain("Smartphone_01");

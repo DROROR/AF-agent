@@ -60,103 +60,140 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
   const maskedCompositionIds = collectMaskedCompositionIds(facts.compositions, compositionById);
   const scannedLayersByComposition = indexScannedLayersByComposition(facts.layerFactsByCompositionAndIndex);
 
-  const scenes: Scene[] = facts.compositions
-    .filter((c) => !c.isNestedOnlyReferenced)
-    .map((composition, originalOrderIndex) => {
-      // The scene's OWN layers - unchanged behaviour, unchanged IDs, still a
-      // prefix of the placeholder list, so nothing that already references a
-      // top-level placeholder can shift.
-      // A disabled or guide layer never renders, so it is never a client slot
-      // (real Mixkit case: CONTROLS in Main_Comp is both). Filtering keeps
-      // every other top-level placeholder's ID unchanged - IDs hash the index.
-      //
-      // REAL 2026-10-02 DEFECT, third clause: an ADJUSTMENT layer was offered
-      // as an editable "color" placeholder. AE reports one much like a solid,
-      // so classifyPlaceholder reasonably called it a uniform fill - but an
-      // adjustment layer renders none of its own colour; it exists only to
-      // carry effects onto the layers beneath it. The client's template
-      // surfaced two of them ("Sharpen", "Noise") beside the two solids that
-      // ARE the background and borders, so a reviewer was asked to pick a
-      // colour for two layers where picking one changes nothing on screen.
-      //
-      // `adjustmentLayer` is an AE fact from the project-wide scan, never a
-      // name guess, and it is excluded ONLY on an explicit `true`: the fact is
-      // nullable, and reading "not reported" as "is an adjustment layer" would
-      // silently drop real placeholders whenever the scan could not answer.
-      const renderedLayers = composition.layers.filter(
-        (layer) =>
-          layer.enabled !== false &&
-          layer.guideLayer !== true &&
-          facts.layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${layer.index}`)?.detail?.adjustmentLayer !== true
-      );
-      const placeholders: Placeholder[] = renderedLayers.map((layer) => {
-        const classification = classifyPlaceholder(layer);
-        if (classification.placeholderType === "unknown") {
-          unknownItems.push({
-            context: `${composition.name} / ${layer.name}`,
-            reason: classification.evidence.reason
-          });
-        }
-        // A slot in the scene's OWN composition is classified exactly like a
-        // nested one: from its layer's own matte, 3D state and parent chain.
-        const slot = isSlotPlaceholderType(classification.placeholderType)
-          ? buildSlotEvidence({
-              composition,
-              layer,
-              chainToParent: [],
-              depth: 0,
-              allCompositions: facts.compositions,
-              layerFactsByCompositionAndIndex: facts.layerFactsByCompositionAndIndex,
-              slotIsWholeComposition: false
-            })
-          : undefined;
-        return buildPlaceholder({
-          placeholderId: deterministicId([composition.compositionId, ...layer.layerPath, String(layer.index)]),
-          compositionId: composition.compositionId,
-          layer,
-          layerPath: [...layer.layerPath],
-          nestedTarget: null,
-          classification,
-          sourceProjectSha256: facts.projectSha256,
-          ...(slot ? { slot } : {})
+  /**
+   * A scene's OWN rendered layers as placeholders - unchanged behaviour,
+   * unchanged IDs, still a prefix of the placeholder list, so nothing that
+   * already references a top-level placeholder can shift.
+   * A disabled or guide layer never renders, so it is never a client slot
+   * (real Mixkit case: CONTROLS in Main_Comp is both). Filtering keeps
+   * every other top-level placeholder's ID unchanged - IDs hash the index.
+   *
+   * REAL 2026-10-02 DEFECT, third clause: an ADJUSTMENT layer was offered
+   * as an editable "color" placeholder. AE reports one much like a solid,
+   * so classifyPlaceholder reasonably called it a uniform fill - but an
+   * adjustment layer renders none of its own colour; it exists only to
+   * carry effects onto the layers beneath it. The client's template
+   * surfaced two of them ("Sharpen", "Noise") beside the two solids that
+   * ARE the background and borders, so a reviewer was asked to pick a
+   * colour for two layers where picking one changes nothing on screen.
+   *
+   * `adjustmentLayer` is an AE fact from the project-wide scan, never a
+   * name guess, and it is excluded ONLY on an explicit `true`: the fact is
+   * nullable, and reading "not reported" as "is an adjustment layer" would
+   * silently drop real placeholders whenever the scan could not answer.
+   */
+  const buildOwnPlaceholders = (composition: CompositionFact): Placeholder[] => {
+    const renderedLayers = composition.layers.filter(
+      (layer) =>
+        layer.enabled !== false &&
+        layer.guideLayer !== true &&
+        facts.layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${layer.index}`)?.detail?.adjustmentLayer !== true
+    );
+    return renderedLayers.map((layer) => {
+      const classification = classifyPlaceholder(layer);
+      if (classification.placeholderType === "unknown") {
+        unknownItems.push({
+          context: `${composition.name} / ${layer.name}`,
+          reason: classification.evidence.reason
         });
-      });
-
-      placeholders.push(
-        ...collectNestedPlaceholders(
-          composition,
-          compositionById,
-          maskedCompositionIds,
-          unknownItems,
-          facts.projectSha256,
-          facts.compositions,
-          facts.layerFactsByCompositionAndIndex,
-          scannedLayersByComposition
-        ),
-        // The scene's OWN colour controls, after everything that existed
-        // before them so no earlier placeholder moves.
-        ...buildColorControlPlaceholders({
-          sceneCompositionId: composition.compositionId,
-          composition,
-          layerPath: [],
-          chainToParent: null,
-          scannedLayers: scannedLayersByComposition.get(composition.compositionId) ?? []
-        })
-      );
-
-      return {
-        sceneId: deterministicId([composition.compositionId, String(originalOrderIndex)]),
-        displayName: null,
+      }
+      // A slot in the scene's OWN composition is classified exactly like a
+      // nested one: from its layer's own matte, 3D state and parent chain.
+      const slot = isSlotPlaceholderType(classification.placeholderType)
+        ? buildSlotEvidence({
+            composition,
+            layer,
+            chainToParent: [],
+            depth: 0,
+            allCompositions: facts.compositions,
+            layerFactsByCompositionAndIndex: facts.layerFactsByCompositionAndIndex,
+            slotIsWholeComposition: false
+          })
+        : undefined;
+      return buildPlaceholder({
+        placeholderId: deterministicId([composition.compositionId, ...layer.layerPath, String(layer.index)]),
         compositionId: composition.compositionId,
-        originalOrderIndex,
-        // A scene's timeline placement within a larger sequence is an
-        // execution-plan concern (human approval), not an inspection fact -
-        // 0 here means "start of this composition's own timeline".
-        startTimeSeconds: 0,
-        durationSeconds: composition.durationSeconds,
-        placeholders
-      };
+        layer,
+        layerPath: [...layer.layerPath],
+        nestedTarget: null,
+        classification,
+        sourceProjectSha256: facts.projectSha256,
+        ...(slot ? { slot } : {})
+      });
     });
+  };
+
+  /** Everything a scene lists: its own layers, then what its precomps hold (skipping the subtrees that are scenes of their own), then its own colour controls. */
+  const buildScenePlaceholders = (composition: CompositionFact, skipChildLayerIndices: ReadonlySet<number>): Placeholder[] => [
+    ...buildOwnPlaceholders(composition),
+    ...collectNestedPlaceholders(
+      composition,
+      compositionById,
+      maskedCompositionIds,
+      unknownItems,
+      facts.projectSha256,
+      facts.compositions,
+      facts.layerFactsByCompositionAndIndex,
+      scannedLayersByComposition,
+      skipChildLayerIndices
+    ),
+    // The scene's OWN colour controls, after everything that existed
+    // before them so no earlier placeholder moves.
+    ...buildColorControlPlaceholders({
+      sceneCompositionId: composition.compositionId,
+      composition,
+      layerPath: [],
+      chainToParent: null,
+      scannedLayers: scannedLayersByComposition.get(composition.compositionId) ?? []
+    })
+  ];
+
+  const scenes: Scene[] = [];
+  for (const composition of facts.compositions.filter((c) => !c.isNestedOnlyReferenced)) {
+    // REAL 2026-10-21 FINDING (every real template this product has met,
+    // the client's two included): the master composition is one long
+    // timeline made of precomps laid end to end - Transition_scene_01..08,
+    // seven seconds each - so the whole template was ONE scene of 84
+    // slots, "Text A / Text B / Text C" eight times over, and the client
+    // could not tell which text went where. Each of those precomps is a
+    // scene of its own now: its placeholders, its own timing on the master,
+    // its own preview. The master keeps what is its own (a footer line, the
+    // background solids, its colour controls). Decided from AE facts only -
+    // enabled precomp layers whose windows follow each other on the master's
+    // timeline - never from a name.
+    const sequentialChildren = findSequentialSceneChildren(composition);
+    const skip = new Set(sequentialChildren.map((child) => child.layerIndex));
+    scenes.push({
+      sceneId: deterministicId([composition.compositionId, String(scenes.length)]),
+      displayName: null,
+      compositionId: composition.compositionId,
+      originalOrderIndex: scenes.length,
+      // A scene's timeline placement within a larger sequence is an
+      // execution-plan concern (human approval), not an inspection fact -
+      // 0 here means "start of this composition's own timeline".
+      startTimeSeconds: 0,
+      durationSeconds: composition.durationSeconds,
+      placeholders: buildScenePlaceholders(composition, skip)
+    });
+    for (const child of sequentialChildren) {
+      const target = compositionById.get(child.sourceCompositionId);
+      if (!target) {
+        continue;
+      }
+      const inPoint = child.inPointSeconds as number;
+      const outPoint = child.outPointSeconds as number;
+      scenes.push({
+        sceneId: deterministicId([composition.compositionId, "scene", String(child.layerIndex)]),
+        displayName: null,
+        compositionId: target.compositionId,
+        originalOrderIndex: scenes.length,
+        // Where this scene sits on the master's timeline - an AE fact.
+        startTimeSeconds: inPoint,
+        durationSeconds: Math.max(0, outPoint - inPoint),
+        placeholders: buildScenePlaceholders(target, new Set())
+      });
+    }
+  }
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -492,6 +529,50 @@ const SCREEN_CARD_CLASSIFICATION: Classification = {
 };
 
 /**
+ * The precomp-reference layers of a top-level composition that are scenes in
+ * their own right: enabled, not shown through a matte, each shorter than the
+ * composition (a precomp spanning the whole timeline is a background or an
+ * overlay, not a scene), and laid out one after another - consecutive
+ * windows may touch or cross-fade, never sit on top of each other. Two or
+ * more such layers make a sequence; one is just a nested part of a single
+ * scene. Returned in order of their in-point. AE facts only, never a name.
+ */
+export function findSequentialSceneChildren(composition: CompositionFact): PrecompChildFact[] {
+  const candidates = composition.precompChildren.filter(
+    (child) =>
+      child.enabled !== false &&
+      child.hasTrackMatte !== true &&
+      typeof child.inPointSeconds === "number" &&
+      typeof child.outPointSeconds === "number" &&
+      child.outPointSeconds > child.inPointSeconds &&
+      child.outPointSeconds - child.inPointSeconds < composition.durationSeconds * SCENE_CHILD_MAX_SHARE_OF_MASTER
+  );
+  if (candidates.length < 2) {
+    return [];
+  }
+  const ordered = [...candidates].sort((a, b) => (a.inPointSeconds as number) - (b.inPointSeconds as number) || a.layerIndex - b.layerIndex);
+  for (let i = 1; i < ordered.length; i++) {
+    const previous = ordered[i - 1] as PrecompChildFact;
+    const current = ordered[i] as PrecompChildFact;
+    const overlap = (previous.outPointSeconds as number) - (current.inPointSeconds as number);
+    const shorter = Math.min(
+      (previous.outPointSeconds as number) - (previous.inPointSeconds as number),
+      (current.outPointSeconds as number) - (current.inPointSeconds as number)
+    );
+    if (overlap > shorter * SCENE_CHILD_MAX_OVERLAP_SHARE) {
+      // Two precomps mostly on screen together are layers of one picture, not two scenes.
+      return [];
+    }
+  }
+  return ordered;
+}
+
+/** A precomp at least this share of the master's length is a background/overlay, not a scene. */
+const SCENE_CHILD_MAX_SHARE_OF_MASTER = 0.9;
+/** Consecutive scene windows may overlap (a cross-fade) by at most this share of the shorter one. */
+const SCENE_CHILD_MAX_OVERLAP_SHARE = 0.5;
+
+/**
  * Depth-first descent through a scene's precomp references, collecting the
  * editable layers found at any depth.
  *
@@ -554,7 +635,9 @@ function collectNestedPlaceholders(
   /** The project-wide scan, for the geometry/matte/animation facts a slot verdict is built from. */
   layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>,
   /** The same scan grouped by composition - where colour controls are found (see buildColorControlPlaceholders). */
-  scannedLayersByComposition: ReadonlyMap<string, readonly ScannedCompositionLayer[]>
+  scannedLayersByComposition: ReadonlyMap<string, readonly ScannedCompositionLayer[]>,
+  /** The scene's own precomp layers that are scenes of their own (findSequentialSceneChildren) - listed under those scenes, not under this one. */
+  skipChildLayerIndices: ReadonlySet<number> = new Set()
 ): Placeholder[] {
   const placeholders: Placeholder[] = [];
   const seenLayers = new Set<string>();
@@ -709,6 +792,9 @@ function collectNestedPlaceholders(
   // The scene's own precomp references are the roots of the descent. The
   // scene itself is never a step in any chain, so each starts empty.
   for (const child of [...scene.precompChildren].sort((a, b) => a.layerIndex - b.layerIndex)) {
+    if (skipChildLayerIndices.has(child.layerIndex)) {
+      continue;
+    }
     descend(child, [], [], new Set([scene.compositionId]), 1);
   }
 

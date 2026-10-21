@@ -213,6 +213,10 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
           layerIndex: entry.layerIndex,
           layerName: detail?.layers?.find((l) => l.index === entry.layerIndex)?.name ?? `layer ${entry.layerIndex}`,
           sourceCompositionId: entry.sourceCompositionId,
+          // The reference layer's own window on this composition's timeline -
+          // the same listing the layer facts above read their timing from.
+          inPointSeconds: detail?.layers?.find((l) => l.index === entry.layerIndex)?.inPointSeconds ?? null,
+          outPointSeconds: detail?.layers?.find((l) => l.index === entry.layerIndex)?.outPointSeconds ?? null,
           enabled: input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${entry.layerIndex}`)?.enabled ?? null,
           hasTrackMatte: input.layerFactsByCompositionAndIndex?.get(`${compositionId}:${entry.layerIndex}`)?.detail?.hasTrackMatte ?? null
         }))

@@ -128,6 +128,14 @@ export interface PrecompChildFact {
   enabled: boolean | null;
   /** Whether THIS precomp-reference layer is cut by a track matte - what makes its content a masked window (e.g. a phone screen). Null/absent when unread. */
   hasTrackMatte?: boolean | null;
+  /**
+   * AE's own in/out points of THIS precomp-reference layer on the PARENT's
+   * timeline (seconds), from the parent's layer listing. What tells a
+   * sequence of scenes apart from a stack of overlays - see
+   * build-manifest.ts's findSequentialSceneChildren. Null/absent when unread.
+   */
+  inPointSeconds?: number | null;
+  outPointSeconds?: number | null;
 }
 
 export interface MissingFootageFact {
