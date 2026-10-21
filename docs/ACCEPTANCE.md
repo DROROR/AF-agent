@@ -2240,3 +2240,13 @@ The client took a second, plain-English template from upload to a finished video
 **Defect, web:** on that COMPLETED session the Reels card also said "Your video is ready - it is under Final Outputs below" and offered "Make it again", for a tall video that did not exist. Whether an output is already made is now read from the real finished videos, per output. Test: Landscape made, session COMPLETED - the Reels card offers "Render Reels", only the Landscape card says it is ready.
 
 Not yet seen: the client's Reels render itself (his Reels output is set to the same `!MAIN` composition with his own render and output templates, both named "שני אנכי").
+
+### 2026-10-21 - the client's Reels render: aerender found no template with the Hebrew name, and "Try again" skipped aerender (project b48ddc7a, jobs 1709541b and 64873a44)
+
+With the COMPLETED-session gate fixed, the client pressed Render Reels. His Reels output names his own Render Settings and Output Module templates, both called "שני אנכי". aerender exited 0 after 20 s with `aerender ERROR: No render settings template was found with the given name.` and wrote no file; the Landscape, with the English-named "Best Settings" and "H.264 - Match Render Settings - 15 Mbps", had rendered on the same machine the day before. The person saw "Your editing computer stopped before the video was finished" and, under Technical details, only that the output file did not exist; his reply: "the computer is still running".
+
+Six minutes later he pressed Try again. The API resumed the prior attempt's checkpoint, in which RUN_AERENDER was already complete, so the worker skipped aerender and failed at once with "this process run never itself ran aerender for this job".
+
+**Fixes.** (API) a RENDER retry keeps at most the two verification stages of a prior checkpoint; aerender always runs again. (Worker) when the output is missing and aerender's own log has `aerender ERROR:` lines, the failure reason starts with them and names the two templates the job asked for. (Web, en/he) the failure text no longer says the computer stopped; it says the video was not made and the reason is under Technical details.
+
+**Open:** why aerender did not find a template whose name is Hebrew. The dashboard's own capability listing is the worker reading After Effects' templates, so the template exists; the `-RStemplate` argument is passed by `spawn` without a shell. The client is asked to give the two templates English names and choose them again; if an English name renders, the cause is the non-ASCII name on aerender's command line and the product should refuse such a name at configuration time with that explanation.

@@ -406,6 +406,37 @@ describe("executeRenderProject", () => {
     expect(result.artifact?.validationStatus).toBe("INVALID");
   });
 
+  // REAL 2026-10-21 DEFECT (the client's Reels): aerender exited 0 with
+  // "aerender ERROR: No render settings template was found with the given
+  // name." and no file; the person was told only that the file did not exist.
+  it("leads the validation failure with After Effects' own error line and the template names it was asked for (2026-10-21)", async () => {
+    const fixture = makeFixture();
+    const request = makeRequest(fixture);
+    const runner = new FakeAerenderRunner(() => ({
+      ok: true,
+      pid: 1,
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "aerender version 26.3x87\r\nPROGRESS: Launching After Effects...\r\nPROGRESS: Adding specified comp to Render Queue\r\naerender ERROR: No render settings template was found with the given name.\r\n",
+      stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      spawnError: null
+    }));
+
+    const result = await executeRenderProject(
+      { workRoot: fixture.workRoot, aerenderPath: "/fake/aerender", aerenderRunner: runner, compositionVerifier: new FakeCompositionVerifier(),
+        artifactUploader: alwaysSucceedingUploader(), persistCheckpoint: noopPersist, now: () => new Date() },
+      "job-9b",
+      request
+    );
+
+    expect(result.failureReason).toContain("After Effects reported: No render settings template was found with the given name.");
+    expect(result.failureReason).toContain(`render settings template "${request.renderSettingsTemplateName}"`);
+    expect(result.artifact?.validationFailureReason).toContain("After Effects reported");
+  });
+
   it("removes a stale pre-existing output file before rendering, so it can never pass validation on its own", async () => {
     const fixture = makeFixture();
     const request = makeRequest(fixture);

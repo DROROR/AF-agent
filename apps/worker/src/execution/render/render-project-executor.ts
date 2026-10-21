@@ -289,8 +289,19 @@ export async function executeRenderProject(
       }
 
       if (!validation.ok) {
-        artifact = { ...(artifactSoFar as RenderArtifact), validationStatus: "INVALID", validationFailureReason: validation.reason };
-        checkpoint = markFailed(checkpoint, `artifact validation failed: ${validation.reason}`, deps.now());
+        // REAL 2026-10-21 DEFECT (the client's Reels, job 1709541b): aerender
+        // exited 0 having written nothing, and its own line "aerender ERROR:
+        // No render settings template was found with the given name." sat
+        // only in the log excerpt while the person was told the file did not
+        // exist. After Effects' own error lines lead the reason, with the
+        // template names the job asked for, so the person can act on it.
+        const aerenderErrors = extractAerenderErrorLines(artifactSoFar.logExcerpt);
+        const reason =
+          aerenderErrors.length > 0
+            ? `After Effects reported: ${aerenderErrors.join(" ")} (render settings template "${request.renderSettingsTemplateName}", output module template "${request.outputModuleTemplateName}") - ${validation.reason}`
+            : validation.reason;
+        artifact = { ...(artifactSoFar as RenderArtifact), validationStatus: "INVALID", validationFailureReason: reason };
+        checkpoint = markFailed(checkpoint, `artifact validation failed: ${reason}`, deps.now());
         return finish();
       }
 
@@ -337,4 +348,17 @@ export async function executeRenderProject(
   }
 
   return finish();
+}
+
+/** The lines aerender itself marks as errors ("aerender ERROR: ..."), each without the marker - empty when it reported none. */
+export function extractAerenderErrorLines(logExcerpt: string | null): string[] {
+  if (!logExcerpt) {
+    return [];
+  }
+  return logExcerpt
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^aerender ERROR:/i.test(line))
+    .map((line) => line.replace(/^aerender ERROR:\s*/i, "").trim())
+    .filter((line) => line.length > 0);
 }

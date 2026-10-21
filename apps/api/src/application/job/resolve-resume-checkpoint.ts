@@ -107,5 +107,22 @@ export async function resolveRenderResumeCheckpoint(
     priorPayload.planRevision === resolvedPayload.planRevision &&
     priorPayload.expectedWorkingProjectSha256 === resolvedPayload.expectedWorkingProjectSha256 &&
     priorPayload.variant === resolvedPayload.variant;
-  return sameIntent ? checkpoint : null;
+  if (!sameIntent) {
+    return null;
+  }
+  // REAL 2026-10-21 DEFECT (the client's Reels, jobs 1709541b/64873a44):
+  // aerender ran but wrote no file (its template was not found), the
+  // attempt failed at VALIDATE_ARTIFACT with RUN_AERENDER already marked
+  // complete, and "Try again" resumed from that checkpoint - so the worker
+  // skipped aerender and failed again with "this process run never itself
+  // ran aerender for this job". A retry may skip only the two cheap
+  // verification stages; the render itself is always run again.
+  const completedBeforeRender = checkpoint.completedOperationIndices.filter((index) => index < RENDER_STAGE_RUN_AERENDER);
+  if (completedBeforeRender.length === 0) {
+    return null;
+  }
+  return { ...checkpoint, completedOperationIndices: completedBeforeRender };
 }
+
+/** RENDER's fixed stage order: VERIFY_WORKING_COPY (0), VERIFY_COMPOSITION (1), RUN_AERENDER (2), VALIDATE_ARTIFACT (3) - see the worker's render-project-executor.ts. */
+const RENDER_STAGE_RUN_AERENDER = 2;

@@ -1063,7 +1063,7 @@ export const en = {
       lockedDescription: "First look at the first frame on the Preview tab and say whether it looks right. The full video is made after that, and this tab opens by itself.",
       lockedAction: "Go to Preview",
       renderFailedTitle: (variantLabel: string): string => `Your final ${variantLabel} video could not be made`,
-      renderFailedDescription: "Your editing computer stopped before the video was finished. Nothing is lost. Press Try again - if it stops again, send the technical details below to support.",
+      renderFailedDescription: "The video was not made. The reason is under Technical details below. Nothing is lost. Fix what it names if you can, then press Try again - if it fails again, send the technical details to support.",
       renderNotStartedTitle: "The final video could not be started",
       notConfiguredTitle: "Not set up yet",
       /**

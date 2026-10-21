@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ExecuteSceneEditRequest, SceneEditCheckpoint } from "@dyo/schemas";
+import type { ExecuteSceneEditRequest, RenderProjectRequest, SceneEditCheckpoint } from "@dyo/schemas";
 import type { Job, JobRepository } from "../../../domain/job/types.js";
-import { resolveExecuteFrameResumeCheckpoint } from "../resolve-resume-checkpoint.js";
+import { resolveExecuteFrameResumeCheckpoint, resolveRenderResumeCheckpoint } from "../resolve-resume-checkpoint.js";
 
 const OPERATIONS = [
   { type: "SET_TEXT", manifestPlaceholderId: "ph-1", layerIndex: null, nestedTarget: [{ compositionId: "comp-9", aeProjectItemIndex: 42, layerIndex: 1 }], text: "Headline" },
@@ -90,5 +90,39 @@ describe("resolveExecuteFrameResumeCheckpoint (real 2026-09-15: jsonb key order 
   it("only resumes a FAILED prior job, and nothing when there is no prior job", async () => {
     await expect(resolveExecuteFrameResumeCheckpoint(repositoryWith(priorJob({ status: "RUNNING" })), RESOLVED)).resolves.toBeNull();
     await expect(resolveExecuteFrameResumeCheckpoint(repositoryWith(null), RESOLVED)).resolves.toBeNull();
+  });
+});
+
+// REAL 2026-10-21 DEFECT (the client's Reels): aerender wrote no file, the
+// attempt failed at VALIDATE_ARTIFACT with RUN_AERENDER marked complete,
+// and "Try again" resumed past aerender - "this process run never itself
+// ran aerender for this job".
+describe("resolveRenderResumeCheckpoint - a retry always runs aerender again (2026-10-21)", () => {
+  const RENDER: Omit<RenderProjectRequest, "checkpoint"> = {
+    projectId: "11111111-1111-1111-1111-111111111111",
+    planId: "plan-1",
+    planRevision: 24,
+    variant: "REELS",
+    executionSessionId: "22222222-2222-2222-2222-222222222222",
+    expectedWorkingProjectSha256: "b".repeat(64),
+    sourceProjectPath: "C:\\copies\\source.aep",
+    sourceProjectSha256: "a".repeat(64),
+    manifestCompositionId: "comp-1",
+    aeProjectItemIndex: 1,
+    compositionName: "!MAIN",
+    renderSettingsTemplateName: "Best Settings",
+    outputModuleTemplateName: "H.264"
+  } as Omit<RenderProjectRequest, "checkpoint">;
+  const failedAfterAerender: SceneEditCheckpoint = { completedOperationIndices: [0, 1, 2], checkpointBeforeAt: null, checkpointAfterAt: "2026-10-21T07:02:14.706Z", failureReason: "artifact validation failed", savedWorkingProjectSha256: null };
+
+  it("keeps only the verification stages of a prior attempt that already ran aerender", async () => {
+    const resumed = await resolveRenderResumeCheckpoint(repositoryWith({ status: "FAILED", payload: jsonbOrder({ ...RENDER, checkpoint: null }), checkpoint: failedAfterAerender } as Partial<Job>), RENDER);
+    expect(resumed?.completedOperationIndices).toEqual([0, 1]);
+  });
+
+  it("starts fresh when nothing before aerender had completed, and refuses a different variant", async () => {
+    const nothingBefore = { ...failedAfterAerender, completedOperationIndices: [2] };
+    expect(await resolveRenderResumeCheckpoint(repositoryWith({ status: "FAILED", payload: jsonbOrder({ ...RENDER, checkpoint: null }), checkpoint: nothingBefore } as Partial<Job>), RENDER)).toBeNull();
+    expect(await resolveRenderResumeCheckpoint(repositoryWith({ status: "FAILED", payload: jsonbOrder({ ...RENDER, variant: "LANDSCAPE", checkpoint: null }), checkpoint: failedAfterAerender } as Partial<Job>), RENDER)).toBeNull();
   });
 });
