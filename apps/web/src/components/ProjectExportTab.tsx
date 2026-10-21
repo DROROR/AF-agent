@@ -15,6 +15,7 @@ import { EmptyState } from "./EmptyState";
 import { LockedStepNotice } from "./LockedStepNotice";
 import { useLocale } from "./LocaleProvider";
 import { dispatchJob, fetchCurrentExecutionSession, fetchJobHistory, fetchJobStatus } from "../lib/projects-api-client";
+import { useRenderArtifacts } from "../lib/use-render-artifacts";
 import { BusyNotice } from "./ui/BusyNotice";
 import { ProblemNotice } from "./ui/ProblemNotice";
 import { useProjectGuidanceIfPresent, useProjectGuidanceRefresh } from "./ProjectGuidanceProvider";
@@ -71,6 +72,13 @@ export function ProjectExportTab(): ReactElement | null {
   // Bumped when a render finishes, so the list of finished videos below is
   // read again and the new one appears by itself.
   const [outputsVersion, setOutputsVersion] = useState(0);
+  // REAL 2026-10-20 DEFECT (the client's first finished video): once the
+  // Landscape render completed the session, the Reels card ALSO said "Your
+  // video is ready - it is under Final Outputs below" and offered "Make it
+  // again" - for a tall video that had never been made. Whether an output is
+  // already made is read from the real finished videos, per output, never
+  // from the session being COMPLETED (which the first output alone causes).
+  const { artifacts: finishedVideos, reload: reloadFinishedVideos } = useRenderArtifacts(project?.project.projectId ?? "");
   const refreshGuidance = useProjectGuidanceRefresh();
   const guidance = useProjectGuidanceIfPresent();
 
@@ -136,8 +144,10 @@ export function ProjectExportTab(): ReactElement | null {
           currentSourceSha={sourceSha}
           session={session}
           renderReady={renderReady}
+          alreadyMade={(finishedVideos ?? []).some((artifact) => artifact.variant === variant)}
           onRendered={() => {
             setOutputsVersion((version) => version + 1);
+            void reloadFinishedVideos();
             refreshGuidance();
           }}
         />
@@ -228,6 +238,7 @@ function SimpleExportVariantCard({
   currentSourceSha,
   session,
   renderReady,
+  alreadyMade: thisOutputMade,
   onRendered
 }: {
   projectId: string;
@@ -236,6 +247,8 @@ function SimpleExportVariantCard({
   currentSourceSha: string;
   session: ExecutionSessionDto | null;
   renderReady: boolean;
+  /** A finished video of THIS output exists (read from the real render artifacts by the parent). */
+  alreadyMade: boolean;
   /** A render of this output has just finished successfully. */
   onRendered: () => void;
 }): ReactElement {
@@ -326,7 +339,7 @@ function SimpleExportVariantCard({
   const renderWorker = session ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === session.assignedWorkerId) ?? null : null;
   const renderWorkerOnline = renderWorker !== null && renderWorker.status === "ONLINE" && renderWorker.currentJobId === null;
   const canRender = currentConfig !== null && !isStale && renderReady && renderWorkerOnline;
-  const alreadyMade = mode === "simple" && session !== null && session.status === "COMPLETED" && !dispatchError;
+  const alreadyMade = mode === "simple" && session !== null && session.status === "COMPLETED" && thisOutputMade && !dispatchError;
   const isKnownWorkerOffline = renderWorker !== null && renderWorker.status !== "ONLINE";
   const variantLabel = t.renders.variantLabel[variant];
   // REAL 2026-09-25 INCIDENT: this render button has four independent

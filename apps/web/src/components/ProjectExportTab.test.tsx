@@ -286,8 +286,10 @@ describe("ProjectExportTab", () => {
           ...base(),
           "/api/jobs": { status: 201, body: { jobId: JOB_ID, workerId, operation: "RENDER", status: "QUEUED", createdAt: new Date().toISOString() } },
           [`/api/jobs/${JOB_ID}`]: { status: 200, body: job("SUCCEEDED") },
-          // Nothing rendered when the page opens; the finished video once the job has succeeded.
+          // Nothing rendered when the page opens (read twice: the list card and
+          // the per-output "already made" check); the finished video once the job has succeeded.
           [`/api/projects/${PROJECT_ID}/render-artifacts`]: [
+            { status: 200, body: { artifacts: [] } },
             { status: 200, body: { artifacts: [] } },
             { status: 200, body: { artifacts: [renderArtifactFixture()] } }
           ]
@@ -535,6 +537,31 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
 
     await screen.findByRole("button", { name: "Render Reels" });
     expect(screen.queryByText("Also make a tall version for phones")).toBeNull();
+  });
+
+  // REAL 2026-10-20 DEFECT (the client's first finished video): with the
+  // Landscape made and the session COMPLETED, the Reels card also said "Your
+  // video is ready" and offered "Make it again" for a tall video that had
+  // never been made. Each output reads its own finished video.
+  it("after the Landscape is made, the Reels card still offers to make the Reels - only the output that exists says it is ready (2026-10-20)", async () => {
+    const worker = workerWithCapabilities(["RENDER"]);
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: landscapeConfig({ manifestCompositionId: "comp-tall", compositionName: "Tall Master" }) } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } }
+    });
+    renderTab();
+
+    const makeReels = await screen.findByRole("button", { name: "Render Reels" });
+    await waitFor(() => expect((makeReels as HTMLButtonElement).disabled).toBe(false));
+    await screen.findByRole("button", { name: "Make it again" });
+    expect(screen.getAllByText("Your video is ready - it is under Final Outputs below.")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Render Landscape" })).toBeNull();
   });
 
   it("Advanced view is unchanged: both outputs in the open, finished videos at the foot", async () => {

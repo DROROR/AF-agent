@@ -8,6 +8,8 @@ export interface RenderArtifactsState {
   artifacts: RenderArtifactDto[] | null;
   isLoading: boolean;
   error: string | null;
+  /** Reads the list again - for a caller that knows a render has just finished. */
+  reload: () => Promise<void>;
 }
 
 /**
@@ -25,6 +27,11 @@ export function useRenderArtifacts(projectId: string): RenderArtifactsState {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (projectId === "") {
+      // No project yet (the caller's own project read is still in flight) - nothing to ask for.
+      setIsLoading(false);
+      return;
+    }
     const result = await fetchRenderArtifacts(projectId);
     if (result.ok) {
       setArtifacts(result.data);
@@ -43,5 +50,5 @@ export function useRenderArtifacts(projectId: string): RenderArtifactsState {
     void load();
   }, [load]);
 
-  return { artifacts, isLoading, error };
+  return { artifacts, isLoading, error, reload: load };
 }

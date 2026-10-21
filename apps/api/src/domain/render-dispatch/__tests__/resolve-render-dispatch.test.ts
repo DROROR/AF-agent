@@ -155,12 +155,29 @@ describe("resolveRenderDispatch", () => {
     expect(result.reason).toContain("does not belong to this project");
   });
 
-  it("fails when the session is already terminal (COMPLETED/FAILED) - a new execution session is required", () => {
-    for (const status of ["COMPLETED", "FAILED"] as const) {
-      const result = resolveRenderDispatch(baseInput({ session: validSession({ status }) }));
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.reason).toContain("start a new execution session");
+  it("fails when the session FAILED - a new execution session is required", () => {
+    const result = resolveRenderDispatch(baseInput({ session: validSession({ status: "FAILED" }) }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("start a new execution session");
+  });
+
+  // REAL 2026-10-20 DEFECT: after the Landscape video was made the session
+  // was COMPLETED and the Reels render was refused with "start a new
+  // execution session". The other output, and "Make it again", render from
+  // that same completed working copy.
+  it("a COMPLETED session still renders its other output (and again) from the same working copy (2026-10-20)", () => {
+    for (const variant of ["REELS", "LANDSCAPE"] as const) {
+      const result = resolveRenderDispatch(
+        baseInput({
+          variant,
+          session: validSession({ status: "COMPLETED" }),
+          currentPlan: validPlan({ renderOutputs: { LANDSCAPE: validConfig(), REELS: validConfig({ manifestCompositionId: "comp-2", aeProjectItemIndex: 6, compositionName: "Reels Master" }) } })
+        })
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.payload.variant).toBe(variant);
     }
   });
 

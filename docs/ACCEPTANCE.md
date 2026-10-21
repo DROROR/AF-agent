@@ -2230,3 +2230,13 @@ With the moment fixed, the frame shows the polaroid and the Hebrew captions - th
 **Fix (worker): the layout is decided by the room the text has**, measured in the composition's own space: the span on the template's side of the anchor (to the composition's edge, one margin short); the lines that fit below the first before the bottom edge; the template's own line count. A line wider than its span is wrapped only into lines that have room below; what still does not fit is made smaller (floor `TEXT_AUTO_FIT_MIN_FACTOR`), never cut; the anchor moves so the block starts where the template's line started. So a caption at the bottom of a card stays one line and shrinks only as far as needed, while a headline beside a phone with the whole background below it wraps. Evidence adds `layoutShrunkTo`. The evidence schema no longer refuses unknown keys (the PREPARING defect above, made impossible for the next field).
 
 Not yet seen on After Effects: the next QA frame.
+
+### 2026-10-20 - the client's first finished video (project b48ddc7a, a second template "Android App Promo white", worker DESKTOP-A629N4N): Landscape made, Reels refused
+
+The client took a second, plain-English template from upload to a finished video on his own: four projects inspected, three first frames rejected and rebuilt, the full preview made (one earlier `aerender exited with code 9`, then a good one), approved, and the Landscape render SUCCEEDED (84 MB, aerender exit 0, VALID). His only remaining ask, in his words: "What's left to define is the Reel."
+
+**Defect, server:** the moment the Landscape render was recorded the session was marked COMPLETED (by design, "a session stays re-renderable for the other variant"), yet the render gate treated COMPLETED as terminal and refused the Reels render: "Execution session is COMPLETED - start a new execution session to continue". A new session would have had to redo every scene. Fix: only a FAILED session refuses a render; a COMPLETED one renders its other output, or the same one again, from the very working copy the finished video was made from. The test that pinned the refusal now pins the opposite for both outputs.
+
+**Defect, web:** on that COMPLETED session the Reels card also said "Your video is ready - it is under Final Outputs below" and offered "Make it again", for a tall video that did not exist. Whether an output is already made is now read from the real finished videos, per output. Test: Landscape made, session COMPLETED - the Reels card offers "Render Reels", only the Landscape card says it is ready.
+
+Not yet seen: the client's Reels render itself (his Reels output is set to the same `!MAIN` composition with his own render and output templates, both named "שני אנכי").

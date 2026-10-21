@@ -1,5 +1,4 @@
 import type { ExecutionSessionStatus, PlanStatus, RenderOutputVariant, RenderOutputs, RenderProjectRequest, ScenePlanEntry, WorkerCapability } from "@dyo/schemas";
-import { TERMINAL_EXECUTION_SESSION_STATUSES } from "@dyo/schemas";
 import { isHeartbeatStale } from "../worker/rules.js";
 import type { SceneEditWorkerSnapshot } from "../execute-scene-edit/validate-scene-edit-preconditions.js";
 
@@ -75,7 +74,9 @@ export type ResolveRenderDispatchResult =
  * addressing/path field from a browser/API caller directly.
  *
  * READY_TO_RENDER gate (section 13) - all of the following must hold:
- *   - the session exists, belongs to this project, is not terminal,
+ *   - the session exists, belongs to this project, is not FAILED (a
+ *     COMPLETED session renders its other output / again from the same
+ *     working copy - see the 2026-10-20 note in the function),
  *   - the session's own bound planRevision/sourceProjectSha256 still match
  *     the CURRENT plan (section 11 - same rule as EXECUTE_FRAME),
  *   - at least one scene edit has ever succeeded for this session
@@ -119,7 +120,21 @@ export function resolveRenderDispatch(input: ResolveRenderDispatchInput): Resolv
   if (session.projectId !== projectId) {
     return { ok: false, reason: "The execution session does not belong to this project" };
   }
-  if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
+  // REAL 2026-10-20 DEFECT (the client's first finished video, project
+  // b48ddc7a): the Landscape render succeeded, record-render-artifact.ts
+  // marked the session COMPLETED, and the client's very next press - "make
+  // the Reels too" - was refused with "Execution session is COMPLETED -
+  // start a new execution session". A session that COMPLETED is exactly the
+  // one whose working copy, approvals and full preview the finished video
+  // was made from; the OTHER output (and "Make it again") must render from
+  // that same working copy, never from a fresh session that would have to
+  // redo every scene. The web already offered the button on a COMPLETED
+  // session (ProjectExportTab/ProjectRenderSettingsTab's own renderReady)
+  // and record-render-artifact.ts already documents "a session stays
+  // re-renderable (e.g. the OTHER variant) after its first successful
+  // render". Only FAILED stays terminal here: its working copy's custody
+  // is in doubt, so no render may be made from it.
+  if (session.status === "FAILED") {
     return { ok: false, reason: `Execution session is ${session.status} - start a new execution session to continue` };
   }
 
