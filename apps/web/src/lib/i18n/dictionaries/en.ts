@@ -29,13 +29,7 @@ export const en = {
     switchToTheme: (themeName: string): string => `Switch to ${themeName} theme`
   },
   nav: {
-    overview: "Overview",
     projects: "Projects",
-    jobs: "Jobs / Queue",
-    workers: "Workers",
-    approvals: "Approvals",
-    renders: "Renders",
-    activity: "Activity / Logs",
     settings: "Settings"
   },
   sidebar: {
@@ -104,23 +98,6 @@ export const en = {
       signupDisabled: "Signup is temporarily disabled.",
       somethingWentWrong: "Something went wrong. Please try again."
     }
-  },
-  overview: {
-    title: "Overview",
-    description: "Is everything running right now?",
-    loading: "Loading overview…",
-    unavailableTitle: "Overview unavailable",
-    api: "API",
-    database: "Database",
-    workersOnline: "Workers online",
-    aeOnline: "After Effects online",
-    mcpOnline: "Connected to After Effects",
-    activeJobs: "Active jobs",
-    lastHeartbeat: (relative: string): string => `Last heartbeat ${relative}`,
-    noHeartbeat: "No heartbeat received yet",
-    queueOverview: "Queue overview",
-    queuePendingTitle: "Job history is on the Jobs / Queue page",
-    queuePendingDescription: "Counts of waiting, running and finished jobs are not shown here yet. The Jobs / Queue page lists every job with its state.",
   },
   projects: {
     title: "Projects",
@@ -242,26 +219,6 @@ export const en = {
         "This usually means the editing computer is running an older version of the worker software than this server: it was sent a detail it does not recognise, so it refused the whole job. Installing the latest worker update on that computer fixes it."
     }
   },
-  workers: {
-    title: "Workers",
-    description: "Registered Windows workers and their real-time health.",
-    unavailableTitle: "Workers unavailable",
-    tableCaption: "Registered workers",
-    nameColumn: "Name",
-    statusColumn: "Status",
-    aeStatusColumn: "AE status",
-    mcpStatusColumn: "MCP status",
-    aeVersionColumn: "AE version",
-    maxConcurrencyColumn: "Max concurrency",
-    currentJobColumn: "Current job",
-    capabilitiesColumn: "Capabilities",
-    lastHeartbeatColumn: "Last heartbeat",
-    viewDetailsAriaLabel: (name: string): string => `View details for ${name}`,
-    dataUnavailableTitle: "Worker data unavailable",
-    dataUnavailableDescription: "Could not load worker records from the API.",
-    emptyTitle: "No workers registered",
-    emptyDescription: "Once a Windows worker pairs with the API, it will appear here."
-  },
   workerDetail: {
     fallbackTitle: "Worker",
     workerId: "Worker ID",
@@ -277,20 +234,6 @@ export const en = {
     lastUpdated: "Last updated",
     offlineNotice: "Worker is offline — current status cannot be verified.",
     lastKnown: (label: string, relativeTime: string): string => `Last known: ${label} · ${relativeTime}`
-  },
-  approvals: {
-    title: "Approvals",
-    description: "Human approval gates required before DYO proceeds to the next production stage.",
-    gates: {
-      scenePlan: { title: "Scene plan approval", description: "Human maps/reorders/selects scenes and approves the execution plan." },
-      firstFrame: { title: "First designed frame", description: "Real visual preview and style approval on the first executed scene." },
-      branding: { title: "Branding, type & colors", description: "DYO/client brand rules, typography, and color approval." },
-      fullPreview: { title: "Full preview", description: "Visual QA using actual previews from the exact output composition." },
-      finalRender: { title: "Final render", description: "Final human approval before the recoverable aerender job is queued." }
-    },
-    pendingTitle: "Approval tracking is not backed by an API yet",
-    pendingDescription:
-      "Once a project can be dispatched for inspection and review, each gate above will show its real pending/approved/rejected state and reviewer here."
   },
   renders: {
     title: "Renders",
@@ -317,20 +260,14 @@ export const en = {
     finalOutputsDescription: "Your finished, downloadable videos.",
     statusComplete: "Complete"
   },
-  activity: {
-    title: "Activity / Logs",
-    description: "Audit trail of worker, job, and approval events.",
-    pendingTitle: "Activity logging is not backed by an API yet",
-    pendingDescription:
-      "The API and worker both keep structured logs today, but there is no endpoint that exposes an events/audit feed to the dashboard. This page will show a live activity stream once that exists."
-  },
   settings: {
     title: "Settings",
     description: "Dashboard preferences and account configuration.",
     navAiProviders: "AI Providers",
     navAppearance: "Appearance",
     navAccount: "Account",
-    navIntegrations: "API / Integrations",
+    technicalScreens: "Technical screens",
+    technicalScreensHint: "Show the Advanced view switch on projects: the render form, the Reels layout and the diagnostics. For support, not for making a video.",
     appearance: "Appearance",
     themeLight: "Light",
     themeDark: "Dark",
@@ -342,11 +279,6 @@ export const en = {
     accountEmailLabel: "Email",
     accountRoleLabel: "Role",
     logout: "Log out",
-    apiConnection: "API connection",
-    controlPlaneApi: "Control-plane API",
-    controlPlaneApiValue: "Internal only (server-side proxy)",
-    apiConnectionHint:
-      "The browser never calls the control-plane API directly - all data on this dashboard is proxied server-side. There is nothing to configure here today.",
     aiProvider: {
       title: "AI Providers",
       description: "Bring your own AI provider key so the Mapping Assistant can generate real, evidence-backed suggestions. Keys are encrypted on the server and never sent back to this browser.",

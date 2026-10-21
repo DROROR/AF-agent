@@ -167,7 +167,6 @@ export function ProjectExportTab(): ReactElement | null {
     );
   };
   const variantSections: Record<RenderOutputVariant, ReactElement> = { LANDSCAPE: sectionFor("LANDSCAPE"), REELS: sectionFor("REELS") };
-  const reelsAlreadySetUp = (plan.plan.renderOutputs.REELS ?? null) !== null;
 
   // 2026-10-07: the tab carried a lock in the nav, yet opened onto "Landscape
   // master", "Render Settings template name" - a setup form for a step the
@@ -206,20 +205,13 @@ export function ProjectExportTab(): ReactElement | null {
           */}
           <FinalOutputsCard key={outputsVersion} projectId={projectId} />
           {/*
-            2026-10-04: the Reels card and a "Reels master" setup form were
-            drawn at full weight beside Landscape for a client with no
-            interest in a tall video. Unless a tall version is already set
-            up, it waits behind a closed disclosure - still one press away,
-            and exactly the same card and form once opened.
+            2026-10-21: the Reels card is not shown in the Simple view at
+            all. Choosing a composition and two templates does not make a
+            tall video (the client's "Reels" came out 1920x1080, then an
+            800x800 piece of the template); the real vertical is the Reels
+            layout step, which is not ready for clients yet. The card stays
+            in the Advanced view for that work.
           */}
-          {reelsAlreadySetUp ? (
-            variantSections.REELS
-          ) : (
-            <details className="advanced-details export-tab__reels">
-              <summary>{t.projectWorkspace.export.reelsToggle}</summary>
-              <div className="overview-grid">{variantSections.REELS}</div>
-            </details>
-          )}
         </>
       ) : (
         <>

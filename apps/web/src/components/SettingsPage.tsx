@@ -3,6 +3,7 @@
 import type { UserDto } from "@dyo/schemas";
 import { useState, type ReactElement } from "react";
 import { useTheme } from "./ThemeProvider";
+import { useWorkspaceModeControlsIfPresent } from "./WorkspaceModeProvider";
 import { LanguageToggle } from "./LanguageToggle";
 import { useLocale } from "./LocaleProvider";
 import { Card, CardHeader } from "./ui/Card";
@@ -25,8 +26,6 @@ function sectionLabel(t: Dictionary, id: SettingsSectionId): string {
       return t.settings.navAppearance;
     case "account":
       return t.settings.navAccount;
-    case "integrations":
-      return t.settings.navIntegrations;
   }
 }
 
@@ -41,6 +40,7 @@ function sectionLabel(t: Dictionary, id: SettingsSectionId): string {
 export function SettingsPage({ user }: SettingsPageProps): ReactElement {
   const { theme, isExplicit, setTheme, useSystemTheme } = useTheme();
   const { t } = useLocale();
+  const workspaceMode = useWorkspaceModeControlsIfPresent();
   const [loggingOut, setLoggingOut] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("ai-providers");
 
@@ -114,6 +114,24 @@ export function SettingsPage({ user }: SettingsPageProps): ReactElement {
                 </div>
                 <p className="field__hint">{t.settings.savedOnThisDevice}</p>
               </Card>
+
+              {/* 2026-10-21 simplification: the Advanced view is for support, offered only from here. */}
+              {workspaceMode ? (
+                <Card>
+                  <CardHeader title={t.settings.technicalScreens} />
+                  <label className="settings-switch" htmlFor="technical-screens">
+                    <input
+                      id="technical-screens"
+                      type="checkbox"
+                      checked={workspaceMode.technicalScreens}
+                      onChange={(event) => workspaceMode.setTechnicalScreens(event.target.checked)}
+                    />
+                    <span>{t.settings.technicalScreens}</span>
+                  </label>
+                  <p className="field__hint">{t.settings.technicalScreensHint}</p>
+                  <p className="field__hint">{t.settings.savedOnThisDevice}</p>
+                </Card>
+              ) : null}
             </>
           ) : null}
 
@@ -140,18 +158,6 @@ export function SettingsPage({ user }: SettingsPageProps): ReactElement {
             </Card>
           ) : null}
 
-          {activeSection === "integrations" ? (
-            <Card>
-              <CardHeader title={t.settings.apiConnection} />
-              <dl className="detail-list">
-                <div className="detail-list__row">
-                  <dt className="detail-list__label">{t.settings.controlPlaneApi}</dt>
-                  <dd className="detail-list__value">{t.settings.controlPlaneApiValue}</dd>
-                </div>
-              </dl>
-              <p className="field__hint">{t.settings.apiConnectionHint}</p>
-            </Card>
-          ) : null}
         </div>
       </div>
     </>

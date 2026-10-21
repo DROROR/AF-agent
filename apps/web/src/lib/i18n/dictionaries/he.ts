@@ -22,13 +22,7 @@ export const he: Dictionary = {
     switchToTheme: (themeName) => `מעבר למצב ${themeName}`
   },
   nav: {
-    overview: "סקירה כללית",
     projects: "פרויקטים",
-    jobs: "משימות / תור",
-    workers: "עובדים",
-    approvals: "אישורים",
-    renders: "רינדורים",
-    activity: "פעילות / יומנים",
     settings: "הגדרות"
   },
   sidebar: {
@@ -97,23 +91,6 @@ export const he: Dictionary = {
       signupDisabled: "ההרשמה מושבתת זמנית.",
       somethingWentWrong: "משהו השתבש. נסו שוב."
     }
-  },
-  overview: {
-    title: "סקירה כללית",
-    description: "סטטוס בזמן אמת של מערך הבקרה של DYO.",
-    loading: "טוען סקירה כללית…",
-    unavailableTitle: "הסקירה הכללית אינה זמינה",
-    api: "API",
-    database: "מסד נתונים",
-    workersOnline: "עובדים מקוונים",
-    aeOnline: "After Effects מקוון",
-    mcpOnline: "מחובר ל-After Effects",
-    activeJobs: "משימות פעילות",
-    lastHeartbeat: (relative) => `פעימת לב אחרונה ${relative}`,
-    noHeartbeat: "טרם התקבלה פעימת לב",
-    queueOverview: "סקירת תור",
-    queuePendingTitle: "היסטוריית תור המשימות אינה זמינה עדיין",
-    queuePendingDescription: "ספירת העבודות הממתינות, הרצות והגמורות עדיין לא מוצגת כאן. בדף העבודות מופיעה כל עבודה עם המצב שלה.",
   },
   projects: {
     title: "פרויקטים",
@@ -228,26 +205,6 @@ export const he: Dictionary = {
         "בדרך כלל זה אומר שבמחשב העריכה רצה גרסה ישנה יותר של תוכנת העובד מזו שבשרת הזה: נשלח אליו פרט שהוא אינו מכיר, ולכן הוא דחה את כל המשימה. התקנת עדכון העובד האחרון במחשב הזה פותרת את הבעיה."
     }
   },
-  workers: {
-    title: "עובדים",
-    description: "עובדי Windows רשומים והמצב שלהם בזמן אמת.",
-    unavailableTitle: "רשימת העובדים אינה זמינה",
-    tableCaption: "עובדים רשומים",
-    nameColumn: "שם",
-    statusColumn: "סטטוס",
-    aeStatusColumn: "סטטוס AE",
-    mcpStatusColumn: "סטטוס MCP",
-    aeVersionColumn: "גרסת AE",
-    maxConcurrencyColumn: "מקביליות מקסימלית",
-    currentJobColumn: "משימה נוכחית",
-    capabilitiesColumn: "יכולות",
-    lastHeartbeatColumn: "פעימת לב אחרונה",
-    viewDetailsAriaLabel: (name) => `הצגת פרטים עבור ${name}`,
-    dataUnavailableTitle: "נתוני העובד אינם זמינים",
-    dataUnavailableDescription: "לא ניתן היה לטעון את רשומות העובדים מה-API.",
-    emptyTitle: "לא רשומים עובדים",
-    emptyDescription: "לאחר שעובד Windows יתחבר ל-API, הוא יופיע כאן."
-  },
   workerDetail: {
     fallbackTitle: "עובד",
     workerId: "מזהה עובד",
@@ -263,19 +220,6 @@ export const he: Dictionary = {
     lastUpdated: "עודכן לאחרונה",
     offlineNotice: "העובד לא מקוון — לא ניתן לאמת את הסטטוס הנוכחי.",
     lastKnown: (label, relativeTime) => `ידוע לאחרונה: ${label} · ${relativeTime}`
-  },
-  approvals: {
-    title: "אישורים",
-    description: "שערי אישור אנושיים הנדרשים לפני ש-DYO ממשיכה לשלב ההפקה הבא.",
-    gates: {
-      scenePlan: { title: "אישור תוכנית סצנות", description: "מיפוי/סידור/בחירת סצנות ואישור תוכנית הביצוע - בידי אדם." },
-      firstFrame: { title: "הפריים המעוצב הראשון", description: "תצוגה מקדימה חזותית אמיתית ואישור סגנון על הסצנה המבוצעת הראשונה." },
-      branding: { title: "מיתוג, טיפוגרפיה וצבעים", description: "אישור כללי המיתוג של DYO/הלקוח, הטיפוגרפיה והצבעים." },
-      fullPreview: { title: "תצוגה מקדימה מלאה", description: "בקרת איכות חזותית באמצעות תצוגות מקדימות אמיתיות מהקומפוזיציה הסופית בפועל." },
-      finalRender: { title: "רינדור סופי", description: "אישור אנושי סופי לפני שמשימת ה-aerender הניתנת לשחזור נכנסת לתור." }
-    },
-    pendingTitle: "מעקב האישורים אינו מגובה ב-API עדיין",
-    pendingDescription: "לאחר שניתן יהיה לשלוח פרויקט לבדיקה וסקירה, כל שער למעלה יציג כאן את מצבו האמיתי (ממתין/מאושר/נדחה) ואת הבודק."
   },
   renders: {
     title: "רינדורים",
@@ -302,20 +246,14 @@ export const he: Dictionary = {
     finalOutputsDescription: "סרטוני הווידאו המוגמרים והניתנים להורדה שלכם.",
     statusComplete: "הושלם"
   },
-  activity: {
-    title: "פעילות / יומנים",
-    description: "יומן ביקורת של אירועי עובדים, משימות ואישורים.",
-    pendingTitle: "רישום הפעילות אינו מגובה ב-API עדיין",
-    pendingDescription:
-      "גם ה-API וגם העובד שומרים כיום יומנים מובנים, אך אין עדיין נקודת קצה שחושפת ללוח הבקרה פיד אירועים/ביקורת. עמוד זה יציג זרם פעילות חי לאחר שזה יהיה קיים."
-  },
   settings: {
     title: "הגדרות",
     description: "העדפות לוח הבקרה והגדרות החשבון.",
     navAiProviders: "ספקי בינה מלאכותית",
     navAppearance: "מראה",
     navAccount: "חשבון",
-    navIntegrations: "API / אינטגרציות",
+    technicalScreens: "מסכים טכניים",
+    technicalScreensHint: "מציג את מתג התצוגה המתקדמת בפרויקטים: טופס הרינדור, פריסת הרילס והאבחון. לתמיכה, לא ליצירת סרטון.",
     appearance: "מראה",
     themeLight: "בהיר",
     themeDark: "כהה",
@@ -327,11 +265,6 @@ export const he: Dictionary = {
     accountEmailLabel: "אימייל",
     accountRoleLabel: "תפקיד",
     logout: "התנתקות",
-    apiConnection: "חיבור ל-API",
-    controlPlaneApi: "API מישור הבקרה",
-    controlPlaneApiValue: "פנימי בלבד (פרוקסי בצד השרת)",
-    apiConnectionHint:
-      "הדפדפן לעולם אינו קורא ל-API של מישור הבקרה ישירות - כל הנתונים בלוח בקרה זה עוברים דרך פרוקסי בצד השרת. אין כאן שום דבר להגדיר כיום.",
     aiProvider: {
       title: "ספקי בינה מלאכותית",
       description: "חברו מפתח API אישי כדי שעוזר המיפוי יוכל ליצור הצעות אמיתיות המבוססות על ראיות. המפתחות מוצפנים בשרת ולעולם אינם נשלחים חזרה לדפדפן.",

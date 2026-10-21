@@ -10,13 +10,18 @@ import {
 } from "react";
 import {
   readStoredWorkspaceMode,
+  readTechnicalScreensEnabled,
   writeStoredWorkspaceMode,
+  writeTechnicalScreensEnabled,
   type WorkspaceMode
 } from "../lib/workspace-mode";
 
 interface WorkspaceModeContextValue {
   mode: WorkspaceMode;
   setMode: (mode: WorkspaceMode) => void;
+  /** Settings > "Technical screens" (per device): whether the Simple/Advanced switch is offered on projects at all. */
+  technicalScreens: boolean;
+  setTechnicalScreens: (enabled: boolean) => void;
 }
 
 const WorkspaceModeContext = createContext<WorkspaceModeContextValue | null>(null);
@@ -31,6 +36,7 @@ const WorkspaceModeContext = createContext<WorkspaceModeContextValue | null>(nul
  */
 export function WorkspaceModeProvider({ children }: { children: ReactNode }): ReactElement {
   const [mode, setModeState] = useState<WorkspaceMode>("simple");
+  const [technicalScreens, setTechnicalScreensState] = useState(false);
 
   // setModeState only ever runs after this async function's own await -
   // never synchronously at the top of the effect (same pattern as
@@ -40,6 +46,7 @@ export function WorkspaceModeProvider({ children }: { children: ReactNode }): Re
     async function syncFromStorage(): Promise<void> {
       await Promise.resolve();
       if (cancelled) return;
+      setTechnicalScreensState(readTechnicalScreensEnabled());
       const stored = readStoredWorkspaceMode();
       if (stored) {
         setModeState(stored);
@@ -56,8 +63,16 @@ export function WorkspaceModeProvider({ children }: { children: ReactNode }): Re
     writeStoredWorkspaceMode(next);
   }
 
+  function setTechnicalScreens(enabled: boolean): void {
+    setTechnicalScreensState(enabled);
+    writeTechnicalScreensEnabled(enabled);
+    if (!enabled) {
+      setMode("simple");
+    }
+  }
+
   return (
-    <WorkspaceModeContext.Provider value={{ mode, setMode }}>
+    <WorkspaceModeContext.Provider value={{ mode, setMode, technicalScreens, setTechnicalScreens }}>
       {children}
     </WorkspaceModeContext.Provider>
   );
@@ -79,4 +94,9 @@ export function useWorkspaceMode(): WorkspaceModeContextValue {
  */
 export function useWorkspaceModeIfPresent(): WorkspaceMode | null {
   return useContext(WorkspaceModeContext)?.mode ?? null;
+}
+
+/** The whole context when a provider is present (Settings reads the "Technical screens" switch through it), else null. */
+export function useWorkspaceModeControlsIfPresent(): WorkspaceModeContextValue | null {
+  return useContext(WorkspaceModeContext);
 }

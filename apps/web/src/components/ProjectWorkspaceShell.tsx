@@ -78,11 +78,10 @@ function tabsFor(projectId: string, mode: "simple" | "advanced"): TabDef[] {
   // to act on: the technical render form (which already appears on Export
   // for any output missing one, so leaving it out is no longer a dead end)
   // and the plan's revision history.
-  return [
-    ...simpleTabs,
-    { href: `/projects/${projectId}/render-settings`, labelKey: "renderSettings" },
-    { href: `/projects/${projectId}/revisions`, labelKey: "revisions" }
-  ];
+  // 2026-10-21: the plan's revision history tab is gone (nobody acted on it);
+  // the technical render form stays, reachable only with "Technical screens"
+  // switched on in Settings.
+  return [...simpleTabs, { href: `/projects/${projectId}/render-settings`, labelKey: "renderSettings" }];
 }
 
 /**
@@ -120,7 +119,7 @@ export function ProjectWorkspaceShell({
   const router = useRouter();
   const { project, plan, isLoading, error } = useProjectWorkspaceContext();
   const { nextAction, tabLocks, stateUnknown } = useProjectGuidance();
-  const { mode, setMode } = useWorkspaceMode();
+  const { mode, setMode, technicalScreens } = useWorkspaceMode();
   const hintIdPrefix = useId();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -188,7 +187,7 @@ export function ProjectWorkspaceShell({
             developer - the deletion dialog remains the guard against that.
             Their call, made twice, so it stands.
           */}
-          <ProjectSettingsControls mode={mode} setMode={setMode} onDelete={() => setConfirmingDelete(true)} />
+          <ProjectSettingsControls mode={mode} setMode={setMode} showModeSwitch={technicalScreens} onDelete={() => setConfirmingDelete(true)} />
         </div>
       </div>
       {/*
@@ -337,23 +336,28 @@ export function ProjectWorkspaceShell({
 function ProjectSettingsControls({
   mode,
   setMode,
+  showModeSwitch,
   onDelete
 }: {
   mode: "simple" | "advanced";
   setMode: (mode: "simple" | "advanced") => void;
+  /** 2026-10-21: the switch is offered only with Settings > "Technical screens" on - a client never sees it. */
+  showModeSwitch: boolean;
   onDelete: () => void;
 }): ReactElement {
   const { t } = useLocale();
   return (
     <>
-      <div className="workspace-mode-toggle" role="group" aria-label={t.workspaceMode.toggleAriaLabel}>
-        <button type="button" className="workspace-mode-toggle__option" data-active={mode === "simple"} onClick={() => setMode("simple")}>
-          {t.workspaceMode.simpleAction}
-        </button>
-        <button type="button" className="workspace-mode-toggle__option" data-active={mode === "advanced"} onClick={() => setMode("advanced")}>
-          {t.workspaceMode.advancedAction}
-        </button>
-      </div>
+      {showModeSwitch ? (
+        <div className="workspace-mode-toggle" role="group" aria-label={t.workspaceMode.toggleAriaLabel}>
+          <button type="button" className="workspace-mode-toggle__option" data-active={mode === "simple"} onClick={() => setMode("simple")}>
+            {t.workspaceMode.simpleAction}
+          </button>
+          <button type="button" className="workspace-mode-toggle__option" data-active={mode === "advanced"} onClick={() => setMode("advanced")}>
+            {t.workspaceMode.advancedAction}
+          </button>
+        </div>
+      ) : null}
       <Button size="sm" variant="danger" onClick={onDelete}>
         <Trash2 aria-hidden="true" />
         {t.projectWorkspace.deleteProjectAction}

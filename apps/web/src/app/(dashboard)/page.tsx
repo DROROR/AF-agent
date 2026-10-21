@@ -1,9 +1,10 @@
-import type { ReactElement } from "react";
-import { OverviewPage } from "@/components/OverviewPage";
+import { redirect } from "next/navigation";
 
-// Data is always live (worker/API/DB health) - never statically prerendered.
-export const dynamic = "force-dynamic";
-
-export default function Page(): ReactElement {
-  return <OverviewPage />;
+/**
+ * 2026-10-21 simplification: the dashboard opens on the projects list. The
+ * former Overview (API/database/worker health) duplicated the top bar's own
+ * "All systems normal" and the project pages' own worker notices.
+ */
+export default function Page(): never {
+  redirect("/projects");
 }

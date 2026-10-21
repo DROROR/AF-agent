@@ -1,16 +1,13 @@
-import {
-  Activity,
-  CheckSquare,
-  Clapperboard,
-  FolderKanban,
-  LayoutDashboard,
-  ListTodo,
-  Server,
-  Settings,
-  type LucideIcon
-} from "lucide-react";
+import { FolderKanban, Settings, type LucideIcon } from "lucide-react";
 
-export type NavItemId = "overview" | "projects" | "jobs" | "workers" | "approvals" | "renders" | "activity" | "settings";
+/**
+ * 2026-10-21 simplification (operator audit, after the client's first
+ * finished videos): the sidebar carried eight entries and the client used
+ * two. Overview duplicated the top bar's health line; Jobs / Queue, Workers,
+ * Renders listed what the project pages already show; Approvals and
+ * Activity had no API behind them. Only Projects and Settings remain.
+ */
+export type NavItemId = "projects" | "settings";
 
 export interface NavItem {
   href: string;
@@ -28,13 +25,7 @@ export interface NavItem {
 
 /** Single source of truth for sidebar nav and the topbar's page-title lookup - see TopBar.tsx. */
 export const NAV_ITEMS: readonly NavItem[] = [
-  { href: "/", label: "Overview", id: "overview", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", id: "projects", icon: FolderKanban },
-  { href: "/jobs", label: "Jobs / Queue", id: "jobs", icon: ListTodo },
-  { href: "/workers", label: "Workers", id: "workers", icon: Server },
-  { href: "/approvals", label: "Approvals", id: "approvals", icon: CheckSquare },
-  { href: "/renders", label: "Renders", id: "renders", icon: Clapperboard },
-  { href: "/activity", label: "Activity / Logs", id: "activity", icon: Activity },
   { href: "/settings", label: "Settings", id: "settings", icon: Settings }
 ];
 

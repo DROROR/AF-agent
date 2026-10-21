@@ -1,6 +1,6 @@
-import { Bot, Palette, Plug, User, type LucideIcon } from "lucide-react";
+import { Bot, Palette, User, type LucideIcon } from "lucide-react";
 
-export type SettingsSectionId = "ai-providers" | "appearance" | "account" | "integrations";
+export type SettingsSectionId = "ai-providers" | "appearance" | "account";
 
 export interface SettingsSection {
   id: SettingsSectionId;
@@ -11,6 +11,5 @@ export interface SettingsSection {
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: "ai-providers", icon: Bot },
   { id: "appearance", icon: Palette },
-  { id: "account", icon: User },
-  { id: "integrations", icon: Plug }
+  { id: "account", icon: User }
 ];

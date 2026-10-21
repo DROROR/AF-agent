@@ -7,7 +7,7 @@ import { DashboardStatusProvider } from "../DashboardStatusProvider";
 import { ThemeProvider } from "../ThemeProvider";
 import { renderWithLocale } from "../../test-utils/render-with-locale";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/workers" }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/settings" }));
 
 const USER: UserDto = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -52,7 +52,7 @@ describe("TopBar", () => {
       { locale: "he" }
     );
 
-    screen.getByText("עובדים");
+    screen.getByText("הגדרות");
     screen.getByRole("button", { name: "English" });
     screen.getByRole("button", { name: "עברית" });
   });

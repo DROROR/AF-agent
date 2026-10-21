@@ -177,6 +177,7 @@ describe("ProjectWorkMapTab - Simple Mode default (video-planning UX simplificat
   });
 
   it("Advanced Mode still exposes the real composition/asset IDs under Advanced details, unchanged", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace({
       status: 200,
@@ -261,6 +262,7 @@ describe("ProjectWorkMapTab - Simple Mode scene filtering (live QA fix)", () => 
   });
 
   it("CASE H: Advanced Mode still shows every raw entry, including nested-only compositions - full technical capability preserved", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace(
       { status: 200, body: { workMap: workMapFixture({}, entriesOnePerComposition()) } },
@@ -381,6 +383,7 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
   });
 
   it("Advanced Mode still shows the exact raw '!Render' composition name, unchanged", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace(
       { status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } },
@@ -420,6 +423,7 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
   });
 
   it("Advanced Mode keeps the old row-based description text unchanged", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
     renderWorkMap();
@@ -429,6 +433,7 @@ describe("ProjectWorkMapTab - Simple Mode AI Plan cleanup pass", () => {
   });
 
   it("Advanced Mode keeps the 'Add details manually' label unchanged - Simple Mode's own 'Edit Plan' wording never leaks into it", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace({ status: 200, body: { workMap: workMapFixture({}, [workMapEntryFixture({ sourceCompositionId: "c1" })]) } });
     renderWorkMap();
@@ -569,6 +574,7 @@ describe("ProjectWorkMapTab - real live-QA shape (51 entries, all with instructi
   });
 
   it("Advanced Mode still shows the full raw technical data - all 51 entries, composition IDs, and asset IDs", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubWorkspace(
       { status: 200, body: { workMap: workMapFixture({}, fiftyOneEntriesAllWithInstructionsOnly()) } },

@@ -70,7 +70,7 @@ describe("SettingsPage", () => {
     stubFetchByUrl({ "/api/settings/ai-provider": { status: 200, body: NOT_CONNECTED } });
     renderSettings();
 
-    const navLabels = ["AI Providers", "Appearance", "Account", "API / Integrations"];
+    const navLabels = ["AI Providers", "Appearance", "Account"];
     for (const label of navLabels) {
       expect(screen.getByRole("button", { name: label })).not.toBeNull();
     }

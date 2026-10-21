@@ -40,6 +40,7 @@ afterEach(() => {
  */
 function useAdvancedView(): void {
   beforeEach(() => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
   });
 }
@@ -759,6 +760,7 @@ describe("ProjectPreviewTab - locked before a plan exists (live QA fix)", () => 
   });
 
   it("Advanced Mode keeps the raw technical empty state unchanged", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubNoPlan();
     renderPreview();

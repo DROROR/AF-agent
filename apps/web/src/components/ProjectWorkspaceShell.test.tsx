@@ -186,13 +186,25 @@ describe("ProjectWorkspaceShell - final nav (Project / Files / Scenes / Preview 
     expect(tabLabels()).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export"]);
   });
 
-  it("Advanced Mode adds only Render Settings / Revisions after the same six Simple tabs, never replacing them", async () => {
+  it("Advanced Mode (offered only with Technical screens on) adds only Render Settings after the same six Simple tabs", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     stubWorkspace();
     renderShell();
     await screen.findByText("White App Promo");
 
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Advanced" }));
 
-    expect(tabLabels()).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export", "Render Settings", "Revisions"]);
+    expect(tabLabels()).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export", "Render Settings"]);
+    window.localStorage.removeItem("dyo-technical-screens");
+  });
+
+  it("without Technical screens there is no Simple/Advanced switch at all (2026-10-21)", async () => {
+    window.localStorage.removeItem("dyo-technical-screens");
+    stubWorkspace();
+    renderShell();
+    await screen.findByText("White App Promo");
+
+    expect(screen.queryByRole("button", { name: "Advanced" })).toBeNull();
+    expect(tabLabels()).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export"]);
   });
 });

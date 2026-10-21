@@ -36,7 +36,8 @@ afterEach(() => {
  * their own device (see WorkspaceModeProvider/workspace-mode.ts).
  */
 function renderScenes(): void {
-  window.localStorage.setItem("dyo-workspace-mode", "advanced");
+  window.localStorage.setItem("dyo-technical-screens", "on");
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
   renderWithLocale(
     <DashboardStatusProvider>
       <WorkspaceModeProvider>

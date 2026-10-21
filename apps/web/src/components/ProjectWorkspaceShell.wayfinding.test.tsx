@@ -208,6 +208,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
   it("says 'you are on the right tab' instead of a link when the action lives on the page you are already looking at", async () => {
     currentPathname = `/projects/${PROJECT_ID}/scenes`;
     // 2026-10-07: in Simple view the Scenes tab's own guide says this, and the banner stands down there - so this is the Advanced view's banner.
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubAll();
     renderShell();
@@ -227,6 +228,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     //
     // 2026-10-04: this pointer is now Advanced-only - see the next test for
     // what Simple mode says instead.
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubAll(executedProjectStubs());
     renderShell();
@@ -482,7 +484,8 @@ describe("Project workspace - what was taken off the page", () => {
     expect(document.querySelector(".next-action")).not.toBeNull();
   });
 
-  it("keeps the technical facts, the Advanced switch and Delete Project at the top, where the operator asked for them", async () => {
+  it("keeps the technical facts, the Advanced switch (with Technical screens on) and Delete Project at the top, where the operator asked for them", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
@@ -496,9 +499,10 @@ describe("Project workspace - what was taken off the page", () => {
 
     // The switch and Delete sit in the header actions, as they always did.
     const actions = document.querySelector(".workspace-header__actions") as HTMLElement;
-    within(actions).getByRole("button", { name: "Advanced" });
+    await within(actions).findByRole("button", { name: "Advanced" });
     within(actions).getByRole("button", { name: "Simple" });
     within(actions).getByRole("button", { name: "Delete Project" });
+    window.localStorage.removeItem("dyo-technical-screens");
   });
 
   it("still asks before deleting - the confirmation is what guards a destructive button at the top of every page", async () => {
@@ -512,7 +516,8 @@ describe("Project workspace - what was taken off the page", () => {
     await screen.findByText(/Delete this project/i);
   });
 
-  it("the Advanced switch still works from the header, and reveals the two technical tabs - hidden, never deleted", async () => {
+  it("the Advanced switch still works from the header once Technical screens is on, and reveals the technical tab - hidden, never deleted", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     stubAll();
     renderShell();
     await screen.findByText("White App Promo");
@@ -520,12 +525,13 @@ describe("Project workspace - what was taken off the page", () => {
     const nav = document.querySelector(".workspace-tabs") as HTMLElement;
     expect(within(nav).getAllByRole("link")).toHaveLength(6);
 
-    fireEvent.click(within(document.querySelector(".workspace-header__actions") as HTMLElement).getByRole("button", { name: "Advanced" }));
+    fireEvent.click(await within(document.querySelector(".workspace-header__actions") as HTMLElement).findByRole("button", { name: "Advanced" }));
 
     expect(
       within(document.querySelector(".workspace-tabs") as HTMLElement)
         .getAllByRole("link")
         .map((link) => link.textContent)
-    ).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export", "Render Settings", "Revisions"]);
+    ).toEqual(["Project", "Files", "AI Plan", "Scenes", "Preview", "Export", "Render Settings"]);
+    window.localStorage.removeItem("dyo-technical-screens");
   });
 });

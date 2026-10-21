@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import { NAV_ITEMS, findActiveNavItem } from "./nav-items";
 
 describe("findActiveNavItem", () => {
-  it("matches the Overview item only for the exact root path", () => {
-    expect(findActiveNavItem("/")?.label).toBe("Overview");
-    expect(findActiveNavItem("/workers")?.label).not.toBe("Overview");
+  it("offers only Projects and Settings (2026-10-21 simplification)", () => {
+    expect(NAV_ITEMS.map((item) => item.label)).toEqual(["Projects", "Settings"]);
   });
 
   it("matches a top-level route exactly", () => {
-    expect(findActiveNavItem("/workers")?.label).toBe("Workers");
-    expect(findActiveNavItem("/jobs")?.label).toBe("Jobs / Queue");
+    expect(findActiveNavItem("/settings")?.label).toBe("Settings");
+    expect(findActiveNavItem("/projects")?.label).toBe("Projects");
   });
 
   it("matches a nested route to its parent nav item via longest-prefix match", () => {

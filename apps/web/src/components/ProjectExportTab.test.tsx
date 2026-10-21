@@ -12,6 +12,8 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.removeItem("dyo-technical-screens");
+  window.localStorage.removeItem("dyo-workspace-mode");
 });
 
 const NO_WORKERS_STATUS = { "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [] } } };
@@ -109,6 +111,9 @@ describe("ProjectExportTab", () => {
    * pass if the form were never shown at all (the original bug).
    */
   it("THE DEAD END: an output that cannot render without setup shows the real setup form in place, never a pointer to another tab", async () => {
+    // Both outputs are drawn only in the Advanced view (2026-10-21: Simple has no Reels card).
+    window.localStorage.setItem("dyo-technical-screens", "on");
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
@@ -129,6 +134,9 @@ describe("ProjectExportTab", () => {
   });
 
   it("and the setup form disappears for an output that is already set up against the current template - it is a fix, not permanent clutter", async () => {
+    // Both outputs are drawn only in the Advanced view (2026-10-21: Simple has no Reels card).
+    window.localStorage.setItem("dyo-technical-screens", "on");
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
@@ -147,6 +155,9 @@ describe("ProjectExportTab", () => {
   });
 
   it("shows a plain 'not set up yet' message (never the raw fields) when a variant has no render configuration", async () => {
+    // Both outputs are drawn only in the Advanced view (2026-10-21: Simple has no Reels card).
+    window.localStorage.setItem("dyo-technical-screens", "on");
+    window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
@@ -379,6 +390,7 @@ describe("ProjectExportTab - locked before a plan exists (live QA fix)", () => {
   });
 
   it("Advanced Mode keeps the raw technical empty state unchanged", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubNoPlan();
     renderTab();
@@ -432,9 +444,10 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
     await screen.findByText("Not ready yet");
 
     // The LANDSCAPE card is configured; its own button must give the
-    // session reason, while REELS (still unconfigured) keeps its own.
+    // session reason. (2026-10-21: the Simple view draws no Reels card, so
+    // the configuration reason is not on this page at all.)
     screen.getByText("The complete preview has to be approved on the Preview tab before rendering.");
-    screen.getByText("This output has not been set up yet. Fill in the short setup form just below and press Save.");
+    expect(screen.queryByText("This output has not been set up yet. Fill in the short setup form just below and press Save.")).toBeNull();
   });
 
   it("reports a STALE master as a re-selection problem, never as 'not configured' - they need different fixes", async () => {
@@ -506,36 +519,16 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
     });
   }
 
-  it("keeps the tall version behind a closed disclosure when none is set up - still there, one press away", async () => {
-    stubExport(null);
-    renderTab();
-
-    const summary = await screen.findByText("Also make a tall version for phones");
-    const disclosure = summary.closest("details") as HTMLDetailsElement;
-    expect(disclosure.open).toBe(false);
-    // The same card and the same setup form, inside it - nothing was removed.
-    expect(disclosure.contains(screen.getByRole("button", { name: "Render Reels" }))).toBe(true);
-    // The Landscape video is not inside it.
-    expect(disclosure.contains(screen.getByRole("button", { name: "Render Landscape" }))).toBe(false);
-  });
-
-  it("puts the finished videos directly under the Landscape video, above the tall version", async () => {
-    stubExport(null);
-    renderTab();
-
-    const disclosure = (await screen.findByText("Also make a tall version for phones")).closest("details") as HTMLElement;
-    const landscape = screen.getByRole("button", { name: "Render Landscape" });
-    const outputs = document.querySelector(".final-outputs-card") as HTMLElement;
-    const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(landscape.compareDocumentPosition(outputs) & FOLLOWING).toBeTruthy();
-    expect(outputs.compareDocumentPosition(disclosure) & FOLLOWING).toBeTruthy();
-  });
-
-  it("shows the tall version in the open once one IS set up - it is not hidden from someone who asked for it", async () => {
+  // 2026-10-21: choosing templates never made a tall video; the Reels card
+  // is out of the Simple view until the Reels layout step is ready.
+  it("Simple view shows no Reels card at all, set up or not - only the Landscape and the finished videos", async () => {
     stubExport(landscapeConfig({ manifestCompositionId: "comp-tall", compositionName: "Tall Master" }));
     renderTab();
 
-    await screen.findByRole("button", { name: "Render Reels" });
+    const landscape = await screen.findByRole("button", { name: "Render Landscape" });
+    const outputs = document.querySelector(".final-outputs-card") as HTMLElement;
+    expect(landscape.compareDocumentPosition(outputs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Render Reels" })).toBeNull();
     expect(screen.queryByText("Also make a tall version for phones")).toBeNull();
   });
 
@@ -543,7 +536,7 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
   // Landscape made and the session COMPLETED, the Reels card also said "Your
   // video is ready" and offered "Make it again" for a tall video that had
   // never been made. Each output reads its own finished video.
-  it("after the Landscape is made, the Reels card still offers to make the Reels - only the output that exists says it is ready (2026-10-20)", async () => {
+  it("after the Landscape is made, only the Landscape card says it is ready - the Simple view never draws a Reels card (2026-10-20/21)", async () => {
     const worker = workerWithCapabilities(["RENDER"]);
     stubFetchByUrl({
       "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
@@ -557,14 +550,14 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
     });
     renderTab();
 
-    const makeReels = await screen.findByRole("button", { name: "Render Reels" });
-    await waitFor(() => expect((makeReels as HTMLButtonElement).disabled).toBe(false));
     await screen.findByRole("button", { name: "Make it again" });
     expect(screen.getAllByText("Your video is ready - it is under Final Outputs below.")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Render Landscape" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Render Reels" })).toBeNull();
   });
 
   it("Advanced view is unchanged: both outputs in the open, finished videos at the foot", async () => {
+    window.localStorage.setItem("dyo-technical-screens", "on");
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubExport(null);
     renderTab();
