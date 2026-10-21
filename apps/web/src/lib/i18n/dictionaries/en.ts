@@ -833,6 +833,7 @@ export const en = {
       renderSettingsTemplateLabel: "Render Settings template name",
       outputModuleTemplateLabel: "Output Module template name",
       templateHint: "Exact AE Render Queue template name, as it will appear on the real Windows AE install - not yet auto-discovered here.",
+      templateListHint: (workerName: string, at: string): string => `Pick from the names After Effects on ${workerName} reported (${at}). A name it does not have is refused when you save.`,
       saveAction: "Save",
       savingLabel: "Saving…",
       saveFailedTitle: "Could not save this render configuration",

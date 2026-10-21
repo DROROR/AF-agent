@@ -38,9 +38,11 @@ import { rejectExecutionPlan } from "../application/execution-plan/reject-execut
 import { reopenExecutionPlan } from "../application/execution-plan/reopen-execution-plan.js";
 import { suggestRenderOutputConfig } from "../application/execution-plan/suggest-render-output-config.js";
 import { setRenderOutputConfig } from "../application/execution-plan/set-render-output-config.js";
+import { listRenderTemplates } from "../application/execution-plan/list-render-templates.js";
 import { reconcileExecutionPlanReadiness } from "../application/execution-plan/reconcile-execution-plan-readiness.js";
 import { getSceneEvidencePreviewMetadata, getSceneEvidencePreviewFile } from "../application/execution-plan/get-scene-evidence-preview.js";
 import type { BrandRulesConfig } from "../domain/brand-rules/validate-brand-rules.js";
+import type { WorkerRepository } from "../domain/worker/types.js";
 
 export interface ProjectsRouteDeps {
   projectRepository: ProjectRepository;
@@ -54,6 +56,8 @@ export interface ProjectsRouteDeps {
   sceneEvidencePreviewRepository: SceneEvidencePreviewRepository;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
+  /** The worker registry - for the template names a project's worker's After Effects last reported (list-render-templates.ts). */
+  workerRepository: WorkerRepository;
   now?: () => Date;
   /** Injectable for tests - defaults to reading the real dyo-brand-rules.yaml (see approve-execution-plan.ts). */
   brandRulesConfig?: BrandRulesConfig;
@@ -278,12 +282,24 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectsRouteD
     reply.send(await suggestRenderOutputConfig({ executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository }, projectId, variant));
   });
 
+  /** Read-only: the template names the project's worker's After Effects last reported - see list-render-templates.ts. */
+  app.get("/api/projects/:projectId/execution-plan/render-templates", async (request, reply) => {
+    await requireSessionUser(request.headers.authorization, sessionDeps);
+    const { projectId } = projectIdParamsSchema.parse(request.params);
+    reply.send(await listRenderTemplates({ projectRepository: deps.projectRepository, jobRepository: deps.jobRepository, workerRepository: deps.workerRepository }, projectId));
+  });
+
   app.put("/api/projects/:projectId/execution-plan/render-outputs/:variant", async (request, reply) => {
     await requireSessionUser(request.headers.authorization, sessionDeps);
     const { projectId, variant } = renderOutputParamsSchema.parse(request.params);
     const body = setRenderOutputConfigRequestSchema.parse(request.body);
     const result = await setRenderOutputConfig(
-      { executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository, now },
+      {
+        executionPlanRepository: deps.executionPlanRepository,
+        projectRepository: deps.projectRepository,
+        now,
+        renderTemplates: { jobRepository: deps.jobRepository, workerRepository: deps.workerRepository }
+      },
       projectId,
       variant,
       body

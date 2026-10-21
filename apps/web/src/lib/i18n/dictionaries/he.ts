@@ -750,6 +750,7 @@ export const he: Dictionary = {
       renderSettingsTemplateLabel: "שם תבנית Render Settings",
       outputModuleTemplateLabel: "שם תבנית Output Module",
       templateHint: "שם התבנית המדויק ב-Render Queue של AE, כפי שיופיע בהתקנת AE האמיתית ב-Windows - טרם מתגלה אוטומטית כאן.",
+      templateListHint: (workerName: string, at: string): string => `בחרו מהשמות ש-After Effects במחשב ${workerName} דיווח עליהם (${at}). שם שאין לו נדחה בשמירה.`,
       saveAction: "שמירה",
       savingLabel: "שומר…",
       saveFailedTitle: "לא ניתן היה לשמור את הגדרת הרינדור הזו",

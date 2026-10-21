@@ -411,6 +411,38 @@ describe("ProjectRenderSettingsTab", () => {
     await screen.findByText(`Configured ${new Date(configuredAt).toLocaleString()}`);
   });
 
+  // REAL 2026-10-21 (client project b48ddc7a): a typed Output Module name
+  // the machine's After Effects did not have failed only at render time.
+  it("offers the names the project's worker's After Effects reported under each template field, and says so (2026-10-21)", async () => {
+    stubFetchByUrl({
+      ...NO_WORKERS_STATUS,
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
+      [`/api/projects/${PROJECT_ID}/execution-plan/render-templates`]: {
+        status: 200,
+        body: {
+          templates: {
+            workerId: "345ee0a4-ef4d-4b87-a923-726f97144aa4",
+            workerName: "DESKTOP-A629N4N",
+            capturedAt: "2026-10-21T09:40:55.000Z",
+            renderSettingsTemplateNames: ["Best Settings", "Reels"],
+            outputModuleTemplateNames: ["H.264 - Match Render Settings - 15 Mbps", "Lossless"]
+          }
+        }
+      }
+    });
+    renderTab();
+    await screen.findAllByText("Landscape master");
+
+    const rsInput = (await screen.findAllByLabelText("Render Settings template name"))[0] as HTMLInputElement;
+    await waitFor(() => expect(rsInput.getAttribute("list")).toBe("render-rs-template-list-LANDSCAPE"));
+    const rsOptions = Array.from(document.querySelectorAll("#render-rs-template-list-LANDSCAPE option")).map((o) => (o as HTMLOptionElement).value);
+    expect(rsOptions).toEqual(["Best Settings", "Reels"]);
+    const omOptions = Array.from(document.querySelectorAll("#render-om-template-list-LANDSCAPE option")).map((o) => (o as HTMLOptionElement).value);
+    expect(omOptions).toEqual(["H.264 - Match Render Settings - 15 Mbps", "Lossless"]);
+    expect(document.body.textContent).toContain("Pick from the names After Effects on DESKTOP-A629N4N reported");
+  });
+
   it("shows a stale-configuration warning when the configured sourceProjectSha256 no longer matches the current manifest", async () => {
     stubWorkspace({
       renderOutputs: {

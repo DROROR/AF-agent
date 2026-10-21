@@ -3,11 +3,20 @@ import { ExecutionPlanEditError, ExecutionPlanNotFoundError, ProjectNotFoundErro
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
 import { toExecutionPlanResponse } from "./execution-plan-dto-mapper.js";
+import { listRenderTemplates, type ListRenderTemplatesDeps } from "./list-render-templates.js";
 
 export interface SetRenderOutputConfigDeps {
   executionPlanRepository: ExecutionPlanRepository;
   projectRepository: ProjectRepository;
   now: () => Date;
+  /**
+   * When given, a template name the project's worker's After Effects has not
+   * reported is refused at save time, with the real names in the message -
+   * never discovered only when aerender fails (2026-10-21). Without it (or
+   * while that worker has never reported its templates) the names are saved
+   * as typed.
+   */
+  renderTemplates?: Pick<ListRenderTemplatesDeps, "jobRepository" | "workerRepository">;
 }
 
 /**
@@ -56,6 +65,23 @@ export async function setRenderOutputConfig(
     throw new ExecutionPlanEditError(
       `manifestCompositionId "${request.manifestCompositionId}" does not match any composition in this project's current manifest`
     );
+  }
+
+  if (deps.renderTemplates) {
+    const { templates } = await listRenderTemplates({ projectRepository: deps.projectRepository, ...deps.renderTemplates }, projectId);
+    if (templates) {
+      const unknown: string[] = [];
+      if (!templates.renderSettingsTemplateNames.includes(request.renderSettingsTemplateName)) {
+        unknown.push(`a Render Settings template named "${request.renderSettingsTemplateName}" (it has: ${templates.renderSettingsTemplateNames.join(", ")})`);
+      }
+      if (!templates.outputModuleTemplateNames.includes(request.outputModuleTemplateName)) {
+        unknown.push(`an Output Module template named "${request.outputModuleTemplateName}" (it has: ${templates.outputModuleTemplateNames.join(", ")})`);
+      }
+      if (unknown.length > 0) {
+        const where = templates.workerName ? `After Effects on ${templates.workerName}` : "After Effects on the project's editing computer";
+        throw new ExecutionPlanEditError(`${where} does not have ${unknown.join(", nor ")}. Choose a name from its own list, or read the list again under Tools and diagnostics.`);
+      }
+    }
   }
 
   const config: RenderOutputConfig = {

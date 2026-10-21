@@ -205,6 +205,16 @@ export class DrizzleJobRepository implements JobRepository {
     return row ? toDomain(row) : null;
   }
 
+  async findLatestSucceededForWorkerOperation(workerId: string, operation: WorkerCapability): Promise<Job | null> {
+    const [row] = await this.db
+      .select()
+      .from(jobs)
+      .where(and(eq(jobs.workerId, workerId), eq(jobs.operation, operation), eq(jobs.status, "SUCCEEDED")))
+      .orderBy(desc(jobs.createdAt))
+      .limit(1);
+    return row ? toDomain(row) : null;
+  }
+
   async listByCreatedByUserId(userId: string, limit: number): Promise<Job[]> {
     const rows = await this.db
       .select()

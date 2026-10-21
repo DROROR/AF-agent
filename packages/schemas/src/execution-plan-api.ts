@@ -109,6 +109,31 @@ export const renderOutputSuggestionResponseSchema = z
 export type RenderOutputSuggestionResponse = z.infer<typeof renderOutputSuggestionResponseSchema>;
 
 /**
+ * GET /api/projects/:projectId/execution-plan/render-templates - the Render
+ * Settings and Output Module template names the project's own worker's
+ * After Effects last reported (its newest successful
+ * INSPECT_RENDER_CAPABILITIES), so a render output is configured from real
+ * names and never from a typed guess. `templates` is null when that worker
+ * has never reported them (or the project has no recorded worker).
+ *
+ * REAL 2026-10-21 (client project b48ddc7a): the two names were free text;
+ * the client typed an Output Module name his After Effects did not have,
+ * twice, and each attempt cost a full aerender launch and a red box.
+ */
+export const renderTemplatesResponseSchema = z.object({
+  templates: z
+    .object({
+      workerId: z.string().uuid(),
+      workerName: z.string().min(1).nullable(),
+      capturedAt: z.string().datetime(),
+      renderSettingsTemplateNames: z.array(z.string()),
+      outputModuleTemplateNames: z.array(z.string())
+    })
+    .nullable()
+});
+export type RenderTemplatesResponse = z.infer<typeof renderTemplatesResponseSchema>;
+
+/**
  * POST /api/projects/:projectId/execution-plan/reconcile-readiness
  * (mapping-review propagation fix) - explicitly recomputes every scene's
  * `unresolvedReasons`/`approvalState` from its real, current mapping

@@ -205,6 +205,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     sceneEvidencePreviewRepository: deps.sceneEvidencePreviewRepository,
     userRepository: deps.userRepository,
     sessionRepository: deps.sessionRepository,
+    workerRepository: deps.workerRepository,
     ...(deps.now ? { now: deps.now } : {}),
     ...(deps.brandRulesConfig ? { brandRulesConfig: deps.brandRulesConfig } : {})
   });

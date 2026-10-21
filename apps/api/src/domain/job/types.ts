@@ -144,4 +144,12 @@ export interface JobRepository {
    * P3/P4's stuck-job recovery (2026-09-04).
    */
   listActiveForWorker(workerId: string): Promise<Job[]>;
+  /**
+   * The newest SUCCEEDED job of this operation on this worker, or null - the
+   * latest real answer that worker's After Effects gave (2026-10-21: the
+   * Render Queue template names from INSPECT_RENDER_CAPABILITIES, offered
+   * and checked when a render output is configured - see
+   * list-render-templates.ts).
+   */
+  findLatestSucceededForWorkerOperation(workerId: string, operation: WorkerCapability): Promise<Job | null>;
 }

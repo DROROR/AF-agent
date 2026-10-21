@@ -157,6 +157,13 @@ export class InMemoryJobRepository implements JobRepository {
     );
   }
 
+  async findLatestSucceededForWorkerOperation(workerId: string, operation: WorkerCapability): Promise<Job | null> {
+    const matches = [...this.rows.values()]
+      .filter((job) => job.workerId === workerId && job.operation === operation && job.status === "SUCCEEDED")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return matches[0] ?? null;
+  }
+
   async findMostRecentForSessionKey(
     operation: WorkerCapability,
     executionSessionId: string,

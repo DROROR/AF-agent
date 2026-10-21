@@ -10,7 +10,7 @@ import {
   type RenderOutputConfig,
   type RenderOutputVariant
 } from "@dyo/schemas";
-import type { RenderArtifactDto } from "@dyo/schemas";
+import type { RenderArtifactDto, RenderTemplatesResponse } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useRenderArtifacts } from "../lib/use-render-artifacts";
@@ -26,7 +26,7 @@ import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { HelpTooltip } from "./ui/HelpTooltip";
 import { useLocale } from "./LocaleProvider";
-import { dispatchJob, fetchCurrentExecutionSession, fetchJobStatus, renderArtifactFileUrl } from "../lib/projects-api-client";
+import { dispatchJob, fetchCurrentExecutionSession, fetchJobStatus, fetchRenderTemplates, renderArtifactFileUrl } from "../lib/projects-api-client";
 import { findDispatchableWorker } from "../lib/find-dispatchable-worker";
 import { resolveProjectWorker } from "../lib/resolve-project-worker";
 
@@ -704,6 +704,23 @@ export function VariantConfigCard({
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [dispatchSuccess, setDispatchSuccess] = useState<string | null>(null);
+  // REAL 2026-10-21 (client project b48ddc7a): both template names were free
+  // text; the client typed an Output Module name his After Effects did not
+  // have, twice, and each one failed only when aerender ran. The names his
+  // machine's After Effects last reported are offered under each field, and
+  // the server refuses a name that is not on that list at Save.
+  const [templates, setTemplates] = useState<RenderTemplatesResponse["templates"]>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRenderTemplates(projectId).then((result) => {
+      if (!cancelled && result.ok) {
+        setTemplates(result.data);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const isStale = currentConfig !== null && currentConfig.sourceProjectSha256 !== currentSourceSha;
   const selectedComposition = compositions.find((c) => c.compositionId === manifestCompositionId) ?? null;
@@ -835,14 +852,26 @@ export function VariantConfigCard({
           <Field
             label={t.projectWorkspace.renderSettings.renderSettingsTemplateLabel}
             htmlFor={`render-rs-template-${variant}`}
-            hint={t.projectWorkspace.renderSettings.templateHint}
+            hint={
+              templates
+                ? t.projectWorkspace.renderSettings.templateListHint(templates.workerName ?? templates.workerId, new Date(templates.capturedAt).toLocaleString())
+                : t.projectWorkspace.renderSettings.templateHint
+            }
           >
             <Input
               id={`render-rs-template-${variant}`}
               value={renderSettingsTemplateName}
               disabled={isSaving}
+              list={templates ? `render-rs-template-list-${variant}` : undefined}
               onChange={(event) => setRenderSettingsTemplateName(event.target.value)}
             />
+            {templates ? (
+              <datalist id={`render-rs-template-list-${variant}`}>
+                {templates.renderSettingsTemplateNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            ) : null}
           </Field>
 
           <Field label={t.projectWorkspace.renderSettings.outputModuleTemplateLabel} htmlFor={`render-om-template-${variant}`}>
@@ -850,8 +879,16 @@ export function VariantConfigCard({
               id={`render-om-template-${variant}`}
               value={outputModuleTemplateName}
               disabled={isSaving}
+              list={templates ? `render-om-template-list-${variant}` : undefined}
               onChange={(event) => setOutputModuleTemplateName(event.target.value)}
             />
+            {templates ? (
+              <datalist id={`render-om-template-list-${variant}`}>
+                {templates.outputModuleTemplateNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            ) : null}
           </Field>
 
           {saveError ? <ErrorState title={t.projectWorkspace.renderSettings.saveFailedTitle} description={saveError} /> : null}

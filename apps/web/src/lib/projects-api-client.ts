@@ -37,8 +37,10 @@ import {
   fullPreviewArtifactResponseSchema,
   sceneEvidencePreviewStatusResponseSchema,
   renderOutputSuggestionResponseSchema,
+  renderTemplatesResponseSchema,
   type RenderArtifactDto,
   type RenderOutputSuggestionResponse,
+  type RenderTemplatesResponse,
   type RenderOutputVariant,
   type SetRenderOutputConfigRequest,
   type DispatchJobRequest,
@@ -578,6 +580,19 @@ export async function fetchRenderOutputSuggestion(
     return { ok: false, status, code: null, message: "Response did not match the expected render-output suggestion contract" };
   }
   return { ok: true, data: parsed.data.suggestion };
+}
+
+/** The template names the project's worker's After Effects last reported (2026-10-21) - null when it never has. */
+export async function fetchRenderTemplates(projectId: string): Promise<ApiResult<RenderTemplatesResponse["templates"]>> {
+  const { status, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/execution-plan/render-templates`);
+  if (status !== 200) {
+    return toErrorResult(status, json);
+  }
+  const parsed = renderTemplatesResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, status, code: null, message: "Response did not match the expected render-templates contract" };
+  }
+  return { ok: true, data: parsed.data.templates };
 }
 
 /** Real, persisted render-result metadata (render-delivery phase section 7/12) - only genuinely completed/validated artifacts, never a placeholder/fake card. */
