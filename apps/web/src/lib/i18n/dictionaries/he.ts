@@ -880,6 +880,12 @@ export const he: Dictionary = {
       squareBuildingTitle: "מכינים את הגרסה הריבועית…",
       squareBuildingDescription: "מחשב העריכה בונה את הקומפוזיציה הריבועית. זה לוקח כדקה; כפתור הרינדור יופיע כאן מעצמו.",
       squareBuildFailedTitle: "לא ניתן היה להכין את הגרסה הריבועית",
+      verticalIntro: "גרסה 1080×1920 לרילס ולסטורי. היא נבנית מסרטון ה-Landscape: כל התמונה מותאמת לרוחב, ומאחוריה אותה תמונה מוגדלת ומטושטשת.",
+      verticalNeedsLandscape: "קודם צרו את סרטון ה-Landscape - הגרסה האנכית נבנית ממנו.",
+      verticalBuildAction: "הכינו את הגרסה האנכית",
+      verticalBuildingTitle: "מכינים את הגרסה האנכית…",
+      verticalBuildingDescription: "מחשב העריכה בונה את הקומפוזיציה האנכית. זה לוקח כדקה; כפתור הרינדור יופיע כאן מעצמו.",
+      verticalBuildFailedTitle: "לא ניתן היה להכין את הגרסה האנכית",
       renderAgainAction: "ליצור שוב",
       notReadyTitle: "עדיין לא מוכן",
       notReadyDescription: "יש לסיים לאשר כל סצנה ואת התצוגה המקדימה הסופית לפני שהייצוא הזה יהיה מוכן."

@@ -185,12 +185,13 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       ...(request.regeneratePreviewOnly === true ? { regeneratePreviewOnly: true as const } : {}),
       ...(request.previewTimestampSeconds !== undefined ? { previewTimestampSeconds: request.previewTimestampSeconds } : {}),
       ...(request.buildHorizontalCompositionOnly === true ? { buildHorizontalCompositionOnly: true as const } : {}),
-      ...(request.buildSquareCompositionOnly === true ? { buildSquareCompositionOnly: true as const } : {})
+      ...(request.buildSquareCompositionOnly === true ? { buildSquareCompositionOnly: true as const } : {}),
+      ...(request.buildVerticalCompositionOnly === true ? { buildVerticalCompositionOnly: true as const } : {})
     });
     if (!resolved.ok) {
       throw new PreconditionNotMetError(resolved.reason);
     }
-    if (request.regeneratePreviewOnly === true || request.buildHorizontalCompositionOnly === true || request.buildSquareCompositionOnly === true) {
+    if (request.regeneratePreviewOnly === true || request.buildHorizontalCompositionOnly === true || request.buildSquareCompositionOnly === true || request.buildVerticalCompositionOnly === true) {
       // Both a previewOnly run and a buildHorizontalCompositionOnly run
       // are a deliberate one-shot, never a multi-operation job with
       // anything to resume - checkpoint resume only ever applies to a

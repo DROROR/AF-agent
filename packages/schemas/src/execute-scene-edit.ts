@@ -32,7 +32,8 @@ export const SCENE_EDIT_OPERATION_TYPES = [
   "SET_COLOR_CONTROL",
   "BUILD_REELS_COMPOSITION",
   "BUILD_HORIZONTAL_COMPOSITION",
-  "BUILD_SQUARE_COMPOSITION"
+  "BUILD_SQUARE_COMPOSITION",
+  "BUILD_VERTICAL_COMPOSITION"
 ] as const;
 export type SceneEditOperationType = (typeof SCENE_EDIT_OPERATION_TYPES)[number];
 
@@ -294,6 +295,25 @@ const buildSquareCompositionOperationSchema = z
   .strict();
 export type BuildSquareCompositionOperation = z.infer<typeof buildSquareCompositionOperationSchema>;
 
+/**
+ * 2026-10-25, the client's "Reels version", measured on his real template:
+ * of the 24 layers in one scene, 17 are parented or keyframed, so the
+ * per-layer static layout (BUILD_REELS_COMPOSITION) proposes nothing. This
+ * builds a 1080x1920 composition that nests the scene's wide composition
+ * WHOLE, twice: behind, scaled to cover the tall frame and blurred (the
+ * template's own picture as the backdrop); in front, scaled to fit the
+ * width and centred - every element, every animation, every text exactly
+ * as the template plays it. Nothing inside the scene is edited. The name
+ * is server-derived (`${scene composition's name} (Vertical)`).
+ */
+const buildVerticalCompositionOperationSchema = z
+  .object({
+    type: z.literal("BUILD_VERTICAL_COMPOSITION"),
+    verticalCompositionName: z.string().min(1)
+  })
+  .strict();
+export type BuildVerticalCompositionOperation = z.infer<typeof buildVerticalCompositionOperationSchema>;
+
 export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setTextOperationSchema,
   mapFootageOperationSchema,
@@ -304,12 +324,13 @@ export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setColorControlOperationSchema,
   buildReelsCompositionOperationSchema,
   buildHorizontalCompositionOperationSchema,
-  buildSquareCompositionOperationSchema
+  buildSquareCompositionOperationSchema,
+  buildVerticalCompositionOperationSchema
 ]);
 export type SceneEditOperation = z.infer<typeof sceneEditOperationSchema>;
 
 /** Every comp-level operation type - never tied to a single manifestPlaceholderId/layerIndex/approved mapping, unlike every other SceneEditOperation. Shared by executeSceneEditRequestSchema's own approvedMappingIds refine below and any future caller that needs the same "is this operation mapping-driven or not" classification. */
-const COMP_LEVEL_OPERATION_TYPES = ["BUILD_REELS_COMPOSITION", "BUILD_HORIZONTAL_COMPOSITION", "BUILD_SQUARE_COMPOSITION"] as const;
+const COMP_LEVEL_OPERATION_TYPES = ["BUILD_REELS_COMPOSITION", "BUILD_HORIZONTAL_COMPOSITION", "BUILD_SQUARE_COMPOSITION", "BUILD_VERTICAL_COMPOSITION"] as const;
 
 /**
  * MAP_FOOTAGE's DISPATCH-FACING intent - identifies the project asset to
@@ -378,7 +399,8 @@ export const sceneEditOperationIntentSchema = z.discriminatedUnion("type", [
   setColorControlOperationSchema,
   buildReelsCompositionOperationSchema,
   buildHorizontalCompositionOperationSchema,
-  buildSquareCompositionOperationSchema
+  buildSquareCompositionOperationSchema,
+  buildVerticalCompositionOperationSchema
 ]);
 export type SceneEditOperationIntent = z.infer<typeof sceneEditOperationIntentSchema>;
 
@@ -682,6 +704,18 @@ export const sceneEditResultSchema = z.object({
    * canonical manifest identity.
    */
   horizontalCompositionBuilt: z
+    .object({
+      aeProjectItemIndex: z.number().int().positive(),
+      compositionName: z.string().min(1),
+      widthPx: z.number().int().positive(),
+      heightPx: z.number().int().positive(),
+      durationSeconds: z.number().nonnegative(),
+      frameRate: z.number().positive()
+    })
+    .nullable()
+    .default(null),
+  /** The new Vertical (1080x1920) composition's real, worker-verified identity (BUILD_VERTICAL_COMPOSITION, 2026-10-25) - registered by register-vertical-composition.ts, which configures the REELS output from it. */
+  verticalCompositionBuilt: z
     .object({
       aeProjectItemIndex: z.number().int().positive(),
       compositionName: z.string().min(1),

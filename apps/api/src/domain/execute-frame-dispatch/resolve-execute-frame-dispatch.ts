@@ -124,6 +124,8 @@ export interface ResolveExecuteFrameDispatchInput {
   buildHorizontalCompositionOnly?: boolean;
   /** 2026-10-25: the Square composition, same contract as buildHorizontalCompositionOnly. */
   buildSquareCompositionOnly?: boolean;
+  /** 2026-10-25: the Vertical (1080x1920) composition, same contract. */
+  buildVerticalCompositionOnly?: boolean;
 }
 
 export type ResolveExecuteFrameDispatchResult =
@@ -235,6 +237,9 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   }
   if (input.buildSquareCompositionOnly === true) {
     return resolveBuildSquareCompositionOnly(input, session);
+  }
+  if (input.buildVerticalCompositionOnly === true) {
+    return resolveBuildVerticalCompositionOnly(input, session);
   }
 
   if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
@@ -1066,10 +1071,18 @@ function resolveBuildSquareCompositionOnly(
   return resolveDerivedCompositionBuildOnly(input, session, "Square", (name) => ({ type: "BUILD_SQUARE_COMPOSITION", squareCompositionName: `${name} (Square)` }));
 }
 
+/** 2026-10-25: the Vertical (1080x1920) composition (BUILD_VERTICAL_COMPOSITION), named `${scene composition's name} (Vertical)`. */
+function resolveBuildVerticalCompositionOnly(
+  input: ResolveExecuteFrameDispatchInput,
+  session: ExecuteFrameDispatchSessionSnapshot
+): ResolveExecuteFrameDispatchResult {
+  return resolveDerivedCompositionBuildOnly(input, session, "Vertical", (name) => ({ type: "BUILD_VERTICAL_COMPOSITION", verticalCompositionName: `${name} (Vertical)` }));
+}
+
 function resolveDerivedCompositionBuildOnly(
   input: ResolveExecuteFrameDispatchInput,
   session: ExecuteFrameDispatchSessionSnapshot,
-  masterLabel: "Landscape" | "Square",
+  masterLabel: "Landscape" | "Square" | "Vertical",
   buildOperation: (sceneCompositionName: string) => ExecuteSceneEditRequest["operations"][number]
 ): ResolveExecuteFrameDispatchResult {
   const { projectId, scenePlanId, currentPlan, currentProjectManifest, worker, now, staleAfterMs } = input;

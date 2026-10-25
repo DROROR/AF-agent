@@ -107,6 +107,9 @@ export function validateSceneEditPreconditions(input: ValidateSceneEditPrecondit
       }
       continue;
     }
+    if (operation.type === "BUILD_VERTICAL_COMPOSITION") {
+      continue;
+    }
     if (operation.type === "BUILD_SQUARE_COMPOSITION") {
       // Comp-level like BUILD_HORIZONTAL_COMPOSITION below: its name is
       // server-derived from the scene's composition name (2026-10-25).

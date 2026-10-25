@@ -30,6 +30,16 @@ const horizontalCompositionBuiltResultSchema = z.object({
   horizontalFrameRate: z.number().positive()
 });
 
+/** What jsx-templates.ts's BUILD_VERTICAL_COMPOSITION script's own resultingValue contains (2026-10-25). */
+const verticalCompositionBuiltResultSchema = z.object({
+  verticalAeProjectItemIndex: z.number().int().positive(),
+  verticalCompositionName: z.string().min(1),
+  verticalWidthPx: z.number().int().positive(),
+  verticalHeightPx: z.number().int().positive(),
+  verticalDurationSeconds: z.number().nonnegative(),
+  verticalFrameRate: z.number().positive()
+});
+
 /** What jsx-templates.ts's BUILD_SQUARE_COMPOSITION script's own resultingValue contains (2026-10-25) - parsed defensively, never trusted blindly. */
 const squareCompositionBuiltResultSchema = z.object({
   squareAeProjectItemIndex: z.number().int().positive(),
@@ -155,6 +165,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   let horizontalCompositionBuilt: SceneEditResult["horizontalCompositionBuilt"] = null;
   /** Same again for BUILD_SQUARE_COMPOSITION (2026-10-25). */
   let squareCompositionBuilt: SceneEditResult["squareCompositionBuilt"] = null;
+  let verticalCompositionBuilt: SceneEditResult["verticalCompositionBuilt"] = null;
   // One entry per SET_TEXT operation actually applied in this run, in
   // operation order - reported whether the job as a whole succeeds or fails
   // later, so an operator can always see what direction handling really
@@ -194,6 +205,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       reelsCompositionBuilt,
       horizontalCompositionBuilt,
       squareCompositionBuilt,
+      verticalCompositionBuilt,
       textDirectionEvidence,
       failureReason: checkpoint.failureReason,
       startedAt,
@@ -496,6 +508,20 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
           heightPx: parsedResultingValue.data.reelsHeightPx,
           durationSeconds: parsedResultingValue.data.reelsDurationSeconds,
           frameRate: parsedResultingValue.data.reelsFrameRate
+        };
+      }
+    }
+
+    if (operation.type === "BUILD_VERTICAL_COMPOSITION") {
+      const parsedResultingValue = verticalCompositionBuiltResultSchema.safeParse(outcome.resultingValue);
+      if (parsedResultingValue.success) {
+        verticalCompositionBuilt = {
+          aeProjectItemIndex: parsedResultingValue.data.verticalAeProjectItemIndex,
+          compositionName: parsedResultingValue.data.verticalCompositionName,
+          widthPx: parsedResultingValue.data.verticalWidthPx,
+          heightPx: parsedResultingValue.data.verticalHeightPx,
+          durationSeconds: parsedResultingValue.data.verticalDurationSeconds,
+          frameRate: parsedResultingValue.data.verticalFrameRate
         };
       }
     }

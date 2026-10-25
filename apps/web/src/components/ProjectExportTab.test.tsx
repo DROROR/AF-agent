@@ -569,41 +569,33 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
     expect(screen.queryByRole("button", { name: "Prepare the square version" })).toBeNull();
   });
 
-  // 2026-10-21: choosing templates never made a tall video; the Reels card
-  // is out of the Simple view until the Reels layout step is ready.
-  it("Simple view shows no Reels card at all, set up or not - only the Landscape and the finished videos", async () => {
-    stubExport(landscapeConfig({ manifestCompositionId: "comp-tall", compositionName: "Tall Master" }));
+  // 2026-10-25: the vertical is built by the system from the Landscape -
+  // the Simple view offers one press for it, exactly like the square.
+  it("Simple view offers 'Prepare the vertical version' for an unconfigured Reels output, and dispatches the vertical build", async () => {
+    const worker = workerWithCapabilities(["EXECUTE_FRAME", "RENDER"]);
+    const calls: import("../test-utils/execution-plan-fixtures").RecordedFetchCall[] = [];
+    stubFetchByUrl(
+      {
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
+        [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] } },
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+        [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } },
+        "/api/jobs": { status: 201, body: { jobId: "77777777-7777-7777-7777-777777777777", workerId: worker.workerId, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() } }
+      },
+      calls
+    );
     renderTab();
 
-    const landscape = await screen.findByRole("button", { name: "Render Landscape" });
-    const outputs = document.querySelector(".final-outputs-card") as HTMLElement;
-    expect(landscape.compareDocumentPosition(outputs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const prepare = await screen.findByRole("button", { name: "Prepare the vertical version" });
+    await waitFor(() => expect((prepare as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByRole("button", { name: "Render Reels" })).toBeNull();
     expect(screen.queryByText("Also make a tall version for phones")).toBeNull();
-  });
+    fireEvent.click(prepare);
 
-  // REAL 2026-10-20 DEFECT (the client's first finished video): with the
-  // Landscape made and the session COMPLETED, the Reels card also said "Your
-  // video is ready" and offered "Make it again" for a tall video that had
-  // never been made. Each output reads its own finished video.
-  it("after the Landscape is made, only the Landscape card says it is ready - the Simple view never draws a Reels card (2026-10-20/21)", async () => {
-    const worker = workerWithCapabilities(["RENDER"]);
-    stubFetchByUrl({
-      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
-      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
-        status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: landscapeConfig({ manifestCompositionId: "comp-tall", compositionName: "Tall Master" }) } }), sceneTable: [] }
-      },
-      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
-      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } }
-    });
-    renderTab();
-
-    await screen.findByRole("button", { name: "Make it again" });
-    expect(screen.getAllByText("Your video is ready - it is under Final Outputs below.")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Render Landscape" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Render Reels" })).toBeNull();
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith("/api/jobs") && call.method === "POST")).toBe(true));
+    const dispatch = calls.find((call) => call.url.endsWith("/api/jobs") && call.method === "POST")!;
+    expect(dispatch.body).toMatchObject({ operation: "EXECUTE_FRAME", scenePlanId: "s1", buildVerticalCompositionOnly: true });
   });
 
   it("Advanced view is unchanged: both outputs in the open, finished videos at the foot", async () => {

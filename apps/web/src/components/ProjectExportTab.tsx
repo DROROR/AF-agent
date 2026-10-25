@@ -167,32 +167,36 @@ export function ProjectExportTab(): ReactElement | null {
     );
   };
   const variantSections: Record<RenderOutputVariant, ReactElement> = { LANDSCAPE: sectionFor("LANDSCAPE"), REELS: sectionFor("REELS"), SQUARE: sectionFor("SQUARE") };
-  // 2026-10-25, the client's "square version": the Square output is set up
-  // by the system itself (register-square-composition.ts) once the square
-  // composition is built from the Landscape, so in the Simple view its card
-  // offers that one press instead of the template form.
-  const squareConfig = plan.plan.renderOutputs.SQUARE ?? null;
-  const squareReady = squareConfig !== null && squareConfig.sourceProjectSha256 === sourceSha;
+  // 2026-10-25, the client's "square version" and "Reels version": each is
+  // set up by the system itself (register-square/vertical-composition.ts)
+  // once its composition is built from the Landscape, so in the Simple view
+  // the card offers that one press instead of the template form.
   const landscapeMade = (finishedVideos ?? []).some((artifact) => artifact.variant === "LANDSCAPE");
-  const squareSection = squareReady ? (
-    <SimpleExportVariantCard
-      key="SQUARE"
-      projectId={projectId}
-      variant="SQUARE"
-      currentConfig={squareConfig}
-      currentSourceSha={sourceSha}
-      session={session}
-      renderReady={renderReady}
-      alreadyMade={(finishedVideos ?? []).some((artifact) => artifact.variant === "SQUARE")}
-      onRendered={() => {
-        setOutputsVersion((version) => version + 1);
-        void reloadFinishedVideos();
-        refreshGuidance();
-      }}
-    />
-  ) : (
-    <SquarePrepareCard key="SQUARE" projectId={projectId} session={session} landscapeMade={landscapeMade} onPrepared={() => void refetch()} />
-  );
+  const derivedSection = (variant: "SQUARE" | "REELS"): ReactElement => {
+    const config = plan.plan.renderOutputs[variant] ?? null;
+    const ready = config !== null && config.sourceProjectSha256 === sourceSha;
+    return ready ? (
+      <SimpleExportVariantCard
+        key={variant}
+        projectId={projectId}
+        variant={variant}
+        currentConfig={config}
+        currentSourceSha={sourceSha}
+        session={session}
+        renderReady={renderReady}
+        alreadyMade={(finishedVideos ?? []).some((artifact) => artifact.variant === variant)}
+        onRendered={() => {
+          setOutputsVersion((version) => version + 1);
+          void reloadFinishedVideos();
+          refreshGuidance();
+        }}
+      />
+    ) : (
+      <PrepareDerivedOutputCard key={variant} variant={variant} projectId={projectId} session={session} landscapeMade={landscapeMade} onPrepared={() => void refetch()} />
+    );
+  };
+  const squareSection = derivedSection("SQUARE");
+  const verticalSection = derivedSection("REELS");
 
   // 2026-10-07: the tab carried a lock in the nav, yet opened onto "Landscape
   // master", "Render Settings template name" - a setup form for a step the
@@ -230,15 +234,9 @@ export function ProjectExportTab(): ReactElement | null {
             download without a reload.
           */}
           {squareSection}
+          {/* 2026-10-25: the vertical is built by the system (BUILD_VERTICAL_COMPOSITION); the per-layer Reels layout stays in the Advanced view. */}
+          {verticalSection}
           <FinalOutputsCard key={outputsVersion} projectId={projectId} />
-          {/*
-            2026-10-21: the Reels card is not shown in the Simple view at
-            all. Choosing a composition and two templates does not make a
-            tall video (the client's "Reels" came out 1920x1080, then an
-            800x800 piece of the template); the real vertical is the Reels
-            layout step, which is not ready for clients yet. The card stays
-            in the Advanced view for that work.
-          */}
         </>
       ) : (
         <>
@@ -476,18 +474,40 @@ function SimpleExportVariantCard({
  * finished working copy, and the Landscape's templates are what it renders
  * with.
  */
-function SquarePrepareCard({
+function PrepareDerivedOutputCard({
+  variant,
   projectId,
   session,
   landscapeMade,
   onPrepared
 }: {
+  variant: "SQUARE" | "REELS";
   projectId: string;
   session: ExecutionSessionDto | null;
   landscapeMade: boolean;
   onPrepared: () => void;
 }): ReactElement {
   const { t } = useLocale();
+  const copy =
+    variant === "SQUARE"
+      ? {
+          intro: t.projectWorkspace.export.squareIntro,
+          needsLandscapeTitle: t.projectWorkspace.export.squareNeedsLandscapeTitle,
+          needsLandscape: t.projectWorkspace.export.squareNeedsLandscape,
+          action: t.projectWorkspace.export.squareBuildAction,
+          buildingTitle: t.projectWorkspace.export.squareBuildingTitle,
+          buildingDescription: t.projectWorkspace.export.squareBuildingDescription,
+          failedTitle: t.projectWorkspace.export.squareBuildFailedTitle
+        }
+      : {
+          intro: t.projectWorkspace.export.verticalIntro,
+          needsLandscapeTitle: t.projectWorkspace.export.squareNeedsLandscapeTitle,
+          needsLandscape: t.projectWorkspace.export.verticalNeedsLandscape,
+          action: t.projectWorkspace.export.verticalBuildAction,
+          buildingTitle: t.projectWorkspace.export.verticalBuildingTitle,
+          buildingDescription: t.projectWorkspace.export.verticalBuildingDescription,
+          failedTitle: t.projectWorkspace.export.verticalBuildFailedTitle
+        };
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [building, setBuilding] = useState<{ jobId: string; startedAt: string } | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
@@ -544,7 +564,7 @@ function SquarePrepareCard({
       projectId,
       executionSessionId: session.id,
       scenePlanId,
-      buildSquareCompositionOnly: true
+      ...(variant === "SQUARE" ? { buildSquareCompositionOnly: true as const } : { buildVerticalCompositionOnly: true as const })
     });
     setIsDispatching(false);
     if (!result.ok) {
@@ -556,12 +576,12 @@ function SquarePrepareCard({
 
   return (
     <Card className="overview-section">
-      <CardHeader title={t.renders.variantLabel.SQUARE} />
-      <p>{t.projectWorkspace.export.squareIntro}</p>
-      {!landscapeMade ? <EmptyState title={t.projectWorkspace.export.squareNeedsLandscapeTitle} description={t.projectWorkspace.export.squareNeedsLandscape} /> : null}
-      {error ? <ProblemNotice title={t.projectWorkspace.export.squareBuildFailedTitle} description={t.projectWorkspace.export.renderFailedDescription} technicalDetails={error} /> : null}
+      <CardHeader title={t.renders.variantLabel[variant]} />
+      <p>{copy.intro}</p>
+      {!landscapeMade ? <EmptyState title={copy.needsLandscapeTitle} description={copy.needsLandscape} /> : null}
+      {error ? <ProblemNotice title={copy.failedTitle} description={t.projectWorkspace.export.renderFailedDescription} technicalDetails={error} /> : null}
       {building ? (
-        <BusyNotice title={t.projectWorkspace.export.squareBuildingTitle} description={t.projectWorkspace.export.squareBuildingDescription} startedAt={building.startedAt} />
+        <BusyNotice title={copy.buildingTitle} description={copy.buildingDescription} startedAt={building.startedAt} />
       ) : (
         <div className="overview-actions">
           <Button
@@ -570,14 +590,14 @@ function SquarePrepareCard({
               isDispatching
                 ? t.projectWorkspace.disabledReason.working
                 : !landscapeMade
-                  ? t.projectWorkspace.export.squareNeedsLandscape
+                  ? copy.needsLandscape
                   : !workerOnline
                     ? t.projectWorkspace.disabledReason.workerOffline
                     : undefined
             }
             onClick={() => void handlePrepare()}
           >
-            {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.export.squareBuildAction}
+            {isDispatching ? t.jobDispatch.dispatching : copy.action}
           </Button>
         </div>
       )}

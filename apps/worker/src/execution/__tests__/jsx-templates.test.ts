@@ -4225,3 +4225,28 @@ describe("BUILD_SQUARE_COMPOSITION (the client's square version, 2026-10-25)", (
     expect(script).toContain("app.endUndoGroup()");
   });
 });
+
+describe("BUILD_VERTICAL_COMPOSITION (the client's Reels version, 2026-10-25)", () => {
+  const op = (): SceneEditOperation => ({ type: "BUILD_VERTICAL_COMPOSITION", verticalCompositionName: "!MAIN (Vertical)" });
+
+  it("builds a 1080x1920 composition holding the source WHOLE twice: a blurred cover backdrop behind and a width-fitted picture in front - no layer inside is touched", () => {
+    const script = buildOperationScript(1, "!MAIN", op());
+    expect(script).toContain("app.project.items.addComp(" + JSON.stringify("!MAIN (Vertical)") + ", 1080, 1920");
+    expect(script.split("__newComp.layers.add(__comp)").length - 1).toBe(2);
+    expect(script).toContain("Math.max(1080 / __comp.width, 1920 / __comp.height) * 100");
+    expect(script).toContain("Math.min(1080 / __comp.width, 1920 / __comp.height) * 100");
+    expect(script).toContain('addProperty("ADBE Gaussian Blur 2")');
+    expect(script).toContain("__front.moveToBeginning()");
+    expect(script).not.toContain("sourceRectAtTime");
+    expect(script).not.toContain("layerTransforms");
+  });
+
+  it("verifies the source by index and name, replaces an earlier composition of the same name, and reports the real identity", () => {
+    const script = buildOperationScript(1, "!MAIN", op());
+    expect(script).toContain("__comp.name !== " + JSON.stringify("!MAIN"));
+    expect(script).toContain("app.project.item(__existingIndex).remove()");
+    for (const key of ["verticalAeProjectItemIndex", "verticalCompositionName", "verticalWidthPx", "verticalHeightPx"]) {
+      expect(script).toContain(key);
+    }
+  });
+});

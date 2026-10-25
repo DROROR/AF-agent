@@ -2058,6 +2058,120 @@ function buildBuildSquareCompositionScript(
   return script as FixedJsxScript;
 }
 
+/**
+ * BUILD_VERTICAL_COMPOSITION (2026-10-25, the client's "Reels version"):
+ * a NEW 1080x1920 composition holding the scene's composition WHOLE, twice.
+ * Layer 2 (behind): scaled uniformly to COVER the tall frame, centred, with
+ * a Gaussian blur - the template's own picture as the backdrop, so there
+ * are never empty black bands. Layer 1 (in front): scaled uniformly to FIT
+ * the width, centred vertically - every element, animation and text as the
+ * template plays it. Nothing inside the scene is edited, so parented and
+ * keyframed layers (17 of 24 in the client's real scene) need no rule.
+ * Same contract as the other build scripts: resolve by index AND name,
+ * replace an earlier composition of the same name, report the real
+ * identity read back from AE.
+ */
+function buildBuildVerticalCompositionScript(
+  aeProjectItemIndex: number,
+  compositionName: string,
+  op: Extract<SceneEditOperation, { type: "BUILD_VERTICAL_COMPOSITION" }>
+): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const verticalNameLiteral = JSON.stringify(op.verticalCompositionName);
+  const WIDTH = 1080;
+  const HEIGHT = 1920;
+  const BACKDROP_BLUR = 80;
+
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: BUILD_VERTICAL_COMPOSITION")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \"" + __comp.name + "\", expected \"" + ${compNameLiteral} + "\" - refusing to use the wrong composition"
+      });
+    } else {
+      var __existingIndex = null;
+      for (var __i = 1; __i <= app.project.numItems; __i++) {
+        var __candidate = app.project.item(__i);
+        if (__candidate instanceof CompItem && __candidate.name === ${verticalNameLiteral}) {
+          __existingIndex = __i;
+          break;
+        }
+      }
+      if (__existingIndex !== null) {
+        app.project.item(__existingIndex).remove();
+      }
+
+      var __newComp = app.project.items.addComp(${verticalNameLiteral}, ${WIDTH}, ${HEIGHT}, __comp.pixelAspect, __comp.duration, __comp.frameRate);
+      var __centerX = __comp.width / 2;
+      var __centerY = __comp.height / 2;
+
+      var __backdrop = __newComp.layers.add(__comp);
+      __backdrop.name = "DYO backdrop";
+      var __cover = Math.max(${WIDTH} / __comp.width, ${HEIGHT} / __comp.height) * 100;
+      __backdrop.transform.anchorPoint.setValue([__centerX, __centerY]);
+      __backdrop.transform.position.setValue([${WIDTH} / 2, ${HEIGHT} / 2]);
+      __backdrop.transform.scale.setValue([__cover, __cover]);
+      try {
+        var __blur = __backdrop.property("ADBE Effect Parade").addProperty("ADBE Gaussian Blur 2");
+        __blur.property("ADBE Gaussian Blur 2-0001").setValue(${BACKDROP_BLUR});
+        try { __blur.property("ADBE Gaussian Blur 2-0003").setValue(true); } catch (__edgeError) {}
+      } catch (__blurError) {
+        // A backdrop without blur is still a backdrop - never a failure.
+      }
+
+      var __front = __newComp.layers.add(__comp);
+      __front.name = "DYO picture";
+      var __fit = Math.min(${WIDTH} / __comp.width, ${HEIGHT} / __comp.height) * 100;
+      __front.transform.anchorPoint.setValue([__centerX, __centerY]);
+      __front.transform.position.setValue([${WIDTH} / 2, ${HEIGHT} / 2]);
+      __front.transform.scale.setValue([__fit, __fit]);
+      __front.moveToBeginning();
+
+      var __newIndex = null;
+      for (var __j = 1; __j <= app.project.numItems; __j++) {
+        if (app.project.item(__j) === __newComp) {
+          __newIndex = __j;
+          break;
+        }
+      }
+      __result = JSON.stringify({
+        ok: true,
+        resultingValue: {
+          verticalAeProjectItemIndex: __newIndex,
+          verticalCompositionName: __newComp.name,
+          verticalWidthPx: __newComp.width,
+          verticalHeightPx: __newComp.height,
+          verticalDurationSeconds: __newComp.duration,
+          verticalFrameRate: __newComp.frameRate
+        }
+      });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
 /** #RRGGBB (already validated by setBrandColorOperationSchema's regex) -> [r,g,b] in AE's native 0..1 float range. */
 function hexToUnitRgb(colorHex: string): [number, number, number] {
   const r = parseInt(colorHex.slice(1, 3), 16) / 255;
@@ -3644,6 +3758,8 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildBuildHorizontalCompositionScript(aeProjectItemIndex, compositionName, operation);
     case "BUILD_SQUARE_COMPOSITION":
       return buildBuildSquareCompositionScript(aeProjectItemIndex, compositionName, operation);
+    case "BUILD_VERTICAL_COMPOSITION":
+      return buildBuildVerticalCompositionScript(aeProjectItemIndex, compositionName, operation);
     default: {
       const exhaustive: never = operation;
       throw new Error(`Unhandled scene edit operation type: ${JSON.stringify(exhaustive)}`);

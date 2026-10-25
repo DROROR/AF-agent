@@ -1040,6 +1040,12 @@ export const en = {
       squareBuildingTitle: "Preparing the square version…",
       squareBuildingDescription: "The editing computer is building the square composition. This takes about a minute; the Render button appears here by itself.",
       squareBuildFailedTitle: "The square version could not be prepared",
+      verticalIntro: "A 1080×1920 version for Reels and Stories. It is made from the Landscape video: the whole picture fitted to the width, with the same picture enlarged and blurred behind it.",
+      verticalNeedsLandscape: "Make the Landscape video first - the vertical version is built from it.",
+      verticalBuildAction: "Prepare the vertical version",
+      verticalBuildingTitle: "Preparing the vertical version…",
+      verticalBuildingDescription: "The editing computer is building the vertical composition. This takes about a minute; the Render button appears here by itself.",
+      verticalBuildFailedTitle: "The vertical version could not be prepared",
       renderAgainAction: "Make it again",
       notReadyTitle: "Not ready yet",
       notReadyDescription: "Finish approving every scene and the Final Preview before this export is ready."

@@ -19,6 +19,7 @@ function result(overrides: Partial<SceneEditResult> = {}): SceneEditResult {
     reelsCompositionBuilt: null,
     horizontalCompositionBuilt: null,
     squareCompositionBuilt: null,
+    verticalCompositionBuilt: null,
     failureReason: null,
     startedAt: "2026-08-26T00:00:00.000Z",
     completedAt: "2026-08-26T00:00:01.000Z",

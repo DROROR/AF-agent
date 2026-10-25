@@ -317,7 +317,9 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        */
       buildHorizontalCompositionOnly: z.boolean().optional(),
       /** 2026-10-25: same shape as buildHorizontalCompositionOnly, for the Square composition - see resolveExecuteFrameDispatch's buildSquareCompositionOnly branch. */
-      buildSquareCompositionOnly: z.boolean().optional()
+      buildSquareCompositionOnly: z.boolean().optional(),
+      /** 2026-10-25: the Vertical (1080x1920) composition - see resolveExecuteFrameDispatch's buildVerticalCompositionOnly branch. */
+      buildVerticalCompositionOnly: z.boolean().optional()
     })
     .strict(),
   z

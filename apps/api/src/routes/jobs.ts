@@ -30,6 +30,7 @@ import { recordRegeneratePreviewResultIfApplicable } from "../application/job/re
 import { registerReelsCompositionIfApplicable } from "../application/job/register-reels-composition.js";
 import { registerHorizontalCompositionIfApplicable } from "../application/job/register-horizontal-composition.js";
 import { registerSquareCompositionIfApplicable } from "../application/job/register-square-composition.js";
+import { registerVerticalCompositionIfApplicable } from "../application/job/register-vertical-composition.js";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
 
@@ -287,6 +288,15 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     );
     // 2026-10-25: the Square composition, same contract - see register-square-composition.ts.
     await registerSquareCompositionIfApplicable(
+      {
+        executionSessionRepository: deps.executionSessionRepository,
+        executionPlanRepository: deps.executionPlanRepository,
+        projectRepository: deps.projectRepository,
+        now
+      },
+      dto
+    );
+    await registerVerticalCompositionIfApplicable(
       {
         executionSessionRepository: deps.executionSessionRepository,
         executionPlanRepository: deps.executionPlanRepository,

@@ -2195,3 +2195,12 @@ describe("resolveExecuteFrameDispatch - buildSquareCompositionOnly (the client's
     expect(result.reason).toContain("a Square master can only be built");
   });
 });
+
+describe("resolveExecuteFrameDispatch - buildVerticalCompositionOnly (the client's Reels version, 2026-10-25)", () => {
+  it("produces a single BUILD_VERTICAL_COMPOSITION operation named from the scene's own composition", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ status: "READY_TO_RENDER", completedScenePlanIds: ["scene-1"], latestWorkingProjectSha256: "d".repeat(64) }), buildVerticalCompositionOnly: true }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "BUILD_VERTICAL_COMPOSITION", verticalCompositionName: "Scene 01 (Vertical)" }]);
+  });
+});
