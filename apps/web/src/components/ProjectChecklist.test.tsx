@@ -127,7 +127,7 @@ function executedProjectStubs(overrides: { renderOutputs?: Record<string, unknow
     [`/api/projects/${PROJECT_ID}/execution-plan`]: {
       status: 200,
       body: {
-        plan: planFixture({ status: "APPROVED", renderOutputs: overrides.renderOutputs ?? { LANDSCAPE: null, REELS: null } }, [scene]),
+        plan: planFixture({ status: "APPROVED", renderOutputs: overrides.renderOutputs ?? { LANDSCAPE: null, REELS: null, SQUARE: null } }, [scene]),
         sceneTable: []
       }
     },
@@ -177,7 +177,7 @@ describe("ProjectChecklist - one list, one live row", () => {
   });
 
   it("counts only genuinely finished steps - progress is read from persisted facts, never from pages visited", async () => {
-    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
+    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }));
     renderChecklist();
     // 2026-10-04: with nothing made yet the step is "make it" - "review" is
     // only said once there is a video to review.
@@ -202,7 +202,7 @@ describe("ProjectChecklist - one list, one live row", () => {
 
   it("reports the finished job as finished, and points at the one thing left: the download on Export", async () => {
     stubAll({
-      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null }, sessionOverrides: { fullPreviewApproved: true } }),
+      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null }, sessionOverrides: { fullPreviewApproved: true } }),
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture()] } }
     });
     renderChecklist();

@@ -29,7 +29,7 @@ function makeFakeProvider(): RenderProvider {
 
 describe("RenderProvider contract", () => {
   it("defines exactly the output kinds and statuses the rest of the system relies on", () => {
-    expect(RENDER_OUTPUT_KINDS).toEqual(["LANDSCAPE", "REELS"]);
+    expect(RENDER_OUTPUT_KINDS).toEqual(["LANDSCAPE", "REELS", "SQUARE"]);
     expect(RENDER_STATUSES).toEqual(["QUEUED", "PROCESSING", "DONE", "FAILED"]);
   });
 

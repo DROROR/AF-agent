@@ -616,7 +616,7 @@ export const sceneEvidence = pgTable(
 export type SceneEvidenceRow = typeof sceneEvidence.$inferSelect;
 export type NewSceneEvidenceRow = typeof sceneEvidence.$inferInsert;
 
-export const DB_RENDER_OUTPUT_VARIANTS = ["LANDSCAPE", "REELS"] as const;
+export const DB_RENDER_OUTPUT_VARIANTS = ["LANDSCAPE", "REELS", "SQUARE"] as const;
 export const DB_RENDER_ARTIFACT_VALIDATION_STATUSES = ["VALID", "INVALID"] as const;
 
 /**

@@ -30,6 +30,16 @@ const horizontalCompositionBuiltResultSchema = z.object({
   horizontalFrameRate: z.number().positive()
 });
 
+/** What jsx-templates.ts's BUILD_SQUARE_COMPOSITION script's own resultingValue contains (2026-10-25) - parsed defensively, never trusted blindly. */
+const squareCompositionBuiltResultSchema = z.object({
+  squareAeProjectItemIndex: z.number().int().positive(),
+  squareCompositionName: z.string().min(1),
+  squareWidthPx: z.number().int().positive(),
+  squareHeightPx: z.number().int().positive(),
+  squareDurationSeconds: z.number().nonnegative(),
+  squareFrameRate: z.number().positive()
+});
+
 /**
  * What jsx-templates.ts's SET_TEXT script reports BESIDE its resultingValue
  * (2026-09-18 bidirectional-text stage): the direction/composer/verification
@@ -143,6 +153,8 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
   // Same as reelsCompositionBuilt above, for a successfully completed
   // BUILD_HORIZONTAL_COMPOSITION operation (live QA, 2026-09-10).
   let horizontalCompositionBuilt: SceneEditResult["horizontalCompositionBuilt"] = null;
+  /** Same again for BUILD_SQUARE_COMPOSITION (2026-10-25). */
+  let squareCompositionBuilt: SceneEditResult["squareCompositionBuilt"] = null;
   // One entry per SET_TEXT operation actually applied in this run, in
   // operation order - reported whether the job as a whole succeeds or fails
   // later, so an operator can always see what direction handling really
@@ -181,6 +193,7 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
       previewTimestampSeconds: params.previewTimestampSeconds,
       reelsCompositionBuilt,
       horizontalCompositionBuilt,
+      squareCompositionBuilt,
       textDirectionEvidence,
       failureReason: checkpoint.failureReason,
       startedAt,
@@ -483,6 +496,20 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
           heightPx: parsedResultingValue.data.reelsHeightPx,
           durationSeconds: parsedResultingValue.data.reelsDurationSeconds,
           frameRate: parsedResultingValue.data.reelsFrameRate
+        };
+      }
+    }
+
+    if (operation.type === "BUILD_SQUARE_COMPOSITION") {
+      const parsedResultingValue = squareCompositionBuiltResultSchema.safeParse(outcome.resultingValue);
+      if (parsedResultingValue.success) {
+        squareCompositionBuilt = {
+          aeProjectItemIndex: parsedResultingValue.data.squareAeProjectItemIndex,
+          compositionName: parsedResultingValue.data.squareCompositionName,
+          widthPx: parsedResultingValue.data.squareWidthPx,
+          heightPx: parsedResultingValue.data.squareHeightPx,
+          durationSeconds: parsedResultingValue.data.squareDurationSeconds,
+          frameRate: parsedResultingValue.data.squareFrameRate
         };
       }
     }

@@ -315,7 +315,9 @@ export const dispatchJobRequestSchema = z.discriminatedUnion("operation", [
        * passthrough from the browser, and never a caller-supplied
        * composition name/geometry of any kind.
        */
-      buildHorizontalCompositionOnly: z.boolean().optional()
+      buildHorizontalCompositionOnly: z.boolean().optional(),
+      /** 2026-10-25: same shape as buildHorizontalCompositionOnly, for the Square composition - see resolveExecuteFrameDispatch's buildSquareCompositionOnly branch. */
+      buildSquareCompositionOnly: z.boolean().optional()
     })
     .strict(),
   z

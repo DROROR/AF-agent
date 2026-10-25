@@ -9,7 +9,8 @@ import { sceneEditCheckpointSchema, type SceneEditCheckpoint } from "./execute-s
  * from editing operations"). Strict output variants only - never an
  * arbitrary renderer command (section 2 of the render-engine phase).
  */
-export const RENDER_OUTPUT_VARIANTS = ["LANDSCAPE", "REELS"] as const;
+/** 2026-10-25: SQUARE (1080x1080) added at the client's request - a square composition the worker builds from the wide master (BUILD_SQUARE_COMPOSITION). */
+export const RENDER_OUTPUT_VARIANTS = ["LANDSCAPE", "REELS", "SQUARE"] as const;
 export type RenderOutputVariant = (typeof RENDER_OUTPUT_VARIANTS)[number];
 export const renderOutputVariantSchema = z.enum(RENDER_OUTPUT_VARIANTS);
 

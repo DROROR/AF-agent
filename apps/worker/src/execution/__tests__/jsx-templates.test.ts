@@ -4194,3 +4194,34 @@ describe("SET_TEXT - the font-name normaliser the script carries strips whitespa
     expect(script).not.toContain('.replace(/[s_]/g, "")');
   });
 });
+
+describe("BUILD_SQUARE_COMPOSITION (the client's square version, 2026-10-25)", () => {
+  const op = (): SceneEditOperation => ({ type: "BUILD_SQUARE_COMPOSITION", squareCompositionName: "!MAIN (Square)" });
+
+  it("resolves and name-verifies the source composition, replaces an earlier composition of the same name, and nests the source WHOLE - no layer inside is touched", () => {
+    const script = buildOperationScript(1, "!MAIN", op());
+    expect(script).toContain("app.project.item(1)");
+    expect(script).toContain("__comp.name !== " + JSON.stringify("!MAIN"));
+    expect(script).toContain("app.project.item(__existingIndex).remove()");
+    expect(script).toContain("app.project.items.addComp(" + JSON.stringify("!MAIN (Square)") + ", __side, __side");
+    expect(script).toContain("__newComp.layers.add(__comp)");
+    expect(script).not.toContain("__comp.duplicate()");
+    expect(script).not.toContain("sourceRectAtTime");
+  });
+
+  it("makes the square from the shorter side and scales the nested source to COVER it, centred", () => {
+    const script = buildOperationScript(1, "!MAIN", op());
+    expect(script).toContain("Math.min(__comp.width, __comp.height)");
+    expect(script).toContain("Math.max(__side / __comp.width, __side / __comp.height) * 100");
+    expect(script).toContain("position.setValue([__side / 2, __side / 2])");
+  });
+
+  it("reports the new composition's real identity read back from After Effects", () => {
+    const script = buildOperationScript(1, "!MAIN", op());
+    for (const key of ["squareAeProjectItemIndex", "squareCompositionName", "squareWidthPx", "squareHeightPx", "squareDurationSeconds", "squareFrameRate"]) {
+      expect(script).toContain(key);
+    }
+    expect(script).toContain("app.beginUndoGroup(");
+    expect(script).toContain("app.endUndoGroup()");
+  });
+});

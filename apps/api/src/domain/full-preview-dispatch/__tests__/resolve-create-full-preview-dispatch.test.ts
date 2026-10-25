@@ -59,7 +59,7 @@ function validPlan(overrides: Partial<FullPreviewDispatchPlanSnapshot> = {}): Fu
     revision: 2,
     status: "APPROVED",
     sourceProjectSha256: SHA,
-    renderOutputs: { LANDSCAPE: validConfig(), REELS: null },
+    renderOutputs: { LANDSCAPE: validConfig(), REELS: null, SQUARE: null },
     scenePlans: [validScene()],
     ...overrides
   };
@@ -257,7 +257,7 @@ describe("resolveCreateFullPreviewDispatch", () => {
   });
 
   it("fails when LANDSCAPE output is not configured yet - reused, not invented, so this is a real prerequisite", () => {
-    const result = resolveCreateFullPreviewDispatch(baseInput({ currentPlan: validPlan({ renderOutputs: { LANDSCAPE: null, REELS: null } }) }));
+    const result = resolveCreateFullPreviewDispatch(baseInput({ currentPlan: validPlan({ renderOutputs: { LANDSCAPE: null, REELS: null, SQUARE: null } }) }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toContain("Landscape output is not configured");

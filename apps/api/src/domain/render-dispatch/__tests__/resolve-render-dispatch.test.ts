@@ -53,7 +53,7 @@ function validPlan(overrides: Partial<RenderDispatchPlanSnapshot> = {}): RenderD
     revision: 2,
     status: "APPROVED",
     sourceProjectSha256: SHA,
-    renderOutputs: { LANDSCAPE: validConfig(), REELS: null },
+    renderOutputs: { LANDSCAPE: validConfig(), REELS: null, SQUARE: null },
     scenePlans: [validScene()],
     ...overrides
   };
@@ -131,7 +131,7 @@ describe("resolveRenderDispatch", () => {
     const result = resolveRenderDispatch(
       baseInput({
         variant: "REELS",
-        currentPlan: validPlan({ renderOutputs: { LANDSCAPE: validConfig(), REELS: reelsConfig } })
+        currentPlan: validPlan({ renderOutputs: { LANDSCAPE: validConfig(), REELS: reelsConfig, SQUARE: null } })
       })
     );
     expect(result.ok).toBe(true);
@@ -172,7 +172,7 @@ describe("resolveRenderDispatch", () => {
         baseInput({
           variant,
           session: validSession({ status: "COMPLETED" }),
-          currentPlan: validPlan({ renderOutputs: { LANDSCAPE: validConfig(), REELS: validConfig({ manifestCompositionId: "comp-2", aeProjectItemIndex: 6, compositionName: "Reels Master" }) } })
+          currentPlan: validPlan({ renderOutputs: { LANDSCAPE: validConfig(), REELS: validConfig({ manifestCompositionId: "comp-2", aeProjectItemIndex: 6, compositionName: "Reels Master" }), SQUARE: null } })
         })
       );
       expect(result.ok).toBe(true);
@@ -226,7 +226,7 @@ describe("resolveRenderDispatch", () => {
   it("fails closed when the configured output is STALE (bound to a different source sha than the plan's current one)", () => {
     const staleConfig = validConfig({ sourceProjectSha256: "c".repeat(64) });
     const result = resolveRenderDispatch(
-      baseInput({ currentPlan: validPlan({ renderOutputs: { LANDSCAPE: staleConfig, REELS: null } }) })
+      baseInput({ currentPlan: validPlan({ renderOutputs: { LANDSCAPE: staleConfig, REELS: null, SQUARE: null } }) })
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;

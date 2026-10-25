@@ -204,6 +204,13 @@
       "when": 1790951114532,
       "tag": "0028_clean_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792935071049,
+      "tag": "0029_square_render_variant",
+      "breakpoints": true
     }
   ]
 }

@@ -2174,3 +2174,24 @@ describe("resolveExecuteFrameDispatch - content on a layer that is not a place f
     expect(result.ok).toBe(true);
   });
 });
+
+describe("resolveExecuteFrameDispatch - buildSquareCompositionOnly (the client's square version, 2026-10-25)", () => {
+  const MUTATED_SHA = "d".repeat(64);
+  const readyToBuildSession = () => validSession({ status: "READY_TO_RENDER", completedScenePlanIds: ["scene-1"], latestWorkingProjectSha256: MUTATED_SHA });
+
+  it("produces a single BUILD_SQUARE_COMPOSITION operation named from the scene's own composition, from the completed working copy", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession(), buildSquareCompositionOnly: true }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([{ type: "BUILD_SQUARE_COMPOSITION", squareCompositionName: "Scene 01 (Square)" }]);
+    expect(result.payload.approvedMappingIds).toEqual([]);
+    expect(result.payload.expectedWorkingProjectSha256).toBe(MUTATED_SHA);
+  });
+
+  it("requires the scene to be completed in this session, the same gate as the Landscape master build", () => {
+    const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ status: "EDITING", completedScenePlanIds: [], latestWorkingProjectSha256: MUTATED_SHA }), buildSquareCompositionOnly: true }));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain("a Square master can only be built");
+  });
+});

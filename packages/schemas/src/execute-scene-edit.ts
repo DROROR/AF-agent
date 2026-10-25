@@ -31,7 +31,8 @@ export const SCENE_EDIT_OPERATION_TYPES = [
   "SET_BRAND_COLOR",
   "SET_COLOR_CONTROL",
   "BUILD_REELS_COMPOSITION",
-  "BUILD_HORIZONTAL_COMPOSITION"
+  "BUILD_HORIZONTAL_COMPOSITION",
+  "BUILD_SQUARE_COMPOSITION"
 ] as const;
 export type SceneEditOperationType = (typeof SCENE_EDIT_OPERATION_TYPES)[number];
 
@@ -276,6 +277,23 @@ const buildHorizontalCompositionOperationSchema = z
   .strict();
 export type BuildHorizontalCompositionOperation = z.infer<typeof buildHorizontalCompositionOperationSchema>;
 
+/**
+ * 2026-10-25, at the client's request ("a square version or a Reels
+ * version"): a NEW 1080x1080 composition that nests the scene's wide
+ * composition whole, scaled to cover the square and centred - the wide
+ * picture's middle, at full height, with its sides outside the frame. No
+ * layer is moved or edited (unlike BUILD_HORIZONTAL_COMPOSITION), so a
+ * template's animation, 3D layers and parenting are untouched. The name is
+ * server-derived (`${scene composition's name} (Square)`), never typed.
+ */
+const buildSquareCompositionOperationSchema = z
+  .object({
+    type: z.literal("BUILD_SQUARE_COMPOSITION"),
+    squareCompositionName: z.string().min(1)
+  })
+  .strict();
+export type BuildSquareCompositionOperation = z.infer<typeof buildSquareCompositionOperationSchema>;
+
 export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setTextOperationSchema,
   mapFootageOperationSchema,
@@ -285,12 +303,13 @@ export const sceneEditOperationSchema = z.discriminatedUnion("type", [
   setBrandColorOperationSchema,
   setColorControlOperationSchema,
   buildReelsCompositionOperationSchema,
-  buildHorizontalCompositionOperationSchema
+  buildHorizontalCompositionOperationSchema,
+  buildSquareCompositionOperationSchema
 ]);
 export type SceneEditOperation = z.infer<typeof sceneEditOperationSchema>;
 
 /** Every comp-level operation type - never tied to a single manifestPlaceholderId/layerIndex/approved mapping, unlike every other SceneEditOperation. Shared by executeSceneEditRequestSchema's own approvedMappingIds refine below and any future caller that needs the same "is this operation mapping-driven or not" classification. */
-const COMP_LEVEL_OPERATION_TYPES = ["BUILD_REELS_COMPOSITION", "BUILD_HORIZONTAL_COMPOSITION"] as const;
+const COMP_LEVEL_OPERATION_TYPES = ["BUILD_REELS_COMPOSITION", "BUILD_HORIZONTAL_COMPOSITION", "BUILD_SQUARE_COMPOSITION"] as const;
 
 /**
  * MAP_FOOTAGE's DISPATCH-FACING intent - identifies the project asset to
@@ -358,7 +377,8 @@ export const sceneEditOperationIntentSchema = z.discriminatedUnion("type", [
   setBrandColorOperationSchema,
   setColorControlOperationSchema,
   buildReelsCompositionOperationSchema,
-  buildHorizontalCompositionOperationSchema
+  buildHorizontalCompositionOperationSchema,
+  buildSquareCompositionOperationSchema
 ]);
 export type SceneEditOperationIntent = z.infer<typeof sceneEditOperationIntentSchema>;
 
@@ -662,6 +682,18 @@ export const sceneEditResultSchema = z.object({
    * canonical manifest identity.
    */
   horizontalCompositionBuilt: z
+    .object({
+      aeProjectItemIndex: z.number().int().positive(),
+      compositionName: z.string().min(1),
+      widthPx: z.number().int().positive(),
+      heightPx: z.number().int().positive(),
+      durationSeconds: z.number().nonnegative(),
+      frameRate: z.number().positive()
+    })
+    .nullable()
+    .default(null),
+  /** The new Square composition's real, worker-verified identity (BUILD_SQUARE_COMPOSITION, 2026-10-25) - registered by register-square-composition.ts exactly like horizontalCompositionBuilt. */
+  squareCompositionBuilt: z
     .object({
       aeProjectItemIndex: z.number().int().positive(),
       compositionName: z.string().min(1),

@@ -206,7 +206,7 @@ describe("dispatchJobRequestSchema - RENDER never accepts a raw worker payload",
         workerId: WORKER_ID,
         projectId: PROJECT_ID,
         executionSessionId: SESSION_ID,
-        variant: "SQUARE"
+        variant: "PORTRAIT"
       })
     ).toThrow();
   });

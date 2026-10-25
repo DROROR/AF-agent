@@ -248,11 +248,13 @@ export type RenderOutputConfig = z.infer<typeof renderOutputConfigSchema>;
 /** Independent per variant - configuring LANDSCAPE never requires or implies a REELS configuration, and vice versa (section 1: "independent optional configuration"). Reuses render-project.ts's own RenderOutputVariant ("LANDSCAPE"|"REELS") - the one variant vocabulary the whole render pipeline shares, never redeclared. */
 export const renderOutputsSchema = z.object({
   LANDSCAPE: renderOutputConfigSchema.nullable(),
-  REELS: renderOutputConfigSchema.nullable()
+  REELS: renderOutputConfigSchema.nullable(),
+  /** Absent on every plan stored before 2026-10-25 - read as "not configured". */
+  SQUARE: renderOutputConfigSchema.nullable().default(null)
 });
 export type RenderOutputs = z.infer<typeof renderOutputsSchema>;
 
-export const EMPTY_RENDER_OUTPUTS: RenderOutputs = { LANDSCAPE: null, REELS: null };
+export const EMPTY_RENDER_OUTPUTS: RenderOutputs = { LANDSCAPE: null, REELS: null, SQUARE: null };
 
 export const executionPlanSchema = z.object({
   schemaVersion: z.literal(EXECUTION_PLAN_SCHEMA_VERSION),

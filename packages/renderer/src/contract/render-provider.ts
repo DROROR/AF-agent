@@ -1,7 +1,7 @@
 import type { SceneMap } from "../scene-map/scene-map.js";
 import type { ValidationResult } from "../scene-map/validate-scene-map.js";
 
-export const RENDER_OUTPUT_KINDS = ["LANDSCAPE", "REELS"] as const;
+export const RENDER_OUTPUT_KINDS = ["LANDSCAPE", "REELS", "SQUARE"] as const;
 export type RenderOutputKind = (typeof RENDER_OUTPUT_KINDS)[number];
 
 /**

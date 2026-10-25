@@ -29,6 +29,7 @@ import { recordExecuteFrameResultIfApplicable } from "../application/job/record-
 import { recordRegeneratePreviewResultIfApplicable } from "../application/job/record-regenerate-preview-result.js";
 import { registerReelsCompositionIfApplicable } from "../application/job/register-reels-composition.js";
 import { registerHorizontalCompositionIfApplicable } from "../application/job/register-horizontal-composition.js";
+import { registerSquareCompositionIfApplicable } from "../application/job/register-square-composition.js";
 import type { ExecutionPlanRepository } from "../domain/execution-plan/types.js";
 import type { ExecutionSessionRepository } from "../domain/execution-session/types.js";
 
@@ -276,6 +277,16 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     // Same "best-effort side effect, never a competing source of truth"
     // contract - see register-horizontal-composition.ts's own doc comment.
     await registerHorizontalCompositionIfApplicable(
+      {
+        executionSessionRepository: deps.executionSessionRepository,
+        executionPlanRepository: deps.executionPlanRepository,
+        projectRepository: deps.projectRepository,
+        now
+      },
+      dto
+    );
+    // 2026-10-25: the Square composition, same contract - see register-square-composition.ts.
+    await registerSquareCompositionIfApplicable(
       {
         executionSessionRepository: deps.executionSessionRepository,
         executionPlanRepository: deps.executionPlanRepository,

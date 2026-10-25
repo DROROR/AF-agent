@@ -18,7 +18,8 @@ function toDomain(row: ExecutionPlanRow): ExecutionPlanRecord {
     sourceProjectSha256: row.sourceProjectSha256,
     scenePlans: row.scenePlans,
     // Existing rows predating this column read back as null - never a crash, never a guessed config (see schema.ts's own doc comment).
-    renderOutputs: row.renderOutputs ?? EMPTY_RENDER_OUTPUTS,
+    // A row stored before a variant existed (SQUARE, 2026-10-25) reads that variant as "not configured".
+    renderOutputs: { ...EMPTY_RENDER_OUTPUTS, ...(row.renderOutputs ?? {}) },
     approvedAt: row.approvedAt,
     approvedBy: row.approvedBy,
     createdAt: row.createdAt,

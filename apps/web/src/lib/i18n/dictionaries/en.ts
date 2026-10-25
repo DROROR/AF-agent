@@ -267,7 +267,7 @@ export const en = {
     emptyTitle: "No renders yet",
     emptyDescription: "Finished videos for this project appear here by themselves. To make one, press Render on the project's Export tab.",
     variantColumn: "Variant",
-    variantLabel: { LANDSCAPE: "Landscape", REELS: "Reels" },
+    variantLabel: { LANDSCAPE: "Landscape", REELS: "Reels", SQUARE: "Square" },
     compositionColumn: "Composition",
     statusColumn: "Status",
     statusReady: "Ready",
@@ -778,7 +778,7 @@ export const en = {
         "Everything about turning this project into finished video files. The two settings at the top are needed once, before anything can be rendered. The Reels layout below them is only needed if you also want the tall version for phones. \"Tools and diagnostics\" at the foot of the page only reads what After Effects reports - it changes nothing.",
       /** The one disclosure inside an output's card holding the identifier nobody needs in order to use the screen. */
       technicalDetailsToggle: "Technical details",
-      variantSection: { LANDSCAPE: "Landscape master", REELS: "Reels master" },
+      variantSection: { LANDSCAPE: "Landscape master", REELS: "Reels master", SQUARE: "Square master" },
       compositionLabel: "Master composition",
       compositionPlaceholder: "Select a composition…",
       noCompositionOption: "Not configured",
@@ -1033,6 +1033,13 @@ export const en = {
        */
       setUpBelowDescription: "This output needs setting up once before it can be rendered. The short form for it is right below.",
       alreadyMadeNote: "Your video is ready - it is under Final Outputs below.",
+      squareIntro: "A 1080×1080 version for feeds. It is made from the Landscape video: the middle of the picture at full height, the sides left out.",
+      squareNeedsLandscapeTitle: "After the Landscape video",
+      squareNeedsLandscape: "Make the Landscape video first - the square version is built from it.",
+      squareBuildAction: "Prepare the square version",
+      squareBuildingTitle: "Preparing the square version…",
+      squareBuildingDescription: "The editing computer is building the square composition. This takes about a minute; the Render button appears here by itself.",
+      squareBuildFailedTitle: "The square version could not be prepared",
       renderAgainAction: "Make it again",
       notReadyTitle: "Not ready yet",
       notReadyDescription: "Finish approving every scene and the Final Preview before this export is ready."
@@ -1419,6 +1426,7 @@ export const en = {
     finalPreview: "The complete video with every scene in place, for you to review and approve before the final render.",
     landscape: "The standard widescreen version of your video.",
     reels: "Creates a native 1080×1920 vertical version. DYO repositions the real scene elements instead of simply cropping the Landscape video.",
+    square: "A 1080×1080 version for feeds: the middle of the wide video at full height, made by the system from the Landscape.",
     safeSuggestions: "Suggestions DYO is confident about. They're grouped here so you can approve several at once instead of one at a time."
   },
   workspaceMode: {

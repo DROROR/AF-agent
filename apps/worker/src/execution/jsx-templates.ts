@@ -1965,6 +1965,99 @@ function buildBuildHorizontalCompositionScript(
   return script as FixedJsxScript;
 }
 
+/**
+ * BUILD_SQUARE_COMPOSITION (2026-10-25, the client's "square version"):
+ * a NEW composition of S x S (S = the shorter side of the scene's
+ * composition, so 1920x1080 gives 1080x1080) that nests the scene's
+ * composition WHOLE as its only layer, scaled uniformly to COVER the
+ * square and centred - the picture's middle at full height, the sides
+ * outside the frame. Nothing inside the scene is moved or edited, so the
+ * template's animation, 3D layers and parenting are untouched (unlike
+ * BUILD_HORIZONTAL_COMPOSITION, which adapts layer by layer). Same shape
+ * of contract as the other build scripts: resolves the composition by
+ * index AND name, replaces an earlier composition of the same name,
+ * reports the new composition's real identity read back from AE.
+ */
+function buildBuildSquareCompositionScript(
+  aeProjectItemIndex: number,
+  compositionName: string,
+  op: Extract<SceneEditOperation, { type: "BUILD_SQUARE_COMPOSITION" }>
+): FixedJsxScript {
+  const compIndexLiteral = String(aeProjectItemIndex);
+  const compNameLiteral = JSON.stringify(compositionName);
+  const squareNameLiteral = JSON.stringify(op.squareCompositionName);
+
+  const script = `${JSON_STRINGIFY_POLYFILL}app.beginUndoGroup(${JSON.stringify("DYO EXECUTE_FRAME: BUILD_SQUARE_COMPOSITION")});
+  var __result = null;
+  try {
+    var __comp = null;
+    try {
+      var __rawItem = app.project.item(${compIndexLiteral});
+      if (__rawItem instanceof CompItem) {
+        __comp = __rawItem;
+      }
+    } catch (__compLookupError) {
+      __comp = null;
+    }
+    if (__comp === null) {
+      __result = JSON.stringify({ ok: false, failureReason: "project item index " + ${compIndexLiteral} + " did not resolve to a composition in this project" });
+    } else if (__comp.name !== ${compNameLiteral}) {
+      __result = JSON.stringify({
+        ok: false,
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \"" + __comp.name + "\", expected \"" + ${compNameLiteral} + "\" - refusing to use the wrong composition"
+      });
+    } else {
+      var __existingIndex = null;
+      for (var __i = 1; __i <= app.project.numItems; __i++) {
+        var __candidate = app.project.item(__i);
+        if (__candidate instanceof CompItem && __candidate.name === ${squareNameLiteral}) {
+          __existingIndex = __i;
+          break;
+        }
+      }
+      if (__existingIndex !== null) {
+        app.project.item(__existingIndex).remove();
+      }
+
+      var __side = Math.min(__comp.width, __comp.height);
+      var __newComp = app.project.items.addComp(${squareNameLiteral}, __side, __side, __comp.pixelAspect, __comp.duration, __comp.frameRate);
+      var __layer = __newComp.layers.add(__comp);
+      var __cover = Math.max(__side / __comp.width, __side / __comp.height) * 100;
+      __layer.transform.anchorPoint.setValue([__comp.width / 2, __comp.height / 2]);
+      __layer.transform.position.setValue([__side / 2, __side / 2]);
+      __layer.transform.scale.setValue([__cover, __cover]);
+
+      var __newIndex = null;
+      for (var __j = 1; __j <= app.project.numItems; __j++) {
+        if (app.project.item(__j) === __newComp) {
+          __newIndex = __j;
+          break;
+        }
+      }
+      __result = JSON.stringify({
+        ok: true,
+        resultingValue: {
+          squareAeProjectItemIndex: __newIndex,
+          squareCompositionName: __newComp.name,
+          squareWidthPx: __newComp.width,
+          squareHeightPx: __newComp.height,
+          squareDurationSeconds: __newComp.duration,
+          squareFrameRate: __newComp.frameRate
+        }
+      });
+    }
+  } catch (__unexpectedError) {
+    __result = JSON.stringify({
+      ok: false,
+      failureReason: "unexpected error: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError))
+    });
+  } finally {
+    app.endUndoGroup();
+  }
+  return __result;`;
+  return script as FixedJsxScript;
+}
+
 /** #RRGGBB (already validated by setBrandColorOperationSchema's regex) -> [r,g,b] in AE's native 0..1 float range. */
 function hexToUnitRgb(colorHex: string): [number, number, number] {
   const r = parseInt(colorHex.slice(1, 3), 16) / 255;
@@ -3549,6 +3642,8 @@ export function buildOperationScript(aeProjectItemIndex: number, compositionName
       return buildBuildReelsCompositionScript(aeProjectItemIndex, compositionName, operation);
     case "BUILD_HORIZONTAL_COMPOSITION":
       return buildBuildHorizontalCompositionScript(aeProjectItemIndex, compositionName, operation);
+    case "BUILD_SQUARE_COMPOSITION":
+      return buildBuildSquareCompositionScript(aeProjectItemIndex, compositionName, operation);
     default: {
       const exhaustive: never = operation;
       throw new Error(`Unhandled scene edit operation type: ${JSON.stringify(exhaustive)}`);

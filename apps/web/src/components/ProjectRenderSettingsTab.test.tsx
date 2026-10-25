@@ -352,7 +352,7 @@ describe("ProjectRenderSettingsTab", () => {
     stubWorkspace({}, manifestWithNoCompositions());
     renderTab();
     const titles = await screen.findAllByText("No compositions available");
-    expect(titles).toHaveLength(2);
+    expect(titles).toHaveLength(3); // Landscape, Reels, Square (2026-10-25)
   });
 
   it("lists only real manifest compositions in the picker - never an arbitrary numeric index field", async () => {
@@ -386,7 +386,7 @@ describe("ProjectRenderSettingsTab", () => {
                 outputModuleTemplateName: "H.264 - Match Source",
                 configuredAt
               },
-              REELS: null
+              REELS: null, SQUARE: null
             }
           }),
           sceneTable: []
@@ -416,7 +416,7 @@ describe("ProjectRenderSettingsTab", () => {
   it("offers the names the project's worker's After Effects reported under each template field, and says so (2026-10-21)", async () => {
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null, SQUARE: null } }), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestWithCompositions() } },
       [`/api/projects/${PROJECT_ID}/execution-plan/render-templates`]: {
         status: 200,
@@ -455,7 +455,7 @@ describe("ProjectRenderSettingsTab", () => {
           outputModuleTemplateName: "H.264 - Match Source",
           configuredAt: new Date().toISOString()
         },
-        REELS: null
+        REELS: null, SQUARE: null
       }
     });
     renderTab();
@@ -474,7 +474,7 @@ describe("ProjectRenderSettingsTab", () => {
           outputModuleTemplateName: "H.264 - Match Source",
           configuredAt: new Date().toISOString()
         },
-        REELS: null
+        REELS: null, SQUARE: null
       }
     });
     renderTab();
@@ -494,7 +494,7 @@ describe("ProjectRenderSettingsTab", () => {
           outputModuleTemplateName: "H.264 - Match Source",
           configuredAt: new Date().toISOString()
         },
-        REELS: null
+        REELS: null, SQUARE: null
       }
     });
     renderTab();
@@ -520,7 +520,7 @@ describe("ProjectRenderSettingsTab", () => {
                 outputModuleTemplateName: "H.264 - Match Source",
                 configuredAt: new Date().toISOString()
               },
-              REELS: null
+              REELS: null, SQUARE: null
             }
           }),
           sceneTable: []
@@ -540,7 +540,7 @@ describe("ProjectRenderSettingsTab", () => {
                 outputModuleTemplateName: "H.264 - Match Source",
                 configuredAt: new Date().toISOString()
               },
-              REELS: null
+              REELS: null, SQUARE: null
             }
           }),
           sceneTable: []
@@ -595,7 +595,7 @@ describe("ProjectRenderSettingsTab", () => {
                 outputModuleTemplateName: "H.264 - Match Source",
                 configuredAt: new Date().toISOString()
               },
-              REELS: null
+              REELS: null, SQUARE: null
             }
           }),
           sceneTable: []
@@ -673,7 +673,7 @@ describe("ProjectRenderSettingsTab", () => {
       { locale: "he" }
     );
     const titles = await screen.findAllByText("אין קומפוזיציות זמינות");
-    expect(titles).toHaveLength(2);
+    expect(titles).toHaveLength(3);
   });
 });
 

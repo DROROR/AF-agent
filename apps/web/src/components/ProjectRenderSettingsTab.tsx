@@ -779,7 +779,7 @@ export function VariantConfigCard({
         title={
           <>
             {t.projectWorkspace.renderSettings.variantSection[variant]}
-            <HelpTooltip text={variant === "REELS" ? t.helpTooltips.reels : t.helpTooltips.landscape} />
+            <HelpTooltip text={variant === "REELS" ? t.helpTooltips.reels : variant === "SQUARE" ? t.helpTooltips.square : t.helpTooltips.landscape} />
           </>
         }
       />

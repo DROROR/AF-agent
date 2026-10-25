@@ -116,7 +116,7 @@ describe("ProjectExportTab", () => {
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null, SQUARE: null } }), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
     });
@@ -125,10 +125,11 @@ describe("ProjectExportTab", () => {
 
     // The real fields, on this tab, with a real Save - not a link, not an
     // instruction to change modes.
-    expect(screen.getAllByLabelText("Master composition")).toHaveLength(2);
-    expect(screen.getAllByLabelText("Render Settings template name")).toHaveLength(2);
-    expect(screen.getAllByLabelText("Output Module template name")).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(2);
+    // Three outputs since 2026-10-25 (Landscape, Reels, Square).
+    expect(screen.getAllByLabelText("Master composition")).toHaveLength(3);
+    expect(screen.getAllByLabelText("Render Settings template name")).toHaveLength(3);
+    expect(screen.getAllByLabelText("Output Module template name")).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(3);
     // And it no longer tells anyone to go somewhere else to do it.
     expect(document.body.textContent).not.toContain("Advanced view");
   });
@@ -141,7 +142,7 @@ describe("ProjectExportTab", () => {
       ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] }
       },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
@@ -150,8 +151,8 @@ describe("ProjectExportTab", () => {
     renderTab();
     await screen.findByText("Not ready yet");
 
-    // Only REELS is still missing its setup, so exactly one form is drawn.
-    expect(screen.getAllByLabelText("Master composition")).toHaveLength(1);
+    // REELS and SQUARE are still missing their setup, so exactly two forms are drawn - never one for the configured LANDSCAPE.
+    expect(screen.getAllByLabelText("Master composition")).toHaveLength(2);
   });
 
   it("shows a plain 'not set up yet' message (never the raw fields) when a variant has no render configuration", async () => {
@@ -160,13 +161,13 @@ describe("ProjectExportTab", () => {
     window.localStorage.setItem("dyo-workspace-mode", "advanced");
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null, SQUARE: null } }), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
     });
     renderTab();
     const notConfigured = await screen.findAllByText("Not set up yet");
-    expect(notConfigured.length).toBe(2); // LANDSCAPE and REELS
+    expect(notConfigured.length).toBe(3); // LANDSCAPE, REELS and SQUARE
   });
 
   it("shows a plain 'not ready yet' message when the variant IS configured but no execution session has reached READY_TO_RENDER", async () => {
@@ -174,7 +175,7 @@ describe("ProjectExportTab", () => {
       ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] }
       },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
@@ -191,7 +192,7 @@ describe("ProjectExportTab", () => {
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(workerId) } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] }
       },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } },
@@ -249,7 +250,7 @@ describe("ProjectExportTab", () => {
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(workerId) } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] }
       },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
@@ -415,7 +416,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
   it("names the missing master composition AND the tab that fixes it, wired to the button itself", async () => {
     stubFetchByUrl({
       ...NO_WORKERS_STATUS,
-      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null } }), sceneTable: [] } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: null, REELS: null, SQUARE: null } }), sceneTable: [] } },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
@@ -434,7 +435,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
       ...NO_WORKERS_STATUS,
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] }
       },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: null } },
@@ -456,7 +457,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
         body: {
-          plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig({ sourceProjectSha256: "e".repeat(64) }), REELS: null } }),
+          plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig({ sourceProjectSha256: "e".repeat(64) }), REELS: null, SQUARE: null } }),
           sceneTable: []
         }
       },
@@ -476,7 +477,7 @@ describe("ProjectExportTab - a disabled Render button always says why (REAL 2026
       "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] }
       },
       [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: readyToRenderSession(worker.workerId) } },
@@ -518,6 +519,55 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [] } }
     });
   }
+
+  // 2026-10-25, the client's "square version": one press prepares the
+  // square composition; the ordinary render card takes over once the plan
+  // carries the SQUARE output the server configured from it.
+  it("Simple view offers 'Prepare the square version' once the Landscape is made, and dispatches the square build for the session's own scene", async () => {
+    const worker = workerWithCapabilities(["EXECUTE_FRAME", "RENDER"]);
+    const calls: import("../test-utils/execution-plan-fixtures").RecordedFetchCall[] = [];
+    stubFetchByUrl(
+      {
+        "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
+        [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
+        [`/api/projects/${PROJECT_ID}/execution-plan`]: { status: 200, body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: null } }), sceneTable: [] } },
+        [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+        [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } },
+        "/api/jobs": { status: 201, body: { jobId: "77777777-7777-7777-7777-777777777777", workerId: worker.workerId, operation: "EXECUTE_FRAME", status: "QUEUED", createdAt: new Date().toISOString() } }
+      },
+      calls
+    );
+    renderTab();
+
+    const prepare = await screen.findByRole("button", { name: "Prepare the square version" });
+    await waitFor(() => expect((prepare as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: "Render Square" })).toBeNull();
+    fireEvent.click(prepare);
+
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith("/api/jobs") && call.method === "POST")).toBe(true));
+    const dispatch = calls.find((call) => call.url.endsWith("/api/jobs") && call.method === "POST")!;
+    expect(dispatch.body).toMatchObject({ operation: "EXECUTE_FRAME", scenePlanId: "s1", buildSquareCompositionOnly: true });
+    await screen.findByText("Preparing the square version…");
+  });
+
+  it("Simple view shows the ordinary 'Render Square' card once the SQUARE output is configured", async () => {
+    const worker = workerWithCapabilities(["RENDER"]);
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: landscapeConfig({ manifestCompositionId: "comp-square", compositionName: "Landscape Master (Square)" }) } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } }
+    });
+    renderTab();
+
+    const render = await screen.findByRole("button", { name: "Render Square" });
+    await waitFor(() => expect((render as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: "Prepare the square version" })).toBeNull();
+  });
 
   // 2026-10-21: choosing templates never made a tall video; the Reels card
   // is out of the Simple view until the Reels layout step is ready.

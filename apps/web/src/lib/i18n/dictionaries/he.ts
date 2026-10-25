@@ -253,7 +253,7 @@ export const he: Dictionary = {
     emptyTitle: "אין עדיין רינדורים",
     emptyDescription: "סרטונים מוגמרים של הפרויקט הזה יופיעו כאן בעצמם. כדי ליצור אחד, לחצו על רינדור בלשונית הייצוא של הפרויקט.",
     variantColumn: "וריאנט",
-    variantLabel: { LANDSCAPE: "לרוחב", REELS: "Reels" },
+    variantLabel: { LANDSCAPE: "לרוחב", REELS: "Reels", SQUARE: "ריבועי" },
     compositionColumn: "קומפוזיציה",
     statusColumn: "סטטוס",
     statusReady: "מוכן",
@@ -696,7 +696,7 @@ export const he: Dictionary = {
       description:
         "כל מה שקשור להפיכת הפרויקט הזה לקובצי וידאו מוגמרים. שתי ההגדרות שלמעלה נדרשות פעם אחת, לפני שאפשר לרנדר משהו. פריסת הרילס שמתחתיהן נחוצה רק אם רוצים גם את הגרסה האנכית לנייד. \"כלים ואבחון\" בתחתית הדף רק קורא את מה ש-After Effects מדווח - הוא לא משנה כלום.",
       technicalDetailsToggle: "פרטים טכניים",
-      variantSection: { LANDSCAPE: "אב לרוחב", REELS: "אב Reels" },
+      variantSection: { LANDSCAPE: "אב לרוחב", REELS: "אב Reels", SQUARE: "אב ריבועי" },
       compositionLabel: "קומפוזיציית אב",
       compositionPlaceholder: "בחרו קומפוזיציה…",
       noCompositionOption: "לא מוגדר",
@@ -873,6 +873,13 @@ export const he: Dictionary = {
       notConfiguredTitle: "עדיין לא הוגדר",
       setUpBelowDescription: "צריך להגדיר את הפלט הזה פעם אחת לפני שאפשר לרנדר אותו. הטופס הקצר לכך נמצא ממש למטה.",
       alreadyMadeNote: "הסרטון מוכן - הוא נמצא למטה תחת התוצרים הסופיים.",
+      squareIntro: "גרסה 1080×1080 לפיד. היא נבנית מסרטון ה-Landscape: מרכז התמונה בגובה מלא, בלי הצדדים.",
+      squareNeedsLandscapeTitle: "אחרי סרטון ה-Landscape",
+      squareNeedsLandscape: "קודם צרו את סרטון ה-Landscape - הגרסה הריבועית נבנית ממנו.",
+      squareBuildAction: "הכינו את הגרסה הריבועית",
+      squareBuildingTitle: "מכינים את הגרסה הריבועית…",
+      squareBuildingDescription: "מחשב העריכה בונה את הקומפוזיציה הריבועית. זה לוקח כדקה; כפתור הרינדור יופיע כאן מעצמו.",
+      squareBuildFailedTitle: "לא ניתן היה להכין את הגרסה הריבועית",
       renderAgainAction: "ליצור שוב",
       notReadyTitle: "עדיין לא מוכן",
       notReadyDescription: "יש לסיים לאשר כל סצנה ואת התצוגה המקדימה הסופית לפני שהייצוא הזה יהיה מוכן."
@@ -1237,6 +1244,7 @@ export const he: Dictionary = {
     finalPreview: "הסרטון המלא עם כל הסצנות במקומן, לבדיקה ואישור שלכם לפני הרינדור הסופי.",
     landscape: "הגרסה הרוחבית הרגילה של הסרטון שלכם.",
     reels: "יוצר גרסה אנכית טבעית של 1080×1920. DYO ממקמת מחדש את אלמנטי הסצנה האמיתיים במקום פשוט לחתוך את סרטון ה-Landscape.",
+    square: "גרסה 1080×1080 לפיד: מרכז הסרטון הרוחבי בגובה מלא, שהמערכת בונה מה-Landscape.",
     safeSuggestions: "הצעות ש-DYO בטוחה לגביהן. הן מקובצות כאן כדי שתוכלו לאשר כמה בבת אחת במקום אחת בכל פעם."
   },
   workspaceMode: {

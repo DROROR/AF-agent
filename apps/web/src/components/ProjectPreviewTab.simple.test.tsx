@@ -196,7 +196,7 @@ function baseHandlers(options: { session: unknown; landscape?: unknown; workers?
     [`GET /api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
     [`GET /api/projects/${PROJECT_ID}/execution-plan`]: {
       status: 200,
-      body: { plan: planFixture({ status: "APPROVED", renderOutputs: { LANDSCAPE: landscape, REELS: null } }, scenes), sceneTable: [] }
+      body: { plan: planFixture({ status: "APPROVED", renderOutputs: { LANDSCAPE: landscape, REELS: null, SQUARE: null } }, scenes), sceneTable: [] }
     },
     [`GET /api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: options.session } },
     [`GET ${SESSION_URL}/full-preview-status`]: { status: 200, body: { artifact: null } },
@@ -486,7 +486,7 @@ describe("Simple Preview tab - the Landscape output is never a trip to another t
       [`GET ${SUGGESTION_URL}`]: { status: 200, body: { suggestion } },
       [`PUT ${RENDER_OUTPUT_URL}`]: {
         status: 200,
-        body: { plan: planFixture({ status: "APPROVED", renderOutputs: { LANDSCAPE: landscapeConfigFixture(), REELS: null } }, scenes), sceneTable: [] }
+        body: { plan: planFixture({ status: "APPROVED", renderOutputs: { LANDSCAPE: landscapeConfigFixture(), REELS: null, SQUARE: null } }, scenes), sceneTable: [] }
       },
       "POST /api/jobs": dispatched("CREATE_PREVIEW"),
       [`GET /api/jobs/${JOB_ID}`]: { status: 200, body: jobFixture("CREATE_PREVIEW", "RUNNING") }

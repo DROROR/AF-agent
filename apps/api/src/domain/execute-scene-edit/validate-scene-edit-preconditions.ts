@@ -107,6 +107,11 @@ export function validateSceneEditPreconditions(input: ValidateSceneEditPrecondit
       }
       continue;
     }
+    if (operation.type === "BUILD_SQUARE_COMPOSITION") {
+      // Comp-level like BUILD_HORIZONTAL_COMPOSITION below: its name is
+      // server-derived from the scene's composition name (2026-10-25).
+      continue;
+    }
     if (operation.type === "BUILD_HORIZONTAL_COMPOSITION") {
       // Comp-level, not tied to one manifestPlaceholderId or a persisted
       // human-approved layout (live QA, 2026-09-10) - its own

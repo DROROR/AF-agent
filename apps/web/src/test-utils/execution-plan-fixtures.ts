@@ -101,7 +101,7 @@ export function planFixture(overrides: Record<string, unknown> = {}, scenePlans 
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     scenePlans,
-    renderOutputs: { LANDSCAPE: null, REELS: null },
+    renderOutputs: { LANDSCAPE: null, REELS: null, SQUARE: null },
     ...overrides
   };
 }

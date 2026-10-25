@@ -70,6 +70,7 @@ export interface ShotstackEditPayload {
 const OUTPUT_SIZES: Record<RenderOutputKind, { width: number; height: number }> = {
   // 1920x1080/1080x1920 per CLAUDE.md's own required output resolutions.
   LANDSCAPE: { width: 1920, height: 1080 },
+  SQUARE: { width: 1080, height: 1080 },
   REELS: { width: 1080, height: 1920 }
 };
 

@@ -173,7 +173,7 @@ function executedProjectStubs(overrides: { renderOutputs?: Record<string, unknow
     [`/api/projects/${PROJECT_ID}/execution-plan`]: {
       status: 200,
       body: {
-        plan: planFixture({ status: "APPROVED", renderOutputs: overrides.renderOutputs ?? { LANDSCAPE: null, REELS: null } }, [scene]),
+        plan: planFixture({ status: "APPROVED", renderOutputs: overrides.renderOutputs ?? { LANDSCAPE: null, REELS: null, SQUARE: null } }, [scene]),
         sceneTable: []
       }
     },
@@ -258,7 +258,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
   });
 
   it("asks for the full video to be made once everything is built, and for it to be watched only once there is one", async () => {
-    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
+    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }));
     renderShell();
     await screen.findByText("Make the full video");
     expect(within(banner()).getByRole("link", { name: "Go to Preview" }).getAttribute("href")).toBe(`/projects/${PROJECT_ID}/preview`);
@@ -266,7 +266,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     cleanup();
     stubAll({
       ...executedProjectStubs({
-        renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null },
+        renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null },
         sessionOverrides: { latestWorkingProjectSha256: WORKING_SHA }
       }),
       [`/api/projects/${PROJECT_ID}/execution-sessions/${SESSION_ID}/full-preview-status`]: {
@@ -303,7 +303,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
     // The complete preview is being made.
     cleanup();
     stubAll({
-      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }),
+      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }),
       "/api/jobs": { status: 200, body: { jobs: [liveJobFixture("CREATE_PREVIEW")] } }
     });
     renderShell();
@@ -313,7 +313,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
 
   it("a job history that cannot be read never blanks the banner - it falls back to the step that is true without it", async () => {
     stubAll({
-      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }),
+      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }),
       "/api/jobs": { status: 500, body: { error: { code: "INTERNAL", message: "boom", requestId: "r1" } } }
     });
     renderShell();
@@ -323,7 +323,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
   it("treats a Landscape master configured against an OLDER template as not configured - never offers a render that cannot run", async () => {
     stubAll(
       executedProjectStubs({
-        renderOutputs: { LANDSCAPE: renderOutputFixture({ sourceProjectSha256: "b".repeat(64) }), REELS: null },
+        renderOutputs: { LANDSCAPE: renderOutputFixture({ sourceProjectSha256: "b".repeat(64) }), REELS: null, SQUARE: null },
         sessionOverrides: { fullPreviewApproved: true }
       })
     );
@@ -335,7 +335,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
 
   it("reaches Export only after the real fullPreviewApproved gate, and reports 'done' once a render artifact exists", async () => {
     stubAll(
-      executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null }, sessionOverrides: { fullPreviewApproved: true } })
+      executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null }, sessionOverrides: { fullPreviewApproved: true } })
     );
     renderShell();
     await screen.findByText("Render the final video");
@@ -343,7 +343,7 @@ describe("Project wayfinding - the 'what to do next' banner", () => {
 
     cleanup();
     stubAll({
-      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null }, sessionOverrides: { fullPreviewApproved: true } }),
+      ...executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null }, sessionOverrides: { fullPreviewApproved: true } }),
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture()] } }
     });
     renderShell();
@@ -383,7 +383,7 @@ describe("Project wayfinding - locked tabs say what unlocks them", () => {
   });
 
   it("stops calling Preview locked once the plan is approved with a genuinely executable scene, while Export stays locked on the real final-preview gate", async () => {
-    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
+    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }));
     renderShell();
     await screen.findByText("Make the full video");
 
@@ -403,7 +403,7 @@ describe("Project wayfinding - locked tabs say what unlocks them", () => {
    * use this tab" is a different question nothing else on screen answers.
    */
   it("the tab bar no longer marks the next step itself - the banner alone names the tab and links to it", async () => {
-    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
+    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }));
     renderShell();
     await screen.findByText("Make the full video");
 
@@ -446,7 +446,7 @@ describe("Project wayfinding - never invents state", () => {
   });
 
   it("the seven-chip stepper is gone from every page's chrome - it named a phase, never an action, and doubled the banner", async () => {
-    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null } }));
+    stubAll(executedProjectStubs({ renderOutputs: { LANDSCAPE: renderOutputFixture(), REELS: null, SQUARE: null } }));
     renderShell();
     await waitFor(() => expect(banner().textContent).toContain("Make the full video"));
 

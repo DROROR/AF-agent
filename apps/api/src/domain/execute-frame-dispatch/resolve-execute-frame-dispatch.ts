@@ -122,6 +122,8 @@ export interface ResolveExecuteFrameDispatchInput {
    * prior behavior untouched.
    */
   buildHorizontalCompositionOnly?: boolean;
+  /** 2026-10-25: the Square composition, same contract as buildHorizontalCompositionOnly. */
+  buildSquareCompositionOnly?: boolean;
 }
 
 export type ResolveExecuteFrameDispatchResult =
@@ -230,6 +232,9 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
   // resolveBuildHorizontalCompositionOnly's own doc comment).
   if (input.buildHorizontalCompositionOnly === true) {
     return resolveBuildHorizontalCompositionOnly(input, session);
+  }
+  if (input.buildSquareCompositionOnly === true) {
+    return resolveBuildSquareCompositionOnly(input, session);
   }
 
   if (TERMINAL_EXECUTION_SESSION_STATUSES.includes(session.status)) {
@@ -1044,6 +1049,29 @@ function resolveBuildHorizontalCompositionOnly(
   input: ResolveExecuteFrameDispatchInput,
   session: ExecuteFrameDispatchSessionSnapshot
 ): ResolveExecuteFrameDispatchResult {
+  return resolveDerivedCompositionBuildOnly(input, session, "Landscape", (name) => ({ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: `${name} (Landscape)` }));
+}
+
+/**
+ * 2026-10-25: the Square composition (BUILD_SQUARE_COMPOSITION) - the exact
+ * same gates as the Landscape master build: the scene's own approved
+ * content must already be baked into a trusted working copy, the plan
+ * approved and current, the worker the session's own and idle. The new
+ * composition's name is `${scene composition's name} (Square)`.
+ */
+function resolveBuildSquareCompositionOnly(
+  input: ResolveExecuteFrameDispatchInput,
+  session: ExecuteFrameDispatchSessionSnapshot
+): ResolveExecuteFrameDispatchResult {
+  return resolveDerivedCompositionBuildOnly(input, session, "Square", (name) => ({ type: "BUILD_SQUARE_COMPOSITION", squareCompositionName: `${name} (Square)` }));
+}
+
+function resolveDerivedCompositionBuildOnly(
+  input: ResolveExecuteFrameDispatchInput,
+  session: ExecuteFrameDispatchSessionSnapshot,
+  masterLabel: "Landscape" | "Square",
+  buildOperation: (sceneCompositionName: string) => ExecuteSceneEditRequest["operations"][number]
+): ResolveExecuteFrameDispatchResult {
   const { projectId, scenePlanId, currentPlan, currentProjectManifest, worker, now, staleAfterMs } = input;
 
   if (session.status === "FAILED" || session.status === "COMPLETED") {
@@ -1055,18 +1083,18 @@ function resolveBuildHorizontalCompositionOnly(
   if (!session.completedScenePlanIds.includes(scenePlanId)) {
     return {
       ok: false,
-      reason: `Scene "${scenePlanId}" has not been executed in this session yet - a Landscape master can only be built from a scene's own already-executed, approved content`
+      reason: `Scene "${scenePlanId}" has not been executed in this session yet - a ${masterLabel} master can only be built from a scene's own already-executed, approved content`
     };
   }
   if (session.latestWorkingProjectSha256 === null) {
-    return { ok: false, reason: "Execution session has no recorded working copy to build a Landscape master from" };
+    return { ok: false, reason: `Execution session has no recorded working copy to build a ${masterLabel} master from` };
   }
 
   if (!currentPlan) {
     return { ok: false, reason: "No execution plan exists for this project" };
   }
   if (currentPlan.status !== "APPROVED") {
-    return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a Landscape master can only be built from an approved plan` };
+    return { ok: false, reason: `Plan is ${currentPlan.status}, not APPROVED - a ${masterLabel} master can only be built from an approved plan` };
   }
   if (session.planRevision !== currentPlan.revision || session.sourceProjectSha256 !== currentPlan.sourceProjectSha256) {
     return {
@@ -1124,7 +1152,7 @@ function resolveBuildHorizontalCompositionOnly(
       aeProjectItemIndex: composition.aeProjectItemIndex,
       compositionName: composition.name,
       approvedMappingIds: [],
-      operations: [{ type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: `${composition.name} (Landscape)` }]
+      operations: [buildOperation(composition.name)]
     }
   };
 }

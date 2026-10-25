@@ -66,7 +66,7 @@ import { FinalOutputsCard, VariantConfigCard } from "./ProjectRenderSettingsTab"
  */
 export function ProjectExportTab(): ReactElement | null {
   const { t } = useLocale();
-  const { project, plan } = useProjectWorkspaceContext();
+  const { project, plan, refetch } = useProjectWorkspaceContext();
   const { mode } = useWorkspaceMode();
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
   // Bumped when a render finishes, so the list of finished videos below is
@@ -166,7 +166,33 @@ export function ProjectExportTab(): ReactElement | null {
       </Fragment>
     );
   };
-  const variantSections: Record<RenderOutputVariant, ReactElement> = { LANDSCAPE: sectionFor("LANDSCAPE"), REELS: sectionFor("REELS") };
+  const variantSections: Record<RenderOutputVariant, ReactElement> = { LANDSCAPE: sectionFor("LANDSCAPE"), REELS: sectionFor("REELS"), SQUARE: sectionFor("SQUARE") };
+  // 2026-10-25, the client's "square version": the Square output is set up
+  // by the system itself (register-square-composition.ts) once the square
+  // composition is built from the Landscape, so in the Simple view its card
+  // offers that one press instead of the template form.
+  const squareConfig = plan.plan.renderOutputs.SQUARE ?? null;
+  const squareReady = squareConfig !== null && squareConfig.sourceProjectSha256 === sourceSha;
+  const landscapeMade = (finishedVideos ?? []).some((artifact) => artifact.variant === "LANDSCAPE");
+  const squareSection = squareReady ? (
+    <SimpleExportVariantCard
+      key="SQUARE"
+      projectId={projectId}
+      variant="SQUARE"
+      currentConfig={squareConfig}
+      currentSourceSha={sourceSha}
+      session={session}
+      renderReady={renderReady}
+      alreadyMade={(finishedVideos ?? []).some((artifact) => artifact.variant === "SQUARE")}
+      onRendered={() => {
+        setOutputsVersion((version) => version + 1);
+        void reloadFinishedVideos();
+        refreshGuidance();
+      }}
+    />
+  ) : (
+    <SquarePrepareCard key="SQUARE" projectId={projectId} session={session} landscapeMade={landscapeMade} onPrepared={() => void refetch()} />
+  );
 
   // 2026-10-07: the tab carried a lock in the nav, yet opened onto "Landscape
   // master", "Render Settings template name" - a setup form for a step the
@@ -203,6 +229,7 @@ export function ProjectExportTab(): ReactElement | null {
             the moment a render finishes - the empty state turns into the
             download without a reload.
           */}
+          {squareSection}
           <FinalOutputsCard key={outputsVersion} projectId={projectId} />
           {/*
             2026-10-21: the Reels card is not shown in the Simple view at
@@ -216,6 +243,7 @@ export function ProjectExportTab(): ReactElement | null {
       ) : (
         <>
           {variantSections.REELS}
+          {variantSections.SQUARE}
           <FinalOutputsCard key={outputsVersion} projectId={projectId} />
         </>
       )}
@@ -431,6 +459,125 @@ function SimpleExportVariantCard({
                 : alreadyMade
                   ? t.projectWorkspace.export.renderAgainAction
                   : t.projectWorkspace.export.renderAction(variantLabel)}
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * 2026-10-25: one press builds the square composition on the editing
+ * computer (EXECUTE_FRAME with buildSquareCompositionOnly - the worker's
+ * BUILD_SQUARE_COMPOSITION), the API registers it and configures the
+ * SQUARE output from it with the Landscape's own template names, and this
+ * card is replaced by the ordinary render card once the plan is read again.
+ * It needs the Landscape video to exist: the square is made from the same
+ * finished working copy, and the Landscape's templates are what it renders
+ * with.
+ */
+function SquarePrepareCard({
+  projectId,
+  session,
+  landscapeMade,
+  onPrepared
+}: {
+  projectId: string;
+  session: ExecutionSessionDto | null;
+  landscapeMade: boolean;
+  onPrepared: () => void;
+}): ReactElement {
+  const { t } = useLocale();
+  const { data: dashboardStatus } = useDashboardStatusContext();
+  const [building, setBuilding] = useState<{ jobId: string; startedAt: string } | null>(null);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const scenePlanId = session?.latestPreviewScenePlanId ?? null;
+  const worker = session ? (dashboardStatus?.workers ?? []).find((w) => w.workerId === session.assignedWorkerId) ?? null : null;
+  const workerOnline = worker !== null && worker.status === "ONLINE" && worker.currentJobId === null;
+  const canPrepare = landscapeMade && session !== null && scenePlanId !== null && workerOnline && !isDispatching && building === null;
+
+  const buildingJobId = building?.jobId ?? null;
+  useEffect(() => {
+    if (buildingJobId === null) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function tick(): Promise<void> {
+      const result = await fetchJobStatus(buildingJobId as string);
+      if (cancelled) {
+        return;
+      }
+      if (result.ok && TERMINAL_JOB_STATUSES.has(result.data.status)) {
+        setBuilding(null);
+        if (result.data.status === "SUCCEEDED") {
+          onPrepared();
+        } else {
+          setError(result.data.error?.message ?? `Job ${result.data.status.toLowerCase()}`);
+        }
+        return;
+      }
+      timer = setTimeout(() => void tick(), RENDER_POLL_INTERVAL_MS);
+    }
+    timer = setTimeout(() => void tick(), RENDER_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+    // onPrepared is a fresh closure each render of the parent; the job id is what this watch is about.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildingJobId]);
+
+  async function handlePrepare(): Promise<void> {
+    if (!session || !worker || scenePlanId === null) {
+      return;
+    }
+    setIsDispatching(true);
+    setError(null);
+    const result = await dispatchJob({
+      operation: "EXECUTE_FRAME",
+      workerId: worker.workerId,
+      projectId,
+      executionSessionId: session.id,
+      scenePlanId,
+      buildSquareCompositionOnly: true
+    });
+    setIsDispatching(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setBuilding({ jobId: result.data.jobId, startedAt: result.data.createdAt });
+  }
+
+  return (
+    <Card className="overview-section">
+      <CardHeader title={t.renders.variantLabel.SQUARE} />
+      <p>{t.projectWorkspace.export.squareIntro}</p>
+      {!landscapeMade ? <EmptyState title={t.projectWorkspace.export.squareNeedsLandscapeTitle} description={t.projectWorkspace.export.squareNeedsLandscape} /> : null}
+      {error ? <ProblemNotice title={t.projectWorkspace.export.squareBuildFailedTitle} description={t.projectWorkspace.export.renderFailedDescription} technicalDetails={error} /> : null}
+      {building ? (
+        <BusyNotice title={t.projectWorkspace.export.squareBuildingTitle} description={t.projectWorkspace.export.squareBuildingDescription} startedAt={building.startedAt} />
+      ) : (
+        <div className="overview-actions">
+          <Button
+            disabled={!canPrepare}
+            disabledReason={
+              isDispatching
+                ? t.projectWorkspace.disabledReason.working
+                : !landscapeMade
+                  ? t.projectWorkspace.export.squareNeedsLandscape
+                  : !workerOnline
+                    ? t.projectWorkspace.disabledReason.workerOffline
+                    : undefined
+            }
+            onClick={() => void handlePrepare()}
+          >
+            {isDispatching ? t.jobDispatch.dispatching : t.projectWorkspace.export.squareBuildAction}
           </Button>
         </div>
       )}
