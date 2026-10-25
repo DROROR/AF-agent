@@ -4250,3 +4250,23 @@ describe("BUILD_VERTICAL_COMPOSITION (the client's Reels version, 2026-10-25)", 
     }
   });
 });
+
+// REAL 2026-10-25 DEFECT (QA project mega, job 5a0c77d4): the square script
+// reached After Effects with an unescaped quote in its name-mismatch
+// message - `[AE_ERROR] Expected: }` - and no composition was built. Every
+// generated build script must stay valid ExtendScript source.
+describe("generated build scripts are valid script source (2026-10-25)", () => {
+  const ops: SceneEditOperation[] = [
+    { type: "BUILD_SQUARE_COMPOSITION", squareCompositionName: "Main (Square)" },
+    { type: "BUILD_VERTICAL_COMPOSITION", verticalCompositionName: "Main (Vertical)" },
+    { type: "BUILD_HORIZONTAL_COMPOSITION", horizontalCompositionName: "Main (Landscape)" }
+  ];
+  for (const op of ops) {
+    it(`${op.type}: the name-mismatch message keeps its quotes escaped and the whole script parses`, () => {
+      const script = buildOperationScript(1, "Main", op);
+      expect(script).toContain('resolved to composition \\"" + __comp.name + "\\", expected \\""');
+      // The script is the body of a function on the worker side (it ends with `return __result;`).
+      expect(() => new Function(script)).not.toThrow();
+    });
+  }
+});

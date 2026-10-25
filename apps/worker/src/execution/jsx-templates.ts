@@ -2004,7 +2004,7 @@ function buildBuildSquareCompositionScript(
     } else if (__comp.name !== ${compNameLiteral}) {
       __result = JSON.stringify({
         ok: false,
-        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \"" + __comp.name + "\", expected \"" + ${compNameLiteral} + "\" - refusing to use the wrong composition"
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to use the wrong composition"
       });
     } else {
       var __existingIndex = null;
@@ -2100,7 +2100,7 @@ function buildBuildVerticalCompositionScript(
     } else if (__comp.name !== ${compNameLiteral}) {
       __result = JSON.stringify({
         ok: false,
-        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \"" + __comp.name + "\", expected \"" + ${compNameLiteral} + "\" - refusing to use the wrong composition"
+        failureReason: "project item index " + ${compIndexLiteral} + " resolved to composition \\"" + __comp.name + "\\", expected \\"" + ${compNameLiteral} + "\\" - refusing to use the wrong composition"
       });
     } else {
       var __existingIndex = null;
