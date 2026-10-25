@@ -174,7 +174,12 @@ export function ProjectExportTab(): ReactElement | null {
   const landscapeMade = (finishedVideos ?? []).some((artifact) => artifact.variant === "LANDSCAPE");
   const derivedSection = (variant: "SQUARE" | "REELS"): ReactElement => {
     const config = plan.plan.renderOutputs[variant] ?? null;
-    const ready = config !== null && config.sourceProjectSha256 === sourceSha;
+    // The card renders only a composition of the right SHAPE (the client's
+    // own earlier Reels setting pointed at a wide and then an 800x800 piece
+    // of the template); anything else is offered the system's own build.
+    const configured = config === null ? null : (project.manifest.compositions.find((c) => c.compositionId === config.manifestCompositionId) ?? null);
+    const rightShape = configured !== null && (variant === "REELS" ? configured.heightPx > configured.widthPx : configured.widthPx === configured.heightPx);
+    const ready = config !== null && config.sourceProjectSha256 === sourceSha && rightShape;
     return ready ? (
       <SimpleExportVariantCard
         key={variant}

@@ -557,9 +557,20 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
       [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
       [`/api/projects/${PROJECT_ID}/execution-plan`]: {
         status: 200,
-        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: landscapeConfig({ manifestCompositionId: "comp-square", compositionName: "Landscape Master (Square)" }) } }), sceneTable: [] }
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: null, SQUARE: landscapeConfig({ manifestCompositionId: "comp-square", compositionName: "Scene 01 (Square)" }) } }), sceneTable: [] }
       },
-      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}`]: {
+        status: 200,
+        body: {
+          project: projectDtoFixture(),
+          manifest: (() => {
+            const manifest = manifestFixture();
+            // The composition the system built and registered: square, as register-square-composition.ts records it.
+            manifest.compositions.push({ compositionId: "comp-square", aeProjectItemIndex: 9, name: "Scene 01 (Square)", widthPx: 1080, heightPx: 1080, durationSeconds: 4, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] });
+            return manifest;
+          })()
+        }
+      },
       [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } }
     });
     renderTab();
@@ -567,6 +578,25 @@ describe("ProjectExportTab - Simple mode leads with the Landscape video", () => 
     const render = await screen.findByRole("button", { name: "Render Square" });
     await waitFor(() => expect((render as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByRole("button", { name: "Prepare the square version" })).toBeNull();
+  });
+
+  // The client's own earlier Reels setting pointed at the wide master and then at an 800x800 piece of the template.
+  it("a Reels output configured on a composition that is not tall is offered the system's own build, not a Render button", async () => {
+    const worker = workerWithCapabilities(["RENDER"]);
+    stubFetchByUrl({
+      "/api/dashboard/status": { status: 200, body: { api: "ok", database: "ok", workers: [worker] } },
+      [`/api/projects/${PROJECT_ID}/execution-sessions/current`]: { status: 200, body: { session: { ...readyToRenderSession(worker.workerId), status: "COMPLETED" } } },
+      [`/api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ renderOutputs: { LANDSCAPE: landscapeConfig(), REELS: landscapeConfig(), SQUARE: null } }), sceneTable: [] }
+      },
+      [`/api/projects/${PROJECT_ID}`]: { status: 200, body: { project: projectDtoFixture(), manifest: manifestFixture() } },
+      [`/api/projects/${PROJECT_ID}/render-artifacts`]: { status: 200, body: { artifacts: [renderArtifactFixture({ variant: "LANDSCAPE" })] } }
+    });
+    renderTab();
+
+    await screen.findByRole("button", { name: "Prepare the vertical version" });
+    expect(screen.queryByRole("button", { name: "Render Reels" })).toBeNull();
   });
 
   // 2026-10-25: the vertical is built by the system from the Landscape -
