@@ -1087,7 +1087,11 @@ function resolveDerivedCompositionBuildOnly(
 ): ResolveExecuteFrameDispatchResult {
   const { projectId, scenePlanId, currentPlan, currentProjectManifest, worker, now, staleAfterMs } = input;
 
-  if (session.status === "FAILED" || session.status === "COMPLETED") {
+  // 2026-10-26: a COMPLETED session is exactly the one whose Landscape was
+  // just made - the Square/Vertical masters are built from that same working
+  // copy (the same reasoning as resolve-render-dispatch.ts's 2026-10-20 note).
+  // Only FAILED refuses: its working copy's custody is in doubt.
+  if (session.status === "FAILED") {
     return { ok: false, reason: `Execution session is ${session.status} - start a new execution session to continue` };
   }
   if (!session.workingCopyTrusted) {

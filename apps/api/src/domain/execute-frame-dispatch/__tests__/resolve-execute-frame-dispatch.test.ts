@@ -1436,9 +1436,9 @@ describe("resolveExecuteFrameDispatch - buildHorizontalCompositionOnly (Landscap
     expect(result.reason).toContain("start a new execution session");
   });
 
-  it("refuses a COMPLETED session", () => {
-    const result = resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ status: "COMPLETED" }), buildHorizontalCompositionOnly: true }));
-    expect(result.ok).toBe(false);
+  it("builds from a COMPLETED session too - the finished video's own working copy (2026-10-26); only FAILED refuses", () => {
+    expect(resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ status: "COMPLETED" }), buildHorizontalCompositionOnly: true })).ok).toBe(true);
+    expect(resolveExecuteFrameDispatch(baseInput({ session: readyToBuildSession({ status: "FAILED" }), buildHorizontalCompositionOnly: true })).ok).toBe(false);
   });
 
   it("refuses when the session's own workingCopyTrusted has been set false", () => {
@@ -2202,5 +2202,16 @@ describe("resolveExecuteFrameDispatch - buildVerticalCompositionOnly (the client
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.operations).toEqual([{ type: "BUILD_VERTICAL_COMPOSITION", verticalCompositionName: "Scene 01 (Vertical)" }]);
+  });
+});
+
+describe("resolveExecuteFrameDispatch - derived masters build from a COMPLETED session too (2026-10-26)", () => {
+  it("a client whose Landscape is finished (session COMPLETED) can still prepare the Square and the Vertical from that working copy", () => {
+    for (const flag of ["buildSquareCompositionOnly", "buildVerticalCompositionOnly", "buildHorizontalCompositionOnly"] as const) {
+      const result = resolveExecuteFrameDispatch(baseInput({ session: validSession({ status: "COMPLETED", completedScenePlanIds: ["scene-1"], latestWorkingProjectSha256: "d".repeat(64) }), [flag]: true }));
+      expect(result.ok).toBe(true);
+    }
+    const failed = resolveExecuteFrameDispatch(baseInput({ session: validSession({ status: "FAILED", completedScenePlanIds: ["scene-1"], latestWorkingProjectSha256: "d".repeat(64) }), buildSquareCompositionOnly: true }));
+    expect(failed.ok).toBe(false);
   });
 });
