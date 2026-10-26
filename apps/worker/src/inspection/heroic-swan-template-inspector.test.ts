@@ -43,7 +43,7 @@ const request = { templateId: "tmpl-1", sourceProjectPath: "/copies/test.aep" };
  * from - is never reached; see writeRealShapeFakeServer below for the
  * success-path tests that DO exercise both).
  */
-async function writeFakeServer(aeMcpPath: string, options: { oversized?: boolean; toolError?: boolean } = {}): Promise<void> {
+async function writeFakeServer(aeMcpPath: string, options: { oversized?: boolean; toolError?: boolean; largeList?: boolean } = {}): Promise<void> {
   await mkdir(join(aeMcpPath, "dist"), { recursive: true });
   const sdkEsmRoot = join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
   const oversizedText = options.oversized ? "x".repeat(50_000) : "small";
@@ -84,6 +84,14 @@ async function writeFakeServer(aeMcpPath: string, options: { oversized?: boolean
 
   server.registerTool("ae_list_compositions", { description: "d" }, async () => {
     calls.push("ae_list_compositions");
+    if (${options.largeList ? "true" : "false"}) {
+      // 2026-10-26: a real 4K template listed 201 items - far past the 20 000-character capture bound.
+      const comps = [];
+      for (let i = 1; i <= 300; i++) {
+        comps.push({ index: i, name: "Composition number " + i + " with a reasonably long name", width: 3840, height: 2160, frameRate: 30, duration: 7.0333, numLayers: 6 });
+      }
+      return { content: [{ type: "text", text: JSON.stringify(comps) }] };
+    }
     return { content: [{ type: "text", text: JSON.stringify([{ some_unconfirmed_field: "value" }]) }] };
   });
 
@@ -202,6 +210,18 @@ describe("HeroicSwanTemplateInspector - real spawned MCP server, not mocked", ()
     expect(typeof projectInfo?.content).toBe("string");
     expect((projectInfo?.content as string).length).toBeLessThanOrEqual(20_000);
   });
+
+  // REAL 2026-10-26 DEFECT: the client's 201-item template - the list was
+  // parsed from the 20 000-character capture and every inspection failed.
+  it("a composition list far larger than the capture bound is still parsed in full - the bound applies to the stored record only (2026-10-26)", async () => {
+    await writeFakeServer(dir, { largeList: true });
+    const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: dir });
+    const result = await inspector.inspect(request);
+
+    expect(result.kind).toBe("manifest");
+    if (result.kind !== "manifest") return;
+    expect(result.response.summary.compositionCount).toBe(300);
+  }, 60_000);
 
   it("reports a typed unavailable capture, without ever spawning a process, when AE_MCP_PATH is not configured", async () => {
     const inspector = new HeroicSwanTemplateInspector({ aeMcpPath: undefined });

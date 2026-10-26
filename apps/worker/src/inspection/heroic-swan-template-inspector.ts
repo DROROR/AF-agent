@@ -436,12 +436,17 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       };
 
       const discovery: RawToolCallCapture[] = [healthCapture];
+      // The complete content of each discovery tool, for parsing - the
+      // captures above are size-bounded for the record (2026-10-26).
+      const completeContent = new Map<AllowedInspectionTool, unknown>();
       for (const tool of REMAINING_DISCOVERY_TOOLS) {
-        discovery.push(await captureOneToolWithRetry(client, tool, this.logger, this.retryOptions));
+        const captured = await captureOneToolWithRetryKeepingContent(client, tool, this.logger, this.retryOptions);
+        discovery.push(captured.capture);
+        completeContent.set(tool, captured.content);
       }
 
       const listCompositionsCall = discovery.find((c) => c.tool === "ae_list_compositions");
-      const parsedList = listCompositionsCall?.ok ? parseCompositionList(listCompositionsCall.content) : null;
+      const parsedList = listCompositionsCall?.ok ? parseCompositionList(completeContent.get("ae_list_compositions")) : null;
       if (!listCompositionsCall?.ok || !parsedList || !parsedList.ok) {
         const reason = !listCompositionsCall?.ok
           ? `ae_list_compositions failed (${listCompositionsCall?.error?.message ?? "unknown error"})`
@@ -505,14 +510,14 @@ export class HeroicSwanTemplateInspector implements TemplateInspector {
       const details: (CompositionDetail | null)[] = [];
       const precompFacts: ({ layerIndex: number; sourceCompositionId: string }[] | null)[] = [];
       for (const summary of discovered) {
-        const call = await captureOneToolWithRetry(
+        const { capture: call, content: detailContent } = await captureOneToolWithRetryKeepingContent(
           client,
           "ae_get_composition",
           this.logger,
           this.retryOptions,
           { comp_index: summary.index, response_format: "detailed" }
         );
-        const parsedDetail = call.ok ? parseCompositionDetail(call.content) : null;
+        const parsedDetail = call.ok ? parseCompositionDetail(detailContent) : null;
         details.push(parsedDetail && parsedDetail.ok ? parsedDetail.value : null);
         precompFacts.push(await fetchPrecompFacts(client, summary, this.logger, this.retryOptions));
       }
@@ -694,12 +699,32 @@ export async function captureOneToolWithRetry(
   retryOptions: TransientRetryOptions | undefined,
   args?: Record<string, unknown>
 ): Promise<RawToolCallCapture> {
+  return (await captureOneToolWithRetryKeepingContent(client, tool, logger, retryOptions, args)).capture;
+}
+
+/**
+ * REAL 2026-10-26 DEFECT (the client's "App Promo - Phone 14 Pro" template,
+ * 201 project items, four inspections failed): the composition list was
+ * PARSED from the size-bounded capture - a JSON string cut at 20 000
+ * characters once the real list serialised past it - so "content is not a
+ * non-empty array" and no manifest, for any template large enough. The
+ * bounded capture is for the job's own diagnostics record; parsing reads
+ * the tool's real, complete content, returned here beside it and never
+ * persisted.
+ */
+export async function captureOneToolWithRetryKeepingContent(
+  client: HeroicSwanMcpClient,
+  tool: AllowedInspectionTool,
+  logger: pino.Logger | undefined,
+  retryOptions: TransientRetryOptions | undefined,
+  args?: Record<string, unknown>
+): Promise<{ capture: RawToolCallCapture; content: unknown }> {
   const calledAt = new Date().toISOString();
   const result = await callWithTransientRetry(tool, logger, () => client.callTool(tool, args), retryOptions);
   if (result.ok) {
-    return { tool, calledAt, ok: true, ...boundCapturedContent(result.content) };
+    return { capture: { tool, calledAt, ok: true, ...boundCapturedContent(result.content) }, content: result.content };
   }
-  return { tool, calledAt, ok: false, error: result.error };
+  return { capture: { tool, calledAt, ok: false, error: result.error }, content: undefined };
 }
 
 const openProjectScriptResultSchema = z.union([
