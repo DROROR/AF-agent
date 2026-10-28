@@ -5,6 +5,8 @@ import { proposeOutputLayout } from "@dyo/schemas";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  buildCaptureStillScript,
+  MAX_STILL_WIDTH_PX,
   buildOperationScript,
   buildSaveProjectScript,
   buildInspectRenderCapabilitiesScript,
@@ -4269,4 +4271,21 @@ describe("generated build scripts are valid script source (2026-10-25)", () => {
       expect(() => new Function(script)).not.toThrow();
     });
   }
+});
+
+// REAL 2026-10-28 DEFECT: the client's 4K template - every phone scene's
+// still was a 32 MB PNG, over the preview upload bound, so no evidence
+// frame ever arrived and the slot check failed on all of them.
+describe("buildCaptureStillScript bounds a wide composition's still (2026-10-28)", () => {
+  it("renders a composition wider than the bound through a temporary scaled composition that is removed afterwards, and captures a narrower one directly", () => {
+    const script = buildCaptureStillScript(3, 3.5, "C:\\previews\\still.png");
+    expect(script).toContain("if (__item.width > " + String(MAX_STILL_WIDTH_PX) + ")");
+    expect(script).toContain('app.project.items.addComp("DYO still (temporary)"');
+    expect(script).toContain("__stillComp.saveFrameToPng(3.5, __file)");
+    expect(script).toContain("__item.saveFrameToPng(3.5, __file)");
+    expect(script).toContain("if (__stillComp !== null) { __stillComp.remove(); }");
+    expect(script).not.toContain("app.project.save");
+    expect(script).not.toContain("beginUndoGroup");
+    expect(() => new Function(script)).not.toThrow();
+  });
 });

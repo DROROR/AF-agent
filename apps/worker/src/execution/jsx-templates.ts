@@ -2602,6 +2602,9 @@ export function buildInspectCompositionPrecompsScript(aeProjectItemIndex: number
  * project. No undo group: a still render must not run inside one
  * (CLAUDE.md Safety Rule 4), and nothing here is a project mutation.
  */
+/** A captured still is rendered no wider than this; a 4K composition's own PNG (32 MB) never fits the preview upload route (10 MB). */
+export const MAX_STILL_WIDTH_PX = 1920;
+
 export function buildCaptureStillScript(aeProjectItemIndex: number, timeSeconds: number, outputPath: string): FixedJsxScript {
   if (!Number.isInteger(aeProjectItemIndex) || aeProjectItemIndex < 1) {
     throw new Error(`buildCaptureStillScript: aeProjectItemIndex must be a positive integer, got ${String(aeProjectItemIndex)}`);
@@ -2609,6 +2612,15 @@ export function buildCaptureStillScript(aeProjectItemIndex: number, timeSeconds:
   if (!Number.isFinite(timeSeconds) || timeSeconds < 0) {
     throw new Error(`buildCaptureStillScript: timeSeconds must be a finite, non-negative number, got ${String(timeSeconds)}`);
   }
+  // REAL 2026-10-28 DEFECT (the client's 4K template, 3840x2160): a still
+  // of a 4K composition is a 32 MB PNG; the preview upload route is bounded
+  // at 10 MB, so every one of those frames was captured and never arrived -
+  // the Scenes tab showed "no evidence frame" for every phone scene. A still
+  // wider than MAX_STILL_WIDTH_PX is rendered through a temporary
+  // composition that holds the real one scaled to fit that width, which is
+  // then removed; a composition at or under the bound is captured as before.
+  // The temporary composition is never saved (nothing here saves the
+  // project), and it is removed in `finally` whatever the save did.
   const script = `${JSON_STRINGIFY_POLYFILL}var __result = null;
   try {
     var __item = null;
@@ -2618,14 +2630,29 @@ export function buildCaptureStillScript(aeProjectItemIndex: number, timeSeconds:
     } else {
       var __file = new File(${JSON.stringify(outputPath)});
       var __previousTime = __item.time;
+      var __stillComp = null;
       try {
         try { __item.openInViewer(); } catch (__viewerError) {}
         __item.time = ${String(timeSeconds)};
-        __item.saveFrameToPng(${String(timeSeconds)}, __file);
+        if (__item.width > ${String(MAX_STILL_WIDTH_PX)}) {
+          var __stillScale = ${String(MAX_STILL_WIDTH_PX)} / __item.width;
+          var __stillWidth = ${String(MAX_STILL_WIDTH_PX)};
+          var __stillHeight = Math.max(1, Math.round(__item.height * __stillScale));
+          __stillComp = app.project.items.addComp("DYO still (temporary)", __stillWidth, __stillHeight, __item.pixelAspect, Math.max(__item.duration, ${String(timeSeconds)} + 1), __item.frameRate);
+          var __stillLayer = __stillComp.layers.add(__item);
+          __stillLayer.transform.anchorPoint.setValue([__item.width / 2, __item.height / 2]);
+          __stillLayer.transform.position.setValue([__stillWidth / 2, __stillHeight / 2]);
+          __stillLayer.transform.scale.setValue([__stillScale * 100, __stillScale * 100]);
+          __stillComp.time = ${String(timeSeconds)};
+          __stillComp.saveFrameToPng(${String(timeSeconds)}, __file);
+        } else {
+          __item.saveFrameToPng(${String(timeSeconds)}, __file);
+        }
         __result = JSON.stringify({ ok: true, compositionName: __item.name });
       } catch (__saveError) {
         __result = JSON.stringify({ ok: false, failureReason: "saveFrameToPng failed: " + (__saveError && __saveError.toString ? __saveError.toString() : String(__saveError)) });
       } finally {
+        try { if (__stillComp !== null) { __stillComp.remove(); } } catch (__removeError) {}
         try { __item.time = __previousTime; } catch (__restoreError) {}
       }
     }
