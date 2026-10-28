@@ -345,13 +345,15 @@ function applyExecutionPlanEditRaw(
         updatedAt: timestamp
       }));
       if (!result.ok) return result;
-      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+      // A slot decision is about the frame already captured - the scene's own
+      // updatedAt stays, so that frame is not re-captured (2026-10-28).
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings }) };
     }
 
     case "CLEAR_SLOT_REVIEW": {
       const result = updateMapping(scene, operation.mappingId, (m) => ({ ...m, slotReview: null, updatedAt: timestamp }));
       if (!result.ok) return result;
-      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings, updatedAt: timestamp }) };
+      return { ok: true, scenePlans: replaceScene(plans, sceneIndex, { ...scene, mappings: result.mappings }) };
     }
 
     case "SET_ASSET_TIMESTAMP": {
@@ -528,7 +530,13 @@ function applyExecutionPlanEditRaw(
     case "APPROVE_SCENE":
       return {
         ok: true,
-        scenePlans: replaceScene(plans, sceneIndex, { ...scene, approvalState: "APPROVED", updatedAt: timestamp })
+        // REAL 2026-10-28 DEFECT (client project 5e27a0e2, 26 scenes): approving
+        // changed every scene's updatedAt, the Scenes tab read every preview as
+        // stale and re-captured all 26 (one a minute) - the editing computer
+        // stayed busy and the picture checks failed with "no evidence frame".
+        // Approval is a decision, not a content change: it does not touch
+        // updatedAt, so a current preview stays current.
+        scenePlans: replaceScene(plans, sceneIndex, { ...scene, approvalState: "APPROVED" })
       };
 
     case "REJECT_SCENE":
@@ -538,7 +546,7 @@ function applyExecutionPlanEditRaw(
           ...scene,
           approvalState: "REJECTED",
           notes: scene.notes ? `${scene.notes}\n${operation.reason}` : operation.reason,
-          updatedAt: timestamp
+          /* a decision, not a content change - updatedAt untouched (2026-10-28) */ updatedAt: scene.updatedAt
         })
       };
 

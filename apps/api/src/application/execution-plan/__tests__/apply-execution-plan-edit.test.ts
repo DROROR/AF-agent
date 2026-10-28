@@ -218,6 +218,18 @@ describe("applyExecutionPlanEdit", () => {
     expect(cleared.ok && cleared.scenePlans[0]?.instructions).toBeNull();
   });
 
+  // REAL 2026-10-28 DEFECT (client project 5e27a0e2, 26 scenes): approval
+  // bumped every scene's updatedAt, the Scenes tab re-captured all 26
+  // previews and the picture checks failed while the editing computer was
+  // busy. A decision never touches the scene's updatedAt.
+  it("APPROVE_SCENE and REJECT_SCENE leave the scene's updatedAt alone - a decision is not a content change (2026-10-28)", () => {
+    const before = scene().updatedAt;
+    const approved = applyExecutionPlanEdit([scene()], { type: "APPROVE_SCENE", scenePlanId: "scene-1" }, fixedNow);
+    expect(approved.ok && approved.scenePlans[0]?.updatedAt).toBe(before);
+    const rejected = applyExecutionPlanEdit([scene()], { type: "REJECT_SCENE", scenePlanId: "scene-1", reason: "not this one" }, fixedNow);
+    expect(rejected.ok && rejected.scenePlans[0]?.updatedAt).toBe(before);
+  });
+
   it("APPROVE_SCENE sets approvalState to APPROVED", () => {
     const result = applyExecutionPlanEdit([scene()], { type: "APPROVE_SCENE", scenePlanId: "scene-1" }, fixedNow);
     expect(result.ok && result.scenePlans[0]?.approvalState).toBe("APPROVED");

@@ -43,7 +43,7 @@ import { useDashboardStatusContext } from "./DashboardStatusProvider";
 const POLL_INTERVAL_MS = 4_000;
 const MAX_POLL_ATTEMPTS = 45;
 /** The worker runs one job at a time and the page's own scene previews use it too - a refused dispatch is retried, not reported. */
-const DISPATCH_RETRY_ATTEMPTS = 24;
+const DISPATCH_RETRY_ATTEMPTS = 60;
 const DISPATCH_RETRY_INTERVAL_MS = 5_000;
 
 export interface PendingSlot {
@@ -272,7 +272,10 @@ export function SlotBulkReview({
       }
     }
     if (jobId === null) {
-      return lastMessage ?? t.projectWorkspace.editDrawer.slotEvidenceFrameMissing;
+      // 2026-10-28: a worker that stayed busy for the whole window is not a
+      // missing frame - say so, so the person waits a minute instead of
+      // reading "no evidence frame" as something broken.
+      return lastMessage ?? t.projectWorkspace.simplePreview.workerBusy;
     }
     for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
       await sleep(POLL_INTERVAL_MS);
