@@ -82,6 +82,12 @@ export function fitModeForRole(selectedAssetType: string | null): FitMode {
   return selectedAssetType === "logo" ? "contain" : "cover";
 }
 
+/** The scene's own composition, where the evidence frame is rendered - null when the manifest no longer lists it. */
+function sceneCompositionFor(manifest: TemplateManifest, manifestCompositionId: string): { compositionId: string; durationSeconds: number } | null {
+  const composition = manifest.compositions.find((candidate) => candidate.compositionId === manifestCompositionId);
+  return composition ? { compositionId: composition.compositionId, durationSeconds: composition.durationSeconds } : null;
+}
+
 function placeholderFor(manifest: TemplateManifest, manifestPlaceholderId: string | null): Placeholder | null {
   if (manifestPlaceholderId === null) {
     return null;
@@ -193,11 +199,19 @@ export function assessMappingSlot(params: {
   // The moment a human must be shown before deciding. Null means the slot
   // never presents a provable visible moment, which the reasons below say
   // plainly rather than capturing an arbitrary frame.
-  const evidenceFrameAtSeconds = slotFacts === null ? null : selectEvidenceFrameSeconds(slotFacts);
+  // REAL 2026-10-28 DEFECT (client project 5e27a0e2, "Picture 1 in Scene 13"):
+  // the evidence frame is rendered in the SCENE's composition, and the
+  // server chose its moment there (7.85 s, inside the slot's host window in
+  // the scene), while this window was computed without a composition - the
+  // slot's own 0-7 s - so the captured frame "did not show the slot" and the
+  // picture check failed every time. Both the moment and the window are
+  // stated in the scene's own timeline now, exactly as the capture is.
+  const renderedIn = sceneCompositionFor(manifest, scene.manifestCompositionId);
+  const evidenceFrameAtSeconds = slotFacts === null ? null : selectEvidenceFrameSeconds(slotFacts, renderedIn ?? undefined);
   // The window a captured frame must fall inside to prove anything: the one the
   // slot is EFFECTIVELY visible in (enabled, on screen, at a visible opacity),
-  // not merely its in/out points.
-  const evidenceFrameWindowSeconds = slotFacts === null ? null : computeEffectiveVisibility(slotFacts);
+  // not merely its in/out points - in the scene composition's timeline.
+  const evidenceFrameWindowSeconds = slotFacts === null ? null : computeEffectiveVisibility(slotFacts, scene.manifestCompositionId);
 
   if (semantics.requiresHumanDecision) {
     blockers.push({

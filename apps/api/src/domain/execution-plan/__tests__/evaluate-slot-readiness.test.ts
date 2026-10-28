@@ -106,6 +106,31 @@ describe("assessMappingSlot", () => {
     expect(uncertain?.evidenceFrameAtSeconds).toBe(4);
   });
 
+  // REAL 2026-10-28 DEFECT (client project 5e27a0e2, "Picture 1 in Scene 13"):
+  // the frame is rendered in the scene; its moment was chosen there (inside
+  // the scene host's window) while the window the frame was checked against
+  // was the slot's own - so a correct frame "did not show the slot".
+  it("states the evidence moment and window in the SCENE composition's timeline - the one the frame is rendered in (2026-10-28)", () => {
+    const facts = conflictingSlotFacts({
+      // The slot's own window (its nested composition's timeline) is 0-7; the
+      // host that places it in the scene is on screen 5-10 of the scene's 10 s.
+      visibleWindowSeconds: { startSeconds: 0, endSeconds: 7 },
+      hosts: [
+        ...conflictingSlotFacts().hosts,
+        { ...conflictingSlotFacts().hosts[0]!, compositionId: "composition-under-test", windowSeconds: { startSeconds: 5, endSeconds: 10 } }
+      ]
+    });
+    const base = manifestWith([imagePlaceholderFixture({ placeholderId: "p1", slotFacts: facts })]);
+    const manifest = {
+      ...base,
+      compositions: [{ compositionId: "composition-under-test", aeProjectItemIndex: 1, name: "02 Scene", widthPx: 3840, heightPx: 2160, durationSeconds: 10, frameRate: 30, isNestedOnlyReferenced: false, parentCompositionIds: [] }]
+    };
+    const scene = planFor({ placeholderId: "p1", assetId: SCREENSHOT.id, assetType: "image" });
+    const uncertain = assessMappingSlot({ scene, mapping: scene.mappings[0]!, manifest, asset: SCREENSHOT }).blockers.find((b) => b.kind === "SLOT_CLASSIFICATION_UNCERTAIN");
+    expect(uncertain?.evidenceFrameWindowSeconds).toEqual({ startSeconds: 5, endSeconds: 10 });
+    expect(uncertain?.evidenceFrameAtSeconds).toBe(7.5);
+  });
+
   it("reports no usable evidence moment when no host reported when the slot is on screen", () => {
     const manifest = manifestWith([imagePlaceholderFixture({ placeholderId: "p1", slotFacts: conflictingSlotFacts({ visibleWindowSeconds: null }) })]);
     const scene = planFor({ placeholderId: "p1", assetId: SCREENSHOT.id, assetType: "image" });
