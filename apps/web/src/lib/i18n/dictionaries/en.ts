@@ -1594,6 +1594,9 @@ export const en = {
     approveScenesAction: "Approve Scenes",
     approvingScenes: "Approving…",
     /** 2026-10-09: the slot gate, said in the client's words - which pictures, and where on this page to go. */
+      approveNeedsChoices: (labels: string[]): string =>
+        labels.length === 0 ? "A scene still needs your choice." : `Still needs your choice: ${labels.join(", ")}. On each of those cards keep or change what is left, then approve.`,
+      approveWaitsForPreviews: "After Effects is still making the scene previews - approval unlocks when they are done.",
     approveNeedsPictures: (n: number): string =>
       n === 1 ? "First confirm where 1 picture will appear - press \"Show me the spot\" above." : `First confirm where ${n} pictures will appear - press "Show me all ${n} spots" above.`,
     approveRefusedPicturesTitle: "Not yet - some pictures still need your confirmation",

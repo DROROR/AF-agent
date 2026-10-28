@@ -1407,6 +1407,9 @@ export const he: Dictionary = {
       count === 1 ? "בסדר - להשאיר כמו שהוא" : `בסדר - להשאיר את כל ${count} כמו שהם`,
     approveScenesAction: "אישור הסצנות",
     approvingScenes: "מאשר…",
+      approveNeedsChoices: (labels: string[]): string =>
+        labels.length === 0 ? "סצנה עדיין מחכה לבחירה שלכם." : `עדיין מחכה לבחירה שלכם: ${labels.join(", ")}. בכל אחד מהכרטיסים האלה השאירו או שנו את מה שנותר, ואז אשרו.`,
+      approveWaitsForPreviews: "After Effects עדיין מכין את תצוגות הסצנות - האישור ייפתח כשיסיים.",
     approveNeedsPictures: (n: number): string =>
       n === 1 ? "קודם אשרו לאן נכנסת תמונה אחת - לחצו על \"להציג לי את המקום\" למעלה." : `קודם אשרו לאן נכנסות ${n} תמונות - לחצו על "להציג לי את כל ${n} המקומות" למעלה.`,
     approveRefusedPicturesTitle: "עדיין לא - כמה תמונות מחכות לאישור שלכם",

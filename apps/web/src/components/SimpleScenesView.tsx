@@ -293,6 +293,15 @@ export function SimpleScenesView(): ReactElement {
     contentProblemsByCard.set(cardId, [...(contentProblemsByCard.get(cardId) ?? []), problem]);
   }
   const contentHold = !scenesApproved && contentProblems.length > 0;
+  // 2026-10-28: the button said nothing when scenes the client HAD touched
+  // still needed decisions - he pressed everything he could see and was stuck.
+  const unsettledCardLabels = realScenes
+    .filter(
+      (scene) =>
+        sceneHasHumanInput(scene.scenePlan) &&
+        !((pendingByScene.get(scene.scenePlan.id)?.length ?? 0) === 0 && (scene.scenePlan.approvalState === "READY_FOR_APPROVAL" || scene.scenePlan.approvalState === "APPROVED"))
+    )
+    .map((scene) => cardLabels.get(scene.scenePlan.id) ?? scene.sceneName);
   const approveDisabledReason = scenesApproved
     ? undefined
     : contentHold
@@ -300,7 +309,9 @@ export function SimpleScenesView(): ReactElement {
       : picturesHold
       ? t.simpleScenes.approveNeedsPictures(picturesWaiting)
       : !allReady
-        ? undefined
+        ? previewsReady
+          ? t.simpleScenes.approveNeedsChoices(unsettledCardLabels)
+          : t.simpleScenes.approveWaitsForPreviews
         : isStale
           ? t.projectWorkspace.disabledReason.staleRevision
           : isApproving
