@@ -1,5 +1,6 @@
 "use client";
 
+import { sceneHasHumanInput } from "./scene-human-input";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ExecutionPlanEditOperation,
@@ -202,15 +203,18 @@ export function useProjectWorkspace(projectId: string): ProjectWorkspaceState {
     isApprovingScenesRef.current = true;
     try {
       let current = plan;
+      // 2026-10-28: a scene nobody put anything into is left as the template
+      // has it - excluded rather than approved, so its undecided placeholders
+      // never hold the plan (see scene-human-input.ts).
+      const untouchedScenes = current.plan.scenePlans.filter((scene) => scene.use && !sceneHasHumanInput(scene));
       const pendingScenes = current.plan.scenePlans.filter(
-        (scene) => scene.use && scene.approvalState === "READY_FOR_APPROVAL" && scene.unresolvedReasons.length === 0
+        (scene) => scene.use && sceneHasHumanInput(scene) && scene.approvalState === "READY_FOR_APPROVAL" && scene.unresolvedReasons.length === 0
       );
-      if (pendingScenes.length > 0) {
-        const edited = await updateExecutionPlan(
-          projectId,
-          current.plan.revision,
-          pendingScenes.map((scene) => ({ type: "APPROVE_SCENE" as const, scenePlanId: scene.id }))
-        );
+      if (pendingScenes.length > 0 || untouchedScenes.length > 0) {
+        const edited = await updateExecutionPlan(projectId, current.plan.revision, [
+          ...untouchedScenes.map((scene) => ({ type: "EXCLUDE_SCENE" as const, scenePlanId: scene.id })),
+          ...pendingScenes.map((scene) => ({ type: "APPROVE_SCENE" as const, scenePlanId: scene.id }))
+        ]);
         if (!edited.ok) {
           if (edited.code === "CONFLICT") {
             setIsStale(true);

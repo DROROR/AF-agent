@@ -1,5 +1,6 @@
 "use client";
 
+import { sceneHasHumanInput } from "../lib/scene-human-input";
 import Link from "next/link";
 
 import { useRouter } from "next/navigation";
@@ -143,10 +144,13 @@ export function SimpleScenesView(): ReactElement {
     pendingByScene.set(cardId, bucket);
   }
 
+  // A scene nobody touched is left as the template has it and never holds
+  // approval (2026-10-28, 22 untouched scenes on a 26-composition template).
   const reviewsReady = realScenes.every(
     (scene) =>
-      (pendingByScene.get(scene.scenePlan.id)?.length ?? 0) === 0 &&
-      (scene.scenePlan.approvalState === "READY_FOR_APPROVAL" || scene.scenePlan.approvalState === "APPROVED")
+      !sceneHasHumanInput(scene.scenePlan) ||
+      ((pendingByScene.get(scene.scenePlan.id)?.length ?? 0) === 0 &&
+        (scene.scenePlan.approvalState === "READY_FOR_APPROVAL" || scene.scenePlan.approvalState === "APPROVED"))
   );
   // Preview freshness (final MVP polish item 2): a stale scene preview -
   // captured before the mapped asset/text/timestamp/duration change that
