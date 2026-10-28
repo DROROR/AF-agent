@@ -135,6 +135,13 @@ describe("isMappingResolved", () => {
     expect(isMappingResolved(structural, s.instructions)).toBe(true);
   });
 
+  it("REAL 2026-10-28: an unclassified place with an ordinary name ('BG' shape layer) IS resolved - no card offers a control for it, so nothing could ever clear it", () => {
+    const unclassified = mapping({ placeholderName: "BG", placeholderClassification: { value: null, source: "MANIFEST", evidence: ["no confident structural signal matched a known placeholder type"] } });
+    expect(isMappingResolved(unclassified, null)).toBe(true);
+    const s = scene({ mappings: [unclassified, mapping({ placeholderName: "Headline" })] });
+    expect(computeSceneUnresolvedReasons(s)).toEqual(["1 placeholder(s) in this scene still need a mapping decision"]);
+  });
+
   it("an explicit 'keep unchanged' scene instruction resolves an otherwise-ambiguous (non-content, non-structural-by-name) mapping", () => {
     const ambiguous = mapping({ placeholderName: "Layer 7", placeholderClassification: { value: null, source: "MANIFEST", evidence: [] } });
     const s = scene({ mappings: [ambiguous], instructions: "Keep this unchanged." });

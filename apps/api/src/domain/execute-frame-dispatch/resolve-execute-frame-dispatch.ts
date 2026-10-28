@@ -582,8 +582,12 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     // notion of "structural" that could drift from the readiness one.
     // "No text in this place" is resolved AND has work to do (the layer's
     // text is emptied), so it is not skipped with the leave-as-is mappings.
+    // A visibility / freeze / duration override is work to do as well, on
+    // any layer at all (2026-10-28: an unclassified shape layer the operator
+    // hid is resolved AND still has its SET_LAYER_VISIBILITY to apply).
     const noText = classification === "text" && isNoTextDecision(mapping);
-    if (!noText && !mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
+    const hasOverride = layerVisible !== null || freezeAtSeconds !== null || layerDurationSeconds !== null;
+    if (!noText && !hasOverride && !mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
       continue;
     }
 

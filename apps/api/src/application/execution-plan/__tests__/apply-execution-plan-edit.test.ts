@@ -394,7 +394,8 @@ describe("applyExecutionPlanEdit - mapping-review -> execution-plan propagation 
   });
 
   it("CLEAR_TEXT on a scene's only mapping makes it unresolved again - stays in sync in both directions", () => {
-    const resolved = scene({ mappings: [mapping({ text: "Was real" })], unresolvedReasons: [], approvalState: "READY_FOR_APPROVAL" });
+    const textTarget = { value: "text" as const, source: "MANIFEST" as const, evidence: ["TextLayer"] };
+    const resolved = scene({ mappings: [mapping({ text: "Was real", placeholderClassification: textTarget })], unresolvedReasons: [], approvalState: "READY_FOR_APPROVAL" });
     const result = applyExecutionPlanEdit([resolved], { type: "CLEAR_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1" }, fixedNow);
     expect(result.ok && result.scenePlans[0]?.unresolvedReasons.length).toBeGreaterThan(0);
     expect(result.ok && result.scenePlans[0]?.approvalState).toBe("UNREVIEWED");
@@ -425,7 +426,10 @@ describe("applyExecutionPlanEdit - mapping-review -> execution-plan propagation 
   });
 
   it("duplicate label identity: two mappings sharing the same placeholderName in the SAME scene - the untouched sibling stays undecided", () => {
-    const twoTitles = scene({ mappings: [mapping({ id: "mapping-1", placeholderName: "Title" }), mapping({ id: "mapping-2", placeholderName: "Title" })] });
+    const textTarget = { value: "text" as const, source: "MANIFEST" as const, evidence: ["TextLayer"] };
+    const twoTitles = scene({
+      mappings: [mapping({ id: "mapping-1", placeholderName: "Title", placeholderClassification: textTarget }), mapping({ id: "mapping-2", placeholderName: "Title", placeholderClassification: textTarget })]
+    });
     const result = applyExecutionPlanEdit([twoTitles], { type: "SET_TEXT", scenePlanId: "scene-1", mappingId: "mapping-1", text: "First title" }, fixedNow);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

@@ -189,12 +189,17 @@ describe("buildScenePlans", () => {
     expect(scenePlansA[0]?.id).not.toBe(scenePlansB[0]?.id);
   });
 
-  it("initializes a scene as UNREVIEWED whenever it genuinely still needs a human decision (a real, unclassified placeholder, or a genuine detail-fetch failure) - never pre-approved by the deterministic builder", () => {
+  it("initializes a scene as UNREVIEWED whenever it genuinely still needs a human decision (a genuine detail-fetch failure) - never pre-approved by the deterministic builder", () => {
+    const scenePlans = buildScenePlans(syntheticManifest(), fixedNow);
+    const sceneB = scenePlans.find((s) => s.manifestCompositionId === "comp-no-detail");
+    expect(sceneB?.approvalState).toBe("UNREVIEWED");
+  });
+
+  it("2026-10-28: a scene whose only placeholder is unclassified (no text, no picture, no colour to decide) is READY_FOR_APPROVAL from the start - still never APPROVED by the builder", () => {
     const scenePlans = buildScenePlans(syntheticManifest(), fixedNow);
     const sceneA = scenePlans.find((s) => s.manifestCompositionId === "comp-detailed");
-    const sceneB = scenePlans.find((s) => s.manifestCompositionId === "comp-no-detail");
-    expect(sceneA?.approvalState).toBe("UNREVIEWED");
-    expect(sceneB?.approvalState).toBe("UNREVIEWED");
+    expect(sceneA?.unresolvedReasons).toEqual([]);
+    expect(sceneA?.approvalState).toBe("READY_FOR_APPROVAL");
   });
 
   it("never sets finalDuration - always null until a human sets it", () => {

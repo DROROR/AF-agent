@@ -104,7 +104,24 @@ export function isMappingResolved(mapping: PlaceholderMapping, instructions: str
   if (classifyStructuralPlaceholder(input).isStructural) {
     return true;
   }
-  return resolveKeepOriginal(input).shouldKeepOriginal;
+  if (resolveKeepOriginal(input).shouldKeepOriginal) {
+    return true;
+  }
+  // REAL 2026-10-28 DEAD END (client project 5e27a0e2, "I approve all the
+  // scenes and the next button is not live"): 67 shape layers the inspector
+  // could not classify ("BG", "line", "elipse", "Rec 1"... - no text, no
+  // footage, no colour control) each counted as "still needs a mapping
+  // decision", and no card offers any control for an unclassified place:
+  // not a text question, not a picture, not a colour. Nothing the reviewer
+  // can press would ever clear it. A place nobody can decide about is left
+  // exactly as the template has it - the same complete answer a colour
+  // nobody chose gives. A real content target always carries a
+  // classification (text / picture kinds / colour), so this never excuses
+  // one of those.
+  if (mapping.placeholderClassification.value === null) {
+    return true;
+  }
+  return false;
 }
 
 /**

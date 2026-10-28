@@ -178,7 +178,10 @@ function unresolvedManifest(): TemplateManifest {
     ...base,
     scenes: base.scenes.map((scene) => ({
       ...scene,
-      placeholders: scene.placeholders.map((placeholder) => ({ ...placeholder, placeholderType: "unknown" as const, editable: false }))
+      // 2026-10-28: an "unknown" placeholder no longer needs a decision (no
+      // card can offer one), so the genuinely pending case is the base
+      // manifest's real text target with nothing typed and nothing kept.
+      placeholders: scene.placeholders.map((placeholder) => ({ ...placeholder }))
     }))
   };
 }
