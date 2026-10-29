@@ -393,6 +393,22 @@ function computeSceneWindow(input: SlotFactsInput): { compositionId: string; sta
   return null;
 }
 
+/**
+ * The slot layer's OWN source size - footage or solid alike. REAL 2026-10-29
+ * (QA template, first frame): the template's image placeholder is an AE
+ * solid 1242×2688 inside a 1242×2648 composition. Solids were reported
+ * without a size, so the slot's size fell back to the composition's, the
+ * mutation fingerprint was computed from 2648, and the live re-check before
+ * the edit (which reads the layer's source: 2688) refused every MAP_FOOTAGE
+ * as "this slot's structure has changed since the plan was approved".
+ */
+function slotLayerWidthPx(layer: CompositionFact["layers"][number] | undefined): number | null {
+  return layer?.footage?.widthPx ?? layer?.solidFill?.widthPx ?? null;
+}
+function slotLayerHeightPx(layer: CompositionFact["layers"][number] | undefined): number | null {
+  return layer?.footage?.heightPx ?? layer?.solidFill?.heightPx ?? null;
+}
+
 /** Assembles the full structural picture of one slot, including every host that pulls it in. */
 export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralFacts {
   const compositionById = new Map(input.compositions.map((composition) => [composition.compositionId, composition]));
@@ -425,7 +441,7 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
       siblingPreRenderedPass: hasSiblingPreRenderedPass(input, input.slotComposition.compositionId, input.slotLayerIndex, input.slotComposition),
       scalePercent: selfDetail?.scalePercent ?? null,
       rotationDegrees: selfDetail?.rotationDegrees ?? null,
-      ...visibilityFacts(scannedSelf, selfDetail, input.slotComposition, slotLayer?.footage?.widthPx ?? input.slotComposition.widthPx, slotLayer?.footage?.heightPx ?? input.slotComposition.heightPx)
+      ...visibilityFacts(scannedSelf, selfDetail, input.slotComposition, slotLayerWidthPx(slotLayer) ?? input.slotComposition.widthPx, slotLayerHeightPx(slotLayer) ?? input.slotComposition.heightPx)
     });
   }
 
@@ -468,8 +484,8 @@ export function buildSlotStructuralFacts(input: SlotFactsInput): SlotStructuralF
   placements.sort((a, b) => (a.compositionId === b.compositionId ? a.layerIndex - b.layerIndex : a.compositionId < b.compositionId ? -1 : 1));
   hosts.push(...placements);
 
-  const widthPx = slotLayer?.footage?.widthPx ?? input.slotComposition.widthPx;
-  const heightPx = slotLayer?.footage?.heightPx ?? input.slotComposition.heightPx;
+  const widthPx = slotLayerWidthPx(slotLayer) ?? input.slotComposition.widthPx;
+  const heightPx = slotLayerHeightPx(slotLayer) ?? input.slotComposition.heightPx;
 
   // Rendered size in the top-level composition, when every hop's scale is
   // known. One unreadable scale makes the whole product unknown rather than

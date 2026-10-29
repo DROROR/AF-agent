@@ -109,6 +109,26 @@ describe("buildSlotStructuralFacts - matte source is read from what the matte is
     expect(facts.hosts[0]?.matteSource).toBe("UNKNOWN");
   });
 
+  it("REAL 2026-10-29: a solid slot layer's size is the solid's own (1242×2688), not its composition's (1242×2648) - the mutation fingerprint is built from it", () => {
+    const solidComposition = composition({
+      compositionId: "comp-solid",
+      widthPx: 1242,
+      heightPx: 2648,
+      layers: [layer({ index: 3, name: "Placeholder", layerKind: "AVLayer", footage: null, solidFill: { isUniformSolidFill: true, widthPx: 1242, heightPx: 2688 } })]
+    });
+    const facts = buildSlotStructuralFacts({
+      slotComposition: solidComposition,
+      slotLayerIndex: 3,
+      slotLayerName: "Placeholder",
+      compositions: [solidComposition],
+      layerFactsByCompositionAndIndex: new Map([["comp-solid:3", scanned({ detail: { hasTrackMatte: false, threeDLayer: false, parentLayerIndex: null } })]]),
+      hostDepth: 0,
+      slotIsWholeComposition: false
+    });
+    expect(facts.widthPx).toBe(1242);
+    expect(facts.heightPx).toBe(2688);
+  });
+
   it("says NONE when After Effects positively reports no track matte", () => {
     expect(graph(scanned(), { hasTrackMatte: false }).hosts[0]?.matteSource).toBe("NONE");
   });

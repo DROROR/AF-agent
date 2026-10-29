@@ -4235,6 +4235,8 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
     var __hops = [];
     var __targetWidth = null;
     var __targetHeight = null;
+      var __targetCompositionWidth = null;
+      var __targetCompositionHeight = null;
     var __comp = null;
     for (var __s = 0; __s < __steps.length; __s++) {
       var __step = __steps[__s];
@@ -4291,6 +4293,8 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
       if (__s === __steps.length - 1) {
         __targetWidth = __read(function () { return __layer.source ? __layer.source.width : null; });
         __targetHeight = __read(function () { return __layer.source ? __layer.source.height : null; });
+        __targetCompositionWidth = __read(function () { return __comp.width; });
+        __targetCompositionHeight = __read(function () { return __comp.height; });
       } else {
         // The descent is now a VERIFICATION, not the way the next composition
         // is found: the next step is resolved by its own id above, exactly as
@@ -4308,7 +4312,7 @@ export function buildDescribeChainStructureScript(steps: readonly ResolvedNested
       }
     }
     if (__result === null) {
-      __result = JSON.stringify({ ok: true, resultingValue: { hops: __hops, targetWidthPx: __targetWidth, targetHeightPx: __targetHeight } });
+      __result = JSON.stringify({ ok: true, resultingValue: { hops: __hops, targetWidthPx: __targetWidth, targetHeightPx: __targetHeight, targetCompositionWidthPx: __targetCompositionWidth, targetCompositionHeightPx: __targetCompositionHeight } });
     }
   } catch (__unexpectedError) {
     __result = JSON.stringify({ ok: false, failureReason: "could not read the chain's live structure: " + (__unexpectedError && __unexpectedError.toString ? __unexpectedError.toString() : String(__unexpectedError)) });

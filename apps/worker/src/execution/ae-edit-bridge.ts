@@ -179,7 +179,10 @@ const chainStructureResultSchema = z.object({
     })
   ),
   targetWidthPx: z.number().nullable(),
-  targetHeightPx: z.number().nullable()
+  targetHeightPx: z.number().nullable(),
+  /** The composition the target layer sits in (2026-10-29) - what a manifest inspected before solids carried a size recorded as the slot's size. Absent from an older worker script. */
+  targetCompositionWidthPx: z.number().nullable().optional(),
+  targetCompositionHeightPx: z.number().nullable().optional()
 });
 
 export interface AeEditBridge {
@@ -209,7 +212,7 @@ export interface AeEditBridge {
    * mutate a slot whose structure has changed. Read-only.
    */
   describeChainStructure(nestedTarget: readonly ResolvedNestedTargetStep[]): Promise<
-    { ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null } | { ok: false; reason: string }
+    { ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null; targetCompositionWidthPx?: number | null; targetCompositionHeightPx?: number | null } | { ok: false; reason: string }
   >;
   /**
    * READ-ONLY: which project is open and whether it holds unsaved edits.
@@ -379,7 +382,7 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
    */
   async describeChainStructure(
     nestedTarget: readonly ResolvedNestedTargetStep[]
-  ): Promise<{ ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null } | { ok: false; reason: string }> {
+  ): Promise<{ ok: true; hops: SlotChainHop[]; targetWidthPx: number | null; targetHeightPx: number | null; targetCompositionWidthPx?: number | null; targetCompositionHeightPx?: number | null } | { ok: false; reason: string }> {
     const outcome = await this.runScript(buildDescribeChainStructureScript(nestedTarget));
     if (!outcome.ok) {
       return { ok: false, reason: outcome.failureReason };
@@ -388,7 +391,14 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
     if (!parsed.success) {
       return { ok: false, reason: `the chain-structure script's response did not match the expected shape: ${parsed.error.message}` };
     }
-    return { ok: true, hops: parsed.data.hops, targetWidthPx: parsed.data.targetWidthPx, targetHeightPx: parsed.data.targetHeightPx };
+    return {
+      ok: true,
+      hops: parsed.data.hops,
+      targetWidthPx: parsed.data.targetWidthPx,
+      targetHeightPx: parsed.data.targetHeightPx,
+      targetCompositionWidthPx: parsed.data.targetCompositionWidthPx ?? null,
+      targetCompositionHeightPx: parsed.data.targetCompositionHeightPx ?? null
+    };
   }
 
   async saveProject(): Promise<SaveProjectResult> {

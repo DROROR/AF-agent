@@ -1,6 +1,5 @@
+import { verifyLiveSlotStructure } from "./verify-slot-structure.js";
 import {
-  computeSlotMutationFingerprint,
-  slotFingerprintsMatch,
   inspectRenderCapabilitiesRequestSchema,
   validateJobPayload,
   type AeStatus,
@@ -372,26 +371,7 @@ async function runExecuteFrame(deps: JobDispatcherDeps, job: JobDto): Promise<Jo
         // refuses when the structure has changed since approval.
         verifySlotStructure: async ({ nestedTarget, expected }) => {
           const live = await deps.aeEditBridge.describeChainStructure(nestedTarget);
-          if (!live.ok) {
-            return { ok: false, reason: `the slot's live structure could not be read, so it could not be proven unchanged since approval (${live.reason})` };
-          }
-          const recomputed = computeSlotMutationFingerprint({
-            chain: live.hops,
-            targetLayerIndex: nestedTarget[nestedTarget.length - 1]?.layerIndex ?? 0,
-            targetWidthPx: live.targetWidthPx,
-            targetHeightPx: live.targetHeightPx
-          });
-          return slotFingerprintsMatch(recomputed, expected)
-            ? { ok: true }
-            : {
-                ok: false,
-                // The live facts are stated, not only their digest (2026-10-04):
-                // a refusal that says "changed" without saying WHAT changed
-                // could only be diagnosed by installing a new build to ask.
-                reason:
-                  `this slot's structure has changed since the plan was approved (approved ${expected.digest.slice(0, 12)}, now ${recomputed.digest.slice(0, 12)}) - refusing to edit a layer that is no longer the one that was reviewed; re-run template inspection and re-approve. ` +
-                  `Live chain now: ${JSON.stringify({ hops: live.hops, targetWidthPx: live.targetWidthPx, targetHeightPx: live.targetHeightPx }).slice(0, 1500)}`
-              };
+          return verifyLiveSlotStructure(live, nestedTarget, expected);
         },
         now: deps.now
       },

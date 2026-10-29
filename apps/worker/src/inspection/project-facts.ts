@@ -25,6 +25,9 @@ export interface FootageFact {
 
 export interface SolidFillFact {
   isUniformSolidFill: boolean;
+  /** The solid's own size (2026-10-29): a template's placeholder is often a solid, and its size is the slot's size - the comp it sits in can be a different size. Null when unread. */
+  widthPx?: number | null;
+  heightPx?: number | null;
 }
 
 export interface LayerFact {

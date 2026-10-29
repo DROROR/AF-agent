@@ -964,7 +964,9 @@ function buildPlaceholder(args: {
     dimensions:
       layer.footage && layer.footage.widthPx !== null && layer.footage.heightPx !== null
         ? { width: layer.footage.widthPx, height: layer.footage.heightPx }
-        : null,
+        : layer.solidFill && typeof layer.solidFill.widthPx === "number" && typeof layer.solidFill.heightPx === "number"
+          ? { width: layer.solidFill.widthPx, height: layer.solidFill.heightPx }
+          : null,
     startTimeSeconds: layer.startTimeSeconds,
     durationSeconds: layer.durationSeconds,
     evidence: classification.evidence

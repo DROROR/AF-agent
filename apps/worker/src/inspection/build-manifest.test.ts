@@ -309,6 +309,24 @@ describe("buildTemplateManifest - slot semantics", () => {
     expect(placeholder.slotMutationFingerprint?.digest).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("REAL 2026-10-29: a solid placeholder's dimensions are the solid's own size, not its composition's (1242×2688 solid in a 1242×2648 composition)", () => {
+    const scene = composition({
+      compositionId: "comp-1",
+      widthPx: 1242,
+      heightPx: 2648,
+      layers: [layer({ index: 1, name: "Placeholder", layerKind: "AVLayer", solidFill: { isUniformSolidFill: true, widthPx: 1242, heightPx: 2688 }, enabled: true })]
+    });
+    const manifest = buildTemplateManifest(
+      baseFacts({
+        compositions: [scene],
+        layerFactsByCompositionAndIndex: new Map([["comp-1:1", scan({ hasTrackMatte: false, threeDLayer: false, parentLayerIndex: null, inPointSeconds: 0, outPointSeconds: 4 })]])
+      }),
+      fixedNow
+    );
+    const placeholder = manifest.scenes[0]!.placeholders[0]!;
+    expect(placeholder.dimensions).toEqual({ width: 1242, height: 2688 });
+  });
+
   it("classifies an image layer cut by a rendered matte and animated in 3D as a device screen", () => {
     const scene = composition({
       compositionId: "comp-1",

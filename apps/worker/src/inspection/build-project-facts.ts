@@ -168,7 +168,7 @@ export function buildProjectFacts(input: BuildProjectFactsInput): ProjectFacts {
                   heightPx: scannedFootage.heightPx
                 }
               : null,
-          solidFill: scannedFootage?.isSolid ? { isUniformSolidFill: true } : null,
+          solidFill: scannedFootage?.isSolid ? { isUniformSolidFill: true, widthPx: scannedFootage.widthPx, heightPx: scannedFootage.heightPx } : null,
           enabled: scanned?.enabled ?? null,
           trackMatte: scanned?.detail
             ? {
