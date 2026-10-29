@@ -629,6 +629,9 @@ export const en = {
       continueIntro: "The first frame is approved. The remaining scenes still have to be built.",
       buildingTitle: "Your video is being built…",
       buildingDescription: "After Effects is working on your editing computer. The result appears here by itself - there is nothing to press.",
+      /** One press builds every remaining scene, one after another (2026-10-29: a 22-scene video was being built one press per scene). */
+      buildingAllTitle: (done: number, total: number): string => `Building scene ${Math.min(done + 1, total)} of ${total}…`,
+      buildingAllDescription: "The remaining scenes are built one after another by themselves. Leave this page open; when all are built, the full video is next.",
       frameQuestion: "Does this frame look right?",
       frameQuestionHint: "This is one real frame of your video. If your pictures, text and colours look right here, the rest of the video is made the same way.",
       frameYesAndMakeAction: "Yes, make my full video",

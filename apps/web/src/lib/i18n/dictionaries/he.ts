@@ -571,6 +571,8 @@ export const he: Dictionary = {
       continueIntro: "הפריים הראשון אושר. את שאר הסצנות עדיין צריך לבנות.",
       buildingTitle: "הווידאו שלכם נבנה…",
       buildingDescription: "After Effects עובד כעת על מחשב העריכה שלכם. התוצאה תופיע כאן בעצמה - אין צורך ללחוץ על דבר.",
+      buildingAllTitle: (done: number, total: number): string => `בונים סצנה ${Math.min(done + 1, total)} מתוך ${total}…`,
+      buildingAllDescription: "שאר הסצנות נבנות אחת אחרי השנייה בעצמן. השאירו את הדף פתוח; כשכולן ייבנו, השלב הבא הוא הווידאו המלא.",
       frameQuestion: "האם הפריים הזה נראה נכון?",
       frameQuestionHint: "זהו פריים אמיתי אחד מהווידאו שלכם. אם התמונות, הטקסט והצבעים נראים נכון כאן, שאר הווידאו נוצר באותה צורה.",
       frameYesAndMakeAction: "כן, צרו את הווידאו המלא",

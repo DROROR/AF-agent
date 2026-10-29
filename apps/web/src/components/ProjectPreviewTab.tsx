@@ -192,6 +192,22 @@ export function ProjectPreviewTab(): ReactElement | null {
   // that had, in fact, already safely succeeded or was still safely
   // running - never a lost or double mutation, only a UI visibility gap).
   const [inFlightJobId, setInFlightJobId] = useState<string | null>(null);
+  // REAL 2026-10-29 (client project 5e27a0e2, 22 scenes): "Build the rest of
+  // the video" built ONE scene per press. The client pressed it, waited a
+  // minute, pressed it again, twenty times - "every time it repeats to the
+  // same scene and does not move on to the preview video" - and read it as
+  // an endless approval loop. After the first frame is approved there is
+  // nothing left to ask between scenes, so one press now builds them all:
+  // when a scene's job succeeds and the session shows it complete, the next
+  // one is dispatched by itself. A failed job, a refused dispatch or an
+  // unavailable worker ends the chain where it is; "Try again" starts it
+  // again from the next unbuilt scene.
+  const [buildAllRemaining, setBuildAllRemaining] = useState(false);
+  const lastChainedScenePlanIdRef = useRef<string | null>(null);
+  // The latest render's derived facts, read by the chain effect below (the
+  // effect must sit above this component's early returns; the facts are
+  // computed below them).
+  const chainRef = useRef<{ nextScenePlanId: string | null; workerReady: boolean; completedScenePlanIds: readonly string[]; execute: () => Promise<void> } | null>(null);
 
   // Preview Timing Analysis (live QA, 2026-09-09) - see
   // handleAnalyzePreviewTiming below and pollJobUntilTerminal's own doc
@@ -298,6 +314,7 @@ export function ProjectPreviewTab(): ReactElement | null {
           setDispatchSuccess(t.jobDispatch.startedHint);
         } else {
           setFailure({ kind: "job", message: result.data.error?.message ?? `Job ${result.data.status.toLowerCase()}` });
+          setBuildAllRemaining(false);
         }
         setSessionRefreshKey((k) => k + 1);
         return;
@@ -316,6 +333,28 @@ export function ProjectPreviewTab(): ReactElement | null {
       }
     };
   }, [inFlightJobId, t]);
+
+  const workersKey = (dashboardStatus?.workers ?? []).map((worker) => `${worker.workerId}:${worker.status}:${worker.currentJobId ?? ""}`).join("|");
+  useEffect(() => {
+    const facts = chainRef.current;
+    if (!buildAllRemaining || !facts || isDispatching || inFlightJobId !== null) {
+      return;
+    }
+    if (facts.nextScenePlanId === null) {
+      setBuildAllRemaining(false);
+      return;
+    }
+    // The session has not yet reported the scene just built - wait for it,
+    // or the same scene would be dispatched twice.
+    const last = lastChainedScenePlanIdRef.current;
+    if (last !== null && !facts.completedScenePlanIds.includes(last)) {
+      return;
+    }
+    if (!facts.workerReady) {
+      return;
+    }
+    void facts.execute();
+  }, [buildAllRemaining, isDispatching, inFlightJobId, sessionCompletedCount, workersKey]);
 
   if (!project) {
     return null;
@@ -384,6 +423,7 @@ export function ProjectPreviewTab(): ReactElement | null {
     : resolveProjectWorker(dashboardStatus?.workers ?? null, "EXECUTE_FRAME", project.project.sourceWorkerId);
   const workerReady = sessionPinnedToWorker ? candidateWorker !== null && candidateWorker.status === "ONLINE" && candidateWorker.currentJobId === null : candidateWorker !== null;
   const canExecute = nextScenePlanId !== null && workerReady;
+  chainRef.current = { nextScenePlanId, workerReady, completedScenePlanIds: activeSession?.completedScenePlanIds ?? [], execute: handleExecuteNextScene };
   // A session pins a specific worker (worker affinity, section 8) - if that
   // worker is offline this is a known, specific worker being unreachable,
   // not "no worker was ever found" - a more honest, actionable message than
@@ -414,6 +454,8 @@ export function ProjectPreviewTab(): ReactElement | null {
     setFailure(null);
     setDispatchSuccess(null);
     setBuildStartedAt(currentTimeMs());
+    lastChainedScenePlanIdRef.current = nextScenePlanId;
+    setBuildAllRemaining(activeSession?.firstPreviewApproved ?? false);
 
     let targetSession = activeSession;
     if (!targetSession) {
@@ -438,6 +480,7 @@ export function ProjectPreviewTab(): ReactElement | null {
     if (!result.ok) {
       setIsDispatching(false);
       setBuildStartedAt(null);
+      setBuildAllRemaining(false);
       setFailure({ kind: result.code === "WORKER_BUSY" ? "busy" : "dispatch", message: result.message });
       return;
     }
@@ -796,7 +839,13 @@ export function ProjectPreviewTab(): ReactElement | null {
             )
           ) : null}
 
-          {isBuilding ? <BusyNotice title={sp.buildingTitle} description={sp.buildingDescription} startedAt={buildStartedAt} /> : null}
+          {isBuilding ? (
+            <BusyNotice
+              title={buildAllRemaining ? sp.buildingAllTitle(activeSession?.completedScenePlanIds.length ?? 0, requiredScenePlanIds.length) : sp.buildingTitle}
+              description={buildAllRemaining ? sp.buildingAllDescription : sp.buildingDescription}
+              startedAt={buildStartedAt}
+            />
+          ) : null}
 
           {awaitingFrameDecision && session?.hasPreview ? (
             <>

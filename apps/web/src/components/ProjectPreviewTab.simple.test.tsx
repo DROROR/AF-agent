@@ -631,6 +631,36 @@ describe("Simple Preview tab - building the video", () => {
     expect(screen.queryByRole("button", { name: "Continue execution" })).toBeNull();
   }, 10_000);
 
+  it("REAL 2026-10-29: after the first frame is approved, one press builds every remaining scene - the next one is dispatched by itself when the session shows the previous one complete", async () => {
+    const scenes = ["s1", "s2", "s3"].map((id) => sceneFixture({ id, approvalState: "APPROVED", unresolvedReasons: [] }));
+    const calls = stubApi({
+      ...baseHandlers({ session: approvedSession({ status: "EDITING", completedScenePlanIds: ["s1"] }) }),
+      [`GET /api/projects/${PROJECT_ID}/execution-plan`]: {
+        status: 200,
+        body: { plan: planFixture({ status: "APPROVED", renderOutputs: { LANDSCAPE: landscapeConfigFixture(), REELS: null, SQUARE: null } }, scenes), sceneTable: [] }
+      },
+      // The session as read before the press, after the second scene, and after the third.
+      [`GET /api/projects/${PROJECT_ID}/execution-sessions/current`]: [
+        { status: 200, body: { session: approvedSession({ status: "EDITING", completedScenePlanIds: ["s1"] }) } },
+        { status: 200, body: { session: approvedSession({ status: "EDITING", completedScenePlanIds: ["s1", "s2"] }) } },
+        { status: 200, body: { session: approvedSession({ status: "EDITING", completedScenePlanIds: ["s1", "s2", "s3"] }) } }
+      ],
+      "POST /api/jobs": dispatched("EXECUTE_FRAME"),
+      [`GET /api/jobs/${JOB_ID}`]: { status: 200, body: jobFixture("EXECUTE_FRAME", "SUCCEEDED") }
+    });
+    renderPreview();
+
+    const build = await screen.findByRole("button", { name: "Build the rest of the video" });
+    await waitFor(() => expect((build as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(build);
+
+    await screen.findByText("Building scene 2 of 3…");
+    await waitFor(() => expect(dispatchesOf(calls, "EXECUTE_FRAME")).toHaveLength(2), { timeout: 8_000 });
+    expect(dispatchesOf(calls, "EXECUTE_FRAME").map((call) => (call.body as { scenePlanId: string }).scenePlanId)).toEqual(["s2", "s3"]);
+    // No second press was made - the button was never offered between the two scenes.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Build the rest of the video" })).toBeNull());
+  }, 15_000);
+
   it("a reload during a build finds the running job again instead of offering the button", async () => {
     stubApi({
       ...baseHandlers({ session: sessionFixture({ status: "PREPARING", latestWorkingProjectSha256: null, completedScenePlanIds: [], hasPreview: false, latestPreviewScenePlanId: null, latestPreviewCapturedAt: null }) }),
