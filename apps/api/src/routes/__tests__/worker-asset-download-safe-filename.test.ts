@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeContentDispositionFilename } from "../worker-asset-download.js";
+import { contentDispositionAttachment, safeContentDispositionFilename } from "../worker-asset-download.js";
 
 /**
  * Client-handoff phase, section AA (security review) - originalFilename is
@@ -28,5 +28,22 @@ describe("safeContentDispositionFilename", () => {
 
   it("strips other C0 control characters and DEL", () => {
     expect(safeContentDispositionFilename("evil\x00\x1f\x7f.jpg")).toBe("evil.jpg");
+  });
+});
+
+describe("contentDispositionAttachment", () => {
+  it("an ASCII filename is sent as the plain quoted form only", () => {
+    expect(contentDispositionAttachment("hero.jpg")).toBe('attachment; filename="hero.jpg"');
+  });
+
+  it("REAL 2026-10-29: a Hebrew filename never reaches the header raw (Node rejects it with ERR_INVALID_CHAR and the download answered 500) - ASCII fallback plus RFC 5987 filename*", () => {
+    const value = contentDispositionAttachment("מסך 5.png");
+    expect(value).toBe(`attachment; filename="___ 5.png"; filename*=UTF-8''${encodeURIComponent("מסך 5.png")}`);
+    // Every character is one Node accepts in a header value.
+    expect(/^[\x20-\x7e]+$/.test(value)).toBe(true);
+  });
+
+  it("still escapes quotes in the fallback so the quoted value cannot be closed early", () => {
+    expect(contentDispositionAttachment('evil".jpg')).toBe('attachment; filename="evil\\".jpg"');
   });
 });

@@ -42,6 +42,27 @@ export function safeContentDispositionFilename(rawFilename: string): string {
 }
 
 /**
+ * The complete Content-Disposition value for a client-supplied filename.
+ *
+ * REAL 2026-10-29 (client project 5e27a0e2, first frame): every asset the
+ * client uploaded is named in Hebrew ("מסך 5.png"). Node refuses a header
+ * value with a character outside Latin-1 (ERR_INVALID_CHAR), so the route
+ * answered 500 and the worker reported "asset download failed: Internal
+ * Server Error" - the first frame could not be built at all. The quoted
+ * `filename=` carries an ASCII-only fallback (every other character becomes
+ * "_"); the real name travels in RFC 5987's `filename*=UTF-8''…`, percent-
+ * encoded, which no header validator objects to.
+ */
+export function contentDispositionAttachment(rawFilename: string): string {
+  const safe = safeContentDispositionFilename(rawFilename);
+  // eslint-disable-next-line no-control-regex
+  const asciiFallback = safe.replace(/[^\x20-\x7e]/g, "_");
+  const hasNonAscii = asciiFallback !== safe;
+  const quoted = `attachment; filename="${asciiFallback}"`;
+  return hasNonAscii ? `${quoted}; filename*=UTF-8''${encodeURIComponent(safe)}` : quoted;
+}
+
+/**
  * Worker->API asset download (activation-phase Gap 2: MAP_FOOTAGE's asset
  * delivery pipeline) - worker-bearer-token authenticated, never a
  * session/browser endpoint, mirroring render-artifact-upload.ts's own
@@ -71,7 +92,7 @@ export function registerWorkerAssetDownloadRoutes(app: FastifyInstance, deps: Wo
     );
 
     reply.header("content-type", file.mimeType);
-    reply.header("content-disposition", `attachment; filename="${safeContentDispositionFilename(file.originalFilename)}"`);
+    reply.header("content-disposition", contentDispositionAttachment(file.originalFilename));
     reply.send(file.buffer);
   });
 }
