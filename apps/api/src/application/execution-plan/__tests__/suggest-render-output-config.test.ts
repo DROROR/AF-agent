@@ -52,6 +52,24 @@ const ONE_MASTER = (): TemplateManifest =>
     composition("comp-part", "A Part", { aeProjectItemIndex: 2, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-whole"] })
   ]);
 const TWO_MASTERS = (): TemplateManifest => manifest([composition("comp-whole", "Whole Video"), composition("comp-other", "Other Video", { aeProjectItemIndex: 2 })]);
+/** REAL 2026-10-30 shape: the whole video plus helper compositions at the top level; the scenes were split out of the whole video. */
+const MANY_TOP_LEVEL_ONE_HOLDS_THE_SCENES = (): TemplateManifest => {
+  const base = manifest([
+    composition("comp-whole", "_App Promo"),
+    composition("comp-bg", "BG Dark", { aeProjectItemIndex: 2 }),
+    composition("comp-badge", "_Apple_store", { aeProjectItemIndex: 3 }),
+    composition("comp-scene-1", "_01 Phone", { aeProjectItemIndex: 4, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-whole"] }),
+    composition("comp-scene-2", "_02 Phone", { aeProjectItemIndex: 5, isNestedOnlyReferenced: true, parentCompositionIds: ["comp-whole"] })
+  ]);
+  return {
+    ...base,
+    scenes: [
+      { sceneId: "scene-bg", displayName: null, compositionId: "comp-bg", originalOrderIndex: 0, startTimeSeconds: 0, durationSeconds: 5, placeholders: [] },
+      { sceneId: "scene-1", displayName: null, compositionId: "comp-scene-1", originalOrderIndex: 1, startTimeSeconds: 0, durationSeconds: 5, placeholders: [] },
+      { sceneId: "scene-2", displayName: null, compositionId: "comp-scene-2", originalOrderIndex: 2, startTimeSeconds: 5, durationSeconds: 5, placeholders: [] }
+    ]
+  };
+};
 
 function harness() {
   const projectRepository = new InMemoryProjectRepository();
@@ -111,6 +129,18 @@ describe("suggestRenderOutputConfig", () => {
     const projectId = await addProject("New Project", WORKER_A, TWO_MASTERS());
 
     expect(await suggest(projectId)).toEqual({ suggestion: null });
+  });
+
+  it("REAL 2026-10-30: with helper compositions at the top level, the one the scenes were split out of is the master - the person is never shown a 26-entry list to pick from", async () => {
+    const { addProject, configure, suggest } = harness();
+    const sibling = await addProject("Earlier Project", WORKER_A);
+    await configure(sibling, "Settings One", "Module One");
+    const projectId = await addProject("New Project", WORKER_A, MANY_TOP_LEVEL_ONE_HOLDS_THE_SCENES());
+
+    const result = await suggest(projectId);
+    expect(result.suggestion?.manifestCompositionId).toBe("comp-whole");
+    expect(result.suggestion?.compositionName).toBe("_App Promo");
+    expect(result.suggestion?.renderSettingsTemplateName).toBe("Settings One");
   });
 
   // REAL 2026-10-08: the client's first project on his machine had nothing to

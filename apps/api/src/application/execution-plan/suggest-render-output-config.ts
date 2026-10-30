@@ -1,4 +1,4 @@
-import type { RenderOutputSuggestionResponse, RenderOutputVariant } from "@dyo/schemas";
+import type { RenderOutputSuggestionResponse, RenderOutputVariant, TemplateManifest } from "@dyo/schemas";
 import { ProjectNotFoundError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -54,8 +54,7 @@ export async function suggestRenderOutputConfig(
     throw new ProjectNotFoundError(projectId);
   }
 
-  const masters = project.manifest.compositions.filter((composition) => !composition.isNestedOnlyReferenced);
-  const master = masters.length === 1 ? masters[0] : undefined;
+  const master = resolveMasterComposition(project.manifest);
   if (!master) {
     return { suggestion: null };
   }
@@ -93,4 +92,34 @@ function builtIn(master: { compositionId: string; name: string }): RenderOutputS
       basedOnProjectName: null
     }
   };
+}
+
+/**
+ * The composition the whole video is rendered from.
+ *
+ * One top-level composition: that one. Several (REAL 2026-10-30, client
+ * project 5e27a0e2: eleven top-level compositions - the 72-second video plus
+ * ten helper compositions the designer left at the top level, backgrounds,
+ * store badges, a QR code): the one whose own layers hold the scenes the
+ * manifest listed - the composition the scenes were split out of. With no
+ * such composition, or more than one, the choice is the person's and nothing
+ * is suggested. Durations, sizes and names never decide.
+ */
+export function resolveMasterComposition(manifest: Pick<TemplateManifest, "compositions" | "scenes">): TemplateManifest["compositions"][number] | null {
+  const masters = manifest.compositions.filter((composition) => !composition.isNestedOnlyReferenced);
+  if (masters.length === 1) {
+    return masters[0] ?? null;
+  }
+  const sceneCompositionIds = new Set(manifest.scenes.map((scene) => scene.compositionId));
+  const parentOfScenes = new Set<string>();
+  for (const composition of manifest.compositions) {
+    if (!sceneCompositionIds.has(composition.compositionId)) {
+      continue;
+    }
+    for (const parentId of composition.parentCompositionIds) {
+      parentOfScenes.add(parentId);
+    }
+  }
+  const containing = masters.filter((composition) => parentOfScenes.has(composition.compositionId));
+  return containing.length === 1 ? (containing[0] ?? null) : null;
 }
