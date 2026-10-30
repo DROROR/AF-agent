@@ -476,3 +476,17 @@ describe("sceneEditResultSchema", () => {
     });
   });
 });
+
+describe("executeSceneEditRequestSchema - leaveAsTemplate (2026-10-30)", () => {
+  it("a scene with nothing to change may carry zero operations when leaveAsTemplate is true", () => {
+    expect(executeSceneEditRequestSchema.safeParse(validRequest({ leaveAsTemplate: true, operations: [], approvedMappingIds: [] })).success).toBe(true);
+  });
+
+  it("leaveAsTemplate never carries an operation - it changes nothing", () => {
+    expect(executeSceneEditRequestSchema.safeParse(validRequest({ leaveAsTemplate: true })).success).toBe(false);
+  });
+
+  it("without the flag, zero operations are still refused", () => {
+    expect(executeSceneEditRequestSchema.safeParse(validRequest({ operations: [], approvedMappingIds: [] })).success).toBe(false);
+  });
+});

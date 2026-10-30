@@ -838,6 +838,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
       compositionName: composition.name,
       approvedMappingIds,
       operations,
+      ...(operations.length === 0 ? { leaveAsTemplate: true } : {}),
       ...(previewTimestampSeconds !== null ? { previewTimestampSeconds } : {})
     }
   };

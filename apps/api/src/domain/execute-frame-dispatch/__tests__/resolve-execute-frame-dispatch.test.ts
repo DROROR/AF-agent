@@ -1,3 +1,4 @@
+import { executeSceneEditRequestSchema } from "@dyo/schemas";
 import { describe, expect, it } from "vitest";
 import { assessMappingSlot, classifySlotSemantics, SCHEMA_VERSION, slotEvidenceDigest, SLOT_FINGERPRINT_VERSION, type PlaceholderMapping, type ScenePlanEntry, type SlotStructuralFacts, type TemplateManifest } from "@dyo/schemas";
 import { resolveExecuteFrameDispatch, type ExecuteFrameDispatchPlanSnapshot, type ExecuteFrameDispatchSessionSnapshot } from "../resolve-execute-frame-dispatch.js";
@@ -1166,6 +1167,9 @@ describe("resolveExecuteFrameDispatch", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.payload.operations).toEqual([]);
+    expect(result.payload.leaveAsTemplate).toBe(true);
+    const parsed = executeSceneEditRequestSchema.safeParse({ ...result.payload, checkpoint: null });
+    expect(parsed.success ? "ok" : parsed.error.message).toBe("ok");
   });
 
   it("fails when a scene has zero resolvable operations", () => {

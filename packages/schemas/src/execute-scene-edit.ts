@@ -511,6 +511,15 @@ export const executeSceneEditRequestSchema = z
      */
     previewOnly: z.boolean().optional(),
     /**
+     * REAL 2026-10-30: a scene whose every place was left as the template
+     * has it (texts kept, pictures kept) has nothing to change and still has
+     * to be built - the working copy is opened, nothing is applied, it is
+     * saved, its frame captured and the session counts the scene complete.
+     * Set by the API on exactly that scene; the only way an ordinary (non-
+     * previewOnly) job may carry zero operations.
+     */
+    leaveAsTemplate: z.boolean().optional(),
+    /**
      * Only meaningful when previewOnly is true - the real, controlled
      * capture time (section 13: "a controlled frame time"), never guessed
      * by the worker itself. Omitted/undefined for a normal (previewOnly
@@ -530,8 +539,14 @@ export const executeSceneEditRequestSchema = z
       }
       return;
     }
+    if (value.leaveAsTemplate === true) {
+      if (value.operations.length !== 0 || value.approvedMappingIds.length !== 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "leaveAsTemplate must carry zero operations and zero approvedMappingIds - nothing in the scene is changed" });
+      }
+      return;
+    }
     if (value.operations.length === 0) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "operations must be non-empty unless previewOnly is true" });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "operations must be non-empty unless previewOnly or leaveAsTemplate is true" });
       return;
     }
     // Post-completion derived-output-composition dispatch (live QA,
