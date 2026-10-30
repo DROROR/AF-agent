@@ -413,6 +413,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
 
   const assetsById = new Map(projectAssets.map((asset) => [asset.id, asset]));
   const operations: SceneEditOperationIntent[] = [];
+  let leftAsTemplate = 0;
   const approvedMappingIds: string[] = [];
 
   for (const mapping of scene.mappings) {
@@ -588,6 +589,7 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     const noText = classification === "text" && isNoTextDecision(mapping);
     const hasOverride = layerVisible !== null || freezeAtSeconds !== null || layerDurationSeconds !== null;
     if (!noText && !hasOverride && !mappingHasContentDecision(mapping) && isMappingResolved(mapping, scene.instructions ?? null)) {
+      leftAsTemplate += 1;
       continue;
     }
 
@@ -734,7 +736,15 @@ export function resolveExecuteFrameDispatch(input: ResolveExecuteFrameDispatchIn
     }
   }
 
-  if (operations.length === 0) {
+  // REAL 2026-10-30 (QA project qa-t8, "Build the rest of the video"): the
+  // second scene's every place was left as the template has it - texts kept,
+  // pictures kept - so nothing resolved to an operation and the build stopped
+  // with "no resolvable operations". A scene with nothing to change is still a
+  // scene to build: the worker opens the working copy, applies nothing, saves,
+  // captures its frame and the session counts it complete, so the chain goes
+  // on to the next one. Only a scene where NOTHING was even left as-is (no
+  // mapping reached a decision at all) is still refused.
+  if (operations.length === 0 && leftAsTemplate === 0) {
     return { ok: false, reason: `Scene "${scenePlanId}" has no resolvable operations (no mapping with a manifest-linked placeholder and a set value)` };
   }
 

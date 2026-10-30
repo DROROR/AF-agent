@@ -1157,6 +1157,17 @@ describe("resolveExecuteFrameDispatch", () => {
     });
   });
 
+  it("REAL 2026-10-30: a scene whose every place was left as the template has it dispatches with zero operations - it is still built, captured and counted, so the chain goes on", () => {
+    const kept = textMapping({
+      text: null,
+      keepTemplateText: { decision: "KEEP_TEMPLATE_TEXT", decidedBy: "user-1", decidedAt: "2026-10-30T00:00:00.000Z", textAtDecision: "" }
+    });
+    const result = resolveExecuteFrameDispatch(baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ mappings: [kept] })] }) }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.payload.operations).toEqual([]);
+  });
+
   it("fails when a scene has zero resolvable operations", () => {
     const result = resolveExecuteFrameDispatch(
       baseInput({ currentPlan: validPlan({ scenePlans: [validScene({ mappings: [textMapping({ manifestPlaceholderId: null })] })] }) })
