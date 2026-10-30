@@ -365,3 +365,7 @@ On the Render Settings tab the Render Settings / Output Module template names ar
 
 ### 2026-10-28 - scene previews are re-captured after every plan edit, one per minute
 A plan edit updates the plan's `updatedAt`, which marks every scene's preview stale, and the preview queue re-captures all of them (26 scenes on the client's new template: 43 capture jobs in one hour, the editing computer busy the whole time, slot checks refused with "worker busy"). Only the edited scene's preview needs re-capturing (compare against the scene plan entry's own `updatedAt`, not the plan's).
+
+## 2026-10-30 - one checkbox to hide every text in a scene (client request, Dror)
+
+"Add a check mark that will hide all the text instead of going one by one." Today each text on a card has its own Keep / No text here buttons; a card with eleven texts needs eleven presses. Add one control per card (and one for the whole video) that records NO_TEXT for every undecided text at once, using the same SET_TEMPLATE_TEXT_DECISION records as the per-text buttons - nothing new server-side. Fits the client's two-flow use (our agent: colours and pictures; his own flow adds text).
