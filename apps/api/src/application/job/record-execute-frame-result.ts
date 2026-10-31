@@ -84,6 +84,18 @@ export async function recordExecuteFrameResultIfApplicable(deps: RecordExecuteFr
     return;
   }
 
+  // REAL 2026-10-31 (QA project qa-phone14, worker FAHADNAKASH): the bridge
+  // to After Effects dropped for a moment right after the first frame, the
+  // next scene's job could not even OPEN the working copy, and the session
+  // was marked FAILED - the only way on was a fresh session from the first
+  // frame. Nothing had been touched: WORKING_COPY_NOT_OPENED is raised before
+  // any edit, the copy is still on disk at the hash the session records, and
+  // the bridge reconnects by itself. The job stays FAILED and visible; the
+  // session stays where it was, and the next build of the same scene reopens
+  // the copy. Every other custody failure is still terminal.
+  if (result.workingCopyFailureCode === "WORKING_COPY_NOT_OPENED") {
+    return;
+  }
   if (result.workingCopyFailureCode !== null) {
     await deps.executionSessionRepository.markStatus(session.id, "FAILED", deps.now());
     // First Preview regeneration trust flag (live QA, 2026-09-09) - a

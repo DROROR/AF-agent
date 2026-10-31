@@ -166,6 +166,31 @@ describe("recordExecuteFrameResultIfApplicable", () => {
     expect(session?.workingCopyTrusted).toBe(false);
   });
 
+  it("REAL 2026-10-31: WORKING_COPY_NOT_OPENED (the bridge was down before anything was touched) leaves the session as it was, so the next build of the same scene resumes instead of starting over", async () => {
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupPlan(executionPlanRepository);
+    await setupSession(executionSessionRepository);
+    const before = await executionSessionRepository.findById(SESSION_ID);
+
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository, executionPlanRepository, now: () => NOW },
+      baseJob({
+        status: "FAILED",
+        result: validResult({
+          failureReason: "could not confirm the session working copy is open in After Effects: TOOL_ERROR: [AE_NOT_CONNECTED] No live After Effects bridge heartbeat",
+          workingCopyFailureCode: "WORKING_COPY_NOT_OPENED",
+          workingProjectSha256: null
+        })
+      })
+    );
+
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.status).toBe(before?.status);
+    expect(session?.workingCopyTrusted).toBe(true);
+    expect(session?.completedScenePlanIds).toEqual(before?.completedScenePlanIds);
+  });
+
   it("marks workingCopyTrusted false for WORKING_COPY_SHA_MISMATCH and WORKING_COPY_UNEXPECTEDLY_MUTATED too, but NOT for SOURCE_PROJECT_MUTATED (about the source, not this session's working copy)", async () => {
     const executionPlanRepository = new InMemoryExecutionPlanRepository();
 
