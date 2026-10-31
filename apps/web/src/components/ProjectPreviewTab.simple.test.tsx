@@ -691,6 +691,27 @@ describe("Simple Preview tab - building the video", () => {
     screen.getByRole("button", { name: "Try again" });
   });
 
+  it("REAL 2026-10-31: a build that failed AFTER the first frame was approved (session FAILED) still offers Try again - not only 'Regenerate First Preview' while the notice says to press Try again", async () => {
+    const raw = "could not confirm the session working copy is open in After Effects: TOOL_ERROR: [AE_NOT_CONNECTED] No live After Effects bridge heartbeat";
+    const failed = { ...historyRow("EXECUTE_FRAME"), status: "FAILED", error: { code: "NOT_AVAILABLE", message: raw }, completedAt: new Date(Date.now() - 60_000).toISOString() };
+    const calls = stubApi({
+      ...baseHandlers({ session: approvedSession({ status: "FAILED", latestPreviewCapturedAt: new Date(Date.now() - 300_000).toISOString() }) }),
+      "GET /api/jobs": { status: 200, body: { jobs: [failed] } },
+      [`POST /api/projects/${PROJECT_ID}/execution-sessions`]: { status: 201, body: { session: sessionFixture({ id: "77777777-7777-7777-7777-777777777777", status: "PREPARING", completedScenePlanIds: [], hasPreview: false, latestPreviewScenePlanId: null, latestPreviewCapturedAt: null, latestWorkingProjectSha256: null }) } },
+      "POST /api/jobs": dispatched("EXECUTE_FRAME"),
+      [`GET /api/jobs/${JOB_ID}`]: { status: 200, body: jobFixture("EXECUTE_FRAME", "RUNNING") }
+    });
+    renderPreview();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.querySelector("pre")?.textContent).toBe(raw);
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(retry);
+    await waitFor(() => expect(dispatchesOf(calls, "EXECUTE_FRAME")).toHaveLength(1));
+    expect(calls.some((call) => call.method === "POST" && call.url === `/api/projects/${PROJECT_ID}/execution-sessions`)).toBe(true);
+  });
+
   it("a failed build older than the frame on screen is not brought up again", async () => {
     const failed = { ...historyRow("EXECUTE_FRAME"), status: "FAILED", error: { code: "NOT_AVAILABLE", message: "old" }, completedAt: new Date(Date.now() - 3_600_000).toISOString() };
     stubApi({

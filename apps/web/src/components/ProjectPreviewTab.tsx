@@ -789,7 +789,14 @@ export function ProjectPreviewTab(): ReactElement | null {
     // does this frame look right? - and, after a yes, one more step below.
     // Everything removed here is still in Advanced, unchanged.
     const frameApproved = activeSession?.firstPreviewApproved ?? false;
-    const wasNotApproved = session !== null && session.status === "FAILED" && canRegeneratePreview;
+    // REAL 2026-10-31 (QA, client's template): the build of the second scene
+    // failed after the first frame had been approved, the session was marked
+    // FAILED, and this page offered only "Regenerate First Preview" - the
+    // notice said "Press Try again" and there was no Try again. A session
+    // that failed AFTER its frame was approved is a stopped build, not a
+    // refused frame: the way on is to build again (a fresh session).
+    const buildFailedAfterApproval = session !== null && session.status === "FAILED" && session.firstPreviewApproved === true;
+    const wasNotApproved = session !== null && session.status === "FAILED" && canRegeneratePreview && !buildFailedAfterApproval;
     // A failed build read back from the history counts as this page's own
     // failure, unless a frame made after it exists or a build is under way.
     const staleFailedBuild =
@@ -797,7 +804,7 @@ export function ProjectPreviewTab(): ReactElement | null {
         ? ({ kind: "job", message: lastFrameBuild.message } satisfies TabFailure)
         : null;
     const failure = ownFailure ?? staleFailedBuild;
-    const showExecuteButton = !awaitingFrameDecision && !allScenesComplete && !canRegeneratePreview && !isBuilding;
+    const showExecuteButton = !awaitingFrameDecision && !allScenesComplete && (!canRegeneratePreview || buildFailedAfterApproval) && !isBuilding;
     return (
       <div className="overview-grid">
         <Card className="overview-section first-frame-card">
