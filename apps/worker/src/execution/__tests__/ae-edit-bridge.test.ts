@@ -242,6 +242,27 @@ describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-
     // Exactly what the read-only "what is open" script returns - including `dirty`, which an open's own result never carries.
     const opened = (path: string): MutationCallResult => ({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: path, openedName: "working-copy.aep", dirty: false } }) });
 
+    it("REAL 2026-10-31: the bridge is down when the open is asked ([AE_NOT_CONNECTED]) - the open is retried once the bridge is back, instead of failing the job", async () => {
+      const down: MutationCallResult = { ok: false, error: { code: "TOOL_ERROR", message: "[AE_NOT_CONNECTED] No live After Effects bridge heartbeat" } };
+      const openedByOpen: MutationCallResult = { ok: true, content: hostRunJsxContent({ ok: true, previousValue: { closedUnsavedCopy: false }, resultingValue: { openedPath: WORKING_COPY_PATH } }) };
+      const { bridge, scripts } = sequenceBridge([down, down, openedByOpen]);
+      bridge.bridgeDownRetryIntervalMs = 0;
+      expect(await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true })).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });
+      expect(scripts).toHaveLength(3);
+      expect(scripts.every((script) => script.includes("app.open("))).toBe(true);
+    });
+
+    it("the bridge stays down past the bounded retries: the job fails with the bridge's own message", async () => {
+      const down: MutationCallResult = { ok: false, error: { code: "TOOL_ERROR", message: "[AE_NOT_CONNECTED] No live After Effects bridge heartbeat" } };
+      const { bridge, scripts } = sequenceBridge([down]);
+      bridge.bridgeDownRetryIntervalMs = 0;
+      bridge.bridgeDownRetries = 2;
+      const result = await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true });
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.failureReason).toContain("[AE_NOT_CONNECTED]");
+      expect(scripts).toHaveLength(3);
+    });
+
     it("the open times out, AE finishes meanwhile: the next question finds the working copy open", async () => {
       const { bridge, scripts } = sequenceBridge([timeout, timeout, opened(WORKING_COPY_PATH)]);
       expect(await bridge.openProject(WORKING_COPY_PATH, { discardUnsavedChanges: true })).toEqual({ ok: true, openedPath: WORKING_COPY_PATH });

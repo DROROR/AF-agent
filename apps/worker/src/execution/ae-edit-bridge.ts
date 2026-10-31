@@ -255,6 +255,16 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
   /** How often, and how far apart, a timed-out open is followed by asking what is open. Public so tests can shorten them. */
   slowOpenPolls = 6;
   slowOpenPollIntervalMs = 10_000;
+  /**
+   * REAL 2026-10-31 (QA, the client's 4K template on FAHADNAKASH): after a
+   * heavy job the bridge to After Effects drops for a minute or two
+   * ([AE_NOT_CONNECTED]) and the worker's own reconnect brings it back - but
+   * the NEXT job's open ran into that gap and failed at once, ending the
+   * build. An open that finds the bridge down is retried, bounded (at most
+   * five minutes), instead of failing the job. Public so tests can shorten.
+   */
+  bridgeDownRetries = 10;
+  bridgeDownRetryIntervalMs = 30_000;
 
   constructor(config: { aeMcpPath: string } | { createMutationClient: () => AeMutationClient }) {
     this.createMutationClient =
@@ -266,6 +276,10 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
   async openProject(expectedPath: string, options?: OpenProjectOptions): Promise<OpenProjectResult> {
     const script = options?.discardUnsavedChanges ? buildReopenProjectFromDiskScript(expectedPath) : buildOpenProjectScript(expectedPath);
     let outcome = await this.runScript(script);
+    for (let wait = 1; !outcome.ok && outcome.failureReason.includes("[AE_NOT_CONNECTED]") && wait <= this.bridgeDownRetries; wait++) {
+      await new Promise((resolve) => setTimeout(resolve, this.bridgeDownRetryIntervalMs));
+      outcome = await this.runScript(script);
+    }
     // A slow open is not a failed open (2026-10-04): when the call itself
     // ran out of the bridge's time, After Effects is usually still opening
     // the file. It is ASKED what it has open - never told to open again,
