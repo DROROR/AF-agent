@@ -1467,6 +1467,42 @@ describe("executeSceneEdit", () => {
       });
     });
 
+    it("REAL 2026-11-01: the next scene of a session finds the hash-verified working copy already open and clean - it is used as it is, never closed and reopened", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      // Scene 1: prepares and saves the working copy.
+      const first = await executeSceneEdit(deps(new FakeAeEditBridge(alwaysSucceed), undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-y", operations: [] }));
+      expect(first.failureReason).toBeNull();
+      const workingPath = first.workingProjectPath ?? "";
+      // Scene 2: After Effects still has that exact file open, clean.
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      // The fake saves to the path it was asked to open; here nothing opens it, so tell it which file After Effects has.
+      (bridge as unknown as { workingCopyPath: string }).workingCopyPath = workingPath;
+      (bridge as unknown as { describeOpenProject: () => Promise<unknown> }).describeOpenProject = async () => ({ ok: true, openedPath: workingPath, dirty: false });
+      const second = await executeSceneEdit(
+        deps(bridge, undefined, workRoot),
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-y", expectedWorkingProjectSha256: first.workingProjectSha256 })
+      );
+      expect(second.failureReason).toBeNull();
+      expect(bridge.openProjectCalls).toEqual([]);
+      expect(bridge.calls.length).toBeGreaterThan(0);
+    });
+
+    it("REAL 2026-11-01: the same next scene with the working copy open but DIRTY still reopens it from disk", async () => {
+      const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
+      const workRoot = join(root, "work-root");
+      const first = await executeSceneEdit(deps(new FakeAeEditBridge(alwaysSucceed), undefined, workRoot), makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-z", operations: [] }));
+      const workingPath = first.workingProjectPath ?? "";
+      const bridge = new FakeAeEditBridge(alwaysSucceed);
+      (bridge as unknown as { describeOpenProject: () => Promise<unknown> }).describeOpenProject = async () => ({ ok: true, openedPath: workingPath, dirty: true });
+      const second = await executeSceneEdit(
+        deps(bridge, undefined, workRoot),
+        makeRequest({ sourceProjectPath: sourcePath, sourceProjectSha256: sourceSha, executionSessionId: "session-z", expectedWorkingProjectSha256: first.workingProjectSha256 })
+      );
+      expect(second.failureReason).toBeNull();
+      expect(bridge.openProjectOptions).toEqual([{ discardUnsavedChanges: true }]);
+    });
+
     it("a fresh run opens the working copy from disk (discarding unsaved edits); a genuine resume keeps the open project", async () => {
       const { sourcePath, root, sha256: sourceSha } = makeSourceProject();
       const workRoot = join(root, "work-root");

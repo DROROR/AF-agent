@@ -314,9 +314,27 @@ export async function executeSceneEdit(deps: SceneEditExecutorDeps, request: Exe
     }
   }
   const startsFresh = checkpoint.completedOperationIndices.length === 0;
+  // REAL 2026-11-01 (QA, the client's 4K template on FAHADNAKASH): the first
+  // frame built in 46 s; every later scene closed the just-saved working copy
+  // and reopened it from disk, and on that machine After Effects hung on that
+  // close+reopen until the bridge was lost for good (three days of
+  // "could not confirm the session working copy is open"). When the scene
+  // starts on a copy whose on-disk hash was just verified against the
+  // session's record, and After Effects reports exactly that file open and
+  // clean (the previous scene saved it), there is nothing to discard and
+  // nothing to reload: the open project IS the verified file. A fresh
+  // session, a dirty project, a different file, or no answer still reopens
+  // from disk exactly as before.
+  let alreadyOpenAndClean = false;
+  if (startsFresh && !captureOnlyResume && request.previewOnly !== true && request.expectedWorkingProjectSha256 !== null && deps.aeEditBridge.describeOpenProject) {
+    const open = await deps.aeEditBridge.describeOpenProject();
+    alreadyOpenAndClean = open.ok && open.openedPath !== null && windowsPathsEqual(open.openedPath, workingCopy.workingProjectPath) && open.dirty === false;
+  }
   // A capture-only resume also reopens from disk: the pinned, hash-verified
   // saved file is the authority, never whatever is still open in AE.
-  const opened = await deps.aeEditBridge.openProject(workingCopy.workingProjectPath, { discardUnsavedChanges: startsFresh || captureOnlyResume });
+  const opened = alreadyOpenAndClean
+    ? ({ ok: true, openedPath: workingCopy.workingProjectPath } as const)
+    : await deps.aeEditBridge.openProject(workingCopy.workingProjectPath, { discardUnsavedChanges: startsFresh || captureOnlyResume });
   if (!opened.ok) {
     checkpoint = markFailed(checkpoint, `could not confirm the session working copy is open in After Effects: ${opened.failureReason}`, deps.now());
     return finish({
