@@ -142,7 +142,7 @@ export async function executeCreateFullPreview(deps: CreateFullPreviewExecutorDe
     return finish(`aerender could not be started: ${runResult.spawnError ?? "unknown spawn failure"}`, null);
   }
   if (runResult.timedOut) {
-    return finish("aerender timed out and was terminated", null);
+    return finish(`aerender was terminated because ${runResult.timedOutReason ?? "it timed out"}`, null);
   }
   if (runResult.exitCode !== 0) {
     const stderrExcerpt = runResult.stderr.slice(-2000);

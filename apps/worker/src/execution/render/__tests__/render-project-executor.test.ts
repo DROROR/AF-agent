@@ -106,6 +106,7 @@ function alwaysSucceedingRunner(bytes = 10): FakeAerenderRunner {
     exitCode: 0,
     signal: null,
     timedOut: false,
+    timedOutReason: null,
     stdout: "rendered ok",
     stderr: "",
     stdoutTruncated: false,
@@ -307,6 +308,7 @@ describe("executeRenderProject", () => {
       exitCode: null,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "",
       stderr: "",
       stdoutTruncated: false,
@@ -334,6 +336,7 @@ describe("executeRenderProject", () => {
       exitCode: null,
       signal: "SIGKILL",
       timedOut: true,
+      timedOutReason: "it printed nothing for 20 minutes",
       stdout: "",
       stderr: "",
       stdoutTruncated: false,
@@ -348,7 +351,7 @@ describe("executeRenderProject", () => {
       request
     );
 
-    expect(result.failureReason).toContain("timed out");
+    expect(result.failureReason).toContain("terminated because");
   });
 
   it("fails when aerender exits non-zero, including a stderr excerpt", async () => {
@@ -360,6 +363,7 @@ describe("executeRenderProject", () => {
       exitCode: 2,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "",
       stderr: "ERROR: missing font",
       stdoutTruncated: false,
@@ -387,6 +391,7 @@ describe("executeRenderProject", () => {
       exitCode: 0,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "",
       stderr: "",
       stdoutTruncated: false,
@@ -418,6 +423,7 @@ describe("executeRenderProject", () => {
       exitCode: 0,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "aerender version 26.3x87\r\nPROGRESS: Launching After Effects...\r\nPROGRESS: Adding specified comp to Render Queue\r\naerender ERROR: No render settings template was found with the given name.\r\n",
       stderr: "",
       stdoutTruncated: false,

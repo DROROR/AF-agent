@@ -228,7 +228,7 @@ export async function executeRenderProject(
         return finish();
       }
       if (runResult.timedOut) {
-        checkpoint = markFailed(checkpoint, "aerender timed out and was terminated", deps.now());
+        checkpoint = markFailed(checkpoint, `aerender was terminated because ${runResult.timedOutReason ?? "it timed out"}`, deps.now());
         return finish();
       }
       if (runResult.exitCode !== 0) {

@@ -92,6 +92,7 @@ function alwaysSucceedingRunner(bytes = 10): FakeAerenderRunner {
     exitCode: 0,
     signal: null,
     timedOut: false,
+    timedOutReason: null,
     stdout: "rendered ok",
     stderr: "",
     stdoutTruncated: false,
@@ -256,6 +257,7 @@ describe("executeCreateFullPreview", () => {
       exitCode: null,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "",
       stderr: "",
       stdoutTruncated: false,
@@ -281,6 +283,7 @@ describe("executeCreateFullPreview", () => {
       exitCode: null,
       signal: "SIGKILL",
       timedOut: true,
+      timedOutReason: "it printed nothing for 20 minutes",
       stdout: "",
       stderr: "",
       stdoutTruncated: false,
@@ -294,7 +297,7 @@ describe("executeCreateFullPreview", () => {
       makeRequest(fixture)
     );
 
-    expect(result.failureReason).toContain("timed out");
+    expect(result.failureReason).toContain("terminated because");
   });
 
   it("fails when aerender exits non-zero, including a stderr excerpt", async () => {
@@ -305,6 +308,7 @@ describe("executeCreateFullPreview", () => {
       exitCode: 2,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "",
       stderr: "ERROR: missing font",
       stdoutTruncated: false,
@@ -330,6 +334,7 @@ describe("executeCreateFullPreview", () => {
       exitCode: 0,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "",
       stderr: "",
       stdoutTruncated: false,
@@ -366,6 +371,7 @@ describe("executeCreateFullPreview", () => {
       exitCode: 0,
       signal: null,
       timedOut: false,
+      timedOutReason: null,
       stdout: "aerender: rendering...\n",
       stderr: "aerender: *** Cannot find render settings template best setting ***\n",
       stdoutTruncated: false,
