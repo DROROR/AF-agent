@@ -1,4 +1,5 @@
 import { executeSceneEditRequestSchema } from "@dyo/schemas";
+import { isJobStillBeingWorkedOn } from "../../domain/job/rules.js";
 import { JobConflictError, JobNotFoundError, PayloadTooLargeError, UnauthorizedError, UnsupportedMediaTypeError } from "../../errors/app-error.js";
 import type { JobRepository } from "../../domain/job/types.js";
 import type { WorkerRepository } from "../../domain/worker/types.js";
@@ -69,7 +70,7 @@ export async function uploadPreview(
     // reportJobStatus/reportJobCheckpoint/uploadRenderArtifact.
     throw new JobNotFoundError(jobId);
   }
-  if (job.status !== "RUNNING") {
+  if (!isJobStillBeingWorkedOn(job)) {
     throw new JobConflictError(`Job ${jobId} is not RUNNING (current status: ${job.status}) - preview uploads are only accepted while a job is running`);
   }
   if (job.operation !== "EXECUTE_FRAME") {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canClaimAnotherJob, isJobTerminal, isValidJobStatusTransition } from "./rules.js";
+import { canClaimAnotherJob, isJobStillBeingWorkedOn, isJobTerminal, isValidJobStatusTransition } from "./rules.js";
 
 describe("isJobTerminal", () => {
   it("treats SUCCEEDED/FAILED/CANCELLED as terminal", () => {
@@ -56,5 +56,17 @@ describe("canClaimAnotherJob", () => {
 
   it("refuses claiming when active count exceeds maxConcurrency", () => {
     expect(canClaimAnotherJob(2, 1)).toBe(false);
+  });
+});
+
+describe("isJobStillBeingWorkedOn", () => {
+  it("RUNNING, and FAILED by the sweep (WORKER_OFFLINE), may still deliver results", () => {
+    expect(isJobStillBeingWorkedOn({ status: "RUNNING", error: null })).toBe(true);
+    expect(isJobStillBeingWorkedOn({ status: "FAILED", error: { code: "WORKER_OFFLINE" } })).toBe(true);
+  });
+  it("a job that genuinely failed, or finished, may not", () => {
+    expect(isJobStillBeingWorkedOn({ status: "FAILED", error: { code: "NOT_AVAILABLE" } })).toBe(false);
+    expect(isJobStillBeingWorkedOn({ status: "SUCCEEDED", error: null })).toBe(false);
+    expect(isJobStillBeingWorkedOn({ status: "QUEUED", error: null })).toBe(false);
   });
 });

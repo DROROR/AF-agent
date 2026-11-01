@@ -123,6 +123,29 @@ describe("recordExecuteFrameResultIfApplicable", () => {
     expect(session?.completedScenePlanIds).toEqual([]);
   });
 
+  it("REAL 2026-11-01: edits applied and saved, only the preview upload failed - the scene is recorded and the session's hash advances, so the next scene does not fail on a mismatch", async () => {
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupPlan(executionPlanRepository);
+    await setupSession(executionSessionRepository);
+    const saved = "c".repeat(64);
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository, executionPlanRepository, now: () => NOW },
+      baseJob({
+        status: "FAILED",
+        result: validResult({
+          workingProjectSha256: saved,
+          checkpoint: { completedOperationIndices: [0], checkpointBeforeAt: null, checkpointAfterAt: NOW.toISOString(), failureReason: null, savedWorkingProjectSha256: saved },
+          previewFramePath: null,
+          failureReason: 'preview capture succeeded but upload failed: {"code":"CONFLICT"}'
+        })
+      })
+    );
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.completedScenePlanIds).toEqual(["scene-1"]);
+    expect(session?.latestWorkingProjectSha256).toBe(saved);
+  });
+
   it("never persists when workingProjectSha256 is null (failure before a working copy could be prepared)", async () => {
     const executionPlanRepository = new InMemoryExecutionPlanRepository();
     const executionSessionRepository = new InMemoryExecutionSessionRepository();

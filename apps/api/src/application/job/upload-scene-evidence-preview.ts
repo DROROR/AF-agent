@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isJobStillBeingWorkedOn } from "../../domain/job/rules.js";
 import { sceneEvidenceRequestSchema } from "@dyo/schemas";
 import { JobConflictError, JobNotFoundError, PayloadTooLargeError, UnauthorizedError, UnsupportedMediaTypeError } from "../../errors/app-error.js";
 import type { JobRepository } from "../../domain/job/types.js";
@@ -59,7 +60,7 @@ export async function uploadSceneEvidencePreview(
   if (!job || job.workerId !== workerId) {
     throw new JobNotFoundError(jobId);
   }
-  if (job.status !== "RUNNING") {
+  if (!isJobStillBeingWorkedOn(job)) {
     throw new JobConflictError(`Job ${jobId} is not RUNNING (current status: ${job.status}) - scene-evidence preview uploads are only accepted while a job is running`);
   }
   if (job.operation !== "INSPECT_SCENE_EVIDENCE") {

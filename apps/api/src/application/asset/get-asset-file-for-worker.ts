@@ -1,4 +1,5 @@
 import { JobConflictError, JobNotFoundError, UnauthorizedError } from "../../errors/app-error.js";
+import { isJobStillBeingWorkedOn } from "../../domain/job/rules.js";
 import type { JobRepository } from "../../domain/job/types.js";
 import type { WorkerRepository } from "../../domain/worker/types.js";
 import type { AssetStorage } from "../../domain/asset-storage/types.js";
@@ -55,7 +56,7 @@ export async function getAssetFileForWorker(
     // reportJobStatus/reportJobCheckpoint/uploadRenderArtifact.
     throw new JobNotFoundError(jobId);
   }
-  if (job.status !== "RUNNING") {
+  if (!isJobStillBeingWorkedOn(job)) {
     throw new JobConflictError(`Job ${jobId} is not RUNNING (current status: ${job.status}) - asset downloads are only accepted while a job is running`);
   }
   if (job.operation !== "EXECUTE_FRAME") {

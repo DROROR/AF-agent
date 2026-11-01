@@ -109,7 +109,17 @@ export async function recordExecuteFrameResultIfApplicable(deps: RecordExecuteFr
     return;
   }
 
-  if (result.failureReason !== null || !result.workingProjectSha256) {
+  // REAL 2026-11-01: every edit applied and the working copy saved, only the
+  // preview's upload failed (the job had been swept meanwhile). The copy on
+  // disk IS the session's new state; refusing to record it leaves the next
+  // scene to fail on the hash mismatch. The scene counts as built; its frame
+  // can be captured again.
+  const savedButPreviewLost =
+    result.failureReason !== null &&
+    result.failureReason.startsWith("preview capture succeeded but upload failed") &&
+    result.workingProjectSha256 !== null &&
+    (result.checkpoint?.savedWorkingProjectSha256 ?? null) === result.workingProjectSha256;
+  if ((result.failureReason !== null && !savedButPreviewLost) || !result.workingProjectSha256) {
     return;
   }
 

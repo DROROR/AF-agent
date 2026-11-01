@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isJobStillBeingWorkedOn } from "../../domain/job/rules.js";
 import { renderProjectRequestSchema, type RenderOutputVariant } from "@dyo/schemas";
 import { JobConflictError, JobNotFoundError, UnauthorizedError, UnsupportedMediaTypeError, PayloadTooLargeError } from "../../errors/app-error.js";
 import type { JobRepository } from "../../domain/job/types.js";
@@ -64,7 +65,7 @@ export async function uploadRenderArtifact(
     // reportJobStatus/reportJobCheckpoint.
     throw new JobNotFoundError(jobId);
   }
-  if (job.status !== "RUNNING") {
+  if (!isJobStillBeingWorkedOn(job)) {
     throw new JobConflictError(`Job ${jobId} is not RUNNING (current status: ${job.status}) - artifact uploads are only accepted while a job is running`);
   }
   if (job.operation !== "RENDER") {
