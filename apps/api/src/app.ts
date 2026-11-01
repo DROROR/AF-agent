@@ -43,6 +43,7 @@ export interface AppDependencies {
     Env,
     | "WORKER_REGISTRATION_SECRET"
     | "WORKER_HEARTBEAT_STALE_AFTER_MS"
+    | "JOB_STALE_AFTER_MS"
     | "LOG_LEVEL"
     | "ASSET_MAX_UPLOAD_BYTES"
     | "RENDER_ARTIFACT_MAX_UPLOAD_BYTES"
@@ -114,6 +115,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     ...(deps.now ? { now: deps.now } : {})
   });
   registerJobRoutes(app, {
+    jobStaleAfterMs: deps.env.JOB_STALE_AFTER_MS,
     jobRepository: deps.jobRepository,
     workerRepository: deps.workerRepository,
     projectRepository: deps.projectRepository,

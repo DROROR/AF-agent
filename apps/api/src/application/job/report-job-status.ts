@@ -45,7 +45,17 @@ export async function reportJobStatus(
     throw new JobNotFoundError(jobId);
   }
 
-  if (!isValidJobStatusTransition(existing.status, request.status)) {
+  // REAL 2026-11-01 (QA, worker FAHADNAKASH): the sweep marked a RUNNING job
+  // FAILED (WORKER_OFFLINE) while the worker's machine was stalled; the
+  // worker then finished the job - saved the working copy, captured the
+  // frame - and its SUCCEEDED report was refused as an invalid transition.
+  // The working copy on disk had moved on without the session knowing, and
+  // the next scene failed with WORKING_COPY_SHA_MISMATCH, ending the
+  // session. A sweep verdict is a guess about an absent worker; the
+  // worker's own terminal report is what actually happened and wins.
+  const sweptWhileRunning = existing.status === "FAILED" && existing.error?.code === "WORKER_OFFLINE";
+  const terminalReport = request.status === "SUCCEEDED" || request.status === "FAILED";
+  if (!(sweptWhileRunning && terminalReport) && !isValidJobStatusTransition(existing.status, request.status)) {
     throw new JobConflictError(
       `Cannot transition job ${jobId} from ${existing.status} to ${request.status}`
     );

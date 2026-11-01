@@ -8,6 +8,16 @@ const envSchema = z.object({
     .string()
     .min(16, "WORKER_REGISTRATION_SECRET must be at least 16 characters"),
   WORKER_HEARTBEAT_STALE_AFTER_MS: z.coerce.number().int().positive().default(30_000),
+  /**
+   * How long a CLAIMED/RUNNING job may go without its worker's heartbeat
+   * before the sweep marks it FAILED (WORKER_OFFLINE). REAL 2026-11-01: a
+   * worker's machine starved under a 4K After Effects save and the worker
+   * process itself stalled for seven minutes; with the 30 s heartbeat window
+   * the sweep failed the job the worker was still running and then finished.
+   * The dashboard's ONLINE/OFFLINE keeps the short window; a job gets ten
+   * minutes.
+   */
+  JOB_STALE_AFTER_MS: z.coerce.number().int().positive().default(600_000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   /**

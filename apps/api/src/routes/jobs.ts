@@ -46,6 +46,8 @@ export interface JobsRouteDeps {
   renderArtifactUploadRepository: RenderArtifactUploadRepository;
   fullPreviewArtifactRepository: FullPreviewArtifactRepository;
   staleAfterMs: number;
+  /** The job sweep's own window (JOB_STALE_AFTER_MS) - longer than the worker heartbeat's. Defaults to ten minutes. */
+  jobStaleAfterMs?: number;
   userRepository: UserRepository;
   sessionRepository: SessionRepository;
   now?: () => Date;
@@ -189,7 +191,7 @@ export function registerJobRoutes(app: FastifyInstance, deps: JobsRouteDeps): vo
     }
 
     const job = await claimNextJob(
-      { jobRepository: deps.jobRepository, workerRepository: deps.workerRepository, verifyToken, now, staleAfterMs: deps.staleAfterMs },
+      { jobRepository: deps.jobRepository, workerRepository: deps.workerRepository, verifyToken, now, staleAfterMs: deps.jobStaleAfterMs ?? 600_000 },
       workerId,
       token
     );

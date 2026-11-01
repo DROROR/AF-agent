@@ -87,6 +87,28 @@ describe("reportJobStatus", () => {
     ).rejects.toThrow(JobConflictError);
   });
 
+  it("REAL 2026-11-01: a job the sweep marked FAILED (WORKER_OFFLINE) while the worker was still running it accepts the worker's own SUCCEEDED report - what happened wins over the guess", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const { workerId, token, jobId } = await setupClaimedJob(workerRepository, jobRepository);
+    await reportJobStatus(deps(jobRepository, workerRepository), workerId, jobId, token, { status: "RUNNING" });
+    // The sweep's verdict while the worker's machine was stalled.
+    await jobRepository.updateStatus(jobId, workerId, { expectedCurrentStatus: "RUNNING", status: "FAILED", error: { code: "WORKER_OFFLINE", message: "worker heartbeat went stale while this job was active" } }, new Date());
+
+    const dto = await reportJobStatus(deps(jobRepository, workerRepository), workerId, jobId, token, { status: "SUCCEEDED", result: { ok: true } });
+    expect(dto.status).toBe("SUCCEEDED");
+    expect(dto.result).toEqual({ ok: true });
+  });
+
+  it("a job that genuinely FAILED (its own error, not the sweep's) still cannot be reported again", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const { workerId, token, jobId } = await setupClaimedJob(workerRepository, jobRepository);
+    await reportJobStatus(deps(jobRepository, workerRepository), workerId, jobId, token, { status: "RUNNING" });
+    await reportJobStatus(deps(jobRepository, workerRepository), workerId, jobId, token, { status: "FAILED", error: { code: "NOT_AVAILABLE", message: "x" } });
+    await expect(reportJobStatus(deps(jobRepository, workerRepository), workerId, jobId, token, { status: "SUCCEEDED", result: { ok: true } })).rejects.toThrow(JobConflictError);
+  });
+
   it("stores a typed error and marks completedAt on a FAILED report", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);
