@@ -36,6 +36,15 @@ describe("ApiClient.registerWorker", () => {
     );
   });
 
+  it("REAL 2026-11-01: every request asks the server to close the connection - a pooled connection the router dropped silently must never be reused", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(201, { workerId: "11111111-1111-1111-1111-111111111111", workerToken: "t" }));
+    const client = new ApiClient({ apiUrl: "https://api.example.com", fetchImpl });
+    await client.registerWorker("registration-secret", { name: "worker-a", maxConcurrency: 1, capabilities: ["CHECK_HEALTH"] });
+    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).connection).toBe("close");
+    expect((init.headers as Record<string, string>).authorization).toBe("Bearer registration-secret");
+  });
+
   it("throws UnauthorizedApiError on a 401", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(401, { error: { code: "UNAUTHORIZED" } }));
     const client = new ApiClient({ apiUrl: "https://api.example.com", fetchImpl });

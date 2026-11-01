@@ -59,7 +59,19 @@ export class ApiClient {
 
   constructor(config: ApiClientConfig) {
     this.apiUrl = config.apiUrl;
-    this.fetchImpl = config.fetchImpl ?? fetch;
+    const base = config.fetchImpl ?? fetch;
+    // REAL 2026-11-01 (worker FAHADNAKASH, the client's 4K template): after
+    // every job the worker's heartbeat failed with "Failed to reach" for
+    // 10-12 minutes while the same machine could open a fresh HTTPS
+    // connection to the API in half a second - the API saw nothing from the
+    // worker in that window. Node's fetch keeps one pooled connection per
+    // origin; a connection the router dropped silently after a large upload
+    // looks open to the process, and every request queued on it waits out
+    // the OS's own retransmission timeout. No request is ever reused on a
+    // pooled connection: each one opens its own and asks the server to close
+    // it. A few milliseconds per call, never a dead socket.
+    this.fetchImpl = (input, init) =>
+      base(input, { ...init, headers: { ...((init?.headers as Record<string, string> | undefined) ?? {}), connection: "close" } });
   }
 
   async registerWorker(
