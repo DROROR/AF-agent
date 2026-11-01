@@ -242,6 +242,34 @@ describe("HeroicSwanAeEditBridge.openProject (CRITICAL SAFETY FIX, live QA 2026-
     // Exactly what the read-only "what is open" script returns - including `dirty`, which an open's own result never carries.
     const opened = (path: string): MutationCallResult => ({ ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: path, openedName: "working-copy.aep", dirty: false } }) });
 
+    it("REAL 2026-11-01: a save that outruns the bridge's 30 s is asked about, and counts as done once After Effects reports the project open and clean", async () => {
+      const down: MutationCallResult = { ok: false, error: { code: "TOOL_ERROR", message: "[AE_NOT_CONNECTED] No live After Effects bridge heartbeat" } };
+      const { bridge, scripts } = sequenceBridge([timeout, down, opened(WORKING_COPY_PATH)]);
+      bridge.slowSavePollIntervalMs = 0;
+      expect(await bridge.saveProject()).toEqual({ ok: true, resultingValue: WORKING_COPY_PATH });
+      expect(scripts).toHaveLength(3);
+      expect(scripts[0]).toContain("app.project.save()");
+      expect(scripts.slice(1).every((script) => !script.includes("app.project.save()"))).toBe(true);
+    });
+
+    it("REAL 2026-11-01: a slow save after which the project is still dirty is a failed save", async () => {
+      const stillDirty: MutationCallResult = { ok: true, content: hostRunJsxContent({ ok: true, resultingValue: { openedPath: WORKING_COPY_PATH, openedName: "working-copy.aep", dirty: true } }) };
+      const { bridge } = sequenceBridge([timeout, stillDirty]);
+      bridge.slowSavePollIntervalMs = 0;
+      const result = await bridge.saveProject();
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.failureReason).toContain("still reports the project as unsaved");
+    });
+
+    it("REAL 2026-11-01: a save whose bridge never answers again fails after the bounded questions", async () => {
+      const { bridge, scripts } = sequenceBridge([timeout]);
+      bridge.slowSavePollIntervalMs = 0;
+      bridge.slowSavePolls = 3;
+      const result = await bridge.saveProject();
+      expect(result.ok).toBe(false);
+      expect(scripts).toHaveLength(4);
+    });
+
     it("REAL 2026-10-31: the bridge is down when the open is asked ([AE_NOT_CONNECTED]) - the open is retried once the bridge is back, instead of failing the job", async () => {
       const down: MutationCallResult = { ok: false, error: { code: "TOOL_ERROR", message: "[AE_NOT_CONNECTED] No live After Effects bridge heartbeat" } };
       const openedByOpen: MutationCallResult = { ok: true, content: hostRunJsxContent({ ok: true, previousValue: { closedUnsavedCopy: false }, resultingValue: { openedPath: WORKING_COPY_PATH } }) };

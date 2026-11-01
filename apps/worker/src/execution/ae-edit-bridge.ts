@@ -415,13 +415,47 @@ export class HeroicSwanAeEditBridge implements AeEditBridge {
     };
   }
 
+  /** How often, and how far apart, a timed-out save is followed by asking whether the project is now clean. Public so tests can shorten them. */
+  slowSavePolls = 30;
+  slowSavePollIntervalMs = 10_000;
+
   async saveProject(): Promise<SaveProjectResult> {
     const script = buildSaveProjectScript();
     const outcome = await this.runScript(script);
-    if (!outcome.ok) {
+    if (outcome.ok) {
+      return { ok: true, resultingValue: outcome.resultingValue ?? null };
+    }
+    // REAL 2026-11-01 (QA, the client's 4K template on FAHADNAKASH): saving
+    // the 1.7 GB working copy takes longer than the bridge's 30 s, After
+    // Effects is unreachable while it writes, and the job failed with "working
+    // copy save failed: [AE_TIMEOUT]" - the save itself finished a minute
+    // later. Like a slow open (2026-10-04), a slow save is asked about, never
+    // repeated: once After Effects answers that the project is open and
+    // clean, the save is done; a project that is still dirty means the save
+    // did not happen; no answer within the bound fails with the bridge's own
+    // message. The executor's own hash of the saved file still decides
+    // whether the bytes changed.
+    const slow = outcome.failureReason.includes("[AE_TIMEOUT]") || outcome.failureReason.includes("[AE_NOT_CONNECTED]");
+    if (!slow) {
       return { ok: false, failureReason: outcome.failureReason };
     }
-    return { ok: true, resultingValue: outcome.resultingValue ?? null };
+    let lastReason = outcome.failureReason;
+    for (let attempt = 1; attempt <= this.slowSavePolls; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, this.slowSavePollIntervalMs));
+      const asked = await this.describeOpenProject();
+      if (!asked.ok) {
+        lastReason = asked.reason;
+        continue;
+      }
+      if (asked.openedPath !== null && asked.dirty === false) {
+        return { ok: true, resultingValue: asked.openedPath };
+      }
+      if (asked.dirty === true) {
+        return { ok: false, failureReason: `the save did not complete - After Effects still reports the project as unsaved (${lastReason})` };
+      }
+      lastReason = `After Effects answered without saying whether the project is saved (${lastReason})`;
+    }
+    return { ok: false, failureReason: lastReason };
   }
 
   /** Shared connect/run/parse/close pipeline for any FixedJsxScript - the one place that owns the mutation client's lifecycle. */
