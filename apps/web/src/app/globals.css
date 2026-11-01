@@ -1447,6 +1447,12 @@ thead th {
   display: block;
   width: 100%;
   height: auto;
+  /* 2026-11-01: a 4K frame (3840x2160) filled the whole card at page width
+     and the page scrolled off the screen before the question under it; the
+     picture now fits the viewport with its own height capped, never cropped. */
+  max-height: 60vh;
+  object-fit: contain;
+  background: #000;
   border-radius: 8px;
   margin-block: 0.75rem;
 }
@@ -2454,6 +2460,8 @@ a.workflow-stepper__step:hover {
 
 .video-artifact-player__video {
   width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
   border-radius: var(--radius-md);
   background: #000;
 }

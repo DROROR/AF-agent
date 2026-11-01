@@ -369,3 +369,7 @@ A plan edit updates the plan's `updatedAt`, which marks every scene's preview st
 ## 2026-10-30 - one checkbox to hide every text in a scene (client request, Dror)
 
 "Add a check mark that will hide all the text instead of going one by one." Today each text on a card has its own Keep / No text here buttons; a card with eleven texts needs eleven presses. Add one control per card (and one for the whole video) that records NO_TEXT for every undecided text at once, using the same SET_TEMPLATE_TEXT_DECISION records as the per-text buttons - nothing new server-side. Fits the client's two-flow use (our agent: colours and pictures; his own flow adds text).
+
+## 2026-11-01 - done: the first frame and the full video fit the screen
+
+On a 4K template the first frame filled the card at page width (3840 px source) and the page scrolled past the screen before the yes/no question; the frame and the full-video player are now capped to the viewport height (60 / 65 vh, contain, never cropped).
