@@ -14,7 +14,7 @@ import { ErrorState } from "./ErrorState";
 import { EmptyState } from "./EmptyState";
 import { LockedStepNotice } from "./LockedStepNotice";
 import { useLocale } from "./LocaleProvider";
-import { dispatchJob, fetchCurrentExecutionSession, fetchJobHistory, fetchJobStatus } from "../lib/projects-api-client";
+import { dispatchJob, fetchCurrentExecutionSession, fetchJobHistory, fetchJobStatus, fetchRenderOutputSuggestion } from "../lib/projects-api-client";
 import { useRenderArtifacts } from "../lib/use-render-artifacts";
 import { BusyNotice } from "./ui/BusyNotice";
 import { ProblemNotice } from "./ui/ProblemNotice";
@@ -66,7 +66,7 @@ import { FinalOutputsCard, VariantConfigCard } from "./ProjectRenderSettingsTab"
  */
 export function ProjectExportTab(): ReactElement | null {
   const { t } = useLocale();
-  const { project, plan, refetch } = useProjectWorkspaceContext();
+  const { project, plan, refetch, setRenderOutput } = useProjectWorkspaceContext();
   const { mode } = useWorkspaceMode();
   const [session, setSession] = useState<ExecutionSessionDto | null>(null);
   // Bumped when a render finishes, so the list of finished videos below is
@@ -102,6 +102,41 @@ export function ProjectExportTab(): ReactElement | null {
       cancelled = true;
     };
   }, [projectIdForEffect, refreshGuidance]);
+
+  // 2026-11-02, the client's own words: "we don't need that output module...
+  // too many sizes... simple, simple, simple". On the simple screens the
+  // landscape (YouTube) output is never a form: when it is not set up, or is
+  // set up against an older template, the server's own suggestion (this
+  // template's master composition, the machine's H.264) is saved here by
+  // itself - the same call the Preview tab's "Make my full video" makes.
+  const landscapeSaved = plan?.plan.renderOutputs.LANDSCAPE ?? null;
+  const landscapeNeedsSetup = plan !== null && project !== null && (landscapeSaved === null || landscapeSaved.sourceProjectSha256 !== project.manifest.sourceProject.sha256);
+  const isSimpleForSetup = mode === "simple";
+  const [autoSetupTried, setAutoSetupTried] = useState(false);
+  useEffect(() => {
+    if (!isSimpleForSetup || !landscapeNeedsSetup || autoSetupTried || !projectIdForEffect) {
+      return;
+    }
+    setAutoSetupTried(true);
+    let cancelled = false;
+    void fetchRenderOutputSuggestion(projectIdForEffect, "LANDSCAPE").then(async (result) => {
+      if (cancelled || !result.ok || !result.data) {
+        return;
+      }
+      const saved = await setRenderOutput("LANDSCAPE", {
+        manifestCompositionId: result.data.manifestCompositionId,
+        renderSettingsTemplateName: result.data.renderSettingsTemplateName,
+        outputModuleTemplateName: result.data.outputModuleTemplateName
+      });
+      if (!cancelled && saved.ok) {
+        void refetch();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSimpleForSetup, landscapeNeedsSetup, autoSetupTried, projectIdForEffect, setRenderOutput, refetch]);
+
 
   if (!project) {
     return null;
@@ -151,7 +186,7 @@ export function ProjectExportTab(): ReactElement | null {
             refreshGuidance();
           }}
         />
-        {needsSetup ? (
+        {needsSetup && !isSimple ? (
           <VariantConfigCard
             projectId={projectId}
             variant={variant}
@@ -161,7 +196,6 @@ export function ProjectExportTab(): ReactElement | null {
             session={session}
             renderReady={renderReady}
             showRenderAction={false}
-            hideTemplateFields={isSimple}
           />
         ) : null}
       </Fragment>
