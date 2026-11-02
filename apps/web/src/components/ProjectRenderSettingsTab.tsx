@@ -11,6 +11,7 @@ import {
   type RenderOutputVariant
 } from "@dyo/schemas";
 import type { RenderArtifactDto, RenderTemplatesResponse } from "@dyo/schemas";
+import { isAudioOnlyOutputModuleName, preferredOutputModuleName } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useRenderArtifacts } from "../lib/use-render-artifacts";
@@ -715,6 +716,18 @@ export function VariantConfigCard({
     void fetchRenderTemplates(projectId).then((result) => {
       if (!cancelled && result.ok) {
         setTemplates(result.data);
+        // REAL 2026-11-02: an empty Output Module field, filled from an
+        // alphabetical list, got "AIFF 48kHz" - audio only, no video ever.
+        // The H.264 one the machine has is the starting value instead.
+        if (result.data) {
+          const preferred = preferredOutputModuleName(result.data.outputModuleTemplateNames);
+          if (preferred) {
+            setOutputModuleTemplateName((current) => (current.trim() === "" || isAudioOnlyOutputModuleName(current) ? preferred : current));
+          }
+          if (result.data.renderSettingsTemplateNames.includes("Best Settings")) {
+            setRenderSettingsTemplateName((current) => (current.trim() === "" ? "Best Settings" : current));
+          }
+        }
       }
     });
     return () => {
@@ -884,7 +897,7 @@ export function VariantConfigCard({
             />
             {templates ? (
               <datalist id={`render-om-template-list-${variant}`}>
-                {templates.outputModuleTemplateNames.map((name) => (
+                {templates.outputModuleTemplateNames.filter((name) => !isAudioOnlyOutputModuleName(name)).map((name) => (
                   <option key={name} value={name} />
                 ))}
               </datalist>

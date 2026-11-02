@@ -89,6 +89,18 @@ describe("setRenderOutputConfig", () => {
     expect(result.plan.renderOutputs.LANDSCAPE?.compositionName).toBe("Landscape Master");
   });
 
+  it("REAL 2026-11-02: refuses an audio-only Output Module (\"AIFF 48kHz\") - it can never produce the video, and the failure would otherwise only surface when aerender ran", async () => {
+    const { projectRepository, executionPlanRepository, project } = await setup();
+
+    await expect(
+      setRenderOutputConfig({ executionPlanRepository, projectRepository, now: fixedNow }, project.projectId, "LANDSCAPE", {
+        manifestCompositionId: "comp-landscape",
+        renderSettingsTemplateName: "Best Settings",
+        outputModuleTemplateName: "AIFF 48kHz"
+      })
+    ).rejects.toThrow(/sound file only/);
+  });
+
   it("rejects a manifestCompositionId that does not match any real composition in the current manifest", async () => {
     const { projectRepository, executionPlanRepository, project } = await setup();
 

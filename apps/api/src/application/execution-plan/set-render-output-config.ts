@@ -1,4 +1,5 @@
 import type { ExecutionPlanResponse, RenderOutputConfig, RenderOutputVariant, SetRenderOutputConfigRequest } from "@dyo/schemas";
+import { isAudioOnlyOutputModuleName } from "@dyo/schemas";
 import { ExecutionPlanEditError, ExecutionPlanNotFoundError, ProjectNotFoundError, SourceShaMismatchError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -64,6 +65,15 @@ export async function setRenderOutputConfig(
   if (!composition) {
     throw new ExecutionPlanEditError(
       `manifestCompositionId "${request.manifestCompositionId}" does not match any composition in this project's current manifest`
+    );
+  }
+
+  // REAL 2026-11-02: "AIFF 48kHz" was saved as the Output Module and every
+  // full video failed because only a .aif was ever written - see
+  // isAudioOnlyOutputModuleName's own doc comment.
+  if (isAudioOnlyOutputModuleName(request.outputModuleTemplateName)) {
+    throw new ExecutionPlanEditError(
+      `The Output Module "${request.outputModuleTemplateName}" makes a sound file only, never a video. Choose an H.264 one - for example "H.264 - Match Render Settings - 15 Mbps".`
     );
   }
 

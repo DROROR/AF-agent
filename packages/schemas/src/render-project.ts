@@ -199,3 +199,34 @@ export const renderArtifactUploadResponseSchema = z.object({
   sha256: z.string()
 });
 export type RenderArtifactUploadResponse = z.infer<typeof renderArtifactUploadResponseSchema>;
+
+/**
+ * REAL 2026-11-02 (client project 08b28fd1, five "Make my full video" tries
+ * in twenty minutes): the Output Module field offered every template the
+ * client's After Effects has, alphabetically, and the first one was
+ * "AIFF 48kHz" - an audio-only module. aerender then wrote a .aif, the
+ * .mp4 never existed, and each try failed with "expected output file does
+ * not exist". An Output Module whose name says it makes sound only can
+ * never make the video this product exists for, so it is refused at Save
+ * (set-render-output-config.ts) and left out of the names the form offers
+ * (ProjectRenderSettingsTab.tsx). Name-based on purpose: After Effects
+ * reports template names only, never their format.
+ */
+const AUDIO_ONLY_OUTPUT_MODULE_PATTERN = /(^|[^a-z0-9])(aiff|wav|wave|mp3|audio only)([^a-z0-9]|$)/i;
+
+export function isAudioOnlyOutputModuleName(name: string): boolean {
+  return AUDIO_ONLY_OUTPUT_MODULE_PATTERN.test(name);
+}
+
+/**
+ * The Output Module to offer first: an H.264 one when the machine has any
+ * (the complete preview and every final output are H.264 MP4), otherwise
+ * the first name that is not audio-only, otherwise null.
+ */
+export function preferredOutputModuleName(names: readonly string[]): string | null {
+  const h264 = names.find((name) => /h\.?264/i.test(name) && !isAudioOnlyOutputModuleName(name));
+  if (h264) {
+    return h264;
+  }
+  return names.find((name) => !isAudioOnlyOutputModuleName(name)) ?? null;
+}
