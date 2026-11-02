@@ -87,7 +87,8 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
       (layer) =>
         layer.enabled !== false &&
         layer.guideLayer !== true &&
-        facts.layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${layer.index}`)?.detail?.adjustmentLayer !== true
+        facts.layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${layer.index}`)?.detail?.adjustmentLayer !== true &&
+        !isPreRenderedPassBesideHolder(layer, composition, compositionById)
     );
     return renderedLayers.map((layer) => {
       const classification = classifyPlaceholder(layer);
@@ -365,6 +366,64 @@ function collectMaskedCompositionIds(
     }
   }
   return masked;
+}
+
+/**
+ * REAL 2026-11-02 (the client's "app promo" template, scenes 03-06, and the
+ * same complaint on his previous project): each phone is a PRE-RENDERED
+ * image sequence of the hardware, and the screen is a "Holder" composition
+ * the size of a phone screen whose only content is switched off - the
+ * author's instruction being "put your screen in here". Nothing inside it
+ * could ever be a placeholder, so inspection listed the pre-rendered phone
+ * passes as the video slots instead, and the client's screenshots replaced
+ * the phones: a flat picture where the mockup used to be.
+ *
+ * An EMPTY HOLDER is a composition that draws nothing (every layer and every
+ * nested composition in it switched off) and is not the scene's own size (a
+ * scene-sized empty composition is a spacer, never a window). The precomp
+ * layer that places it IS the slot: its own transform, parent and matte are
+ * what put the picture on the phone's screen. A pre-rendered pass beside it
+ * - footage exactly the composition's own size - is hardware, never a slot.
+ * Both are AE facts: switches, sizes and the graph, never a name.
+ */
+function isEmptyHolderComposition(target: CompositionFact, scene: CompositionFact): boolean {
+  const drawsNothing = target.layers.every((layer) => layer.enabled === false) && target.precompChildren.every((child) => child.enabled === false);
+  const isScenesOwnSize = target.widthPx === scene.widthPx && target.heightPx === scene.heightPx;
+  return drawsNothing && !isScenesOwnSize;
+}
+
+const EMPTY_HOLDER_CLASSIFICATION: Classification = {
+  placeholderType: "image",
+  editable: true,
+  evidence: {
+    source: "inferred",
+    reason: "the layer places a composition that draws nothing (everything inside it is switched off) and is not the scene's own size - an empty holder the client's screen goes into"
+  }
+};
+
+/**
+ * True when an enabled precomp layer places an empty holder, directly or
+ * through further precomps (the real template wraps the empty inner holder
+ * in a matted outer one). Bounded and cycle-safe like the main descent.
+ */
+function placesEmptyHolder(child: PrecompChildFact, scene: CompositionFact, compositionById: ReadonlyMap<string, CompositionFact>, visited: ReadonlySet<string> = new Set()): boolean {
+  const target = compositionById.get(child.sourceCompositionId);
+  if (child.enabled === false || target === undefined || visited.has(target.compositionId) || visited.size > MAX_NESTED_COMPOSITION_DEPTH) {
+    return false;
+  }
+  if (isEmptyHolderComposition(target, scene)) {
+    return true;
+  }
+  const deeper = new Set([...visited, target.compositionId]);
+  return target.precompChildren.some((grandchild) => placesEmptyHolder(grandchild, scene, compositionById, deeper));
+}
+
+/** True for a footage layer exactly its composition's own size - a pre-rendered pass of the hardware - when that composition also places an empty holder. */
+function isPreRenderedPassBesideHolder(layer: LayerFact, composition: CompositionFact, compositionById: ReadonlyMap<string, CompositionFact>): boolean {
+  if (!layer.footage || layer.footage.widthPx !== composition.widthPx || layer.footage.heightPx !== composition.heightPx) {
+    return false;
+  }
+  return composition.precompChildren.some((child) => placesEmptyHolder(child, composition, compositionById));
 }
 
 /**
@@ -683,6 +742,9 @@ function collectNestedPlaceholders(
         continue;
       }
       seenLayers.add(identity);
+      if (isPreRenderedPassBesideHolder(layer, composition, compositionById)) {
+        continue;
+      }
 
       const decision: NestedLayerDecision =
         screenCard === null
@@ -777,6 +839,55 @@ function collectNestedPlaceholders(
         `depth:${target.compositionId}`,
         context,
         `nesting deeper than ${MAX_NESTED_COMPOSITION_DEPTH} composition levels - "${target.name}" and everything below it was not inspected for editable layers`
+      );
+      return;
+    }
+    if (isEmptyHolderComposition(target, scene)) {
+      // The placing layer is the slot - see isEmptyHolderComposition. Listed
+      // once per placing layer: two layers placing the same holder (a phone
+      // and its reflection) are two placements of ONE picture, and the slot's
+      // hosts carry both; the first placing layer met is the one recorded.
+      if (walkedCompositions.has(target.compositionId)) {
+        return;
+      }
+      walkedCompositions.add(target.compositionId);
+      const parentCompositionId = chainForChild.length > 0 ? (chainForChild[chainForChild.length - 1] as NestedTargetStep).compositionId : scene.compositionId;
+      const parent = compositionById.get(parentCompositionId) ?? scene;
+      const inPoint = child.inPointSeconds ?? 0;
+      const layer: LayerFact = {
+        name: child.layerName,
+        index: child.layerIndex,
+        layerKind: "AVLayer",
+        footage: null,
+        // The holder's own size is the slot's size (what dimensions are read from).
+        solidFill: { isUniformSolidFill: false, widthPx: target.widthPx, heightPx: target.heightPx },
+        enabled: child.enabled,
+        trackMatte: { isTrackMatte: false, hasTrackMatte: child.hasTrackMatte ?? null, matteLayerIndex: null },
+        layerPath: [...parentLayerPath],
+        startTimeSeconds: inPoint,
+        durationSeconds: Math.max(0, (child.outPointSeconds ?? inPoint + target.durationSeconds) - inPoint)
+      };
+      const slot = buildSlotEvidence({
+        composition: parent,
+        layer,
+        chainToParent: chainForChild.slice(0, -1),
+        depth: Math.max(0, depth - 1),
+        allCompositions,
+        layerFactsByCompositionAndIndex,
+        slotIsWholeComposition: false,
+        sceneCompositionId: scene.compositionId
+      });
+      placeholders.push(
+        buildPlaceholder({
+          placeholderId: deterministicId(["empty-holder", scene.compositionId, parentCompositionId, String(child.layerIndex)]),
+          compositionId: parentCompositionId,
+          layer,
+          layerPath: [...parentLayerPath],
+          nestedTarget: chainForChild.length > 0 ? [...chainForChild] : null,
+          classification: EMPTY_HOLDER_CLASSIFICATION,
+          sourceProjectSha256,
+          slot
+        })
       );
       return;
     }
