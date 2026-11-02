@@ -373,3 +373,7 @@ A plan edit updates the plan's `updatedAt`, which marks every scene's preview st
 ## 2026-11-01 - done: the first frame and the full video fit the screen
 
 On a 4K template the first frame filled the card at page width (3840 px source) and the page scrolled past the screen before the yes/no question; the frame and the full-video player are now capped to the viewport height (60 / 65 vh, contain, never cropped).
+
+## 2026-11-02 - "we don't need that output module... only square, reels and YouTube... simple, simple, simple"
+
+Done today: on the client's simple screens the Render Settings / Output Module fields are gone (After Effects' built-in "Best Settings" + H.264 are used, or the machine's own H.264 once its list is read), audio-only modules are refused everywhere, and the composition list offers only top-level compositions. Still open: the Square and Reels cards should never ask for a composition at all once "Prepare the square/vertical version" has built one (pick the built composition by itself); the whole Render settings page stays an Advanced screen.

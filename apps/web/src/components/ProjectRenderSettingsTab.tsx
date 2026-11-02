@@ -11,7 +11,7 @@ import {
   type RenderOutputVariant
 } from "@dyo/schemas";
 import type { RenderArtifactDto, RenderTemplatesResponse } from "@dyo/schemas";
-import { isAudioOnlyOutputModuleName, preferredOutputModuleName } from "@dyo/schemas";
+import { AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES, isAudioOnlyOutputModuleName, preferredOutputModuleName } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
 import { useRenderArtifacts } from "../lib/use-render-artifacts";
@@ -677,7 +677,8 @@ export function VariantConfigCard({
   currentSourceSha,
   session,
   renderReady,
-  showRenderAction = true
+  showRenderAction = true,
+  hideTemplateFields = false
 }: {
   projectId: string;
   variant: RenderOutputVariant;
@@ -693,13 +694,28 @@ export function VariantConfigCard({
    * complained about - and only the button, never the saving, is dropped.
    */
   showRenderAction?: boolean;
+  /**
+   * The client's simple screens (2026-11-02: "we don't need that output
+   * module... only square, reels and YouTube... simple"): the two After
+   * Effects template names are not shown and After Effects' built-in ones
+   * (or the machine's own H.264, once its list arrives) are used, and only
+   * top-level compositions are offered - never the nested parts a template
+   * is built from, which read as "too many sizes".
+   */
+  hideTemplateFields?: boolean;
 }): ReactElement {
   const { t } = useLocale();
   const { setRenderOutput } = useProjectWorkspaceContext();
   const { data: dashboardStatus } = useDashboardStatusContext();
   const [manifestCompositionId, setManifestCompositionId] = useState(currentConfig?.manifestCompositionId ?? "");
-  const [renderSettingsTemplateName, setRenderSettingsTemplateName] = useState(currentConfig?.renderSettingsTemplateName ?? "");
-  const [outputModuleTemplateName, setOutputModuleTemplateName] = useState(currentConfig?.outputModuleTemplateName ?? "");
+  const [renderSettingsTemplateName, setRenderSettingsTemplateName] = useState(
+    currentConfig?.renderSettingsTemplateName ?? (hideTemplateFields ? AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES.renderSettingsTemplateName : "")
+  );
+  const [outputModuleTemplateName, setOutputModuleTemplateName] = useState(
+    currentConfig?.outputModuleTemplateName ?? (hideTemplateFields ? AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES.outputModuleTemplateName : "")
+  );
+  const topLevelCompositions = compositions.filter((composition) => !composition.isNestedOnlyReferenced);
+  const offeredCompositions = hideTemplateFields && topLevelCompositions.length > 0 ? topLevelCompositions : compositions;
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isDispatching, setIsDispatching] = useState(false);
@@ -819,7 +835,7 @@ export function VariantConfigCard({
               onChange={(event) => setManifestCompositionId(event.target.value)}
             >
               <option value="">{t.projectWorkspace.renderSettings.compositionPlaceholder}</option>
-              {compositions.map((composition) => (
+              {offeredCompositions.map((composition) => (
                 <option key={composition.compositionId} value={composition.compositionId}>
                   {composition.name} ({composition.widthPx}×{composition.heightPx})
                 </option>
@@ -862,6 +878,8 @@ export function VariantConfigCard({
             </>
           ) : null}
 
+          {hideTemplateFields ? null : (
+            <>
           <Field
             label={t.projectWorkspace.renderSettings.renderSettingsTemplateLabel}
             htmlFor={`render-rs-template-${variant}`}
@@ -903,6 +921,8 @@ export function VariantConfigCard({
               </datalist>
             ) : null}
           </Field>
+            </>
+          )}
 
           {saveError ? <ErrorState title={t.projectWorkspace.renderSettings.saveFailedTitle} description={saveError} /> : null}
 

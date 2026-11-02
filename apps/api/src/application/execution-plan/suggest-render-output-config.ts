@@ -1,5 +1,5 @@
 import type { RenderOutputSuggestionResponse, RenderOutputVariant, TemplateManifest } from "@dyo/schemas";
-import { isAudioOnlyOutputModuleName } from "@dyo/schemas";
+import { AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES, isAudioOnlyOutputModuleName } from "@dyo/schemas";
 import { ProjectNotFoundError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -19,10 +19,7 @@ import type { ProjectRepository } from "../../domain/project/types.js";
  * had nowhere to put it right. These names are offered when no sibling
  * project has names of its own; a sibling's names still come first.
  */
-export const AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES = {
-  renderSettingsTemplateName: "Best Settings",
-  outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps"
-} as const;
+export { AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES };
 
 export interface SuggestRenderOutputConfigDeps {
   executionPlanRepository: ExecutionPlanRepository;

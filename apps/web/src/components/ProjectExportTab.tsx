@@ -161,6 +161,7 @@ export function ProjectExportTab(): ReactElement | null {
             session={session}
             renderReady={renderReady}
             showRenderAction={false}
+            hideTemplateFields={isSimple}
           />
         ) : null}
       </Fragment>

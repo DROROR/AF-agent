@@ -230,3 +230,14 @@ export function preferredOutputModuleName(names: readonly string[]): string | nu
   }
   return names.find((name) => !isAudioOnlyOutputModuleName(name)) ?? null;
 }
+
+/**
+ * After Effects' own built-in Render Settings / Output Module template
+ * names, present on every install: what a video is made with when nobody
+ * has to be asked (the client's words, 2026-11-02: "we don't need that
+ * output module... simple, simple, simple").
+ */
+export const AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES = {
+  renderSettingsTemplateName: "Best Settings",
+  outputModuleTemplateName: "H.264 - Match Render Settings - 15 Mbps"
+} as const;
