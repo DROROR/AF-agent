@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import {
+import { isAudioOnlyOutputModuleName,
   sceneEvidenceResponseSchema,
   type ExecutionSessionDto,
   type FullPreviewArtifactDto,
@@ -1130,7 +1130,13 @@ function FinalPreviewCard({
   // counts as not set up.
   const landscapeConfig = plan?.plan.renderOutputs.LANDSCAPE ?? null;
   const sourceSha = project?.manifest.sourceProject.sha256 ?? null;
-  const landscapeConfigured = landscapeConfig !== null && landscapeConfig.sourceProjectSha256 === sourceSha;
+  // REAL 2026-11-02 (client project 08b28fd1): a saved Output Module of
+  // "AIFF 48kHz" (audio only) made every full video fail in one second, and
+  // the Export tab that holds the form was still locked. A saved setup that
+  // can never make a video counts as not set up, so the next press saves
+  // the server's own (H.264) suggestion again and goes on.
+  const landscapeConfigured =
+    landscapeConfig !== null && landscapeConfig.sourceProjectSha256 === sourceSha && !isAudioOnlyOutputModuleName(landscapeConfig.outputModuleTemplateName);
   const needsSetup = isSimple && !landscapeConfigured;
 
   useEffect(() => {

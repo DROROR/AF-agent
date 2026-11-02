@@ -1,4 +1,5 @@
 import type { RenderOutputSuggestionResponse, RenderOutputVariant, TemplateManifest } from "@dyo/schemas";
+import { isAudioOnlyOutputModuleName } from "@dyo/schemas";
 import { ProjectNotFoundError } from "../../errors/app-error.js";
 import type { ExecutionPlanRepository } from "../../domain/execution-plan/types.js";
 import type { ProjectRepository } from "../../domain/project/types.js";
@@ -68,7 +69,9 @@ export async function suggestRenderOutputConfig(
   for (const other of others) {
     const plan = await deps.executionPlanRepository.findCurrentByProjectId(other.id);
     const config = plan?.renderOutputs[variant] ?? null;
-    if (config) {
+    // A sibling's audio-only module (REAL 2026-11-02, "AIFF 48kHz") is never
+    // passed on - see isAudioOnlyOutputModuleName.
+    if (config && !isAudioOnlyOutputModuleName(config.outputModuleTemplateName)) {
       return {
         suggestion: {
           manifestCompositionId: master.compositionId,
