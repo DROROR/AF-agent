@@ -377,3 +377,7 @@ On a 4K template the first frame filled the card at page width (3840 px source) 
 ## 2026-11-02 - "we don't need that output module... only square, reels and YouTube... simple, simple, simple"
 
 Done today: on the client's simple screens the Render Settings / Output Module fields are gone (After Effects' built-in "Best Settings" + H.264 are used, or the machine's own H.264 once its list is read), audio-only modules are refused everywhere, and the composition list offers only top-level compositions. Still open: the Square and Reels cards should never ask for a composition at all once "Prepare the square/vertical version" has built one (pick the built composition by itself); the whole Render settings page stays an Advanced screen.
+
+## 2026-11-02 - done: "one checkbox to hide all the text"
+
+Each scene card now has "Hide texts" / "Show texts" (every text place of that scene set to "No text in this place", or given back its own choice), the Scenes page has "Hide all texts in the video" / "Show all texts in the video", and the scene drawer has "No text in this scene". The "Your logo" requirement card is gone: `requireLogoPresence: false` in dyo-brand-rules.yaml (the client asked for fewer steps; a logo is still placed by mapping it; set true to require it again). Parts of the template with nothing to change are no longer listed in the simple drawer.

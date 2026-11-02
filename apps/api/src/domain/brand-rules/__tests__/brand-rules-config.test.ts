@@ -7,7 +7,8 @@ describe("loadBrandRulesConfig", () => {
     // required by CLAUDE.md's "Required Data Model" actually exists,
     // parses, and satisfies the schema, not merely that the code compiles.
     const config = loadBrandRulesConfig();
-    expect(config.requireLogoPresence).toBe(true);
+    // 2026-11-02: switched off at the client's request - see dyo-brand-rules.yaml. The test holds the file to what it says, not to a fixed value.
+    expect(config.requireLogoPresence).toBe(false);
     // 2026-10-21: the client withdrew the required line; the rule is off until a string is set again.
     expect(config.requiredHebrewText).toBeNull();
     expect(config.rtlPreservedByConstruction).toBe(true);

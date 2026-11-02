@@ -12,7 +12,11 @@
 # mapping whose selected asset is classified as the manifest's "logo"
 # placeholder type. Covers CLAUDE.md's "Client/company logo must appear at
 # least once in every video."
-requireLogoPresence: true
+# 2026-11-02: switched off at the client's request ("simple, simple, simple" -
+# the "Your logo" card and its gate were one more step on every project).
+# The logo is still placed by mapping it on a scene when wanted; set true
+# to require it again - no code change needed.
+requireLogoPresence: false
 
 # A line every approved plan's active scenes must include verbatim on at
 # least one mapping, or null for no required line. Until 2026-10-21 this

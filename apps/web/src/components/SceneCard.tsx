@@ -158,6 +158,11 @@ export interface SceneCardProps {
   onKeepTemplateText?: (mappingIds: string[], findings: MappingSuggestion[]) => void;
   /** Records "no text in this place" for one text layer. Absent: the choice is not offered. */
   onNoText?: (mappingId: string) => void;
+  /** 2026-11-02, the client: "a checkbox that will hide all the text instead of one by one". One press on the card hides (or shows again) every text place of this scene. Absent when the card holds no text. */
+  onHideTexts?: () => void;
+  onShowTexts?: () => void;
+  /** True when every text place of this card is already set to "No text in this place". */
+  textsHidden?: boolean;
   /** What this card is called for a person ("Scene 3", "Whole video") - shown above the template's own name. */
   eyebrow?: string;
   /** Applies several suggestions in ONE request. Absent: no "use all" button is offered - several single accepts fired together would each carry the same plan revision and all but the first would be refused as stale. */
@@ -196,6 +201,9 @@ export function SceneCard({
   eyebrow,
   onKeepTemplateText,
   onNoText,
+  onHideTexts,
+  onShowTexts,
+  textsHidden = false,
   templateTextOf,
   quietActions = false,
   needsConfirmation = false,
@@ -361,6 +369,11 @@ export function SceneCard({
         <Button size="sm" variant="secondary" onClick={() => onEdit()}>
           {t.simpleScenes.editAction}
         </Button>
+        {onHideTexts && onShowTexts ? (
+          <Button size="sm" variant="ghost" disabled={suggestionsBusy} onClick={textsHidden ? onShowTexts : onHideTexts}>
+            {textsHidden ? t.simpleScenes.showTextsAction : t.simpleScenes.hideTextsAction}
+          </Button>
+        ) : null}
       </div>
 
       {hasGenuineReview ? (

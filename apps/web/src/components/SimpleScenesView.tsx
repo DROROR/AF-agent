@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState, type ReactElement, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTabsEndSlot } from "./ProjectWorkspaceShell";
-import type { MappingSuggestion } from "@dyo/schemas";
+import type { PlaceholderMapping, MappingSuggestion } from "@dyo/schemas";
 import { useProjectWorkspaceContext } from "./ProjectWorkspaceProvider";
 import { WholeVideoColours } from "./WholeVideoColours";
 import { useDashboardStatusContext } from "./DashboardStatusProvider";
@@ -375,6 +375,51 @@ export function SimpleScenesView(): ReactElement {
     }
   }
 
+  // 2026-11-02, the client: "add a checkbox that will hide all the text
+  // instead of going one by one" - and sometimes no text at all is wanted in
+  // a scene or in the whole video. One press per card, one for the video.
+  const isTextMapping = (mapping: PlaceholderMapping): boolean => mapping.placeholderClassification?.value === "text";
+  const isHiddenText = (mapping: PlaceholderMapping): boolean => (mapping.keepTemplateText?.decision ?? null) === "NO_TEXT";
+  const textMappingsOfCard = (scenePlanId: string): PlaceholderMapping[] => (homes.mappingsByCardId.get(scenePlanId) ?? []).map((hosted) => hosted.mapping).filter(isTextMapping);
+  async function handleHideTexts(mappingsToHide: readonly PlaceholderMapping[]): Promise<void> {
+    setBusySuggestionId("hide-texts");
+    setActionError(null);
+    const operations = mappingsToHide.flatMap((mapping) => {
+      const owner = plan!.plan.scenePlans.find((scene) => scene.mappings.some((m) => m.id === mapping.id));
+      if (!owner || isHiddenText(mapping)) {
+        return [];
+      }
+      return [
+        ...(mapping.text !== null ? [{ type: "CLEAR_TEXT" as const, scenePlanId: owner.id, mappingId: mapping.id }] : []),
+        { type: "SET_TEMPLATE_TEXT_DECISION" as const, scenePlanId: owner.id, mappingId: mapping.id, decision: "NO_TEXT" as const }
+      ];
+    });
+    if (operations.length > 0) {
+      const result = await applyEdit(operations);
+      if (!result.ok) {
+        setActionError(result.message ?? null);
+      }
+    }
+    setBusySuggestionId(null);
+  }
+  async function handleShowTexts(mappingsToShow: readonly PlaceholderMapping[]): Promise<void> {
+    setBusySuggestionId("show-texts");
+    setActionError(null);
+    const operations = mappingsToShow.flatMap((mapping) => {
+      const owner = plan!.plan.scenePlans.find((scene) => scene.mappings.some((m) => m.id === mapping.id));
+      return owner && isHiddenText(mapping) ? [{ type: "CLEAR_TEMPLATE_TEXT_DECISION" as const, scenePlanId: owner.id, mappingId: mapping.id }] : [];
+    });
+    if (operations.length > 0) {
+      const result = await applyEdit(operations);
+      if (!result.ok) {
+        setActionError(result.message ?? null);
+      }
+    }
+    setBusySuggestionId(null);
+  }
+  const allTextMappings = realScenes.filter((realScene) => !quietCards.has(realScene.scenePlan.id)).flatMap((realScene) => textMappingsOfCard(realScene.scenePlan.id));
+  const allTextsHidden = allTextMappings.length > 0 && allTextMappings.every(isHiddenText);
+
   async function handleKeepTemplateText(mappingIds: string[], findings: MappingSuggestion[], decision: "KEEP_TEMPLATE_TEXT" | "NO_TEXT" = "KEEP_TEMPLATE_TEXT"): Promise<void> {
     setBusySuggestionId(findings[0]?.id ?? "keep-template-text");
     setActionError(null);
@@ -478,6 +523,11 @@ export function SimpleScenesView(): ReactElement {
               {t.simpleScenes.useWholePlanAction(allProposals.length)}
             </Button>
           ) : null}
+          {allTextMappings.length > 0 && !scenesApproved ? (
+            <Button variant="secondary" disabled={busySuggestionId !== null || isStale} onClick={() => void (allTextsHidden ? handleShowTexts(allTextMappings) : handleHideTexts(allTextMappings))}>
+              {allTextsHidden ? t.simpleScenes.showAllTextsAction : t.simpleScenes.hideAllTextsAction}
+            </Button>
+          ) : null}
           {scenesApproved ? (
             <Link href={`/projects/${projectId}/preview`} className="btn btn--primary">
               {t.simpleScenes.goToPreviewAction}
@@ -564,6 +614,13 @@ export function SimpleScenesView(): ReactElement {
               onKeepTemplateText={(mappingIds, findings) => void handleKeepTemplateText(mappingIds, findings)}
               templateTextOf={templateTextOf}
               onNoText={(mappingId) => void handleKeepTemplateText([mappingId], [], "NO_TEXT")}
+              {...(textMappingsOfCard(realScene.scenePlan.id).length > 0 && !isStale
+                ? {
+                    onHideTexts: () => void handleHideTexts(textMappingsOfCard(realScene.scenePlan.id)),
+                    onShowTexts: () => void handleShowTexts(textMappingsOfCard(realScene.scenePlan.id)),
+                    textsHidden: textMappingsOfCard(realScene.scenePlan.id).every(isHiddenText)
+                  }
+                : {})}
             />
           ))}
         </div>

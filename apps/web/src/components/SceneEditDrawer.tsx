@@ -744,7 +744,14 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
   };
   const isColourEntry = (entry: (typeof orderedForRender)[number]): boolean => classificationFor(entry.mapping.mappingId) === "color";
   const rank = (entry: (typeof orderedForRender)[number]): number => (fieldsFor(entry.mapping.mappingId).asset ? 0 : 1);
-  const mainEntries = isSimple ? orderedForRender.filter((entry) => !isColourEntry(entry)).sort((a, b) => rank(a) - rank(b)) : orderedForRender;
+  // 2026-11-02, the client: "simple, simple, simple". A part of the template
+  // that can hold nothing ("Shape Layer 1 - nothing to do here") is not shown
+  // on the simple screens at all; it is still listed in Advanced view.
+  const mainEntries = isSimple
+    ? orderedForRender.filter((entry) => !isColourEntry(entry) && !isNonContentLayer(entry.mapping.mappingId)).sort((a, b) => rank(a) - rank(b))
+    : orderedForRender;
+  const textEntryIndices = isSimple ? mainEntries.filter((entry) => fieldsFor(entry.mapping.mappingId).text).map((entry) => entry.index) : [];
+  const allTextsHidden = textEntryIndices.length > 0 && textEntryIndices.every((index) => mappings[index]?.templateTextDecision === "NO_TEXT");
   const colourEntries = isSimple ? orderedForRender.filter(isColourEntry) : [];
 
   return (
@@ -779,6 +786,28 @@ export function SceneEditDrawer({ scenePlanId, onClose, onlyMappingIds, focusMap
         </Field>
         </>
         )}
+        {/* 2026-11-02, the client: "add a checkbox that will hide all the text instead of one by one". One switch sets every text place of the scene to "No text in this place"; unticking it gives each place back its own choice. */}
+        {isSimple && textEntryIndices.length > 1 ? (
+          <label className="edit-drawer-no-text edit-drawer-no-text--scene">
+            <input
+              type="checkbox"
+              checked={allTextsHidden}
+              onChange={(event) => {
+                const next = [...mappings];
+                for (const index of textEntryIndices) {
+                  const mapping = next[index];
+                  if (!mapping) {
+                    continue;
+                  }
+                  next[index] = event.target.checked ? { ...mapping, text: "", templateTextDecision: "NO_TEXT" } : { ...mapping, templateTextDecision: null };
+                }
+                setMappings(next);
+              }}
+            />
+            {t.projectWorkspace.editDrawer.simple.noTextInScene}
+            <span className="field__hint">{t.projectWorkspace.editDrawer.simple.noTextInSceneHint}</span>
+          </label>
+        ) : null}
         {mappings.length === 0 ? (
           <EmptyState
             title={t.projectWorkspace.editDrawer.noMappingsTitle}
