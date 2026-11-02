@@ -88,7 +88,7 @@ export function buildTemplateManifest(facts: ProjectFacts, now: () => Date = () 
         layer.enabled !== false &&
         layer.guideLayer !== true &&
         facts.layerFactsByCompositionAndIndex.get(`${composition.compositionId}:${layer.index}`)?.detail?.adjustmentLayer !== true &&
-        !isPreRenderedPassBesideHolder(layer, composition, compositionById)
+        !isPreRenderedPassBesideHolder(layer, composition, compositionById, facts.layerFactsByCompositionAndIndex)
     );
     return renderedLayers.map((layer) => {
       const classification = classifyPlaceholder(layer);
@@ -386,8 +386,24 @@ function collectMaskedCompositionIds(
  * - footage exactly the composition's own size - is hardware, never a slot.
  * Both are AE facts: switches, sizes and the graph, never a name.
  */
-function isEmptyHolderComposition(target: CompositionFact, scene: CompositionFact): boolean {
-  const drawsNothing = target.layers.every((layer) => layer.enabled === false) && target.precompChildren.every((child) => child.enabled === false);
+const CHECKERBOARD_EFFECT_MATCH_NAME = "ADBE Checkerboard";
+
+/** A layer that only draws After Effects' Checkerboard placeholder pattern (the real template's "DELETE" layer) - the scan's own effect list, never a name. */
+function drawsOnlyPlaceholderPattern(compositionId: string, layer: LayerFact, layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>): boolean {
+  if (layer.footage !== null || layer.layerKind === "TextLayer") {
+    return false;
+  }
+  const effects = layerFactsByCompositionAndIndex.get(`${compositionId}:${layer.index}`)?.effects ?? [];
+  return effects.some((effect) => effect.matchName === CHECKERBOARD_EFFECT_MATCH_NAME);
+}
+
+function isEmptyHolderComposition(target: CompositionFact, scene: CompositionFact, layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>): boolean {
+  // Draws nothing of its own: every layer switched off, or drawing only the
+  // placeholder pattern (the same template keeps one scene's holder as a
+  // single "DELETE" checkerboard layer and another's as a switched-off shape).
+  const drawsNothing =
+    target.layers.every((layer) => layer.enabled === false || drawsOnlyPlaceholderPattern(target.compositionId, layer, layerFactsByCompositionAndIndex)) &&
+    target.precompChildren.every((child) => child.enabled === false);
   const isScenesOwnSize = target.widthPx === scene.widthPx && target.heightPx === scene.heightPx;
   return drawsNothing && !isScenesOwnSize;
 }
@@ -406,24 +422,35 @@ const EMPTY_HOLDER_CLASSIFICATION: Classification = {
  * through further precomps (the real template wraps the empty inner holder
  * in a matted outer one). Bounded and cycle-safe like the main descent.
  */
-function placesEmptyHolder(child: PrecompChildFact, scene: CompositionFact, compositionById: ReadonlyMap<string, CompositionFact>, visited: ReadonlySet<string> = new Set()): boolean {
+function placesEmptyHolder(
+  child: PrecompChildFact,
+  scene: CompositionFact,
+  compositionById: ReadonlyMap<string, CompositionFact>,
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>,
+  visited: ReadonlySet<string> = new Set()
+): boolean {
   const target = compositionById.get(child.sourceCompositionId);
   if (child.enabled === false || target === undefined || visited.has(target.compositionId) || visited.size > MAX_NESTED_COMPOSITION_DEPTH) {
     return false;
   }
-  if (isEmptyHolderComposition(target, scene)) {
+  if (isEmptyHolderComposition(target, scene, layerFactsByCompositionAndIndex)) {
     return true;
   }
   const deeper = new Set([...visited, target.compositionId]);
-  return target.precompChildren.some((grandchild) => placesEmptyHolder(grandchild, scene, compositionById, deeper));
+  return target.precompChildren.some((grandchild) => placesEmptyHolder(grandchild, scene, compositionById, layerFactsByCompositionAndIndex, deeper));
 }
 
 /** True for a footage layer exactly its composition's own size - a pre-rendered pass of the hardware - when that composition also places an empty holder. */
-function isPreRenderedPassBesideHolder(layer: LayerFact, composition: CompositionFact, compositionById: ReadonlyMap<string, CompositionFact>): boolean {
+function isPreRenderedPassBesideHolder(
+  layer: LayerFact,
+  composition: CompositionFact,
+  compositionById: ReadonlyMap<string, CompositionFact>,
+  layerFactsByCompositionAndIndex: ReadonlyMap<string, ScannedSlotLayer>
+): boolean {
   if (!layer.footage || layer.footage.widthPx !== composition.widthPx || layer.footage.heightPx !== composition.heightPx) {
     return false;
   }
-  return composition.precompChildren.some((child) => placesEmptyHolder(child, composition, compositionById));
+  return composition.precompChildren.some((child) => placesEmptyHolder(child, composition, compositionById, layerFactsByCompositionAndIndex));
 }
 
 /**
@@ -742,7 +769,7 @@ function collectNestedPlaceholders(
         continue;
       }
       seenLayers.add(identity);
-      if (isPreRenderedPassBesideHolder(layer, composition, compositionById)) {
+      if (isPreRenderedPassBesideHolder(layer, composition, compositionById, layerFactsByCompositionAndIndex)) {
         continue;
       }
 
@@ -842,7 +869,7 @@ function collectNestedPlaceholders(
       );
       return;
     }
-    if (isEmptyHolderComposition(target, scene)) {
+    if (isEmptyHolderComposition(target, scene, layerFactsByCompositionAndIndex)) {
       // The placing layer is the slot - see isEmptyHolderComposition. Listed
       // once per placing layer: two layers placing the same holder (a phone
       // and its reflection) are two placements of ONE picture, and the slot's

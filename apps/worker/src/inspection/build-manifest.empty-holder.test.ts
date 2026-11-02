@@ -136,3 +136,55 @@ describe("buildTemplateManifest - an empty holder composition is the screen slot
     expect(scene.placeholders.map((p) => `${p.layerName} (${p.placeholderType})`)).toEqual(["clip.mp4 (video)"]);
   });
 });
+
+describe("buildTemplateManifest - a holder whose only drawing is a Checkerboard placeholder layer is empty too (the same template's Scene 05)", () => {
+  it("lists the placing layer as the image slot and drops the pre-rendered pass", () => {
+    const compositions = [
+      composition({
+        compositionId: "comp-565",
+        name: "Scene 05",
+        isNestedOnlyReferenced: false,
+        layers: [layer({ index: 6, name: "Scene 05_[00000-00150].png", layerKind: "AVLayer", footage: sequence }), layer({ index: 8, name: "Modular Structure", layerKind: "TextLayer", sourceText: "Modular Structure" })],
+        precompChildren: [precomp(4, "PRE Holder 03", "comp-551"), precomp(5, "PRE Holder 03", "comp-551"), precomp(11, "Holder 05", "comp-523", { enabled: false })]
+      }),
+      composition({
+        compositionId: "comp-551",
+        name: "PRE Holder 03",
+        widthPx: 1284,
+        heightPx: 2778,
+        parentCompositionIds: ["comp-565"],
+        layers: [layer({ index: 1, name: "Shape Layer 2", layerKind: "ShapeLayer", enabled: false })],
+        precompChildren: [precomp(2, "Holder 05", "comp-523", { hasTrackMatte: true })]
+      }),
+      composition({
+        compositionId: "comp-523",
+        name: "Holder 05",
+        widthPx: 1284,
+        heightPx: 2778,
+        parentCompositionIds: ["comp-551", "comp-565"],
+        layers: [layer({ index: 1, name: "DELETE", layerKind: "ShapeLayer" })]
+      })
+    ];
+    const projectFacts: ProjectFacts = {
+      ...facts(compositions),
+      layerFactsByCompositionAndIndex: new Map([["comp-523:1", { kind: "ShapeLayer", enabled: true, layerName: "DELETE", effects: [{ name: "Checkerboard", matchName: "ADBE Checkerboard" }] }]])
+    };
+    const manifest = buildTemplateManifest(projectFacts, fixedNow);
+    const scene = manifest.scenes.find((s) => s.compositionId === "comp-565")!;
+    expect(scene.placeholders.map((p) => `${p.compositionId}:${p.layerIndex} ${p.layerName} (${p.placeholderType})`)).toEqual([
+      "comp-565:8 Modular Structure (text)",
+      "comp-551:2 Holder 05 (image)"
+    ]);
+  });
+
+  it("a shape layer WITHOUT the pattern effect keeps the composition a real drawing, not a holder", () => {
+    const compositions = [
+      composition({ compositionId: "comp-1", name: "Scene 01", isNestedOnlyReferenced: false, layers: [layer({ index: 2, name: "bg.mp4", layerKind: "AVLayer", footage: sequence })], precompChildren: [precomp(1, "Badge", "comp-7")] }),
+      composition({ compositionId: "comp-7", name: "Badge", widthPx: 400, heightPx: 400, parentCompositionIds: ["comp-1"], layers: [layer({ index: 1, name: "Star", layerKind: "ShapeLayer" })] })
+    ];
+    const manifest = buildTemplateManifest(facts(compositions), fixedNow);
+    const scene = manifest.scenes.find((s) => s.compositionId === "comp-1")!;
+    expect(scene.placeholders.some((p) => p.layerName === "Badge")).toBe(false);
+    expect(scene.placeholders.some((p) => p.layerName === "bg.mp4" && p.placeholderType === "video")).toBe(true);
+  });
+});

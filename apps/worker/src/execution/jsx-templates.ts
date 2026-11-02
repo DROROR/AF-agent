@@ -1167,7 +1167,20 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit, orientat
               } else if (__layer.source instanceof CompItem && typeof __layer.source.numLayers === "number" && __layer.source.numLayers > 0) {
                 var __holderDrawsNothing = true;
                 for (var __holderIndex = 1; __holderIndex <= __layer.source.numLayers; __holderIndex++) {
-                  if (__layer.source.layer(__holderIndex).enabled) { __holderDrawsNothing = false; break; }
+                  var __holderLayer = __layer.source.layer(__holderIndex);
+                  if (!__holderLayer.enabled) { continue; }
+                  // A layer drawing only the Checkerboard placeholder pattern draws nothing of the client's.
+                  var __onlyPattern = false;
+                  try {
+                    var __holderParade = __holderLayer.property("ADBE Effect Parade");
+                    if (__holderParade && !(__holderLayer instanceof TextLayer) && !(__holderLayer.source && __holderLayer.source.mainSource && __holderLayer.source.mainSource instanceof FileSource)) {
+                      for (var __holderFx = 1; __holderFx <= __holderParade.numProperties; __holderFx++) {
+                        var __holderEffect = __holderParade.property(__holderFx);
+                        if (__holderEffect && __holderEffect.matchName === "ADBE Checkerboard" && __holderEffect.enabled) { __onlyPattern = true; }
+                      }
+                    }
+                  } catch (__patternError) { __onlyPattern = false; }
+                  if (!__onlyPattern) { __holderDrawsNothing = false; break; }
                 }
                 if (__holderDrawsNothing) {
                   __solidCard = { width: __layer.source.width, height: __layer.source.height };
