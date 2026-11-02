@@ -26,10 +26,10 @@ describe("MAP_FOOTAGE script - an empty holder composition is a screen card", ()
     expect(text).toContain("__holderCard = true");
   });
 
-  it("keeps a matted holder under its matte and switches off a Checkerboard placeholder matte", () => {
-    expect(text).toContain("__holderKeepsMatte");
+  it("puts the picture inside the holder composition, on top, covering the holder's own frame - the animated placing layer is never refitted", () => {
+    expect(text).toContain("__holderComp.layers.add(__newFootageItem)");
+    expect(text).toContain("__holderMedia.moveToBeginning()");
     expect(text).toContain('"ADBE Checkerboard"');
-    expect(text).toContain("__matteLayer.enabled = false");
-    expect(text).toContain("could not be switched off - it would paint over the picture");
+    expect(text).not.toContain("__holderKeepsMatte");
   });
 });

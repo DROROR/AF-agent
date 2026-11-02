@@ -2122,7 +2122,8 @@ describe("SET_TEXT/MAP_FOOTAGE with a nested target (live QA execution-wiring fi
     it("without a fit, a screen card keeps the cover path (source swap) - the contain branch is not even in the script", () => {
       const { fit: _fit, ...coverOp } = logoOp;
       const script = buildOperationScript(999, "irrelevant", coverOp as SceneEditOperation);
-      expect(script).not.toContain("layers.add(__newFootageItem)");
+      // The contain branch adds the media beside the card ("__media"); the holder branch (2026-11-02) adds it inside the holder composition and is always present.
+      expect(script).not.toContain("var __media = ");
       expect(script).toContain("__layer.replaceSource(__newFootageItem, false)");
     });
   });

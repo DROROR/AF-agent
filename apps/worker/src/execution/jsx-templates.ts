@@ -1191,8 +1191,7 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit, orientat
               __solidCard = null;
               __holderCard = false;
             }
-            var __holderKeepsMatte = false;
-            try { __holderKeepsMatte = __holderCard && __layer.hasTrackMatte === true; } catch (__matteReadError) { __holderKeepsMatte = false; }
+
             var __importOptions = new ImportOptions(__assetFile);
             var __newFootageItem = app.project.importFile(__importOptions);
             var __fitFailure = null;
@@ -1204,7 +1203,34 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit, orientat
             // height by its width, which is what the fit below measures.
             var __orientation = { mirrorSign: ${orientation.mirror ? -1 : 1}, degrees: ${orientation.quarterTurns * 90} };
             var __mediaFootprint = ${orientation.quarterTurns % 2 === 1 ? "{ width: __newFootageItem.height, height: __newFootageItem.width }" : "{ width: __newFootageItem.width, height: __newFootageItem.height }"};
-            ${turned ? `if (__solidCard === null) {
+            if (__holderCard) {
+              // REAL 2026-11-02 (the client's first frame on the real template):
+              // the layer placing a holder is ANIMATED - it is the phone's own
+              // move - so it is never refitted or resourced. The media goes
+              // INSIDE the holder composition, on top, covering the holder's
+              // own frame; the placing layer keeps its animation, parent and
+              // matte untouched, and every placement of the holder (a phone
+              // and its reflection) shows the picture.
+              var __holderComp = __layer.source;
+              var __holderWidth = __holderComp.width;
+              var __holderHeight = __holderComp.height;
+              if (!(__newFootageItem.width > 0 && __newFootageItem.height > 0 && __holderWidth > 0 && __holderHeight > 0)) {
+                __fitFailure = "holder composition or imported media has no usable pixel size";
+              } else {
+                var __holderMedia = __holderComp.layers.add(__newFootageItem);
+                var __holderFactor = Math.max(__holderWidth / __mediaFootprint.width, __holderHeight / __mediaFootprint.height);
+                var __holderTransform = __holderMedia.property("ADBE Transform Group");
+                __holderTransform.property("ADBE Anchor Point").setValue([__newFootageItem.width / 2, __newFootageItem.height / 2]);
+                __holderTransform.property("ADBE Position").setValue([__holderWidth / 2, __holderHeight / 2]);
+                __holderTransform.property("ADBE Scale").setValue([__holderFactor * 100 * __orientation.mirrorSign, __holderFactor * 100]);
+                if (__orientation.degrees !== 0) { __holderTransform.property("ADBE Rotate Z").setValue(__orientation.degrees); }
+                __holderMedia.startTime = 0;
+                __holderMedia.moveToBeginning();
+                if (__holderMedia.index !== 1) {
+                  __fitFailure = "the picture was not placed on top inside the holder composition (layer index is " + __holderMedia.index + ") - the holder's placeholder pattern would cover it";
+                }
+              }
+            } else ${turned ? `if (__solidCard === null) {
               __fitFailure = "this picture's place is not a screen card - it cannot be flipped or turned there";
             }
             if (__fitFailure === null) ` : ""}            ${containOnCard ? `if (__solidCard !== null) {${buildMapFootageContainOnCard()}
@@ -1270,41 +1296,11 @@ function buildMapFootageMutation(assetPath: string, fit: MapFootageFit, orientat
                 __positionProp.setValue(__newPosition);
                 __scaleProp.setValue(__newScale);
                 if (__orientation.degrees !== 0) { __rotationProp.setValue(__cardBefore.rotation + __orientation.degrees); }
-                if (__holderKeepsMatte) {
-                  // A holder shown through a matte stays where it is: the matte
-                  // is the screen's own rounded shape. A matte layer that only
-                  // draws a placeholder pattern (After Effects' Checkerboard
-                  // effect) is switched off so it stops painting over the
-                  // picture; it still cuts the shape when switched off.
-                  var __matteLayer = null;
-                  try { __matteLayer = (__layer.trackMatteLayer !== undefined && __layer.trackMatteLayer !== null) ? __layer.trackMatteLayer : null; } catch (__matteLayerError) { __matteLayer = null; }
-                  if (__matteLayer === null && __layer.index > 1) {
-                    try { __matteLayer = __layer.containingComp.layer(__layer.index - 1); } catch (__matteAboveError) { __matteLayer = null; }
-                  }
-                  if (__matteLayer !== null && __matteLayer.enabled) {
-                    var __matteParade = null;
-                    try { __matteParade = __matteLayer.property("ADBE Effect Parade"); } catch (__matteParadeError) { __matteParade = null; }
-                    var __matteIsPattern = false;
-                    if (__matteParade) {
-                      for (var __matteFxIndex = 1; __matteFxIndex <= __matteParade.numProperties; __matteFxIndex++) {
-                        var __matteFx = __matteParade.property(__matteFxIndex);
-                        if (__matteFx && __matteFx.matchName === "ADBE Checkerboard" && __matteFx.enabled) { __matteIsPattern = true; }
-                      }
-                    }
-                    if (__matteIsPattern) {
-                      try { __matteLayer.enabled = false; } catch (__matteHideError) { /* verified below */ }
-                      if (__matteLayer.enabled) {
-                        __fitFailure = "the holder's placeholder-pattern matte layer \\"" + __matteLayer.name + "\\" could not be switched off - it would paint over the picture";
-                      }
-                    }
-                  }
-                } else {
-                  __layer.moveToBeginning();
-                  // Verify the ordering actually changed - the media must now be
-                  // the top layer, above the card's guide labels.
-                  if (__layer.index !== 1) {
-                    __fitFailure = "screen card media was not moved to the top of its composition (layer index is " + __layer.index + ") - its guide labels would cover it";
-                  }
+                __layer.moveToBeginning();
+                // Verify the ordering actually changed - the media must now be
+                // the top layer, above the card's guide labels.
+                if (__layer.index !== 1) {
+                  __fitFailure = "screen card media was not moved to the top of its composition (layer index is " + __layer.index + ") - its guide labels would cover it";
                 }
               }
               // REAL 2026-09-16 FINDING (session 1257ac95): replaceSource keeps the
