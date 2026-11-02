@@ -1,4 +1,6 @@
-import { AE_MCP_DEPENDENT_CAPABILITIES, type DispatchJobRequest, type DispatchJobResponse } from "@dyo/schemas";
+import { AE_MCP_DEPENDENT_CAPABILITIES, isAudioOnlyOutputModuleName, type DispatchJobRequest, type DispatchJobResponse } from "@dyo/schemas";
+import { AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES, suggestRenderOutputConfig } from "../execution-plan/suggest-render-output-config.js";
+import { setRenderOutputConfig } from "../execution-plan/set-render-output-config.js";
 import { isHeartbeatStale } from "../../domain/worker/rules.js";
 import { canClaimAnotherJob } from "../../domain/job/rules.js";
 import type { JobRepository } from "../../domain/job/types.js";
@@ -211,7 +213,35 @@ export async function dispatchJob(deps: DispatchJobDeps, request: DispatchJobReq
       throw new ProjectNotFoundError(request.projectId);
     }
     projectId = request.projectId;
-    const plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    let plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    // REAL 2026-11-02 (client project 08b28fd1, six presses): the saved
+    // Landscape Output Module was "AIFF 48kHz" - sound only - so every full
+    // video ended in one second with no .mp4, and the client had no screen
+    // left to put it right (Export locked until a preview is approved). A
+    // Save now refuses such a name (set-render-output-config.ts); a setup
+    // saved before that is repaired here, at the press, with the module the
+    // server itself would have suggested (a sibling project's H.264, else
+    // After Effects' built-in one). Composition and render settings stay as
+    // the person chose them. Deterministic - never a guess at a codec.
+    const landscape = plan?.renderOutputs.LANDSCAPE ?? null;
+    if (plan && landscape && isAudioOnlyOutputModuleName(landscape.outputModuleTemplateName)) {
+      const { suggestion } = await suggestRenderOutputConfig(
+        { executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository },
+        request.projectId,
+        "LANDSCAPE"
+      );
+      await setRenderOutputConfig(
+        { executionPlanRepository: deps.executionPlanRepository, projectRepository: deps.projectRepository, now: deps.now },
+        request.projectId,
+        "LANDSCAPE",
+        {
+          manifestCompositionId: landscape.manifestCompositionId,
+          renderSettingsTemplateName: landscape.renderSettingsTemplateName,
+          outputModuleTemplateName: suggestion?.outputModuleTemplateName ?? AFTER_EFFECTS_BUILT_IN_RENDER_TEMPLATES.outputModuleTemplateName
+        }
+      );
+      plan = await deps.executionPlanRepository.findCurrentByProjectId(request.projectId);
+    }
     const session = await deps.executionSessionRepository.findById(request.executionSessionId);
     const resolved = resolveCreateFullPreviewDispatch({
       projectId: request.projectId,

@@ -1340,6 +1340,44 @@ describe("dispatchJob - CREATE_PREVIEW (safe dispatch, client-handoff phase 'rea
     expect(payload).not.toHaveProperty("checkpoint");
   });
 
+  it("REAL 2026-11-02: a LANDSCAPE setup saved with an audio-only Output Module (\"AIFF 48kHz\") is repaired to H.264 at the press - the job never carries a sound-only module, and the saved setup is corrected too", async () => {
+    const workerRepository = new InMemoryWorkerRepository();
+    const jobRepository = new InMemoryJobRepository(workerRepository);
+    const projectRepository = new InMemoryProjectRepository();
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    const assetRepository = new InMemoryAssetRepository();
+    const fullPreviewArtifactRepository = new InMemoryFullPreviewArtifactRepository();
+    const workerId = await setupWorkerWithCapability(workerRepository, "CREATE_PREVIEW");
+    const project = await createProject({ projectRepository, now: () => FIXED_NOW }, { name: "P", manifest: manifestWithTextPlaceholder() });
+    const plan = await executionPlanRepository.createRevision(
+      { id: "plan-1", projectId: project.projectId, revision: 1, status: "APPROVED", templateId: "tmpl-1", sourceProjectSha256: "a".repeat(64), scenePlans: [approvedTextScene()], approvedAt: FIXED_NOW, approvedBy: "user-1" },
+      FIXED_NOW
+    );
+    await executionPlanRepository.updateRenderOutput(
+      plan.id,
+      "LANDSCAPE",
+      { manifestCompositionId: "comp-1", aeProjectItemIndex: 5, compositionName: "Scene 01", sourceProjectSha256: "a".repeat(64), renderSettingsTemplateName: "Best Settings", outputModuleTemplateName: "AIFF 48kHz", configuredAt: FIXED_NOW.toISOString() },
+      FIXED_NOW
+    );
+    const session = await createSession(executionSessionRepository, project.projectId, workerId);
+    await executionSessionRepository.recordSceneCompleted(session.id, "scene-1", "d".repeat(64), "AWAITING_PREVIEW_APPROVAL", FIXED_NOW);
+    const approved = await executionSessionRepository.approvePreview(session.id, "READY_TO_RENDER", FIXED_NOW);
+
+    const result = await dispatchJob(
+      { jobRepository, workerRepository, projectRepository, executionPlanRepository, executionSessionRepository, assetRepository, fullPreviewArtifactRepository, now: () => FIXED_NOW, staleAfterMs: STALE_AFTER_MS },
+      { operation: "CREATE_PREVIEW", workerId, projectId: project.projectId, executionSessionId: approved!.id }
+    );
+
+    const job = await jobRepository.findById(result.jobId);
+    const payload = job?.payload as Record<string, unknown>;
+    expect(payload.outputModuleTemplateName).toBe("H.264 - Match Render Settings - 15 Mbps");
+    expect(payload.compositionName).toBe("Scene 01");
+    expect(payload.renderSettingsTemplateName).toBe("Best Settings");
+    const repaired = await executionPlanRepository.findCurrentByProjectId(project.projectId);
+    expect(repaired?.renderOutputs.LANDSCAPE?.outputModuleTemplateName).toBe("H.264 - Match Render Settings - 15 Mbps");
+  });
+
   it("rejects with PreconditionNotMetError when the first preview has not been approved yet - never queues a job anyway", async () => {
     const workerRepository = new InMemoryWorkerRepository();
     const jobRepository = new InMemoryJobRepository(workerRepository);
