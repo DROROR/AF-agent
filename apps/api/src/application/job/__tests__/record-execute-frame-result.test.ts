@@ -93,6 +93,42 @@ describe("recordExecuteFrameResultIfApplicable", () => {
     expect(session?.status).toBe("AWAITING_PREVIEW_APPROVAL");
   });
 
+  it("REAL 2026-11-04: a Square composition built into a COMPLETED session's working copy advances the session's hash (status stays COMPLETED) - otherwise the next press is refused with WORKING_COPY_SHA_MISMATCH", async () => {
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupPlan(executionPlanRepository);
+    await setupSession(executionSessionRepository);
+    await executionSessionRepository.recordSceneCompleted(SESSION_ID, "scene-1", "b".repeat(64), "COMPLETED", NOW);
+
+    const square = { compositionName: "Scene 06 (Square)", aeProjectItemIndex: 20, widthPx: 1080, heightPx: 1080, durationSeconds: 20, frameRate: 25 };
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository, executionPlanRepository, now: () => NOW },
+      baseJob({ result: validResult({ workingProjectSha256: "c".repeat(64), squareCompositionBuilt: square }) })
+    );
+
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.status).toBe("COMPLETED");
+    expect(session?.latestWorkingProjectSha256).toBe("c".repeat(64));
+    expect(session?.completedScenePlanIds).toEqual(["scene-1"]);
+  });
+
+  it("a plain scene result on a COMPLETED session still changes nothing", async () => {
+    const executionPlanRepository = new InMemoryExecutionPlanRepository();
+    const executionSessionRepository = new InMemoryExecutionSessionRepository();
+    await setupPlan(executionPlanRepository);
+    await setupSession(executionSessionRepository);
+    await executionSessionRepository.recordSceneCompleted(SESSION_ID, "scene-1", "b".repeat(64), "COMPLETED", NOW);
+
+    await recordExecuteFrameResultIfApplicable(
+      { executionSessionRepository, executionPlanRepository, now: () => NOW },
+      baseJob({ result: validResult({ scenePlanId: "scene-2", workingProjectSha256: "c".repeat(64) }) })
+    );
+
+    const session = await executionSessionRepository.findById(SESSION_ID);
+    expect(session?.latestWorkingProjectSha256).toBe("b".repeat(64));
+    expect(session?.completedScenePlanIds).toEqual(["scene-1"]);
+  });
+
   it("never touches the session for a FAILED job, even one that reports a result-shaped payload", async () => {
     const executionPlanRepository = new InMemoryExecutionPlanRepository();
     const executionSessionRepository = new InMemoryExecutionSessionRepository();

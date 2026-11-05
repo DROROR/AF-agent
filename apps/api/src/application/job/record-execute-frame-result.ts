@@ -80,7 +80,28 @@ export async function recordExecuteFrameResultIfApplicable(deps: RecordExecuteFr
   if (!session || session.projectId !== job.projectId) {
     return;
   }
-  if (session.status === "COMPLETED" || session.status === "FAILED") {
+  if (session.status === "FAILED") {
+    return;
+  }
+  // REAL 2026-11-04 (client project d1436b73): the Landscape render completes
+  // the session; "Prepare the square version" then builds a Square
+  // composition INTO the same working copy and saves it - a new hash on disk
+  // - and this recorder, treating COMPLETED as final, kept the old hash. The
+  // square was never registered (register-square-composition.ts fails closed
+  // on the hash), the card still said "prepare", the next press was refused
+  // with WORKING_COPY_SHA_MISMATCH, and so was the vertical. A completed
+  // session stays completed - no scene is appended, no status moves - but a
+  // derived composition genuinely built and saved into its working copy
+  // advances the hash the session holds for that copy.
+  if (session.status === "COMPLETED") {
+    const builtDerived =
+      result.failureReason === null &&
+      result.workingCopyFailureCode === null &&
+      result.workingProjectSha256 !== null &&
+      (result.squareCompositionBuilt != null || result.verticalCompositionBuilt != null || result.horizontalCompositionBuilt != null || result.reelsCompositionBuilt != null);
+    if (builtDerived && result.workingProjectSha256 !== null) {
+      await deps.executionSessionRepository.recordSceneCompleted(session.id, result.scenePlanId, result.workingProjectSha256, "COMPLETED", deps.now());
+    }
     return;
   }
 
